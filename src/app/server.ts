@@ -1,6 +1,5 @@
 import { loadLocalEnv } from "./load-env";
 loadLocalEnv();
-dns.setDefaultResultOrder("ipv4first");
 
 import express from "express";
 import dns from "node:dns";
@@ -32,6 +31,8 @@ import {
 } from "../api/middleware/auth-middleware";
 import { ensureBootstrapAdminAccount } from "../storage/accounts-store";
 import { cleanupExpiredSessions } from "../storage/sessions-store";
+
+dns.setDefaultResultOrder("ipv4first");
 
 async function bootstrap(): Promise<void> {
     const app = express();
