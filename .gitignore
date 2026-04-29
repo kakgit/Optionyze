@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+
+node_modules/
+dist/
+
+data/logs/
+data/runtime/
+data/state/
+data/trades/
+
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store

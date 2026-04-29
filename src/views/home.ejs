@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Optionyze | Algo Trading and Hedging</title>
+    <style>
+        :root { color-scheme: dark; --bg: #050816; --panel: rgba(10, 18, 38, 0.82); --text: #f3f6ff; --muted: #a7b2d4; --line: rgba(162, 180, 228, 0.18); --accent-soft: rgba(80, 227, 194, 0.12); --shadow: 0 28px 80px rgba(0, 0, 0, 0.35); }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: "Segoe UI", "Trebuchet MS", sans-serif; background: radial-gradient(circle at top left, rgba(80, 227, 194, 0.14), transparent 28%), radial-gradient(circle at top right, rgba(242, 182, 90, 0.12), transparent 26%), linear-gradient(180deg, #040714 0%, #08101f 55%, #050816 100%); color: var(--text); }
+        a { color: inherit; text-decoration: none; }
+        .shell { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
+        .topbar { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(16px); background: rgba(5, 8, 22, 0.72); border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+        .nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 78px; }
+        .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: 0.18em; font-size: 0.95rem; }
+        .brand-mark { width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center; background: linear-gradient(135deg, rgba(80, 227, 194, 0.22), rgba(242, 182, 90, 0.2)); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: var(--shadow); }
+        .nav-links, .auth-links { display: flex; align-items: center; gap: 18px; }
+        .nav-links a, .auth-links a, .auth-links button { color: var(--muted); font-size: 0.95rem; background: none; border: 0; cursor: pointer; font: inherit; }
+        .nav-links a:hover, .auth-links a:hover, .auth-links button:hover { color: var(--text); }
+        .button, .button-secondary { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 18px; border-radius: 999px; font-weight: 600; transition: transform 0.18s ease, box-shadow 0.18s ease; }
+        .button { background: linear-gradient(135deg, #50e3c2, #7dd3fc); color: #05101d; box-shadow: 0 18px 36px rgba(80, 227, 194, 0.18); }
+        .button-secondary { background: rgba(255, 255, 255, 0.04); color: var(--text); border: 1px solid rgba(255, 255, 255, 0.08); }
+        .hero { padding: 92px 0 56px; }
+        .hero-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr); gap: 28px; }
+        .eyebrow { display: inline-flex; align-items: center; gap: 10px; padding: 8px 14px; border-radius: 999px; background: var(--accent-soft); border: 1px solid rgba(80, 227, 194, 0.18); color: #9cf4df; font-size: 0.82rem; letter-spacing: 0.08em; text-transform: uppercase; }
+        h1 { margin: 20px 0 16px; font-size: clamp(2.8rem, 5.8vw, 5.4rem); line-height: 0.98; letter-spacing: -0.04em; }
+        .hero-copy { max-width: 720px; color: var(--muted); font-size: 1.08rem; line-height: 1.78; }
+        .hero-actions { display: flex; flex-wrap: wrap; gap: 14px; margin: 28px 0 36px; }
+        .metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+        .metric, .feature, .callout, .section-card { background: var(--panel); border: 1px solid var(--line); border-radius: 24px; box-shadow: var(--shadow); }
+        .metric { padding: 18px 18px 20px; }
+        .metric-label { color: var(--muted); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.08em; }
+        .metric-value { margin-top: 10px; font-size: 1.5rem; font-weight: 700; }
+        .hero-panel { position: relative; overflow: hidden; padding: 26px; background: linear-gradient(180deg, rgba(13, 24, 49, 0.96), rgba(7, 13, 28, 0.96)); }
+        .panel-copy, .feature p, .section-card p, .section-card li, .callout p, .section-heading p { color: var(--muted); line-height: 1.72; }
+        .panel-list { display: grid; gap: 12px; }
+        .panel-item { padding: 14px 16px; border-radius: 18px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); }
+        main { padding-bottom: 72px; }
+        .section { padding: 34px 0; }
+        .section-heading { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 20px; }
+        .section-heading h2 { margin: 0; font-size: clamp(1.8rem, 3vw, 2.6rem); letter-spacing: -0.03em; }
+        .feature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+        .feature, .section-card { padding: 24px; }
+        .feature-tag { display: inline-flex; padding: 7px 12px; border-radius: 999px; background: rgba(255, 255, 255, 0.04); color: #bfd1ff; font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; }
+        .feature h3, .section-card h3, .callout h3 { margin: 16px 0 10px; }
+        .two-col { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr); gap: 18px; }
+        .section-card ul { padding-left: 18px; margin: 12px 0 0; }
+        .callout { padding: 28px; background: linear-gradient(135deg, rgba(80, 227, 194, 0.12), rgba(242, 182, 90, 0.12)); }
+        .footer-note { margin-top: 28px; color: rgba(167, 178, 212, 0.72); font-size: 0.92rem; text-align: center; }
+        .auth-form { display: inline; margin: 0; }
+        .notice { margin: 18px 0 0; padding: 12px 14px; border-radius: 16px; background: rgba(242, 182, 90, 0.12); border: 1px solid rgba(242, 182, 90, 0.24); color: #ffd79d; }
+        @media (max-width: 980px) { .hero-grid, .two-col, .feature-grid, .metrics { grid-template-columns: 1fr; } .section-heading { align-items: start; flex-direction: column; } }
+        @media (max-width: 760px) { .nav { flex-wrap: wrap; padding: 14px 0; } .nav-links { order: 3; width: 100%; justify-content: space-between; gap: 12px; padding-bottom: 6px; overflow-x: auto; } .auth-links { margin-left: auto; } .hero { padding-top: 64px; } h1 { line-height: 1.04; } }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <div class="shell nav">
+            <a class="brand" href="/"><span class="brand-mark">O</span><span>OPTIONYZE</span></a>
+            <nav class="nav-links"><a href="#algo">Algo Trading</a><a href="#hedging">Hedging Strategies</a><a href="#covered-call">Rolling Covered Call</a><a href="#platform">Platform</a></nav>
+            <div class="auth-links">
+                <% if (currentAccount) { %>
+                    <a href="/dashboard">Dashboard</a>
+                    <form class="auth-form" action="/auth/signout" method="post"><button type="submit">Sign Out</button></form>
+                <% } else { %>
+                    <a href="/signin">Sign In</a>
+                    <a class="button-secondary" href="/signup">Sign Up</a>
+                <% } %>
+            </div>
+        </div>
+    </header>
+    <main>
+        <section class="hero">
+            <div class="shell hero-grid">
+                <div>
+                    <div class="eyebrow">Server-side automation for options traders</div>
+                    <h1>Build discipline into live hedging and structured option execution.</h1>
+                    <p class="hero-copy">Optionyze is being shaped as a backend-first algo trading platform focused on hedged options strategies, repeatable execution, and cleaner risk management. The goal is to move strategy logic away from browser tabs and into a persistent server-side runner that can manage different users independently.</p>
+                    <% if (currentAccount && currentAccount.mustChangePassword) { %><div class="notice">Your admin account is active. Please change the temporary password before using the app.</div><% } %>
+                    <div class="hero-actions">
+                        <% if (currentAccount) { %>
+                            <a class="button" href="<%= currentAccount.mustChangePassword ? '/account/change-password' : '/dashboard' %>">Open Dashboard</a>
+                        <% } else { %>
+                            <a class="button" href="/signup">Start With Optionyze</a>
+                        <% } %>
+                        <a class="button-secondary" href="#covered-call">Explore Rolling Covered Call</a>
+                    </div>
+                    <div class="metrics"><div class="metric"><div class="metric-label">Execution Model</div><div class="metric-value">Server Runner</div></div><div class="metric"><div class="metric-label">Storage Layer</div><div class="metric-value"><%= storageMode %></div></div><div class="metric"><div class="metric-label">Initial Focus</div><div class="metric-value">Covered Call + Paper Greeks</div></div></div>
+                </div>
+                <aside class="hero-panel"><div class="panel-title">What this platform is designed to solve</div><p class="panel-copy">Many retail automation setups break because the trading logic depends on an open browser, manual monitoring, and user-specific state that is hard to recover after a restart. Optionyze is being designed to address that.</p><div class="panel-list"><div class="panel-item"><strong>Persistent strategy execution</strong><span> Runners stay on the server so trades, hedges, and alerts do not depend on a user keeping a browser open.</span></div><div class="panel-item"><strong>User-isolated control</strong><span> Each account can keep separate API credentials, capital limits, risk preferences, and notification settings.</span></div><div class="panel-item"><strong>Operational clarity</strong><span> Logs, state snapshots, and strategy actions can be tracked in one place instead of being scattered across local storage.</span></div></div></aside>
+            </div>
+        </section>
+        <section class="section" id="algo"><div class="shell"><div class="section-heading"><h2>Algo trading with process, not impulse</h2><p>Good automation is not just about speed. It is about turning a repeatable market idea into a controlled workflow: data intake, entry filters, quantity decisions, risk checks, adjustment rules, exit handling, and post-trade visibility.</p></div><div class="feature-grid"><article class="feature"><span class="feature-tag">Structured execution</span><h3>Rule-based entries and exits</h3><p>Entry conditions, hedge behavior, capital checks, and recovery actions can be encoded so the trade plan stays consistent even in fast conditions.</p></article><article class="feature"><span class="feature-tag">Risk-first</span><h3>Control around exposure</h3><p>Optionyze is being oriented around strategies where exposure is visible and intentionally managed, instead of relying on raw directional conviction.</p></article><article class="feature"><span class="feature-tag">Operational fit</span><h3>Built for ongoing monitoring</h3><p>A serious runner should make it easier to review actions, restart cleanly, and understand what the system did for each user account.</p></article></div></div></section>
+        <section class="section" id="hedging"><div class="shell two-col"><article class="section-card"><h3>Why hedging matters</h3><p>Options strategies can offer attractive income or defined setups, but they also carry changing delta, theta, and volatility risk. Hedging helps shape that exposure instead of leaving the position fully exposed to one market move or one time decay profile.</p><ul><li>Delta management can reduce unwanted directional drift when the market trends.</li><li>Theta-aware frameworks help traders compare time decay with directional exposure.</li><li>Futures or stock overlays can be used to rebalance instead of rebuilding the full option structure every time.</li></ul></article><article class="section-card"><h3>How Optionyze approaches it</h3><p>The broader platform direction includes live hedging workflows for deployed strategies and separate paper-trading environments for research and discipline building.</p><ul><li><strong>CoveredCall Live:</strong> intended for server-side managed live trading.</li><li><strong>StrategyFOGreeks Paper:</strong> intended as a paper-trading and hedging research workspace.</li><li><strong>MngUsers:</strong> can evolve into a real user management layer with account-level strategy access and controls.</li></ul></article></div></section>
+        <section class="section" id="covered-call"><div class="shell"><div class="section-heading"><h2>Rolling Covered Call, explained simply</h2><p>A rolling covered call generally combines a long underlying position with short calls that may be adjusted or rolled as price and time evolve. The intent is not only premium collection, but also disciplined management when the trade moves toward or through the short strike.</p></div><div class="two-col"><article class="section-card"><h3>What makes the rolling element important</h3><p>A static covered call can become inefficient if the short option is threatened early, loses value too quickly, or no longer matches the trader's intended exposure. Rolling introduces a rules-based way to adapt the short call position over time.</p><ul><li>Roll decisions can be tied to price movement, premium decay, or days to expiry.</li><li>Capital preferences and lot sizing can stay user-specific.</li><li>Server-side execution helps maintain continuity even when the user is offline.</li></ul></article><article class="callout"><h3>Why this is a good first live strategy for Optionyze</h3><p>It is structured, measurable, and practical for a backend-first system. The strategy has clear state transitions, visible adjustment points, and a natural need for per-user capital controls, audit logs, and alerting. That makes it a strong candidate for the first production-grade runner service in the platform.</p></article></div></div></section>
+        <section class="section" id="platform"><div class="shell"><div class="section-heading"><h2>Where the platform is headed</h2><p>The immediate path is a stable server-side app that can host multiple user profiles, keep strategy state on the server, and separate live trading from paper experimentation. Sign In and Sign Up flows are now the account foundation for the next layers.</p></div><div class="feature-grid"><article class="feature"><span class="feature-tag">For users</span><h3>Account-based access</h3><p>Each user can maintain their own credentials, capital preferences, strategy permissions, and notification channels.</p></article><article class="feature"><span class="feature-tag">For operations</span><h3>Runner management</h3><p>Admin controls can start, stop, audit, and inspect individual strategy runners without relying on per-user browser sessions.</p></article><article class="feature"><span class="feature-tag">For strategy growth</span><h3>Clear product lanes</h3><p>Live Covered Call, paper-trading Greeks workflows, and user management can evolve independently while still sharing one platform foundation.</p></article></div><div class="footer-note">Optionyze is under active build. User onboarding now begins with Sign Up and Sign In, and admin-led user management will follow next.</div></div></section>
+    </main>
+</body>
+</html>

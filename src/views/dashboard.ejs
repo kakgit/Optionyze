@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= pageTitle %></title>
+    <link rel="stylesheet" href="/css/account-menu.css" />
+    <style>
+        :root { color-scheme: dark; --panel:rgba(10,18,38,.88); --line:rgba(162,180,228,.18); --text:#f3f6ff; --muted:#a7b2d4; }
+        * { box-sizing:border-box; }
+        body { margin:0; min-height:100vh; font-family:"Segoe UI","Trebuchet MS",sans-serif; color:var(--text); background:linear-gradient(180deg,#040714 0%,#08101f 55%,#050816 100%); padding:28px; }
+        .shell { width:min(1020px, 100%); margin:0 auto; }
+        .header, .panel { background:var(--panel); border:1px solid var(--line); border-radius:28px; box-shadow:0 28px 80px rgba(0,0,0,.35); }
+        .header { padding:22px 26px; display:flex; justify-content:space-between; align-items:center; gap:16px; }
+        .brand { display:flex; align-items:center; gap:12px; color:var(--text); text-decoration:none; font-weight:700; letter-spacing:.18em; font-size:.95rem; }
+        .mark { width:40px; height:40px; border-radius:14px; display:grid; place-items:center; background:linear-gradient(135deg, rgba(80,227,194,.22), rgba(125,211,252,.22)); }
+        .actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+        .ghost { min-height:42px; padding:0 16px; border-radius:999px; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.03); color:var(--text); text-decoration:none; display:inline-flex; align-items:center; }
+        .panel { margin-top:20px; padding:28px; }
+        h1 { margin:0 0 12px; font-size:2rem; }
+        p { margin:0; color:var(--muted); line-height:1.75; }
+        .grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:18px; margin-top:22px; }
+        .card { padding:20px; border-radius:20px; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); }
+        .card h3 { margin:0 0 10px; font-size:1.05rem; }
+        .card p { font-size:.95rem; }
+        .banner { margin-top:16px; padding:14px 16px; border-radius:16px; background:rgba(242,182,90,.12); border:1px solid rgba(242,182,90,.24); color:#ffd79d; }
+        .info { margin-top:16px; padding:14px 16px; border-radius:16px; background:rgba(80,227,194,.12); border:1px solid rgba(80,227,194,.24); color:#9cf4df; }
+        @media (max-width: 860px) { .grid { grid-template-columns:1fr; } .header { flex-direction:column; align-items:flex-start; } }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <header class="header">
+            <a class="brand" href="/"><span class="mark">O</span><span>OPTIONYZE</span></a>
+            <div class="actions">
+                <a class="ghost" href="/strategyfogreeks">StrategyFOGreeks Paper</a>
+                <%- include('partials/account-menu', { currentAccount }) %>
+            </div>
+        </header>
+        <section class="panel">
+            <h1>Welcome, <%= currentAccount?.fullName || 'User' %></h1>
+            <p>Your server-side account is ready. This dashboard is the base for per-user trading controls, live runner visibility, and future admin-managed access to strategies and capital preferences.</p>
+            <% if (infoMessage) { %><div class="info"><%= infoMessage %></div><% } %>
+            <% if (currentAccount?.isAdmin) { %><div class="banner">You are signed in as the default admin account with full access. The new MngUsers page is now available from the account menu for account management, profile updates, temporary password resets, and role control.</div><% } %>
+            <div class="grid">
+                <article class="card"><h3>Account Access</h3><p>Email: <%= currentAccount?.email %><br />Mobile: <%= currentAccount?.mobileNo %></p></article>
+                <article class="card"><h3>Current Role</h3><p><%= currentAccount?.isAdmin ? 'Administrator' : 'Standard User' %></p></article>
+                <article class="card"><h3>Next Step</h3><p><%= currentAccount?.isAdmin ? 'Use the account menu to open Manage User or continue into StrategyFOGreeks paper mode.' : 'Use the account menu for your profile, API settings, and password, then continue into StrategyFOGreeks paper mode.' %></p></article>
+            </div>
+        </section>
+    </div>
+</body>
+</html>

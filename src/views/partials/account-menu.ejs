@@ -1,0 +1,40 @@
+<%
+    const vFullName = String(currentAccount?.fullName || 'User').trim();
+    const vEmail = String(currentAccount?.email || '');
+    const vInitial = vFullName ? vFullName.charAt(0).toUpperCase() : 'U';
+%>
+<div class="account-menu">
+    <button type="button" class="account-trigger" aria-label="Account menu">
+        <span class="account-avatar"><%= vInitial %></span>
+    </button>
+    <div class="account-dropdown">
+        <div class="account-summary">
+            <div class="account-name"><%= vFullName %></div>
+            <div class="account-email"><%= vEmail %></div>
+        </div>
+        <% if (currentAccount?.isAdmin) { %>
+            <a class="account-link" href="/mngusers">
+                <span>Manage User</span>
+                <span class="account-hint">Admin</span>
+            </a>
+        <% } %>
+        <a class="account-link" href="/account/delta-exchange-api">
+            <span>Delta Exchange API</span>
+            <span class="account-hint">Keys</span>
+        </a>
+        <a class="account-link" href="/account/change-password">
+            <span>Change Password</span>
+            <span class="account-hint">Security</span>
+        </a>
+        <a class="account-link" href="/account/profile">
+            <span>My Profile</span>
+            <span class="account-hint">Account</span>
+        </a>
+        <form class="account-form" action="/auth/signout" method="post">
+            <button class="account-signout" type="submit">
+                <span>Sign Out</span>
+                <span class="account-hint">Exit</span>
+            </button>
+        </form>
+    </div>
+</div>
