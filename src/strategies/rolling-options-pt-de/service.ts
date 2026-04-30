@@ -1,0 +1,803 @@
+import crypto from "node:crypto";
+import { RunnerManager } from "../../runners/runner-manager";
+import {
+    listRollingOptionsPtDeClosedPositions,
+    listRollingOptionsPtDeOpenPositions,
+    saveRollingOptionsPtDePosition,
+    type RollingOptionsPtDePositionRecord
+} from "../../storage/rolling-options-pt-de-position-store";
+import { loadRollingOptionsPtDeProfile } from "../../storage/rolling-options-pt-de-profile-store";
+import {
+    listRollingOptionsPtDeRuntime,
+    saveRollingOptionsPtDeRuntime,
+    type RollingOptionsPtDeRuntimeRecord
+} from "../../storage/rolling-options-pt-de-runtime-store";
+import {
+    buildConfigFromUiState,
+    estimatePositionCharges,
+    getOpenPositionsSummary,
+    getPositionPnl,
+    shouldTriggerOption,
+    updateRenkoState
+} from "./engine";
+import { logRollingOptionsPtDeEvent } from "./event-logger";
+import {
+    ensureLiveTickerSymbols,
+    findBestLiveOptionContract,
+    getLiveMarketSnapshot,
+    getLiveOptionTicker
+} from "./market-data";
+import { applyClosedOptionPnlToProfile } from "./options-pnl";
+import type {
+    RollingOptionsPtDeConfig,
+    RollingOptionsPtDeEngineState,
+    RollingOptionsPtDeMarketSnapshot
+} from "./types";
+
+export class RollingOptionsPtDeService {
+    private readonly stateByUserId = new Map<string, RollingOptionsPtDeEngineState>();
+
+    public constructor(private readonly runnerManager: RunnerManager) {}
+
+    private createInitialState(pUserId: string): RollingOptionsPtDeEngineState {
+        return {
+            userId: pUserId,
+            running: false,
+            isBusy: false,
+            timerRef: null,
+            cycleCount: 0,
+            consecutiveFailures: 0,
+            lastError: "",
+            lastCycleAt: null,
+            renko: {
+                anchor: null,
+                lastDir: 0,
+                lastColor: ""
+            },
+            market: {
+                lastSpotPrice: null,
+                lastFuturesPrice: null,
+                lastSource: "simulated"
+            }
+        };
+    }
+
+    private getOrCreateState(pUserId: string): RollingOptionsPtDeEngineState {
+        const vUserId = String(pUserId || "").trim() || "demo-paper";
+        let objState = this.stateByUserId.get(vUserId);
+        if (!objState) {
+            objState = this.createInitialState(vUserId);
+            this.stateByUserId.set(vUserId, objState);
+        }
+        return objState;
+    }
+
+    public async hydrate(): Promise<void> {
+        const objRuntimeRows = await listRollingOptionsPtDeRuntime();
+        for (const objRuntime of objRuntimeRows) {
+            if (!objRuntime.autoTraderEnabled || objRuntime.status !== "running") {
+                continue;
+            }
+
+            const objState = this.getOrCreateState(objRuntime.userId);
+            objState.running = true;
+            objState.cycleCount = Number((objRuntime.state?.cycleCount as number) || 0);
+            objState.consecutiveFailures = Number((objRuntime.state?.consecutiveFailures as number) || 0);
+            objState.lastError = String(objRuntime.lastError || "");
+            objState.lastCycleAt = objRuntime.lastCycleAt || null;
+            objState.renko.anchor = Number.isFinite(Number(objRuntime.state?.renkoAnchor))
+                ? Number(objRuntime.state?.renkoAnchor)
+                : null;
+            objState.renko.lastDir = Number(objRuntime.state?.renkoLastDir || 0) as -1 | 0 | 1;
+            objState.renko.lastColor = String(objRuntime.state?.renkoLastColor || "") as "" | "R" | "G";
+            objState.market.lastSpotPrice = objRuntime.lastSpotPrice;
+            objState.market.lastFuturesPrice = objRuntime.lastFuturesPrice;
+            objState.market.lastSource = String(objRuntime.state?.marketSource || "simulated") === "public" ? "public" : "simulated";
+            this.armTimer(objState);
+        }
+    }
+
+    private armTimer(pState: RollingOptionsPtDeEngineState, pLoopSeconds = 8): void {
+        if (pState.timerRef) {
+            clearInterval(pState.timerRef);
+        }
+
+        pState.timerRef = setInterval(() => {
+            void this.runCycle(pState.userId);
+        }, Math.max(5, pLoopSeconds) * 1000);
+    }
+
+    private async loadConfig(pUserId: string): Promise<RollingOptionsPtDeConfig> {
+        const objProfile = await loadRollingOptionsPtDeProfile(pUserId);
+        return buildConfigFromUiState({
+            symbol: "BTC",
+            manualFutQty: 1,
+            manualFutOrderType: "market_order",
+            action1: "sell",
+            legSide1: "ce",
+            expiryMode1: "1",
+            expiryDate1: "",
+            manualOptQty1: 1,
+            newDelta1: 0.53,
+            reDelta1: 0.53,
+            deltaTp1: 0.15,
+            deltaSl1: 0.85,
+            reEnter1: false,
+            autoOptQtyPct: 100,
+            addOneLotFuture: false,
+            renkoFeedEnabled: true,
+            renkoFeedPts: 10,
+            renkoFeedPriceSrc: "spot_price",
+            ...(objProfile?.uiState || {})
+        });
+    }
+
+    private getSimulatedSnapshot(pState: RollingOptionsPtDeEngineState, pConfig: RollingOptionsPtDeConfig): RollingOptionsPtDeMarketSnapshot {
+        const vBase = pConfig.symbol === "ETH" ? 3200 : 64000;
+        const vLastSpot = Number(pState.market.lastSpotPrice || vBase);
+        const vBias = pState.renko.lastColor === "R" ? -1 : 1;
+        const vRandomMove = ((Date.now() % 11) - 5) * (pConfig.renkoStepPoints / 4);
+        const vTrendMove = vBias * (pConfig.renkoStepPoints / 5);
+        const vSpotPrice = Number(Math.max(1, vLastSpot + vRandomMove + vTrendMove).toFixed(2));
+        const vFuturesPrice = Number((vSpotPrice * 1.0012).toFixed(2));
+
+        return {
+            symbol: pConfig.symbol,
+            contractName: pConfig.contractName,
+            spotPrice: vSpotPrice,
+            futuresPrice: vFuturesPrice,
+            priceSource: "simulated",
+            ts: new Date().toISOString()
+        };
+    }
+
+    private async getMarketSnapshot(pState: RollingOptionsPtDeEngineState, pConfig: RollingOptionsPtDeConfig): Promise<RollingOptionsPtDeMarketSnapshot> {
+        ensureLiveTickerSymbols([pConfig.contractName]);
+        try {
+            return await getLiveMarketSnapshot(pConfig);
+        }
+        catch (_objError) {
+            return this.getSimulatedSnapshot(pState, pConfig);
+        }
+    }
+
+    private async buildRuntimeRecord(
+        pUserId: string,
+        pConfig: RollingOptionsPtDeConfig,
+        pState: RollingOptionsPtDeEngineState,
+        pOverrides: Partial<RollingOptionsPtDeRuntimeRecord> = {}
+    ): Promise<RollingOptionsPtDeRuntimeRecord> {
+        const objOpenPositions = await listRollingOptionsPtDeOpenPositions(pUserId);
+        const vLastSignal = pOverrides.lastSignal
+            || (pState.renko.lastColor === "R" ? "RED" : (pState.renko.lastColor === "G" ? "GREEN" : "IDLE"));
+
+        return {
+            userId: pUserId,
+            status: pOverrides.status || (pState.running ? "running" : "stopped"),
+            autoTraderEnabled: pOverrides.autoTraderEnabled ?? pState.running,
+            currentSymbol: pConfig.symbol,
+            currentContractName: pConfig.contractName,
+            currentExpiryMode: pConfig.expiryMode,
+            currentExpiryDate: pConfig.expiryDate,
+            renkoEnabled: pConfig.renkoEnabled,
+            renkoPoints: pConfig.renkoStepPoints,
+            renkoSource: pConfig.renkoPriceSource,
+            lastSpotPrice: pOverrides.lastSpotPrice ?? pState.market.lastSpotPrice,
+            lastFuturesPrice: pOverrides.lastFuturesPrice ?? pState.market.lastFuturesPrice,
+            lastSignal: vLastSignal,
+            lastCycleAt: pOverrides.lastCycleAt ?? pState.lastCycleAt ?? "",
+            lastError: pOverrides.lastError ?? pState.lastError,
+            state: {
+                cycleCount: pState.cycleCount,
+                consecutiveFailures: pState.consecutiveFailures,
+                renkoAnchor: pState.renko.anchor,
+                renkoLastDir: pState.renko.lastDir,
+                renkoLastColor: pState.renko.lastColor,
+                marketSource: pState.market.lastSource,
+                openPositions: objOpenPositions.length
+            },
+            updatedAt: ""
+        };
+    }
+
+    private async syncRuntime(
+        pUserId: string,
+        pConfig: RollingOptionsPtDeConfig,
+        pState: RollingOptionsPtDeEngineState,
+        pOverrides: Partial<RollingOptionsPtDeRuntimeRecord> = {}
+    ): Promise<RollingOptionsPtDeRuntimeRecord> {
+        const objRuntime = await this.buildRuntimeRecord(pUserId, pConfig, pState, pOverrides);
+        await this.runnerManager.setState({
+            userId: pUserId,
+            strategyType: "rolling-options-pt-de",
+            status: objRuntime.status === "running" ? "running" : "stopped",
+            updatedAt: new Date().toISOString(),
+            message: objRuntime.lastError || objRuntime.lastSignal || "Rolling Options PT Demo",
+            state: objRuntime.state
+        });
+        return saveRollingOptionsPtDeRuntime(objRuntime);
+    }
+
+    private async openFuturePosition(
+        pUserId: string,
+        pConfig: RollingOptionsPtDeConfig,
+        pQty: number,
+        pReason: string
+    ): Promise<RollingOptionsPtDePositionRecord> {
+        const objSnapshot = await this.getMarketSnapshot(this.getOrCreateState(pUserId), pConfig);
+        const objPosition = await saveRollingOptionsPtDePosition({
+            positionId: crypto.randomUUID(),
+            userId: pUserId,
+            groupId: `group_${Date.now()}`,
+            cycleId: `cycle_${Date.now()}`,
+            status: "OPEN",
+            symbol: pConfig.symbol,
+            contractName: `${pConfig.contractName} FUT`,
+            instrumentType: "FUTURE",
+            optionSide: "",
+            action: pConfig.action === "sell" ? "BUY" : "SELL",
+            strike: null,
+            expiryDate: pConfig.expiryDate,
+            qty: pQty,
+            lotSize: pConfig.lotSize,
+            entryPrice: objSnapshot.futuresPrice,
+            exitPrice: null,
+            markPrice: objSnapshot.futuresPrice,
+            entryDelta: null,
+            exitDelta: null,
+            charges: estimatePositionCharges("FUTURE", pQty, pConfig.lotSize, objSnapshot.futuresPrice),
+            pnl: 0,
+            openedReason: pReason,
+            closedReason: "",
+            openedAt: objSnapshot.ts,
+            closedAt: "",
+            metadata: {
+                orderType: pConfig.futureOrderType,
+                source: "server-strategy"
+            },
+            createdAt: objSnapshot.ts,
+            updatedAt: objSnapshot.ts
+        });
+
+        await logRollingOptionsPtDeEvent({
+            userId: pUserId,
+            eventType: pReason === "SL add one future" ? "extra_future_added" : "future_opened",
+            severity: "success",
+            title: pReason === "SL add one future" ? "Extra Future Added" : "Future Opened",
+            message: `${objPosition.action} future paper position opened.`,
+            payload: {
+                symbol: pConfig.symbol,
+                contractName: objPosition.contractName,
+                qty: pQty,
+                reason: pReason
+            }
+        });
+
+        return objPosition;
+    }
+
+    private async openOptionPositions(
+        pUserId: string,
+        pConfig: RollingOptionsPtDeConfig,
+        pQty: number,
+        pReason: string,
+        pUseReEntryDelta = false
+    ): Promise<RollingOptionsPtDePositionRecord[]> {
+        const objSnapshot = await this.getMarketSnapshot(this.getOrCreateState(pUserId), pConfig);
+        const vOptionSides: Array<"CE" | "PE"> = pConfig.legSide === "both"
+            ? ["CE", "PE"]
+            : [pConfig.legSide === "pe" ? "PE" : "CE"];
+        const vTargetDelta = pUseReEntryDelta ? pConfig.reDelta : pConfig.newDelta;
+        const vStrike = Math.round(objSnapshot.spotPrice / 100) * 100;
+        const objSaved: RollingOptionsPtDePositionRecord[] = [];
+
+        for (const vOptionSide of vOptionSides) {
+            const objLiveContract = await findBestLiveOptionContract(pConfig, vOptionSide, vTargetDelta);
+            if (objLiveContract?.contractSymbol) {
+                ensureLiveTickerSymbols([objLiveContract.contractSymbol]);
+            }
+            const vMark = objLiveContract?.markPrice || Number((objSnapshot.spotPrice * Math.max(0.002, Math.abs(vTargetDelta) * 0.012)).toFixed(2));
+            const vEntryDelta = objLiveContract ? Math.abs(objLiveContract.delta) : vTargetDelta;
+            objSaved.push(await saveRollingOptionsPtDePosition({
+                positionId: crypto.randomUUID(),
+                userId: pUserId,
+                groupId: `group_${Date.now()}`,
+                cycleId: `cycle_${Date.now()}`,
+                status: "OPEN",
+                symbol: pConfig.symbol,
+                contractName: objLiveContract?.contractSymbol || `${pConfig.contractName} ${vOptionSide}`,
+                instrumentType: "OPTION",
+                optionSide: vOptionSide,
+                action: pConfig.action === "buy" ? "BUY" : "SELL",
+                strike: objLiveContract?.strike || vStrike,
+                expiryDate: pConfig.expiryDate,
+                qty: pQty,
+                lotSize: pConfig.lotSize,
+                entryPrice: vMark,
+                exitPrice: null,
+                markPrice: vMark,
+                entryDelta: vEntryDelta,
+                exitDelta: vEntryDelta,
+                charges: estimatePositionCharges("OPTION", pQty, pConfig.lotSize, vMark),
+                pnl: 0,
+                openedReason: pReason,
+                closedReason: "",
+                openedAt: objSnapshot.ts,
+                closedAt: "",
+                metadata: {
+                    deltaTakeProfit: pConfig.deltaTakeProfit,
+                    deltaStopLoss: pConfig.deltaStopLoss,
+                    reEnter: pConfig.reEnter,
+                    entrySpotPrice: objSnapshot.spotPrice,
+                    productSymbol: objLiveContract?.contractSymbol || "",
+                    productDelta: objLiveContract?.delta || vTargetDelta,
+                    productGamma: objLiveContract?.gamma || 0,
+                    productTheta: objLiveContract?.theta || 0,
+                    productVega: objLiveContract?.vega || 0,
+                    expiryMode: pConfig.expiryMode,
+                    source: objSnapshot.priceSource === "public" ? "server-strategy-live" : "server-strategy-simulated"
+                },
+                createdAt: objSnapshot.ts,
+                updatedAt: objSnapshot.ts
+            }));
+        }
+
+        await logRollingOptionsPtDeEvent({
+            userId: pUserId,
+            eventType: pReason.toLowerCase().includes("re-entry") || pReason.toLowerCase().includes("replacement")
+                ? "reentry_opened"
+                : "option_opened",
+            severity: "success",
+            title: pReason.toLowerCase().includes("re-entry") || pReason.toLowerCase().includes("replacement")
+                ? "Replacement Option Opened"
+                : "Option Opened",
+            message: `Opened ${objSaved.length} option paper leg(s).`,
+            payload: {
+                symbol: pConfig.symbol,
+                qty: pQty,
+                reason: pReason
+            }
+        });
+
+        return objSaved;
+    }
+
+    private async closePositions(
+        pPositions: RollingOptionsPtDePositionRecord[],
+        pConfig: RollingOptionsPtDeConfig,
+        pReason: string
+    ): Promise<RollingOptionsPtDePositionRecord[]> {
+        const objSnapshot = await this.getMarketSnapshot(this.getOrCreateState(pPositions[0]?.userId || "demo-paper"), pConfig);
+        const objClosed: RollingOptionsPtDePositionRecord[] = [];
+
+        for (const objPosition of pPositions) {
+            const vProductSymbol = String(objPosition.metadata?.productSymbol || "").trim();
+            const objLiveTicker = objPosition.instrumentType === "OPTION" && vProductSymbol
+                ? await getLiveOptionTicker(vProductSymbol)
+                : null;
+            const vCurrentDelta = objPosition.instrumentType === "OPTION"
+                ? Math.abs(Number(objLiveTicker?.delta || objPosition.exitDelta || objPosition.entryDelta || 0.53))
+                : null;
+            const vExitPrice = objPosition.instrumentType === "OPTION"
+                ? Number(objLiveTicker?.markPrice || objPosition.markPrice || objPosition.entryPrice || 0)
+                : objSnapshot.futuresPrice;
+            const vExitCharges = estimatePositionCharges(objPosition.instrumentType, objPosition.qty, objPosition.lotSize, vExitPrice);
+            objClosed.push(await saveRollingOptionsPtDePosition({
+                ...objPosition,
+                status: "CLOSED",
+                exitPrice: vExitPrice,
+                markPrice: vExitPrice,
+                exitDelta: vCurrentDelta,
+                charges: Number((Number(objPosition.charges || 0) + vExitCharges).toFixed(4)),
+                pnl: getPositionPnl(objPosition, vExitPrice),
+                closedReason: pReason,
+                closedAt: objSnapshot.ts,
+                updatedAt: ""
+            }));
+        }
+
+        if (objClosed.length > 0) {
+            await applyClosedOptionPnlToProfile(objClosed[0].userId, objClosed);
+            await logRollingOptionsPtDeEvent({
+                userId: objClosed[0].userId,
+                eventType: pReason.toLowerCase().includes("sl")
+                    ? "sl_triggered"
+                    : (pReason.toLowerCase().includes("tp") ? "tp_triggered" : "option_closed"),
+                severity: pReason.toLowerCase().includes("sl") ? "warning" : "info",
+                title: pReason.toLowerCase().includes("sl")
+                    ? "SL Triggered"
+                    : (pReason.toLowerCase().includes("tp") ? "TP Triggered" : "Position Closed"),
+                message: `Closed ${objClosed.length} paper position(s).`,
+                payload: {
+                    symbol: pConfig.symbol,
+                    qty: objClosed.length,
+                    reason: pReason
+                }
+            });
+        }
+
+        return objClosed;
+    }
+
+    public async executeStrategy(pUserId: string): Promise<{ status: string; message: string; }> {
+        const objState = this.getOrCreateState(pUserId);
+        const objConfig = await this.loadConfig(pUserId);
+        const objSummary = getOpenPositionsSummary(await listRollingOptionsPtDeOpenPositions(pUserId));
+
+        if (objSummary.futureQty <= 0) {
+            await this.openFuturePosition(pUserId, objConfig, objConfig.futureQty, "Strategy initial future");
+        }
+
+        const objNextSummary = getOpenPositionsSummary(await listRollingOptionsPtDeOpenPositions(pUserId));
+        if (!objNextSummary.hasOpenOption && objNextSummary.futureQty > 0) {
+            const vQty = Math.max(1, Math.round(objNextSummary.futureQty * objConfig.autoOptionQtyPct / 100));
+            await this.openOptionPositions(pUserId, objConfig, vQty, "Strategy initial option entry");
+        }
+
+        await this.syncRuntime(pUserId, objConfig, objState, {
+            status: objState.running ? "running" : "stopped",
+            lastSignal: "STRATEGY_EXECUTED",
+            lastCycleAt: new Date().toISOString(),
+            lastError: ""
+        });
+        await logRollingOptionsPtDeEvent({
+            userId: pUserId,
+            eventType: "strategy_executed",
+            severity: "success",
+            title: "Strategy Executed",
+            message: "Initial futures and option entry flow executed.",
+            payload: {
+                symbol: objConfig.symbol,
+                reason: "strategy_execute"
+            }
+        });
+
+        return { status: "success", message: "Strategy executed." };
+    }
+
+    public async start(pUserId: string): Promise<{ status: string; message: string; }> {
+        const objState = this.getOrCreateState(pUserId);
+        if (objState.running) {
+            return { status: "warning", message: "Auto trader already running." };
+        }
+
+        const objConfig = await this.loadConfig(pUserId);
+        objState.running = true;
+        objState.lastError = "";
+        this.armTimer(objState, objConfig.loopSeconds);
+        await this.syncRuntime(pUserId, objConfig, objState, {
+            status: "running",
+            autoTraderEnabled: true,
+            lastSignal: "AUTO_TRADER_ON",
+            lastCycleAt: new Date().toISOString()
+        });
+        await logRollingOptionsPtDeEvent({
+            userId: pUserId,
+            eventType: "engine_started",
+            severity: "success",
+            title: "Auto Trader Started",
+            message: "Server-side auto trader started.",
+            payload: {
+                symbol: objConfig.symbol,
+                reason: "engine_started"
+            }
+        });
+        void this.runCycle(pUserId);
+        return { status: "success", message: "Auto trader started." };
+    }
+
+    public async stop(pUserId: string, pReason = "Manual stop"): Promise<{ status: string; message: string; }> {
+        const objState = this.getOrCreateState(pUserId);
+        if (objState.timerRef) {
+            clearInterval(objState.timerRef);
+            objState.timerRef = null;
+        }
+        objState.running = false;
+        const objConfig = await this.loadConfig(pUserId);
+        await this.syncRuntime(pUserId, objConfig, objState, {
+            status: "stopped",
+            autoTraderEnabled: false,
+            lastSignal: pReason === "Manual stop" ? "AUTO_TRADER_OFF" : "ENGINE_STOPPED"
+        });
+        await logRollingOptionsPtDeEvent({
+            userId: pUserId,
+            eventType: "engine_stopped",
+            severity: "info",
+            title: "Auto Trader Stopped",
+            message: "Server-side auto trader stopped.",
+            payload: {
+                symbol: objConfig.symbol,
+                reason: pReason
+            }
+        });
+        return { status: "success", message: "Auto trader stopped." };
+    }
+
+    private async handleRenkoRedFlow(pUserId: string, pConfig: RollingOptionsPtDeConfig): Promise<void> {
+        const objOpenPositions = await listRollingOptionsPtDeOpenPositions(pUserId);
+        const objSummary = getOpenPositionsSummary(objOpenPositions);
+        if (objSummary.hasOpenOption) {
+            return;
+        }
+
+        if (objSummary.futureQty <= 0) {
+            await this.openFuturePosition(pUserId, pConfig, pConfig.futureQty, "Renko RED futures entry");
+        }
+
+        const objNextSummary = getOpenPositionsSummary(await listRollingOptionsPtDeOpenPositions(pUserId));
+        if (objNextSummary.futureQty > 0) {
+            const vQty = Math.max(1, Math.round(objNextSummary.futureQty * pConfig.autoOptionQtyPct / 100));
+            await this.openOptionPositions(pUserId, pConfig, vQty, "Renko RED option entry");
+        }
+    }
+
+    private async handleOptionTrigger(
+        pUserId: string,
+        pConfig: RollingOptionsPtDeConfig,
+        pPosition: RollingOptionsPtDePositionRecord,
+        pReason: "sl" | "tp"
+    ): Promise<void> {
+        const vRenkoIsRed = pConfig.renkoEnabled && this.getOrCreateState(pUserId).renko.lastColor === "R";
+
+        if (pConfig.renkoEnabled && !vRenkoIsRed) {
+            await this.closePositions([pPosition], pConfig, pReason === "sl" ? "SL close only" : "TP close only");
+            return;
+        }
+
+        if (vRenkoIsRed) {
+            if (pReason === "sl" && pConfig.addOneLotFuture) {
+                await this.openFuturePosition(pUserId, pConfig, 1, "SL add one future");
+            }
+
+            const objSummary = getOpenPositionsSummary(await listRollingOptionsPtDeOpenPositions(pUserId));
+            if (objSummary.futureQty > 0) {
+                await this.openOptionPositions(
+                    pUserId,
+                    pConfig,
+                    objSummary.futureQty,
+                    pReason === "sl" ? "SL replacement option" : "TP replacement option",
+                    true
+                );
+            }
+            await this.closePositions([pPosition], pConfig, pReason === "sl" ? "SL triggered" : "TP triggered");
+            return;
+        }
+
+        if (pConfig.reEnter) {
+            const objSummary = getOpenPositionsSummary(await listRollingOptionsPtDeOpenPositions(pUserId));
+            const vQty = Math.max(1, objSummary.futureQty);
+            await this.openOptionPositions(
+                pUserId,
+                pConfig,
+                vQty,
+                pReason === "sl" ? "SL re-entry option" : "TP re-entry option",
+                true
+            );
+        }
+
+        await this.closePositions([pPosition], pConfig, pReason === "sl" ? "SL triggered" : "TP triggered");
+    }
+
+    public async runCycle(pUserId: string): Promise<{ status: string; message: string; }> {
+        const objState = this.getOrCreateState(pUserId);
+        if (objState.isBusy) {
+            return { status: "warning", message: "Cycle already in progress." };
+        }
+
+        objState.isBusy = true;
+        try {
+            const objConfig = await this.loadConfig(pUserId);
+            const objCurrentOpenPositions = await listRollingOptionsPtDeOpenPositions(pUserId);
+            ensureLiveTickerSymbols([
+                objConfig.contractName,
+                ...objCurrentOpenPositions
+                    .map((objRow) => String(objRow.metadata?.productSymbol || "").trim())
+                    .filter(Boolean)
+            ]);
+            const objSnapshot = await this.getMarketSnapshot(objState, objConfig);
+            objState.market.lastSpotPrice = objSnapshot.spotPrice;
+            objState.market.lastFuturesPrice = objSnapshot.futuresPrice;
+            objState.market.lastSource = objSnapshot.priceSource;
+
+            const objTransitions = objConfig.renkoEnabled
+                ? updateRenkoState(objState, objSnapshot, objConfig)
+                : [];
+
+            if (objTransitions.includes("G2R") && objState.running) {
+                await logRollingOptionsPtDeEvent({
+                    userId: pUserId,
+                    eventType: "renko_red_detected",
+                    severity: "info",
+                    title: "Renko Red Detected",
+                    message: "Server detected a RED renko transition.",
+                    payload: {
+                        symbol: objConfig.symbol,
+                        reason: "G2R"
+                    }
+                });
+                await this.handleRenkoRedFlow(pUserId, objConfig);
+            }
+
+            const objOpenFutures = objCurrentOpenPositions
+                .filter((objRow) => objRow.instrumentType === "FUTURE");
+            const objOpenOptions = objCurrentOpenPositions
+                .filter((objRow) => objRow.instrumentType === "OPTION");
+
+            for (const objPosition of objOpenFutures) {
+                await saveRollingOptionsPtDePosition({
+                    ...objPosition,
+                    markPrice: objSnapshot.futuresPrice,
+                    pnl: getPositionPnl(objPosition, objSnapshot.futuresPrice),
+                    updatedAt: ""
+                });
+            }
+
+            for (const objPosition of objOpenOptions) {
+                const vProductSymbol = String(objPosition.metadata?.productSymbol || "").trim();
+                const objLiveTicker = vProductSymbol ? await getLiveOptionTicker(vProductSymbol) : null;
+                const vCurrentDelta = Math.abs(Number(objLiveTicker?.delta || objPosition.exitDelta || objPosition.entryDelta || 0.53));
+                const vMarkPrice = Number(objLiveTicker?.markPrice || objPosition.markPrice || objPosition.entryPrice || 0);
+                await saveRollingOptionsPtDePosition({
+                    ...objPosition,
+                    markPrice: vMarkPrice,
+                    exitDelta: vCurrentDelta,
+                    pnl: getPositionPnl(objPosition, vMarkPrice),
+                    updatedAt: ""
+                });
+
+                if (!objState.running) {
+                    continue;
+                }
+
+                const objDecision = shouldTriggerOption(objPosition, vCurrentDelta);
+                if (objDecision.shouldAct && objDecision.reason) {
+                    await this.handleOptionTrigger(pUserId, objConfig, objPosition, objDecision.reason);
+                    break;
+                }
+            }
+
+            objState.cycleCount += 1;
+            objState.consecutiveFailures = 0;
+            objState.lastError = "";
+            objState.lastCycleAt = new Date().toISOString();
+            await this.syncRuntime(pUserId, objConfig, objState, {
+                status: objState.running ? "running" : "stopped",
+                autoTraderEnabled: objState.running,
+                lastSpotPrice: objSnapshot.spotPrice,
+                lastFuturesPrice: objSnapshot.futuresPrice,
+                lastSignal: objTransitions.at(-1) || (objState.renko.lastColor === "R" ? "RED" : (objState.renko.lastColor === "G" ? "GREEN" : "IDLE")),
+                lastCycleAt: objState.lastCycleAt
+            });
+            return { status: "success", message: "Cycle completed." };
+        }
+        catch (objError) {
+            const objConfig = await this.loadConfig(pUserId);
+            objState.consecutiveFailures += 1;
+            objState.lastError = objError instanceof Error ? objError.message : String(objError);
+            objState.lastCycleAt = new Date().toISOString();
+            await this.syncRuntime(pUserId, objConfig, objState, {
+                status: objState.running ? "running" : "error",
+                autoTraderEnabled: objState.running,
+                lastError: objState.lastError,
+                lastSignal: "ENGINE_ERROR",
+                lastCycleAt: objState.lastCycleAt
+            });
+            await logRollingOptionsPtDeEvent({
+                userId: pUserId,
+                eventType: "engine_error",
+                severity: "error",
+                title: "Engine Error",
+                message: objState.lastError,
+                payload: {
+                    reason: "engine_error"
+                }
+            });
+            return { status: "danger", message: objState.lastError };
+        }
+        finally {
+            objState.isBusy = false;
+        }
+    }
+
+    public async emergencyStop(pUserId: string): Promise<{ status: string; message: string; }> {
+        const objConfig = await this.loadConfig(pUserId);
+        const objOpenPositions = await listRollingOptionsPtDeOpenPositions(pUserId);
+        if (objOpenPositions.length > 0) {
+            await this.closePositions(objOpenPositions, objConfig, "Emergency stop");
+        }
+        await this.stop(pUserId, "Emergency stop");
+        await logRollingOptionsPtDeEvent({
+            userId: pUserId,
+            eventType: "kill_switch",
+            severity: "warning",
+            title: "Kill Switch",
+            message: "Emergency stop closed open paper positions and stopped the engine.",
+            payload: {
+                symbol: objConfig.symbol,
+                qty: objOpenPositions.length,
+                reason: "kill_switch"
+            }
+        });
+        return { status: "success", message: "Emergency stop completed." };
+    }
+
+    public async reset(pUserId: string): Promise<{ status: string; message: string; }> {
+        await this.stop(pUserId, "Reset");
+        const objConfig = await this.loadConfig(pUserId);
+        const objState = this.getOrCreateState(pUserId);
+        objState.cycleCount = 0;
+        objState.consecutiveFailures = 0;
+        objState.lastError = "";
+        objState.lastCycleAt = null;
+        objState.renko.anchor = null;
+        objState.renko.lastDir = 0;
+        objState.renko.lastColor = "";
+        await this.syncRuntime(pUserId, objConfig, objState, {
+            status: "stopped",
+            autoTraderEnabled: false,
+            lastSignal: "RESET"
+        });
+        await logRollingOptionsPtDeEvent({
+            userId: pUserId,
+            eventType: "manual_action",
+            severity: "info",
+            title: "Strategy Reset",
+            message: "Rolling Options server state was reset.",
+            payload: {
+                symbol: objConfig.symbol,
+                reason: "reset"
+            }
+        });
+        return { status: "success", message: "Strategy state reset." };
+    }
+
+    public async setManualRenkoSignal(
+        pUserId: string,
+        pColorCode: "R" | "G"
+    ): Promise<{ status: string; message: string; color: "R" | "G"; }> {
+        const objState = this.getOrCreateState(pUserId);
+        const objConfig = await this.loadConfig(pUserId);
+        const vColorCode = pColorCode === "R" ? "R" : "G";
+
+        objState.renko.lastColor = vColorCode;
+        objState.renko.lastDir = vColorCode === "R" ? -1 : 1;
+        objState.lastError = "";
+        objState.lastCycleAt = new Date().toISOString();
+
+        await this.syncRuntime(pUserId, objConfig, objState, {
+            status: objState.running ? "running" : "stopped",
+            autoTraderEnabled: objState.running,
+            lastSignal: vColorCode === "R" ? "MANUAL_RED" : "MANUAL_GREEN",
+            lastCycleAt: objState.lastCycleAt,
+            lastError: ""
+        });
+
+        await logRollingOptionsPtDeEvent({
+            userId: pUserId,
+            eventType: "manual_action",
+            severity: "info",
+            title: "Manual Renko Signal",
+            message: `Manual Renko signal changed to ${vColorCode === "R" ? "RED" : "GREEN"}.`,
+            payload: {
+                symbol: objConfig.symbol,
+                reason: vColorCode === "R" ? "manual_renko_red" : "manual_renko_green"
+            }
+        });
+
+        if (vColorCode === "R" && objState.running) {
+            await this.handleRenkoRedFlow(pUserId, objConfig);
+        }
+
+        return {
+            status: "success",
+            message: `Manual Renko signal set to ${vColorCode === "R" ? "RED" : "GREEN"}.`,
+            color: vColorCode
+        };
+    }
+
+    public async getCounts(pUserId: string): Promise<{ open: number; closed: number; }> {
+        const objOpen = await listRollingOptionsPtDeOpenPositions(pUserId);
+        const objClosed = await listRollingOptionsPtDeClosedPositions(pUserId);
+        return { open: objOpen.length, closed: objClosed.length };
+    }
+}

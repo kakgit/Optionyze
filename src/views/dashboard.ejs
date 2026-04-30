@@ -4,48 +4,192 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title><%= pageTitle %></title>
+    <link rel="stylesheet" href="/css/app-shell.css" />
     <link rel="stylesheet" href="/css/account-menu.css" />
-    <style>
-        :root { color-scheme: dark; --panel:rgba(10,18,38,.88); --line:rgba(162,180,228,.18); --text:#f3f6ff; --muted:#a7b2d4; }
-        * { box-sizing:border-box; }
-        body { margin:0; min-height:100vh; font-family:"Segoe UI","Trebuchet MS",sans-serif; color:var(--text); background:linear-gradient(180deg,#040714 0%,#08101f 55%,#050816 100%); padding:28px; }
-        .shell { width:min(1020px, 100%); margin:0 auto; }
-        .header, .panel { background:var(--panel); border:1px solid var(--line); border-radius:28px; box-shadow:0 28px 80px rgba(0,0,0,.35); }
-        .header { padding:22px 26px; display:flex; justify-content:space-between; align-items:center; gap:16px; }
-        .brand { display:flex; align-items:center; gap:12px; color:var(--text); text-decoration:none; font-weight:700; letter-spacing:.18em; font-size:.95rem; }
-        .mark { width:40px; height:40px; border-radius:14px; display:grid; place-items:center; background:linear-gradient(135deg, rgba(80,227,194,.22), rgba(125,211,252,.22)); }
-        .actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-        .ghost { min-height:42px; padding:0 16px; border-radius:999px; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.03); color:var(--text); text-decoration:none; display:inline-flex; align-items:center; }
-        .panel { margin-top:20px; padding:28px; }
-        h1 { margin:0 0 12px; font-size:2rem; }
-        p { margin:0; color:var(--muted); line-height:1.75; }
-        .grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:18px; margin-top:22px; }
-        .card { padding:20px; border-radius:20px; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); }
-        .card h3 { margin:0 0 10px; font-size:1.05rem; }
-        .card p { font-size:.95rem; }
-        .banner { margin-top:16px; padding:14px 16px; border-radius:16px; background:rgba(242,182,90,.12); border:1px solid rgba(242,182,90,.24); color:#ffd79d; }
-        .info { margin-top:16px; padding:14px 16px; border-radius:16px; background:rgba(80,227,194,.12); border:1px solid rgba(80,227,194,.24); color:#9cf4df; }
-        @media (max-width: 860px) { .grid { grid-template-columns:1fr; } .header { flex-direction:column; align-items:flex-start; } }
-    </style>
+    <link rel="stylesheet" href="/css/dashboard.css" />
 </head>
-<body>
-    <div class="shell">
-        <header class="header">
-            <a class="brand" href="/"><span class="mark">O</span><span>OPTIONYZE</span></a>
-            <div class="actions">
-                <a class="ghost" href="/strategyfogreeks">StrategyFOGreeks Paper</a>
-                <%- include('partials/account-menu', { currentAccount }) %>
+<body class="app-page">
+    <%
+        const vFullName = String(currentAccount?.fullName || "User").trim();
+        const vInitial = vFullName ? vFullName.charAt(0).toUpperCase() : "U";
+        const vIsAdmin = Boolean(currentAccount?.isAdmin);
+        const vMustChangePassword = Boolean(currentAccount?.mustChangePassword);
+        const vRoleLabel = vIsAdmin ? "Administrator" : "Standard User";
+    %>
+    <div class="app-layout">
+        <%- include('partials/app-header', { currentAccount }) %>
+
+        <section class="dashboard-hero">
+            <div class="app-panel">
+                <div class="dashboard-eyebrow">Control Center</div>
+                <h1 class="dashboard-title">Build, monitor, and grow your trading workspace from one dashboard.</h1>
+                <p class="app-copy">This is now the main landing page for your account. Use it to move into strategy controls, tighten account security, and keep the server-side setup organized as the product grows.</p>
+                <div class="dashboard-actions">
+                    <a class="app-solid-btn" href="/strategyfogreeks">Open StrategyFOGreeks</a>
+                    <a class="app-ghost-btn" href="/account/profile">Review My Profile</a>
+                    <a class="app-ghost-btn" href="/account/delta-exchange-api">Delta API Settings</a>
+                </div>
+                <% if (vMustChangePassword) { %>
+                    <div class="dashboard-note">Your account is marked for a password update. Please change it before doing anything important in the platform.</div>
+                <% } else { %>
+                    <div class="dashboard-note">Your login session is active and the dashboard is ready for the next phase of product buildout.</div>
+                <% } %>
+                <% if (infoMessage) { %>
+                    <div class="app-success"><%= infoMessage %></div>
+                <% } %>
             </div>
-        </header>
-        <section class="panel">
-            <h1>Welcome, <%= currentAccount?.fullName || 'User' %></h1>
-            <p>Your server-side account is ready. This dashboard is the base for per-user trading controls, live runner visibility, and future admin-managed access to strategies and capital preferences.</p>
-            <% if (infoMessage) { %><div class="info"><%= infoMessage %></div><% } %>
-            <% if (currentAccount?.isAdmin) { %><div class="banner">You are signed in as the default admin account with full access. The new MngUsers page is now available from the account menu for account management, profile updates, temporary password resets, and role control.</div><% } %>
-            <div class="grid">
-                <article class="card"><h3>Account Access</h3><p>Email: <%= currentAccount?.email %><br />Mobile: <%= currentAccount?.mobileNo %></p></article>
-                <article class="card"><h3>Current Role</h3><p><%= currentAccount?.isAdmin ? 'Administrator' : 'Standard User' %></p></article>
-                <article class="card"><h3>Next Step</h3><p><%= currentAccount?.isAdmin ? 'Use the account menu to open Manage User or continue into StrategyFOGreeks paper mode.' : 'Use the account menu for your profile, API settings, and password, then continue into StrategyFOGreeks paper mode.' %></p></article>
+
+            <div class="dashboard-side">
+                <div class="dashboard-profile">
+                    <div class="dashboard-avatar-row">
+                        <div class="dashboard-avatar"><%= vInitial %></div>
+                        <div>
+                            <div class="dashboard-name"><%= vFullName %></div>
+                            <div class="dashboard-meta"><%= currentAccount?.email || "No email available" %></div>
+                        </div>
+                    </div>
+                    <div class="dashboard-chips">
+                        <span class="dashboard-chip <%= vIsAdmin ? 'dashboard-chip-admin' : 'dashboard-chip-user' %>"><%= vRoleLabel %></span>
+                        <span class="dashboard-chip dashboard-chip-ready">Server Connected</span>
+                        <% if (vMustChangePassword) { %>
+                            <span class="dashboard-chip dashboard-chip-password">Password Change Required</span>
+                        <% } %>
+                    </div>
+                </div>
+                <div class="dashboard-mini-grid">
+                    <div class="app-stat dashboard-stat">
+                        <div class="dashboard-stat-label">Mobile</div>
+                        <div class="dashboard-stat-value"><%= currentAccount?.mobileNo || "--" %></div>
+                    </div>
+                    <div class="app-stat dashboard-stat">
+                        <div class="dashboard-stat-label">Access</div>
+                        <div class="dashboard-stat-value"><%= vIsAdmin ? "Full" : "User" %></div>
+                    </div>
+                    <div class="app-stat dashboard-stat">
+                        <div class="dashboard-stat-label">Security</div>
+                        <div class="dashboard-stat-value"><%= vMustChangePassword ? "Pending" : "Ready" %></div>
+                    </div>
+                    <div class="app-stat dashboard-stat">
+                        <div class="dashboard-stat-label">Primary Workspace</div>
+                        <div class="dashboard-stat-value">Paper</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="dashboard-section">
+            <div class="dashboard-section-head">
+                <div>
+                    <h2>Quick Actions</h2>
+                    <p class="app-copy">Use these entry points to move between account setup, strategy control, and team administration without digging through menus.</p>
+                </div>
+            </div>
+            <div class="dashboard-shortcut-grid">
+                <a class="dashboard-shortcut" href="/strategyfogreeks">
+                    <div class="dashboard-shortcut-kicker">Strategy</div>
+                    <div class="dashboard-shortcut-title">Launch Paper Runner</div>
+                    <div class="dashboard-shortcut-copy">Open the StrategyFOGreeks control surface and continue from the live server-backed paper workflow.</div>
+                </a>
+                <a class="dashboard-shortcut" href="/account/profile">
+                    <div class="dashboard-shortcut-kicker">Profile</div>
+                    <div class="dashboard-shortcut-title">Update Personal Details</div>
+                    <div class="dashboard-shortcut-copy">Review your name, email, mobile number, and Telegram details so account ownership stays clean.</div>
+                </a>
+                <a class="dashboard-shortcut" href="/account/delta-exchange-api">
+                    <div class="dashboard-shortcut-kicker">Credentials</div>
+                    <div class="dashboard-shortcut-title">Manage Delta API Profiles</div>
+                    <div class="dashboard-shortcut-copy">Store and organize exchange API references before strategy automation expands further.</div>
+                </a>
+                <% if (vIsAdmin) { %>
+                    <a class="dashboard-shortcut" href="/mngusers">
+                        <div class="dashboard-shortcut-kicker">Admin</div>
+                        <div class="dashboard-shortcut-title">Manage Users</div>
+                        <div class="dashboard-shortcut-copy">Create accounts, control admin rights, and manage password reset status from the PostgreSQL-backed admin workspace.</div>
+                    </a>
+                <% } %>
+                <a class="dashboard-shortcut" href="/account/change-password">
+                    <div class="dashboard-shortcut-kicker">Security</div>
+                    <div class="dashboard-shortcut-title">Change Password</div>
+                    <div class="dashboard-shortcut-copy">Rotate your password now, especially if you are still using a temporary bootstrap or reset credential.</div>
+                </a>
+                <a class="dashboard-shortcut" href="/">
+                    <div class="dashboard-shortcut-kicker">Platform</div>
+                    <div class="dashboard-shortcut-title">Return to Home</div>
+                    <div class="dashboard-shortcut-copy">Jump back to the public landing page while the dashboard continues evolving into the core signed-in workspace.</div>
+                </a>
+            </div>
+        </section>
+
+        <section class="dashboard-section dashboard-timeline">
+            <div class="dashboard-timeline-card">
+                <div class="dashboard-section-head">
+                    <div>
+                        <h2>Suggested Flow</h2>
+                        <p class="app-copy">This is the cleanest sequence for getting an account production-ready without skipping setup details that will matter later.</p>
+                    </div>
+                </div>
+                <div class="dashboard-steps">
+                    <div class="dashboard-step">
+                        <div class="dashboard-step-num">1</div>
+                        <div>
+                            <div class="dashboard-step-title">Secure the account</div>
+                            <p class="app-copy">Confirm your profile data and set a strong password so the account is stable before strategy usage ramps up.</p>
+                        </div>
+                    </div>
+                    <div class="dashboard-step">
+                        <div class="dashboard-step-num">2</div>
+                        <div>
+                            <div class="dashboard-step-title">Configure API references</div>
+                            <p class="app-copy">Add Delta Exchange API profiles and keep them organized by reference name instead of scattering keys across sessions.</p>
+                        </div>
+                    </div>
+                    <div class="dashboard-step">
+                        <div class="dashboard-step-num">3</div>
+                        <div>
+                            <div class="dashboard-step-title">Enter the strategy workspace</div>
+                            <p class="app-copy">Use StrategyFOGreeks paper mode as the current operating area while the broader platform dashboard continues to expand.</p>
+                        </div>
+                    </div>
+                    <% if (vIsAdmin) { %>
+                        <div class="dashboard-step">
+                            <div class="dashboard-step-num">4</div>
+                            <div>
+                                <div class="dashboard-step-title">Provision the team</div>
+                                <p class="app-copy">From Manage Users, create new accounts, assign admin access carefully, and keep reset flows intentional.</p>
+                            </div>
+                        </div>
+                    <% } %>
+                </div>
+            </div>
+
+            <div class="dashboard-timeline-card">
+                <div class="dashboard-section-head">
+                    <div>
+                        <h2>Workspace Notes</h2>
+                        <p class="app-copy">A few useful signals about the account and where this dashboard sits in the product right now.</p>
+                    </div>
+                </div>
+                <div class="dashboard-detail-list">
+                    <div class="dashboard-detail">
+                        <strong>Current role</strong>
+                        <span><%= vIsAdmin ? "You can access both strategy workflows and admin management tools." : "You currently have access to user-level profile, security, and strategy areas." %></span>
+                    </div>
+                    <div class="dashboard-detail">
+                        <strong>Account email</strong>
+                        <span><%= currentAccount?.email || "No email configured." %></span>
+                    </div>
+                    <div class="dashboard-detail">
+                        <strong>Platform state</strong>
+                        <span>The app is live on Railway and this dashboard is now positioned as the signed-in home base for future status, PnL, runner health, and account summaries.</span>
+                    </div>
+                    <div class="dashboard-detail">
+                        <strong>Next dashboard milestone</strong>
+                        <span>Add live runner stats, strategy summaries, account completion indicators, and server activity snapshots once the backend endpoints are ready.</span>
+                    </div>
+                </div>
+                <% if (vIsAdmin) { %>
+                    <div class="dashboard-info-banner">Admin visibility is enabled for this account, so this dashboard can become the control room for user provisioning and future operational monitoring.</div>
+                <% } %>
             </div>
         </section>
     </div>

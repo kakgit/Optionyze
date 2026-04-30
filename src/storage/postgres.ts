@@ -82,6 +82,35 @@ export async function ensurePostgresSchema(): Promise<void> {
         ADD COLUMN IF NOT EXISTS reference_name TEXT NOT NULL DEFAULT '';
     `);
 
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_rolling_options_pt_de_profiles (
+            user_id TEXT PRIMARY KEY,
+            ui_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_rolling_options_pt_de_runtime (
+            user_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'idle',
+            auto_trader_enabled BOOLEAN NOT NULL DEFAULT false,
+            current_symbol TEXT NOT NULL DEFAULT '',
+            current_contract_name TEXT NOT NULL DEFAULT '',
+            current_expiry_mode TEXT NOT NULL DEFAULT '',
+            current_expiry_date TEXT NOT NULL DEFAULT '',
+            renko_enabled BOOLEAN NOT NULL DEFAULT false,
+            renko_points NUMERIC NOT NULL DEFAULT 0,
+            renko_source TEXT NOT NULL DEFAULT '',
+            last_spot_price NUMERIC NULL,
+            last_futures_price NUMERIC NULL,
+            last_signal TEXT NOT NULL DEFAULT '',
+            last_cycle_at TIMESTAMPTZ NULL,
+            last_error TEXT NOT NULL DEFAULT '',
+            state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
 
     await objPool.query(`
         CREATE TABLE IF NOT EXISTS optionyze_accounts (
@@ -124,6 +153,68 @@ export async function ensurePostgresSchema(): Promise<void> {
     await objPool.query(`
         CREATE INDEX IF NOT EXISTS idx_optionyze_delta_api_profiles_account_id
         ON optionyze_delta_api_profiles(account_id);
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_rolling_options_pt_de_events (
+            event_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            strategy_code TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            severity TEXT NOT NULL DEFAULT 'info',
+            title TEXT NOT NULL DEFAULT '',
+            message TEXT NOT NULL DEFAULT '',
+            payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+
+    await objPool.query(`
+        CREATE INDEX IF NOT EXISTS idx_optionyze_rolling_options_pt_de_events_user_created
+        ON optionyze_rolling_options_pt_de_events(user_id, strategy_code, created_at DESC);
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_rolling_options_pt_de_positions (
+            position_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            group_id TEXT NOT NULL DEFAULT '',
+            cycle_id TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL,
+            symbol TEXT NOT NULL DEFAULT '',
+            contract_name TEXT NOT NULL DEFAULT '',
+            instrument_type TEXT NOT NULL DEFAULT 'OPTION',
+            option_side TEXT NOT NULL DEFAULT '',
+            action TEXT NOT NULL DEFAULT '',
+            strike NUMERIC NULL,
+            expiry_date TEXT NOT NULL DEFAULT '',
+            qty NUMERIC NOT NULL DEFAULT 0,
+            lot_size NUMERIC NOT NULL DEFAULT 0,
+            entry_price NUMERIC NULL,
+            exit_price NUMERIC NULL,
+            mark_price NUMERIC NULL,
+            entry_delta NUMERIC NULL,
+            exit_delta NUMERIC NULL,
+            charges NUMERIC NOT NULL DEFAULT 0,
+            pnl NUMERIC NOT NULL DEFAULT 0,
+            opened_reason TEXT NOT NULL DEFAULT '',
+            closed_reason TEXT NOT NULL DEFAULT '',
+            opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            closed_at TIMESTAMPTZ NULL,
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+
+    await objPool.query(`
+        CREATE INDEX IF NOT EXISTS idx_optionyze_rolling_options_pt_de_positions_user_status
+        ON optionyze_rolling_options_pt_de_positions(user_id, status, opened_at DESC);
+    `);
+
+    await objPool.query(`
+        CREATE INDEX IF NOT EXISTS idx_optionyze_rolling_options_pt_de_positions_user_closed_at
+        ON optionyze_rolling_options_pt_de_positions(user_id, closed_at DESC);
     `);
 
     await objPool.query(`

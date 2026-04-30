@@ -73,42 +73,39 @@ function renderTable() {
     }
 
     if (!gState.filteredUsers.length) {
-        objTableBody.innerHTML = `<tr><td colspan="5" class="empty">No users match the current search.</td></tr>`;
+        objTableBody.innerHTML = `<tr><td colspan="5" class="mngusers-empty">No users match the current search.</td></tr>`;
         return;
     }
 
     objTableBody.innerHTML = gState.filteredUsers.map((objUser) => {
         const vCreated = new Date(objUser.createdAt).toLocaleString("en-IN");
         const vBadges = [
-            objUser.isAdmin ? `<span class="chip chip-admin">Admin</span>` : `<span class="chip chip-muted">User</span>`,
-            objUser.isActive ? `<span class="chip chip-live">Active</span>` : `<span class="chip chip-off">Inactive</span>`,
-            objUser.mustChangePassword ? `<span class="chip chip-warn">Pwd Reset</span>` : ``
+            objUser.isAdmin ? `<span class="mngusers-chip mngusers-chip-admin">Admin</span>` : `<span class="mngusers-chip mngusers-chip-muted">User</span>`,
+            objUser.isActive ? `<span class="mngusers-chip mngusers-chip-live">Active</span>` : `<span class="mngusers-chip mngusers-chip-off">Inactive</span>`,
+            objUser.mustChangePassword ? `<span class="mngusers-chip mngusers-chip-warn">Pwd Reset</span>` : ``
         ].join(" ");
 
         return `
             <tr>
                 <td>
-                    <div class="cell-title">${escapeHtml(objUser.fullName)}</div>
-                    <div class="cell-sub">${escapeHtml(objUser.mobileNo || "-")}</div>
+                    <div class="mngusers-cell-title">${escapeHtml(objUser.fullName)}</div>
+                    <div class="mngusers-cell-sub">${escapeHtml(objUser.mobileNo || "-")}</div>
                 </td>
                 <td>
-                    <div class="cell-title">${escapeHtml(objUser.email)}</div>
-                    <div class="cell-sub">Created ${escapeHtml(vCreated)}</div>
+                    <div class="mngusers-cell-title">${escapeHtml(objUser.email)}</div>
+                    <div class="mngusers-cell-sub">Created ${escapeHtml(vCreated)}</div>
                 </td>
                 <td>${vBadges}</td>
                 <td>${objUser.mustChangePassword ? "Temporary password pending" : "Ready"}</td>
                 <td>
-                    <button class="table-btn icon-btn" type="button" data-action="edit" data-id="${objUser.accountId}" title="Edit user" aria-label="Edit user">
-                        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
-                        <span class="sr-only">Edit</span>
+                    <button class="app-link-btn" type="button" data-action="edit" data-id="${objUser.accountId}" title="Edit user" aria-label="Edit user">
+                        Edit
                     </button>
-                    <button class="table-btn alt icon-btn" type="button" data-action="reset" data-id="${objUser.accountId}" title="Reset password" aria-label="Reset password">
-                        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3"/><rect x="5" y="11" width="14" height="10" rx="2" ry="2"/><path d="M12 15v2"/></svg>
-                        <span class="sr-only">Reset Password</span>
+                    <button class="app-link-btn" type="button" data-action="reset" data-id="${objUser.accountId}" title="Reset password" aria-label="Reset password">
+                        Reset Password
                     </button>
-                    <button class="table-btn danger icon-btn" type="button" data-action="delete" data-id="${objUser.accountId}" title="Delete user" aria-label="Delete user" ${objUser.accountId === gState.currentAccountId ? "disabled" : ""}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-                        <span class="sr-only">Delete</span>
+                    <button class="app-link-btn" type="button" data-action="delete" data-id="${objUser.accountId}" title="Delete user" aria-label="Delete user" ${objUser.accountId === gState.currentAccountId ? "disabled" : ""}>
+                        Delete
                     </button>
                 </td>
             </tr>
@@ -292,7 +289,7 @@ function setStatus(pMessage, pTone) {
     }
 
     objStatus.textContent = pMessage;
-    objStatus.className = `page-status show ${pTone}`;
+    objStatus.className = `mngusers-page-status show ${pTone}`;
 }
 
 function setModalMessage(pMessage, pTone) {
@@ -302,7 +299,7 @@ function setModalMessage(pMessage, pTone) {
     }
 
     objMessage.textContent = pMessage;
-    objMessage.className = `form-message show ${pTone}`;
+    objMessage.className = `mngusers-form-message show ${pTone}`;
 }
 
 function setText(pId, pValue) {

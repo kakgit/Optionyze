@@ -1,0 +1,197 @@
+.delta-layout {
+    width:min(1180px, 100%);
+    margin:0 auto;
+}
+
+.delta-toolbar {
+    display:flex;
+    flex-wrap:wrap;
+    gap:12px;
+    align-items:center;
+    justify-content:space-between;
+    margin:22px 0 16px;
+}
+
+.delta-toolbar-actions {
+    display:flex;
+    flex-wrap:wrap;
+    gap:12px;
+}
+
+.delta-button {
+    min-height:44px;
+    padding:0 18px;
+    border:0;
+    border-radius:999px;
+    background:linear-gradient(135deg,#50e3c2,#7dd3fc);
+    color:#05101d;
+    font-weight:700;
+    cursor:pointer;
+}
+
+.delta-button.alt {
+    background:rgba(255,255,255,.03);
+    color:var(--app-text);
+    border:1px solid rgba(255,255,255,.08);
+}
+
+.delta-status {
+    margin-top:16px;
+    padding:12px 14px;
+    border-radius:14px;
+    display:none;
+}
+
+.delta-status.show { display:block; }
+.delta-status.info { background:rgba(80,227,194,.12); border:1px solid rgba(80,227,194,.22); color:#9cf4df; }
+.delta-status.error { background:rgba(255,101,101,.12); border:1px solid rgba(255,101,101,.22); color:#ff9f9f; }
+.delta-status.success { background:rgba(134,239,172,.12); border:1px solid rgba(134,239,172,.22); color:#86efac; }
+
+.delta-table-wrap {
+    overflow:auto;
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:20px;
+    background:rgba(255,255,255,.03);
+}
+
+.delta-table {
+    width:100%;
+    min-width:760px;
+    border-collapse:collapse;
+}
+
+.delta-table th,
+.delta-table td {
+    padding:16px 14px;
+    border-bottom:1px solid rgba(255,255,255,.06);
+    text-align:left;
+    vertical-align:top;
+}
+
+.delta-table th {
+    color:var(--app-muted);
+    font-size:.76rem;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+}
+
+.delta-empty {
+    text-align:center;
+    color:var(--app-muted);
+    padding:36px 14px;
+}
+
+.delta-cell-title { font-weight:600; }
+.delta-cell-sub { margin-top:6px; color:var(--app-muted); font-size:.84rem; }
+
+.delta-actions-row {
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+}
+
+.delta-row-btn {
+    min-height:36px;
+    padding:0 12px;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,.08);
+    background:rgba(255,255,255,.03);
+    color:var(--app-text);
+    cursor:pointer;
+}
+
+.delta-row-btn.danger { color:#ffb5b5; }
+
+.delta-chip {
+    display:inline-flex;
+    align-items:center;
+    padding:5px 10px;
+    border-radius:999px;
+    font-size:.74rem;
+    border:1px solid rgba(255,255,255,.08);
+}
+
+.delta-chip.good { background:rgba(134,239,172,.12); color:#86efac; }
+.delta-chip.muted { background:rgba(255,255,255,.04); color:#d8def2; }
+
+.delta-overlay {
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,.55);
+    backdrop-filter:blur(6px);
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .18s ease;
+}
+
+.delta-overlay.show {
+    opacity:1;
+    pointer-events:auto;
+}
+
+.delta-modal {
+    position:fixed;
+    left:50%;
+    top:50%;
+    transform:translate(-50%, -48%);
+    width:min(680px, calc(100% - 30px));
+    max-height:calc(100vh - 40px);
+    overflow:auto;
+    padding:22px;
+    opacity:0;
+    pointer-events:none;
+    transition:all .18s ease;
+}
+
+.delta-modal.show {
+    opacity:1;
+    pointer-events:auto;
+    transform:translate(-50%, -50%);
+}
+
+.delta-modal-head {
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:16px;
+    margin-bottom:16px;
+}
+
+.delta-modal-title {
+    margin:0 0 8px;
+}
+
+.delta-modal-grid {
+    display:grid;
+    grid-template-columns:1fr;
+    gap:14px;
+}
+
+.delta-modal-grid label {
+    display:block;
+    margin:0 0 8px;
+    color:#dce5ff;
+}
+
+.delta-modal-grid input {
+    width:100%;
+    min-height:48px;
+    border-radius:14px;
+    border:1px solid rgba(255,255,255,.08);
+    background:rgba(255,255,255,.03);
+    color:var(--app-text);
+    padding:0 14px;
+}
+
+.delta-hint {
+    color:var(--app-muted);
+    font-size:.84rem;
+    line-height:1.6;
+}
+
+.delta-modal-actions {
+    display:flex;
+    justify-content:flex-end;
+    gap:10px;
+    margin-top:18px;
+}

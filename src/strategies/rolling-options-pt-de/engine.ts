@@ -1,0 +1,258 @@
+import type { RollingOptionsPtDePositionRecord } from "../../storage/rolling-options-pt-de-position-store";
+import type {
+    RollingOptionsPtDeConfig,
+    RollingOptionsPtDeEngineState,
+    RollingOptionsPtDeMarketSnapshot
+} from "./types";
+
+const gFutureBrokeragePct = 0.05;
+const gOptionBrokeragePct = 0.01;
+const gBrokerageGstMultiplier = 1.18;
+
+function clampNumber(pValue: number, pMin: number, pMax: number): number {
+    return Math.min(Math.max(pValue, pMin), pMax);
+}
+
+function getStandardBricks(
+    pMark: number,
+    pStep: number,
+    pAnchor: number,
+    pLastDir: -1 | 0 | 1,
+    pMaxBricks = 25
+): { bricks: Array<{ open: number; close: number; }>; anchor: number; lastDir: -1 | 0 | 1; } {
+    const objBricks: Array<{ open: number; close: number; }> = [];
+    let vAnchor = pAnchor;
+    let vLastDir: -1 | 0 | 1 = pLastDir;
+    let vGuard = 0;
+
+    while (vGuard < pMaxBricks) {
+        const vDiff = pMark - vAnchor;
+        let vDir: -1 | 0 | 1 = 0;
+
+        if (vLastDir === 0) {
+            if (vDiff >= pStep) {
+                vDir = 1;
+            }
+            else if (vDiff <= -pStep) {
+                vDir = -1;
+            }
+            else {
+                break;
+            }
+        }
+        else if (vLastDir === 1) {
+            if (vDiff >= pStep) {
+                vDir = 1;
+            }
+            else if (vDiff <= -(2 * pStep)) {
+                vDir = -1;
+            }
+            else {
+                break;
+            }
+        }
+        else {
+            if (vDiff <= -pStep) {
+                vDir = -1;
+            }
+            else if (vDiff >= (2 * pStep)) {
+                vDir = 1;
+            }
+            else {
+                break;
+            }
+        }
+
+        const vOpen = vAnchor;
+        const vClose = vOpen + (vDir * pStep);
+        objBricks.push({ open: vOpen, close: vClose });
+        vAnchor = vClose;
+        vLastDir = vDir;
+        vGuard += 1;
+    }
+
+    return { bricks: objBricks, anchor: vAnchor, lastDir: vLastDir };
+}
+
+export function updateRenkoState(
+    pEngineState: RollingOptionsPtDeEngineState,
+    pSnapshot: RollingOptionsPtDeMarketSnapshot,
+    pConfig: RollingOptionsPtDeConfig
+): Array<"R2G" | "G2R"> {
+    const objTransitions: Array<"R2G" | "G2R"> = [];
+    const vPrice = pConfig.renkoPriceSource === "spot_price"
+        ? pSnapshot.spotPrice
+        : pSnapshot.futuresPrice;
+    const vStep = Math.max(1, Number(pConfig.renkoStepPoints || 10));
+
+    if (!Number.isFinite(vPrice) || vPrice <= 0) {
+        return objTransitions;
+    }
+
+    if (!Number.isFinite(Number(pEngineState.renko.anchor))) {
+        pEngineState.renko.anchor = Math.floor(vPrice / vStep) * vStep;
+        pEngineState.renko.lastDir = 0;
+        pEngineState.renko.lastColor = "";
+        return objTransitions;
+    }
+
+    const objBuild = getStandardBricks(
+        vPrice,
+        vStep,
+        Number(pEngineState.renko.anchor),
+        pEngineState.renko.lastDir
+    );
+
+    pEngineState.renko.anchor = objBuild.anchor;
+    pEngineState.renko.lastDir = objBuild.lastDir;
+
+    for (const objBrick of objBuild.bricks) {
+        const vColor = objBrick.close > objBrick.open ? "G" : "R";
+        if (vColor === "G" && pEngineState.renko.lastColor === "R") {
+            objTransitions.push("R2G");
+        }
+        else if (vColor === "R" && pEngineState.renko.lastColor === "G") {
+            objTransitions.push("G2R");
+        }
+        pEngineState.renko.lastColor = vColor;
+    }
+
+    return objTransitions;
+}
+
+export function getOpenPositionsSummary(pPositions: RollingOptionsPtDePositionRecord[]): {
+    futureQty: number;
+    futureSide: "" | "BUY" | "SELL";
+    hasOpenOption: boolean;
+} {
+    const objOpenPositions = pPositions.filter((objRow) => objRow.status === "OPEN");
+    const objFutures = objOpenPositions.filter((objRow) => objRow.instrumentType === "FUTURE");
+    const objOptions = objOpenPositions.filter((objRow) => objRow.instrumentType === "OPTION");
+
+    return {
+        futureQty: objFutures.reduce((pSum, objRow) => pSum + Math.max(0, Number(objRow.qty || 0)), 0),
+        futureSide: objFutures[0]?.action || "",
+        hasOpenOption: objOptions.length > 0
+    };
+}
+
+export function shouldTriggerOption(
+    pPosition: RollingOptionsPtDePositionRecord,
+    pCurrentDelta: number
+): { shouldAct: boolean; reason: "" | "sl" | "tp"; } {
+    const vTransType = String(pPosition.action || "").toUpperCase();
+    const vDeltaSl = Number((pPosition.metadata?.deltaStopLoss as number) || 0);
+    const vDeltaTp = Number((pPosition.metadata?.deltaTakeProfit as number) || 0);
+    const vAbsDelta = Math.abs(pCurrentDelta);
+    const bHasSl = Number.isFinite(vDeltaSl) && vDeltaSl > 0;
+    const bHasTp = Number.isFinite(vDeltaTp) && vDeltaTp > 0;
+
+    if (!Number.isFinite(vAbsDelta) || (!bHasSl && !bHasTp)) {
+        return { shouldAct: false, reason: "" };
+    }
+
+    if (vTransType === "SELL") {
+        if (bHasSl && vAbsDelta >= vDeltaSl) {
+            return { shouldAct: true, reason: "sl" };
+        }
+        if (bHasTp && vAbsDelta <= vDeltaTp) {
+            return { shouldAct: true, reason: "tp" };
+        }
+    }
+    else if (vTransType === "BUY") {
+        if (bHasSl && vAbsDelta <= vDeltaSl) {
+            return { shouldAct: true, reason: "sl" };
+        }
+        if (bHasTp && vAbsDelta >= vDeltaTp) {
+            return { shouldAct: true, reason: "tp" };
+        }
+    }
+
+    return { shouldAct: false, reason: "" };
+}
+
+export function getSimulatedCurrentDelta(
+    pPosition: RollingOptionsPtDePositionRecord,
+    pSnapshot: RollingOptionsPtDeMarketSnapshot
+): number {
+    const vEntryDelta = Math.abs(Number(pPosition.entryDelta || 0.53));
+    const vEntrySpot = Number((pPosition.metadata?.entrySpotPrice as number) || pSnapshot.spotPrice);
+    const vSpotMovePct = vEntrySpot > 0 ? ((pSnapshot.spotPrice - vEntrySpot) / vEntrySpot) : 0;
+    const vDirectionFactor = String(pPosition.optionSide || "").toUpperCase() === "CE" ? 1 : -1;
+    const vDeltaShift = vSpotMovePct * 12 * vDirectionFactor;
+    return clampNumber(vEntryDelta + vDeltaShift, 0.05, 0.95);
+}
+
+export function getSimulatedOptionMark(
+    pPosition: RollingOptionsPtDePositionRecord,
+    pSnapshot: RollingOptionsPtDeMarketSnapshot,
+    pCurrentDelta: number
+): number {
+    const vSpotBase = Number(pSnapshot.spotPrice || 0);
+    const vVolFactor = 0.012;
+    const vTimeValue = Math.max(0.0015, Math.abs(pCurrentDelta) * vVolFactor);
+    const vMark = vSpotBase * vTimeValue;
+    return Number(vMark.toFixed(2));
+}
+
+export function getPositionPnl(
+    pPosition: RollingOptionsPtDePositionRecord,
+    pExitPrice: number
+): number {
+    const vEntryPrice = Number(pPosition.entryPrice || 0);
+    const vQty = Math.max(1, Number(pPosition.qty || 1));
+    const vLotSize = Math.max(0, Number(pPosition.lotSize || 0));
+    const vSignedMove = pPosition.action === "BUY"
+        ? (pExitPrice - vEntryPrice)
+        : (vEntryPrice - pExitPrice);
+    return Number((vSignedMove * vQty * vLotSize).toFixed(2));
+}
+
+export function estimatePositionCharges(
+    pInstrumentType: "OPTION" | "FUTURE",
+    pQty: number,
+    pLotSize: number,
+    pPrice: number
+): number {
+    const vQty = Math.max(1, Number(pQty || 1));
+    const vLotSize = Math.max(0, Number(pLotSize || 0));
+    const vPrice = Math.max(0, Number(pPrice || 0));
+    const vNotional = vQty * vLotSize * vPrice;
+    const vBrokeragePct = pInstrumentType === "FUTURE" ? gFutureBrokeragePct : gOptionBrokeragePct;
+    return Number((((vNotional * vBrokeragePct) / 100) * gBrokerageGstMultiplier).toFixed(4));
+}
+
+export function buildConfigFromUiState(pUiState: Record<string, unknown>): RollingOptionsPtDeConfig {
+    const vSymbol = String(pUiState.symbol || "BTC").trim().toUpperCase() || "BTC";
+    const vAction = String(pUiState.action1 || "sell").trim().toLowerCase() === "buy" ? "buy" : "sell";
+    const vLegSideRaw = String(pUiState.legSide1 || "ce").trim().toLowerCase();
+    const vLegSide = vLegSideRaw === "both" || vLegSideRaw === "pe" ? vLegSideRaw : "ce";
+    const vPriceSourceRaw = String(pUiState.renkoFeedPriceSrc || "spot_price").trim();
+    const vPriceSource = vPriceSourceRaw === "mark_price" || vPriceSourceRaw === "best_bid" || vPriceSourceRaw === "best_ask"
+        ? vPriceSourceRaw
+        : "spot_price";
+
+    return {
+        symbol: vSymbol,
+        contractName: vSymbol === "ETH" ? "ETHUSD" : "BTCUSD",
+        lotSize: vSymbol === "ETH" ? 0.01 : 0.001,
+        futureQty: Math.max(1, Math.floor(Number(pUiState.manualFutQty || 1))),
+        futureOrderType: String(pUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
+        action: vAction,
+        legSide: vLegSide,
+        expiryMode: String(pUiState.expiryMode1 || "1") as "1" | "2" | "4" | "5" | "6",
+        expiryDate: String(pUiState.expiryDate1 || ""),
+        optionQty: Math.max(1, Math.floor(Number(pUiState.manualOptQty1 || 1))),
+        autoOptionQtyPct: Math.max(1, Math.round(Number(pUiState.autoOptQtyPct || 100))),
+        newDelta: Number(pUiState.newDelta1 || 0.53),
+        reDelta: Number(pUiState.reDelta1 || 0.53),
+        deltaTakeProfit: Number(pUiState.deltaTp1 || 0.15),
+        deltaStopLoss: Number(pUiState.deltaSl1 || 0.85),
+        reEnter: Boolean(pUiState.reEnter1),
+        addOneLotFuture: Boolean(pUiState.addOneLotFuture),
+        renkoEnabled: Boolean(pUiState.renkoFeedEnabled ?? true),
+        renkoStepPoints: Math.max(1, Math.round(Number(pUiState.renkoFeedPts || 10))),
+        renkoPriceSource: vPriceSource,
+        loopSeconds: 8
+    };
+}

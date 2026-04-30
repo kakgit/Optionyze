@@ -21,6 +21,24 @@ import {
     validateStrategyFoPaperLogin
 } from "../controllers/strategyfo-paper-controller";
 import {
+    clearRollingOptionsPtDeClosedPositionsController,
+    clearRollingOptionsPtDeEventsController,
+    executeRollingOptionsPtDeManualFuture,
+    executeRollingOptionsPtDeManualOption,
+    exitRollingOptionsPtDeManualPositions,
+    getRollingOptionsPtDeEvents,
+    getRollingOptionsPtDeClosedPositions,
+    getRollingOptionsPtDeOpenPositions,
+    getRollingOptionsPtDeProfile,
+    getRollingOptionsPtDeStatus,
+    resetRollingOptionsPtDeStrategy,
+    runRollingOptionsPtDeStrategyCycle,
+    runRollingOptionsPtDeStrategyExecution,
+    saveRollingOptionsPtDeProfileController,
+    setRollingOptionsPtDeManualRenkoSignal,
+    toggleRollingOptionsPtDeAutoTrader
+} from "../controllers/rolling-options-pt-de-controller";
+import {
     createDeltaApiProfileController,
     deleteDeltaApiProfileController,
     listDeltaApiProfilesController,
@@ -29,11 +47,13 @@ import {
 } from "../controllers/delta-api-controller";
 import type { RunnerManager } from "../../runners/runner-manager";
 import type { StrategyFoGreeksPaperService } from "../../strategies/strategy-fo-greeks-paper/service";
+import type { RollingOptionsPtDeService } from "../../strategies/rolling-options-pt-de/service";
 import { requireAdminApi, requireAuthApi, requireFreshPasswordApi } from "../middleware/auth-middleware";
 
 export function createApiRouter(
     pRunnerManager: RunnerManager,
-    pStrategyFoPaperService: StrategyFoGreeksPaperService
+    pStrategyFoPaperService: StrategyFoGreeksPaperService,
+    pRollingOptionsPtDeService: RollingOptionsPtDeService
 ): Router {
     const objRouter = Router();
 
@@ -102,6 +122,55 @@ export function createApiRouter(
     });
     objRouter.post("/strategyfo/paper/emergency-stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await emergencyStopStrategyFoPaper(req, res, pStrategyFoPaperService);
+    });
+
+    objRouter.get("/rollingoptions-pt-de/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRollingOptionsPtDeProfile(req, res);
+    });
+    objRouter.post("/rollingoptions-pt-de/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveRollingOptionsPtDeProfileController(req, res);
+    });
+    objRouter.get("/rollingoptions-pt-de/status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRollingOptionsPtDeStatus(req, res);
+    });
+    objRouter.get("/rollingoptions-pt-de/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRollingOptionsPtDeOpenPositions(req, res);
+    });
+    objRouter.get("/rollingoptions-pt-de/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRollingOptionsPtDeClosedPositions(req, res);
+    });
+    objRouter.get("/rollingoptions-pt-de/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRollingOptionsPtDeEvents(req, res);
+    });
+    objRouter.post("/rollingoptions-pt-de/auto-trader", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await toggleRollingOptionsPtDeAutoTrader(req, res, pRollingOptionsPtDeService);
+    });
+    objRouter.post("/rollingoptions-pt-de/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeRollingOptionsPtDeManualFuture(req, res);
+    });
+    objRouter.post("/rollingoptions-pt-de/manual/option", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeRollingOptionsPtDeManualOption(req, res);
+    });
+    objRouter.post("/rollingoptions-pt-de/manual/exit", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await exitRollingOptionsPtDeManualPositions(req, res);
+    });
+    objRouter.post("/rollingoptions-pt-de/strategy/execute", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await runRollingOptionsPtDeStrategyExecution(req, res, pRollingOptionsPtDeService);
+    });
+    objRouter.post("/rollingoptions-pt-de/strategy/cycle", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await runRollingOptionsPtDeStrategyCycle(req, res, pRollingOptionsPtDeService);
+    });
+    objRouter.post("/rollingoptions-pt-de/renko/signal", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await setRollingOptionsPtDeManualRenkoSignal(req, res, pRollingOptionsPtDeService);
+    });
+    objRouter.post("/rollingoptions-pt-de/strategy/reset", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await resetRollingOptionsPtDeStrategy(req, res, pRollingOptionsPtDeService);
+    });
+    objRouter.post("/rollingoptions-pt-de/closed-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearRollingOptionsPtDeClosedPositionsController(req, res);
+    });
+    objRouter.post("/rollingoptions-pt-de/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearRollingOptionsPtDeEventsController(req, res);
     });
 
     return objRouter;

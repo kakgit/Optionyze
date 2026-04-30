@@ -4,90 +4,35 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title><%= pageTitle %></title>
+    <link rel="stylesheet" href="/css/app-shell.css" />
     <link rel="stylesheet" href="/css/account-menu.css" />
-    <style>
-        :root {
-            --bg:#f3efe6; --panel:#fffaf1; --ink:#1b2430; --muted:#6c6a63; --line:#d7c9ab; --accent:#1d5c63; --accent2:#c84b31; --good:#2e7d32; --bad:#b42318; --warn:#b7791f;
-            --account-line: rgba(27,36,48,.14);
-            --account-trigger-bg: rgba(255,255,255,.72);
-            --account-trigger-color: var(--ink);
-            --account-avatar-color: #fffaf1;
-            --account-avatar-bg: linear-gradient(135deg, #1d5c63, #c84b31);
-            --account-dropdown-bg: rgba(255,250,241,.98);
-            --account-strong: var(--ink);
-            --account-muted: #6c6a63;
-            --account-link-color: var(--ink);
-            --account-hover-bg: rgba(29,92,99,.08);
-            --account-divider: rgba(27,36,48,.08);
-            --account-focus: rgba(29,92,99,.55);
-        }
-        * { box-sizing:border-box; }
-        body { margin:0; font-family:Georgia, "Times New Roman", serif; background:radial-gradient(circle at top left, rgba(29,92,99,.10), transparent 28%), linear-gradient(180deg, #f7f2e8, #efe4cf); color:var(--ink); }
-        .page { max-width:1400px; margin:0 auto; padding:24px; }
-        .topbar { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:20px; background:rgba(255,250,241,.92); border:1px solid var(--line); border-radius:18px; box-shadow:0 10px 30px rgba(27,36,48,.08); padding:18px; }
-        .brand { display:flex; align-items:center; gap:12px; color:var(--ink); text-decoration:none; font-weight:700; letter-spacing:.18em; font-size:.95rem; }
-        .mark { width:40px; height:40px; border-radius:14px; display:grid; place-items:center; background:linear-gradient(135deg, rgba(29,92,99,.18), rgba(200,75,49,.18)); }
-        .top-actions { display:flex; gap:12px; align-items:center; }
-        .navbtn { min-height:40px; padding:0 16px; border-radius:999px; border:1px solid rgba(27,36,48,.10); background:rgba(255,255,255,.65); color:var(--ink); text-decoration:none; display:inline-flex; align-items:center; }
-        .panel { background:rgba(255,250,241,.92); border:1px solid var(--line); border-radius:18px; box-shadow:0 10px 30px rgba(27,36,48,.08); padding:18px; }
-        .hero,.grid2,.grid4,.controls,.config,.buttonrow { display:grid; gap:16px; }
-        .hero { grid-template-columns:2fr 1fr; margin-bottom:20px; }
-        .grid2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
-        .grid4,.controls,.config,.buttonrow { grid-template-columns:repeat(4,minmax(0,1fr)); }
-        .badge { display:inline-block; padding:6px 10px; border-radius:999px; font-size:12px; letter-spacing:.08em; text-transform:uppercase; border:1px solid var(--line); background:#fff6df; }
-        .title { font-size:34px; margin:0 0 6px 0; }
-        .subtitle,.muted { color:var(--muted); }
-        .stat { background:rgba(255,255,255,.65); border:1px solid var(--line); border-radius:14px; padding:14px; }
-        .statlabel { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
-        .statvalue { font-size:28px; margin-top:6px; }
-        label { display:block; font-size:13px; margin-bottom:6px; color:var(--muted); }
-        input,select,button { width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:#fffdf8; color:var(--ink); font:inherit; }
-        button { cursor:pointer; background:linear-gradient(135deg, var(--accent), #2c7a7b); color:white; border:none; font-weight:700; }
-        button.alt { background:linear-gradient(135deg, #845422, #b7791f); }
-        button.danger { background:linear-gradient(135deg, #8f2d1d, var(--accent2)); }
-        .sectiontitle { margin:0 0 12px 0; font-size:20px; }
-        .tablewrap { overflow:auto; border:1px solid var(--line); border-radius:14px; background:rgba(255,255,255,.7); }
-        table { width:100%; border-collapse:collapse; min-width:900px; }
-        th,td { padding:10px 12px; border-bottom:1px solid rgba(215,201,171,.7); text-align:left; font-size:14px; }
-        th { color:var(--muted); text-transform:uppercase; letter-spacing:.06em; font-size:11px; }
-        .log { max-height:360px; overflow:auto; border:1px solid var(--line); border-radius:14px; background:#fcf7ed; padding:10px 12px; font-family:Consolas, "Courier New", monospace; font-size:13px; }
-        .logitem { padding:8px 0; border-bottom:1px dashed rgba(215,201,171,.9); }
-        .logitem:last-child { border-bottom:0; }
-        .good { color:var(--good); } .bad { color:var(--bad); } .warn { color:var(--warn); }
-        @media (max-width:980px) { .hero,.grid2,.grid4,.controls,.config,.buttonrow { grid-template-columns:1fr; } .page { padding:14px; } .topbar { flex-direction:column; align-items:flex-start; } .top-actions { width:100%; flex-wrap:wrap; } }
-    </style>
+    <link rel="stylesheet" href="/css/strategyfo-paper.css" />
 </head>
-<body>
-    <div class="page">
-        <header class="topbar">
-            <a class="brand" href="/"><span class="mark">O</span><span>OPTIONYZE</span></a>
-            <div class="top-actions">
-                <a class="navbtn" href="/dashboard">Dashboard</a>
-                <%- include('partials/account-menu', { currentAccount }) %>
+<body class="app-page paper-theme">
+    <div class="app-layout paper-layout">
+        <%- include('partials/app-header', { currentAccount }) %>
+        <section class="paper-hero">
+            <div class="paper-panel">
+                <div class="paper-badge">StrategyFOGreeks</div>
+                <h1 class="paper-title">Paper Trade Runner</h1>
+                <p class="paper-subtitle">Server-side paper engine with the same core logic path as AlgoMarti. The browser is only the control panel.</p>
             </div>
-        </header>
-        <section class="hero">
-            <div class="panel">
-                <div class="badge">StrategyFOGreeks</div>
-                <h1 class="title">Paper Trade Runner</h1>
-                <p class="subtitle">Server-side paper engine with the same core logic path as AlgoMarti. The browser is only the control panel.</p>
-            </div>
-            <div class="panel">
-                <div class="statlabel">Active User</div>
-                <div class="statvalue" id="activeUserLabel"><%= defaultUserId %></div>
-                <div class="muted" id="engineStateText">Idle</div>
+            <div class="paper-panel">
+                <div class="paper-stat-label">Active User</div>
+                <div class="paper-stat-value" id="activeUserLabel"><%= defaultUserId %></div>
+                <div class="paper-muted" id="engineStateText">Idle</div>
             </div>
         </section>
 
-        <section class="panel">
-            <h2 class="sectiontitle">Runner Controls</h2>
-            <div class="controls">
+        <section class="paper-panel">
+            <h2 class="paper-section-title">Runner Controls</h2>
+            <div class="paper-controls">
                 <div><label for="userId">User Id</label><input id="userId" value="<%= defaultUserId %>" /></div>
                 <div><label for="apiKey">API Key</label><input id="apiKey" type="password" /></div>
                 <div><label for="apiSecret">API Secret</label><input id="apiSecret" type="password" /></div>
                 <div><label for="symbol">Trading Symbol</label><select id="symbol"><option value="BTCUSD">BTCUSD</option><option value="ETHUSD">ETHUSD</option></select></div>
             </div>
-            <div class="config" style="margin-top:12px;">
+            <div class="paper-config paper-mt-12">
                 <div><label for="underlying">Underlying</label><select id="underlying"><option value="BTC">BTC</option><option value="ETH">ETH</option></select></div>
                 <div><label for="loopSeconds">Loop Seconds</label><input id="loopSeconds" type="number" value="10" min="5" /></div>
                 <div><label for="deltaTolerance">Delta Tolerance</label><input id="deltaTolerance" type="number" value="20" step="0.01" /></div>
@@ -97,53 +42,53 @@
                 <div><label for="monthlyDteMin">Monthly DTE Min</label><input id="monthlyDteMin" type="number" value="30" /></div>
                 <div><label for="monthlyDteMax">Monthly DTE Max</label><input id="monthlyDteMax" type="number" value="60" /></div>
             </div>
-            <div class="buttonrow" style="margin-top:14px;">
+            <div class="paper-button-row paper-mt-14">
                 <button id="btnStart">Start Engine</button>
                 <button id="btnCycle" class="alt">Run One Cycle</button>
                 <button id="btnStop" class="alt">Stop Engine</button>
                 <button id="btnReset" class="danger">Reset State</button>
             </div>
-            <div class="buttonrow">
+            <div class="paper-button-row">
                 <button id="btnEmergency" class="danger">Emergency Stop</button>
                 <button id="btnRefresh" class="alt">Refresh Status</button>
                 <div></div><div></div>
             </div>
         </section>
 
-        <section class="grid4" style="margin-top:20px;">
-            <div class="stat"><div class="statlabel">Cycle Count</div><div class="statvalue" id="cycleCount">0</div></div>
-            <div class="stat"><div class="statlabel">Total PnL</div><div class="statvalue" id="totalPnl">0</div></div>
-            <div class="stat"><div class="statlabel">Total Delta</div><div class="statvalue" id="totalDelta">0</div></div>
-            <div class="stat"><div class="statlabel">Margin Used</div><div class="statvalue" id="marginUsed">0</div></div>
+        <section class="paper-grid-4 paper-mt-20">
+            <div class="paper-stat"><div class="paper-stat-label">Cycle Count</div><div class="paper-stat-value" id="cycleCount">0</div></div>
+            <div class="paper-stat"><div class="paper-stat-label">Total PnL</div><div class="paper-stat-value" id="totalPnl">0</div></div>
+            <div class="paper-stat"><div class="paper-stat-label">Total Delta</div><div class="paper-stat-value" id="totalDelta">0</div></div>
+            <div class="paper-stat"><div class="paper-stat-label">Margin Used</div><div class="paper-stat-value" id="marginUsed">0</div></div>
         </section>
 
-        <section class="grid4" style="margin-top:16px;">
-            <div class="stat"><div class="statlabel">Open Positions</div><div class="statvalue" id="openCount">0</div></div>
-            <div class="stat"><div class="statlabel">Gamma</div><div class="statvalue" id="totalGamma">0</div></div>
-            <div class="stat"><div class="statlabel">Theta</div><div class="statvalue" id="totalTheta">0</div></div>
-            <div class="stat"><div class="statlabel">Failures</div><div class="statvalue" id="failureCount">0</div></div>
+        <section class="paper-grid-4 paper-mt-16">
+            <div class="paper-stat"><div class="paper-stat-label">Open Positions</div><div class="paper-stat-value" id="openCount">0</div></div>
+            <div class="paper-stat"><div class="paper-stat-label">Gamma</div><div class="paper-stat-value" id="totalGamma">0</div></div>
+            <div class="paper-stat"><div class="paper-stat-label">Theta</div><div class="paper-stat-value" id="totalTheta">0</div></div>
+            <div class="paper-stat"><div class="paper-stat-label">Failures</div><div class="paper-stat-value" id="failureCount">0</div></div>
         </section>
 
-        <section class="grid2" style="margin-top:20px;">
-            <div class="panel">
-                <h2 class="sectiontitle">Open Positions</h2>
-                <div class="tablewrap">
-                    <table>
+        <section class="paper-grid-2 paper-mt-20">
+            <div class="paper-panel">
+                <h2 class="paper-section-title">Open Positions</h2>
+                <div class="paper-table-wrap">
+                    <table class="paper-table">
                         <thead><tr><th>Leg</th><th>Instrument</th><th>Side</th><th>Symbol</th><th>Qty</th><th>Entry</th><th>Mark</th><th>Delta</th><th>Theta</th><th>Status</th></tr></thead>
                         <tbody id="openPositionsBody"></tbody>
                     </table>
                 </div>
             </div>
-            <div class="panel">
-                <h2 class="sectiontitle">Events</h2>
-                <div class="log" id="eventsLog"></div>
+            <div class="paper-panel">
+                <h2 class="paper-section-title">Events</h2>
+                <div class="paper-log" id="eventsLog"></div>
             </div>
         </section>
 
-        <section class="panel" style="margin-top:20px;">
-            <h2 class="sectiontitle">Closed Positions</h2>
-            <div class="tablewrap">
-                <table>
+        <section class="paper-panel paper-mt-20">
+            <h2 class="paper-section-title">Closed Positions</h2>
+            <div class="paper-table-wrap">
+                <table class="paper-table">
                     <thead><tr><th>Leg</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Reason</th><th>Gross PnL</th><th>Net PnL</th><th>Closed At</th></tr></thead>
                     <tbody id="closedPositionsBody"></tbody>
                 </table>

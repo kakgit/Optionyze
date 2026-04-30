@@ -4,121 +4,40 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title><%= pageTitle %></title>
+    <link rel="stylesheet" href="/css/app-shell.css" />
     <link rel="stylesheet" href="/css/account-menu.css" />
-    <style>
-        :root {
-            color-scheme: dark;
-            --bg:#07111f;
-            --panel:rgba(10,18,38,.88);
-            --line:rgba(162,180,228,.18);
-            --text:#f3f6ff;
-            --muted:#a7b2d4;
-            --accent:#50e3c2;
-            --accent-2:#7dd3fc;
-            --warn:#f2b65a;
-            --danger:#f87171;
-            --good:#86efac;
-        }
-        * { box-sizing:border-box; }
-        body { margin:0; min-height:100vh; font-family:"Segoe UI","Trebuchet MS",sans-serif; color:var(--text); background:radial-gradient(circle at top left, rgba(80,227,194,.12), transparent 24%), radial-gradient(circle at top right, rgba(125,211,252,.10), transparent 24%), linear-gradient(180deg,#040714 0%,#08101f 55%,#050816 100%); }
-        .page { max-width:1200px; margin:0 auto; padding:24px; }
-        .topbar, .panel, .modal, .stat { background:var(--panel); border:1px solid var(--line); border-radius:24px; box-shadow:0 24px 80px rgba(0,0,0,.35); }
-        .topbar { padding:18px 22px; display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px; }
-        .brand { display:flex; align-items:center; gap:12px; color:var(--text); text-decoration:none; font-weight:700; letter-spacing:.18em; font-size:.95rem; }
-        .mark { width:40px; height:40px; border-radius:14px; display:grid; place-items:center; background:linear-gradient(135deg, rgba(80,227,194,.22), rgba(125,211,252,.22)); }
-        .top-actions { display:flex; align-items:center; gap:12px; }
-        .link-btn, .solid-btn, .table-btn { min-height:40px; padding:0 16px; border-radius:999px; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.03); color:var(--text); text-decoration:none; cursor:pointer; font:inherit; }
-        .icon-btn { width:36px; min-width:36px; min-height:36px; padding:0; display:inline-flex; align-items:center; justify-content:center; border-radius:12px; }
-        .icon-btn + .icon-btn { margin-left:8px; }
-        .icon-btn svg { width:16px; height:16px; stroke:currentColor; }
-        .icon-btn:hover:not(:disabled) { transform:translateY(-1px); background:rgba(255,255,255,.06); }
-        .icon-btn:focus-visible { outline:2px solid rgba(125,211,252,.55); outline-offset:2px; }
-        .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
-        .solid-btn { background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#05101d; border:0; font-weight:700; }
-        .table-btn { min-height:34px; padding:0 12px; font-size:.86rem; }
-        .table-btn.alt { color:#bfe9ff; }
-        .table-btn.danger { color:#ffb5b5; }
-        .table-btn:disabled { opacity:.45; cursor:not-allowed; }
-        .hero { display:grid; grid-template-columns:1.4fr .9fr; gap:18px; margin-bottom:18px; }
-        .panel { padding:22px; }
-        .badge { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; background:rgba(80,227,194,.10); border:1px solid rgba(80,227,194,.18); color:#9cf4df; font-size:.8rem; text-transform:uppercase; letter-spacing:.08em; }
-        h1 { margin:14px 0 10px; font-size:2.3rem; letter-spacing:-.03em; }
-        p { margin:0; color:var(--muted); line-height:1.72; }
-        .stats { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:14px; margin-top:18px; }
-        .stat { padding:16px; }
-        .stat-label { color:var(--muted); font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; }
-        .stat-value { margin-top:8px; font-size:1.55rem; font-weight:700; }
-        .toolbar { display:grid; grid-template-columns:1fr auto auto; gap:12px; margin-bottom:14px; }
-        input { width:100%; min-height:46px; border-radius:14px; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.03); color:var(--text); padding:10px 14px; font:inherit; }
-        .page-status, .form-message { display:none; margin-top:14px; padding:12px 14px; border-radius:14px; border:1px solid transparent; }
-        .page-status.show, .form-message.show { display:block; }
-        .page-status.info, .form-message.info { background:rgba(80,227,194,.10); border-color:rgba(80,227,194,.18); color:#9cf4df; }
-        .page-status.success, .form-message.success { background:rgba(134,239,172,.10); border-color:rgba(134,239,172,.18); color:var(--good); }
-        .page-status.error, .form-message.error { background:rgba(248,113,113,.10); border-color:rgba(248,113,113,.18); color:#ffc0c0; }
-        .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:18px; background:rgba(255,255,255,.03); }
-        table { width:100%; min-width:860px; border-collapse:collapse; }
-        th, td { padding:14px 12px; border-bottom:1px solid rgba(255,255,255,.06); text-align:left; vertical-align:top; }
-        th { color:var(--muted); font-size:.76rem; text-transform:uppercase; letter-spacing:.08em; }
-        .cell-title { font-weight:600; }
-        .cell-sub { margin-top:6px; color:var(--muted); font-size:.85rem; }
-        .chip { display:inline-flex; align-items:center; padding:5px 10px; border-radius:999px; margin:0 8px 8px 0; font-size:.75rem; border:1px solid rgba(255,255,255,.08); }
-        .chip-admin { background:rgba(125,211,252,.12); color:#bfe9ff; }
-        .chip-live { background:rgba(134,239,172,.12); color:var(--good); }
-        .chip-off { background:rgba(248,113,113,.12); color:#ffb5b5; }
-        .chip-warn { background:rgba(242,182,90,.12); color:#ffd79d; }
-        .chip-muted { background:rgba(255,255,255,.04); color:#d8def2; }
-        .empty { text-align:center; color:var(--muted); padding:28px 14px; }
-        .overlay { position:fixed; inset:0; background:rgba(0,0,0,.55); backdrop-filter:blur(6px); opacity:0; pointer-events:none; transition:opacity .18s ease; }
-        .overlay.show { opacity:1; pointer-events:auto; }
-        .modal { position:fixed; left:50%; top:50%; transform:translate(-50%, -48%); width:min(760px, calc(100% - 30px)); max-height:calc(100vh - 40px); overflow:auto; padding:22px; opacity:0; pointer-events:none; transition:all .18s ease; }
-        .modal.show { opacity:1; pointer-events:auto; transform:translate(-50%, -50%); }
-        .modal-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:16px; }
-        .modal-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
-        .span-2 { grid-column:1 / -1; }
-        .inline-checks { display:flex; flex-wrap:wrap; gap:18px; align-items:center; padding-top:8px; }
-        .check { display:flex; gap:10px; align-items:center; color:var(--muted); }
-        .check input { width:18px; min-height:18px; }
-        .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:18px; }
-        @media (max-width: 980px) { .hero, .stats, .toolbar, .modal-grid { grid-template-columns:1fr; } .page { padding:14px; } .topbar { flex-direction:column; align-items:flex-start; } .top-actions { width:100%; flex-wrap:wrap; } }
-    </style>
+    <link rel="stylesheet" href="/css/mngusers.css" />
 </head>
-<body>
-    <div class="page" id="mngUsersApp" data-current-account-id="<%= currentAccount?.accountId || '' %>">
-        <header class="topbar">
-            <a class="brand" href="/"><span class="mark">O</span><span>OPTIONYZE</span></a>
-            <div class="top-actions">
-                <a class="link-btn" href="/dashboard">Dashboard</a>
-                <a class="link-btn" href="/strategyfogreeks">StrategyFOGreeks</a>
-                <%- include('partials/account-menu', { currentAccount }) %>
-            </div>
-        </header>
+<body class="app-page">
+    <div class="app-layout mngusers-layout" id="mngUsersApp" data-current-account-id="<%= currentAccount?.accountId || '' %>">
+        <%- include('partials/app-header', { currentAccount }) %>
 
-        <section class="hero">
-            <div class="panel">
-                <div class="badge">Admin Workspace</div>
+        <section class="mngusers-hero">
+            <div class="app-panel">
+                <div class="mngusers-badge">Admin Workspace</div>
                 <h1>Manage Users</h1>
-                <p>Control account access, admin rights, and password reset flows from one PostgreSQL-backed admin screen. The user setup is now intentionally minimal and focused on essential login details only.</p>
-                <div id="pageStatus" class="page-status"></div>
+                <p class="app-copy">Control account access, admin rights, and password reset flows from one PostgreSQL-backed admin screen. The user setup is now intentionally minimal and focused on essential login details only.</p>
+                <div id="pageStatus" class="mngusers-page-status"></div>
             </div>
-            <div class="panel">
-                <div class="stats">
-                    <div class="stat"><div class="stat-label">Total</div><div class="stat-value" id="statTotal">0</div></div>
-                    <div class="stat"><div class="stat-label">Active</div><div class="stat-value" id="statActive">0</div></div>
-                    <div class="stat"><div class="stat-label">Admins</div><div class="stat-value" id="statAdmins">0</div></div>
-                    <div class="stat"><div class="stat-label">Pwd Reset</div><div class="stat-value" id="statForced">0</div></div>
+            <div class="app-panel">
+                <div class="mngusers-stats">
+                    <div class="app-stat mngusers-stat"><div class="mngusers-stat-label">Total</div><div class="mngusers-stat-value" id="statTotal">0</div></div>
+                    <div class="app-stat mngusers-stat"><div class="mngusers-stat-label">Active</div><div class="mngusers-stat-value" id="statActive">0</div></div>
+                    <div class="app-stat mngusers-stat"><div class="mngusers-stat-label">Admins</div><div class="mngusers-stat-value" id="statAdmins">0</div></div>
+                    <div class="app-stat mngusers-stat"><div class="mngusers-stat-label">Pwd Reset</div><div class="mngusers-stat-value" id="statForced">0</div></div>
                 </div>
             </div>
         </section>
 
-        <section class="panel">
-            <div class="toolbar">
+        <section class="app-panel">
+            <div class="mngusers-toolbar">
                 <input id="searchInput" type="text" placeholder="Search by name, email, or mobile" />
-                <button id="btnRefresh" class="link-btn" type="button">Refresh</button>
-                <button id="btnAddUser" class="solid-btn" type="button">Add User</button>
+                <button id="btnRefresh" class="app-link-btn" type="button">Refresh</button>
+                <button id="btnAddUser" class="app-solid-btn" type="button">Add User</button>
             </div>
-            <p id="resultCount">0 shown</p>
-            <div class="table-wrap">
-                <table>
+            <p id="resultCount" class="app-copy">0 shown</p>
+            <div class="mngusers-table-wrap">
+                <table class="mngusers-table">
                     <thead>
                         <tr>
                             <th>Name</th>
@@ -129,44 +48,44 @@
                         </tr>
                     </thead>
                     <tbody id="userTableBody">
-                        <tr><td colspan="5" class="empty">Loading users...</td></tr>
+                        <tr><td colspan="5" class="mngusers-empty">Loading users...</td></tr>
                     </tbody>
                 </table>
             </div>
         </section>
     </div>
 
-    <div class="overlay" id="overlay"></div>
-    <section class="modal" id="userModal" aria-hidden="true">
-        <div class="modal-head">
+    <div class="mngusers-overlay" id="overlay"></div>
+    <section class="app-panel mngusers-modal" id="userModal" aria-hidden="true">
+        <div class="mngusers-modal-head">
             <div>
-                <h2 id="modalTitle" style="margin:0 0 8px;">Add User</h2>
-                <p id="modalHint">Create a new account with only the essential login details.</p>
+                <h2 id="modalTitle" class="mngusers-modal-title">Add User</h2>
+                <p id="modalHint" class="app-copy">Create a new account with only the essential login details.</p>
             </div>
-            <button id="btnCloseModal" class="link-btn" type="button">Close</button>
+            <button id="btnCloseModal" class="app-link-btn" type="button">Close</button>
         </div>
-        <div id="modalMessage" class="form-message"></div>
+        <div id="modalMessage" class="mngusers-form-message"></div>
         <form id="userForm">
-            <div class="modal-grid">
+            <div class="mngusers-modal-grid">
                 <div><label for="fullName">Full Name</label><input id="fullName" name="fullName" type="text" required /></div>
                 <div><label for="email">Email</label><input id="email" name="email" type="email" required /></div>
-                <div class="span-2"><label for="mobileNo">Mobile No</label><input id="mobileNo" name="mobileNo" type="tel" required /></div>
-                <div class="span-2"><label for="telegramChatId">Telegram Chat ID</label><input id="telegramChatId" name="telegramChatId" type="text" inputmode="numeric" required /></div>
-                <div class="span-2" id="passwordFields">
-                    <div class="modal-grid">
+                <div class="mngusers-span-2"><label for="mobileNo">Mobile No</label><input id="mobileNo" name="mobileNo" type="tel" required /></div>
+                <div class="mngusers-span-2"><label for="telegramChatId">Telegram Chat ID</label><input id="telegramChatId" name="telegramChatId" type="text" inputmode="numeric" required /></div>
+                <div class="mngusers-span-2" id="passwordFields">
+                    <div class="mngusers-modal-grid">
                         <div><label for="password">Password</label><input id="password" name="password" type="password" /></div>
                         <div><label for="confirmPassword">Confirm Password</label><input id="confirmPassword" name="confirmPassword" type="password" /></div>
                     </div>
                 </div>
-                <div class="span-2 inline-checks">
-                    <label class="check"><input id="isActive" type="checkbox" checked /> Active</label>
-                    <label class="check"><input id="isAdmin" type="checkbox" /> Admin</label>
-                    <label class="check"><input id="mustChangePassword" type="checkbox" /> Force password change</label>
+                <div class="mngusers-span-2 mngusers-inline-checks">
+                    <label class="mngusers-check"><input id="isActive" type="checkbox" checked /> Active</label>
+                    <label class="mngusers-check"><input id="isAdmin" type="checkbox" /> Admin</label>
+                    <label class="mngusers-check"><input id="mustChangePassword" type="checkbox" /> Force password change</label>
                 </div>
             </div>
-            <div class="modal-actions">
-                <button id="btnCancelModal" class="link-btn" type="button">Cancel</button>
-                <button class="solid-btn" type="submit">Save User</button>
+            <div class="mngusers-modal-actions">
+                <button id="btnCancelModal" class="app-link-btn" type="button">Cancel</button>
+                <button class="app-solid-btn" type="submit">Save User</button>
             </div>
         </form>
     </section>

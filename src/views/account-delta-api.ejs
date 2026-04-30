@@ -4,81 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title><%= pageTitle %></title>
+    <link rel="stylesheet" href="/css/app-shell.css" />
     <link rel="stylesheet" href="/css/account-menu.css" />
-    <style>
-        :root { color-scheme: dark; --panel:rgba(10,18,38,.88); --line:rgba(162,180,228,.18); --text:#f3f6ff; --muted:#a7b2d4; --danger:#ff9f9f; --info:#9cf4df; --good:#86efac; }
-        * { box-sizing:border-box; }
-        body { margin:0; min-height:100vh; font-family:"Segoe UI","Trebuchet MS",sans-serif; color:var(--text); background:linear-gradient(180deg,#040714 0%,#08101f 55%,#050816 100%); padding:24px; }
-        .shell { width:min(1180px, 100%); margin:0 auto; }
-        .header, .panel, .modal { background:var(--panel); border:1px solid var(--line); border-radius:28px; box-shadow:0 28px 80px rgba(0,0,0,.35); }
-        .header { padding:18px 22px; display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:20px; }
-        .brand { display:flex; align-items:center; gap:12px; color:var(--text); text-decoration:none; font-weight:700; letter-spacing:.18em; font-size:.95rem; }
-        .mark { width:40px; height:40px; border-radius:14px; display:grid; place-items:center; background:linear-gradient(135deg, rgba(80,227,194,.22), rgba(125,211,252,.22)); }
-        .actions { display:flex; gap:12px; align-items:center; }
-        .ghost { min-height:40px; padding:0 16px; border-radius:999px; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.03); color:var(--text); text-decoration:none; display:inline-flex; align-items:center; }
-        .panel { padding:28px; }
-        h1 { margin:0 0 10px; font-size:2rem; }
-        p { margin:0; color:var(--muted); line-height:1.75; }
-        .toolbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin:22px 0 16px; }
-        .toolbar-actions { display:flex; flex-wrap:wrap; gap:12px; }
-        .button { min-height:44px; padding:0 18px; border:0; border-radius:999px; background:linear-gradient(135deg,#50e3c2,#7dd3fc); color:#05101d; font-weight:700; cursor:pointer; }
-        .button.alt { background:rgba(255,255,255,.03); color:var(--text); border:1px solid rgba(255,255,255,.08); }
-        .status { margin-top:16px; padding:12px 14px; border-radius:14px; display:none; }
-        .status.show { display:block; }
-        .status.info { background:rgba(80,227,194,.12); border:1px solid rgba(80,227,194,.22); color:var(--info); }
-        .status.error { background:rgba(255,101,101,.12); border:1px solid rgba(255,101,101,.22); color:var(--danger); }
-        .status.success { background:rgba(134,239,172,.12); border:1px solid rgba(134,239,172,.22); color:var(--good); }
-        .table-wrap { overflow:auto; border:1px solid rgba(255,255,255,.08); border-radius:20px; background:rgba(255,255,255,.03); }
-        table { width:100%; min-width:760px; border-collapse:collapse; }
-        th, td { padding:16px 14px; border-bottom:1px solid rgba(255,255,255,.06); text-align:left; vertical-align:top; }
-        th { color:var(--muted); font-size:.76rem; text-transform:uppercase; letter-spacing:.08em; }
-        .empty { text-align:center; color:var(--muted); padding:36px 14px; }
-        .cell-title { font-weight:600; }
-        .cell-sub { margin-top:6px; color:var(--muted); font-size:.84rem; }
-        .actions-row { display:flex; flex-wrap:wrap; gap:10px; }
-        .row-btn { min-height:36px; padding:0 12px; border-radius:12px; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.03); color:var(--text); cursor:pointer; }
-        .row-btn.danger { color:#ffb5b5; }
-        .chip { display:inline-flex; align-items:center; padding:5px 10px; border-radius:999px; font-size:.74rem; border:1px solid rgba(255,255,255,.08); }
-        .chip.good { background:rgba(134,239,172,.12); color:var(--good); }
-        .chip.muted { background:rgba(255,255,255,.04); color:#d8def2; }
-        .overlay { position:fixed; inset:0; background:rgba(0,0,0,.55); backdrop-filter:blur(6px); opacity:0; pointer-events:none; transition:opacity .18s ease; }
-        .overlay.show { opacity:1; pointer-events:auto; }
-        .modal { position:fixed; left:50%; top:50%; transform:translate(-50%, -48%); width:min(680px, calc(100% - 30px)); max-height:calc(100vh - 40px); overflow:auto; padding:22px; opacity:0; pointer-events:none; transition:all .18s ease; }
-        .modal.show { opacity:1; pointer-events:auto; transform:translate(-50%, -50%); }
-        .modal-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:16px; }
-        .modal-grid { display:grid; grid-template-columns:1fr; gap:14px; }
-        label { display:block; margin:0 0 8px; color:#dce5ff; }
-        input { width:100%; min-height:48px; border-radius:14px; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.03); color:var(--text); padding:0 14px; }
-        .hint { color:var(--muted); font-size:.84rem; line-height:1.6; }
-        .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:18px; }
-        @media (max-width: 860px) { .header { flex-direction:column; align-items:flex-start; } }
-    </style>
+    <link rel="stylesheet" href="/css/account-delta-api.css" />
 </head>
-<body>
-    <div class="shell">
-        <header class="header">
-            <a class="brand" href="/"><span class="mark">O</span><span>OPTIONYZE</span></a>
-            <div class="actions">
-                <a class="ghost" href="/dashboard">Dashboard</a>
-                <%- include('partials/account-menu', { currentAccount }) %>
-            </div>
-        </header>
-        <section class="panel">
-            <h1>Delta Exchange API</h1>
-            <p>Manage multiple Delta API credentials here. Each credential set gets its own <strong>Reference Name</strong>, and later your strategy pages will bind to one of these saved references instead of storing raw keys inside each strategy.</p>
-            <div id="pageStatus" class="status"></div>
-            <div class="toolbar">
+<body class="app-page">
+    <div class="app-layout delta-layout">
+        <%- include('partials/app-header', { currentAccount }) %>
+        <section class="app-panel">
+            <h1 class="app-title">Delta Exchange API</h1>
+            <p class="app-copy">Manage multiple Delta API credentials here. Each credential set gets its own <strong>Reference Name</strong>, and later your strategy pages will bind to one of these saved references instead of storing raw keys inside each strategy.</p>
+            <div id="pageStatus" class="delta-status"></div>
+            <div class="delta-toolbar">
                 <div>
-                    <div class="cell-title">Saved Credential Sets</div>
-                    <div class="cell-sub">One account can keep multiple API key/secret pairs for future strategy binding.</div>
+                    <div class="delta-cell-title">Saved Credential Sets</div>
+                    <div class="delta-cell-sub">One account can keep multiple API key/secret pairs for future strategy binding.</div>
                 </div>
-                <div class="toolbar-actions">
-                    <button id="btnRefresh" class="button alt" type="button">Refresh</button>
-                    <button id="btnAddProfile" class="button" type="button">Add API</button>
+                <div class="delta-toolbar-actions">
+                    <button id="btnRefresh" class="delta-button alt" type="button">Refresh</button>
+                    <button id="btnAddProfile" class="delta-button" type="button">Add API</button>
                 </div>
             </div>
-            <div class="table-wrap">
-                <table>
+            <div class="delta-table-wrap">
+                <table class="delta-table">
                     <thead>
                         <tr>
                             <th>Reference Name</th>
@@ -89,25 +37,25 @@
                         </tr>
                     </thead>
                     <tbody id="profileTableBody">
-                        <tr><td colspan="5" class="empty">Loading API credentials...</td></tr>
+                        <tr><td colspan="5" class="delta-empty">Loading API credentials...</td></tr>
                     </tbody>
                 </table>
             </div>
         </section>
     </div>
 
-    <div class="overlay" id="overlay"></div>
-    <section class="modal" id="profileModal" aria-hidden="true">
-        <div class="modal-head">
+    <div class="delta-overlay" id="overlay"></div>
+    <section class="app-panel delta-modal" id="profileModal" aria-hidden="true">
+        <div class="delta-modal-head">
             <div>
-                <h2 id="modalTitle" style="margin:0 0 8px;">Add API</h2>
-                <p id="modalHint">Create a reusable Delta credential reference for future strategy binding.</p>
+                <h2 id="modalTitle" class="delta-modal-title">Add API</h2>
+                <p id="modalHint" class="app-copy">Create a reusable Delta credential reference for future strategy binding.</p>
             </div>
-            <button id="btnCloseModal" class="button alt" type="button">Close</button>
+            <button id="btnCloseModal" class="delta-button alt" type="button">Close</button>
         </div>
-        <div id="modalStatus" class="status"></div>
+        <div id="modalStatus" class="delta-status"></div>
         <form id="profileForm">
-            <div class="modal-grid">
+            <div class="delta-modal-grid">
                 <div>
                     <label for="referenceName">Reference Name</label>
                     <input id="referenceName" name="referenceName" type="text" required />
@@ -119,12 +67,12 @@
                 <div>
                     <label for="apiSecret">API Secret</label>
                     <input id="apiSecret" name="apiSecret" type="password" />
-                    <div class="hint" id="secretHint">API Secret is required for new credentials.</div>
+                    <div class="delta-hint" id="secretHint">API Secret is required for new credentials.</div>
                 </div>
             </div>
-            <div class="modal-actions">
-                <button id="btnCancelModal" class="button alt" type="button">Cancel</button>
-                <button class="button" type="submit">Save API</button>
+            <div class="delta-modal-actions">
+                <button id="btnCancelModal" class="delta-button alt" type="button">Cancel</button>
+                <button class="delta-button" type="submit">Save API</button>
             </div>
         </form>
     </section>
@@ -171,7 +119,7 @@
             }
 
             if (!gState.profiles.length) {
-                objTableBody.innerHTML = '<tr><td colspan="5" class="empty">No API credentials saved yet.</td></tr>';
+                objTableBody.innerHTML = '<tr><td colspan="5" class="delta-empty">No API credentials saved yet.</td></tr>';
                 return;
             }
 
@@ -180,17 +128,17 @@
                 return `
                     <tr>
                         <td>
-                            <div class="cell-title">${escapeHtml(objProfile.referenceName)}</div>
-                            <div class="cell-sub">Created ${escapeHtml(formatDate(objProfile.createdAt))}</div>
+                            <div class="delta-cell-title">${escapeHtml(objProfile.referenceName)}</div>
+                            <div class="delta-cell-sub">Created ${escapeHtml(formatDate(objProfile.createdAt))}</div>
                         </td>
                         <td>${escapeHtml(maskApiKey(objProfile.apiKey))}</td>
-                        <td>${objProfile.hasSecret ? '<span class="chip good">Saved</span>' : '<span class="chip muted">Missing</span>'}</td>
+                        <td>${objProfile.hasSecret ? '<span class="delta-chip good">Saved</span>' : '<span class="delta-chip muted">Missing</span>'}</td>
                         <td>${escapeHtml(vUpdatedAt)}</td>
                         <td>
-                            <div class="actions-row">
-                                <button class="row-btn" type="button" data-action="edit" data-id="${objProfile.profileId}">Edit</button>
-                                <button class="row-btn" type="button" data-action="test" data-id="${objProfile.profileId}">Test Login</button>
-                                <button class="row-btn danger" type="button" data-action="delete" data-id="${objProfile.profileId}">Delete</button>
+                            <div class="delta-actions-row">
+                                <button class="delta-row-btn" type="button" data-action="edit" data-id="${objProfile.profileId}">Edit</button>
+                                <button class="delta-row-btn" type="button" data-action="test" data-id="${objProfile.profileId}">Test Login</button>
+                                <button class="delta-row-btn danger" type="button" data-action="delete" data-id="${objProfile.profileId}">Delete</button>
                             </div>
                         </td>
                     </tr>
@@ -368,7 +316,7 @@
                 return;
             }
             objStatus.textContent = pMessage;
-            objStatus.className = `status show ${pTone}`;
+            objStatus.className = `delta-status show ${pTone}`;
         }
 
         function setModalStatus(pMessage, pTone) {
@@ -377,7 +325,7 @@
                 return;
             }
             objStatus.textContent = pMessage;
-            objStatus.className = `status show ${pTone}`;
+            objStatus.className = `delta-status show ${pTone}`;
         }
 
         function hideModalStatus() {
@@ -386,7 +334,7 @@
                 return;
             }
             objStatus.textContent = "";
-            objStatus.className = "status";
+            objStatus.className = "delta-status";
         }
 
         function maskApiKey(pApiKey) {

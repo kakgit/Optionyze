@@ -81,7 +81,7 @@
 
     function renderRows(target, rows, mapper, emptyText, colspan) {
         if (!rows || rows.length === 0) {
-            target.innerHTML = `<tr><td colspan="${colspan}" class="muted">${emptyText}</td></tr>`;
+            target.innerHTML = `<tr><td colspan="${colspan}" class="paper-muted">${emptyText}</td></tr>`;
             return;
         }
         target.innerHTML = rows.map(mapper).join("");
@@ -90,21 +90,21 @@
     function setStateText(status) {
         if (!status) {
             ids.engineStateText.textContent = "Idle";
-            ids.engineStateText.className = "muted";
+            ids.engineStateText.className = "paper-muted";
             return;
         }
         if (status.killSwitch && status.killSwitch.enabled) {
             ids.engineStateText.textContent = "Kill Switch Active";
-            ids.engineStateText.className = "bad";
+            ids.engineStateText.className = "paper-bad";
             return;
         }
         if (status.running) {
             ids.engineStateText.textContent = "Running";
-            ids.engineStateText.className = "good";
+            ids.engineStateText.className = "paper-good";
             return;
         }
         ids.engineStateText.textContent = status.lastError ? `Stopped: ${status.lastError}` : "Stopped";
-        ids.engineStateText.className = status.lastError ? "warn" : "muted";
+        ids.engineStateText.className = status.lastError ? "paper-warn" : "paper-muted";
     }
 
     function renderStatus(payload) {
@@ -131,9 +131,9 @@
 
         const events = status.events || [];
         ids.eventsLog.innerHTML = events.length === 0
-            ? '<div class="logitem muted">No events yet.</div>'
+            ? '<div class="paper-muted">No events yet.</div>'
             : events.map(function (evt) {
-                return `<div class="logitem"><div><strong>${evt.type || "EVENT"}</strong> <span class="muted">${evt.ts || ""}</span></div><div>${evt.message || ""}</div></div>`;
+                return `<div><div><strong>${evt.type || "EVENT"}</strong> <span class="paper-muted">${evt.ts || ""}</span></div><div>${evt.message || ""}</div></div>`;
             }).join("");
     }
 

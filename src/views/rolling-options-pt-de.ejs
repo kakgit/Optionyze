@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= pageTitle %></title>
+    <link rel="stylesheet" href="/css/app-shell.css" />
+    <link rel="stylesheet" href="/css/account-menu.css" />
+    <link rel="stylesheet" href="/css/rolling-options-pt-de.css" />
+</head>
+<body class="app-page">
+    <div class="app-layout rolling-demo-layout">
+        <%- include('partials/app-header', { currentAccount }) %>
+
+        <section class="rolling-demo-hero">
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-eyebrow">Paper Trading</div>
+                <h1 class="rolling-demo-title">Rolling Options - Demo</h1>
+                <p class="app-copy">This is the server-side paper-trading UI shell for <strong>RollingOptions-PT-DE</strong>. It mirrors the working layout of the older live-trading screen, but this version is intentionally prepared for public-data paper trading and future backend wiring inside Optionyze.</p>
+            </div>
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-summary">
+                    <div class="app-stat rolling-demo-stat">
+                        <div class="rolling-demo-stat-label">Mode</div>
+                        <div class="rolling-demo-stat-value">Paper</div>
+                    </div>
+                    <div class="app-stat rolling-demo-stat">
+                        <div class="rolling-demo-stat-label">Product</div>
+                        <div class="rolling-demo-stat-value">Options</div>
+                    </div>
+                    <div class="app-stat rolling-demo-stat">
+                        <div class="rolling-demo-stat-label">Engine Status</div>
+                        <div class="rolling-demo-stat-value" id="rollingDemoEngineStatus">Idle</div>
+                    </div>
+                    <div class="app-stat rolling-demo-stat">
+                        <div class="rolling-demo-stat-label">Open Positions</div>
+                        <div class="rolling-demo-stat-value" id="rollingDemoOpenCount">0</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="rolling-demo-section">
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <div class="rolling-demo-inline">
+                        <span class="rolling-demo-manual-title">Manual Trader</span>
+                    </div>
+                    <div class="rolling-demo-card-tools">
+                        <button class="rolling-demo-btn warn" type="button" id="btnRollingDemoAutoTrader">Auto Trader - OFF</button>
+                    </div>
+                </div>
+
+                <div class="rolling-demo-grid futures">
+                    <div class="rolling-demo-field">
+                        <label for="ddlCoveredCallSymbol">Symbols List</label>
+                        <select id="ddlCoveredCallSymbol">
+                            <option value="BTC" selected>BTCUSD</option>
+                            <option value="ETH">ETHUSD</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtCoveredCallLotSize">Lot Size</label>
+                        <input type="text" id="txtCoveredCallLotSize" value="0.001" readonly />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtManualFutQty">Qty</label>
+                        <input type="number" min="1" step="1" id="txtManualFutQty" value="1" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="ddlManualFutOrderType">Order Type</label>
+                        <select id="ddlManualFutOrderType">
+                            <option value="limit_order">Limit Order</option>
+                            <option value="market_order" selected>Market Order</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn sell" type="button" id="btnRollingDemoSellFuture">SELL FUT</button>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn buy" type="button" id="btnRollingDemoBuyFuture">BUY FUT</button>
+                    </div>
+                </div>
+
+                <div class="rolling-demo-grid options rolling-demo-section">
+                    <div class="rolling-demo-field">
+                        <label for="ddlActionCoveredCall1">Action</label>
+                        <select id="ddlActionCoveredCall1">
+                            <option value="none">None</option>
+                            <option value="buy">Buy</option>
+                            <option value="sell" selected>Sell</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="ddlLegSideCoveredCall1">Legs</label>
+                        <select id="ddlLegSideCoveredCall1">
+                            <option value="both">Both</option>
+                            <option value="ce" selected>CE</option>
+                            <option value="pe">PE</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="ddlExpiryModeCoveredCall1">Expiry Type</label>
+                        <select id="ddlExpiryModeCoveredCall1">
+                            <option value="1" selected>DAILY T+1</option>
+                            <option value="2">DAILY T+2</option>
+                            <option value="4">WEEKLY</option>
+                            <option value="5">BI-WEEKLY</option>
+                            <option value="6">MONTHLY</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtExpiryCoveredCall1">Select Expiry</label>
+                        <input type="date" id="txtExpiryCoveredCall1" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtManualOptQtyCoveredCall1">Qty</label>
+                        <input type="number" min="0" value="1" id="txtManualOptQtyCoveredCall1" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtNewDeltaCoveredCall1">New D</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtNewDeltaCoveredCall1" value="0.53" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtReDeltaCoveredCall1">Re D</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtReDeltaCoveredCall1" value="0.53" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtDeltaTPCoveredCall1">TP D</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtDeltaTPCoveredCall1" value="0.15" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtDeltaSLCoveredCall1">SL D</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtDeltaSLCoveredCall1" value="0.85" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="chkReLegCoveredCall1">Re Enter</label>
+                        <div class="rolling-demo-check-wrap">
+                            <label class="rolling-demo-check" for="chkReLegCoveredCall1">
+                                <input type="checkbox" id="chkReLegCoveredCall1" />
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="rolling-demo-subgrid">
+                    <div class="rolling-demo-field">
+                        <label for="txtAutoOptQtyPctCoveredCall">Auto Option Qty %</label>
+                        <input type="number" min="1" step="1" id="txtAutoOptQtyPctCoveredCall" value="100" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="chkAddOneLotFutIfNegFut">Add 1 Lot Future</label>
+                        <div class="rolling-demo-check-wrap">
+                            <label class="rolling-demo-check" for="chkAddOneLotFutIfNegFut">
+                                <input type="checkbox" id="chkAddOneLotFutIfNegFut" />
+                            </label>
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn primary" type="button" id="btnRollingDemoExecStrategy">Exec Strategy</button>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn buy" type="button" id="btnRollingDemoOpenOption">OPEN OPTION</button>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn warn" type="button" id="btnRollingDemoExitOption">EXIT OPTION</button>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn warn" type="button" id="btnRollingDemoExitFuture">EXIT FUT</button>
+                    </div>
+                </div>
+
+                <div class="rolling-demo-grid metrics rolling-demo-section">
+                    <div class="rolling-demo-metric">
+                        <div class="rolling-demo-metric-label">1 x / Lot</div>
+                        <div class="rolling-demo-metric-value" id="rollingDemoOneLotValue">-</div>
+                    </div>
+                    <div class="rolling-demo-metric">
+                        <div class="rolling-demo-metric-label">Total Margin</div>
+                        <div class="rolling-demo-metric-value" id="rollingDemoTotalMarginValue">-</div>
+                    </div>
+                    <div class="rolling-demo-metric">
+                        <div class="rolling-demo-metric-label">Blocked Margin</div>
+                        <div class="rolling-demo-metric-value">-</div>
+                    </div>
+                    <div class="rolling-demo-metric">
+                        <div class="rolling-demo-metric-label">Available Balance</div>
+                        <div class="rolling-demo-metric-value">-</div>
+                    </div>
+                    <div class="rolling-demo-metric">
+                        <div class="rolling-demo-metric-label">Health</div>
+                        <div class="rolling-demo-metric-value">-</div>
+                    </div>
+                    <div class="rolling-demo-metric">
+                        <div class="rolling-demo-metric-label">Options PnL</div>
+                        <input
+                            class="rolling-demo-metric-input"
+                            type="number"
+                            min="-999999999"
+                            max="999999999"
+                            step="0.001"
+                            id="txtRollingDemoOptionsPnl"
+                            value="0.000"
+                        />
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="rolling-demo-section">
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <h2>Open Positions</h2>
+                    <div class="rolling-demo-card-tools">
+                        <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDemoClearOpenPositions" title="Clear all open paper positions" aria-label="Clear all open paper positions">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M3 6h18" />
+                                <path d="M8 6V4h8v2" />
+                                <path d="M19 6l-1 14H6L5 6" />
+                                <path d="M10 11v6" />
+                                <path d="M14 11v6" />
+                            </svg>
+                        </button>
+                        <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDemoRefreshOpenPositions" title="Refresh open positions" aria-label="Refresh open positions">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                <path d="M21 3v6h-6" />
+                            </svg>
+                        </button>
+                        <button class="rolling-demo-icon-btn sell" type="button" id="btnRollingDemoKillSwitch" title="Kill switch to close all open paper legs" aria-label="Kill switch to close all open paper legs">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M12 2v10" />
+                                <path d="M6.2 6.2a8 8 0 1 0 11.3 0" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="rolling-demo-table-wrap">
+                    <table class="rolling-demo-table rolling-demo-table-open">
+                        <thead>
+                            <tr>
+                                <th>Delta</th>
+                                <th>C Delta</th>
+                                <th>Symbol</th>
+                                <th>Tr Type</th>
+                                <th>Lot Sz</th>
+                                <th>Qty</th>
+                                <th>Buy Price</th>
+                                <th>Sell Price</th>
+                                <th>LTP</th>
+                                <th>Charges</th>
+                                <th>P &amp; L</th>
+                                <th>Start DT</th>
+                                <th>End DT</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rollingDemoOpenPositionsBody">
+                            <tr>
+                                <td colspan="14" class="rolling-demo-empty">No open paper positions yet. Server-side wiring will populate this table later.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section class="rolling-demo-section">
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <h2>Closed Positions</h2>
+                    <div class="rolling-demo-card-tools">
+                        <div class="rolling-demo-filters">
+                            <div class="rolling-demo-field">
+                                <input type="datetime-local" id="txtClsFromDate" title="Filter closed positions from this date and time" aria-label="Filter closed positions from this date and time" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <input type="datetime-local" id="txtClsToDate" title="Filter closed positions up to this date and time" aria-label="Filter closed positions up to this date and time" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <div class="rolling-demo-check-wrap">
+                                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDemoClearClosedFilters" title="Clear closed-position date filters" aria-label="Clear closed-position date filters">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M18 6 6 18" />
+                                            <path d="m6 6 12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="rolling-demo-field">
+                                <div class="rolling-demo-check-wrap">
+                                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDemoClearClosedPositions" title="Delete all closed paper positions" aria-label="Delete all closed paper positions">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M3 6h18" />
+                                            <path d="M8 6V4h8v2" />
+                                            <path d="M19 6l-1 14H6L5 6" />
+                                            <path d="M10 11v6" />
+                                            <path d="M14 11v6" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="rolling-demo-table-wrap">
+                    <table class="rolling-demo-table rolling-demo-table-closed">
+                        <thead>
+                            <tr>
+                                <th>Start DT</th>
+                                <th>End DT</th>
+                                <th>Symbol</th>
+                                <th>Tr Type</th>
+                                <th>Lot Sz</th>
+                                <th>Qty</th>
+                                <th>Buy Price</th>
+                                <th>Sell Price</th>
+                                <th>Charges</th>
+                                <th>P &amp; L</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rollingDemoClosedPositionsBody">
+                            <tr>
+                                <td colspan="10" class="rolling-demo-empty">No closed paper positions yet. This section is ready for server-side history data.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section class="rolling-demo-section">
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <div class="rolling-demo-inline">
+                        <h2>Delta Renko-Style Feed</h2>
+                        <label class="rolling-demo-switch">
+                            <input type="checkbox" checked />
+                            <span>Delta Renko Feed</span>
+                        </label>
+                        <span class="rolling-demo-badge secondary">OFF</span>
+                        <button class="rolling-demo-signal idle" type="button" id="rollingDemoLastSignal" title="Click to toggle manual Renko signal">
+                            -
+                        </button>
+                    </div>
+                    <div class="rolling-demo-card-tools">
+                        <div class="rolling-demo-field">
+                            <label for="txtRenkoFeedPts">Point</label>
+                            <input type="number" id="txtRenkoFeedPts" value="10" min="1" />
+                        </div>
+                        <div class="rolling-demo-field">
+                            <label for="ddlRenkoFeedPriceSrc">Source</label>
+                            <select id="ddlRenkoFeedPriceSrc">
+                                <option value="mark_price">Mark Price</option>
+                                <option value="spot_price" selected>Spot Price</option>
+                                <option value="best_bid">Best Bid</option>
+                                <option value="best_ask">Best Ask</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <p class="app-copy rolling-demo-feed-meta">Symbol: BTCUSD | Signal box and feed log are present for the future server-side paper implementation.</p>
+                <div class="rolling-demo-feed">
+                    <div class="rolling-demo-feed-item">Feed is idle. Turn on "Delta Renko Feed" in this section to begin receiving renko-style public market data.</div>
+                    <div class="rolling-demo-feed-item">No live wiring has been added yet. This area is UI-only for the server-side build phase.</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="rolling-demo-section">
+            <div class="rolling-demo-log-grid">
+                <div class="app-panel rolling-demo-card">
+                    <div class="rolling-demo-card-head">
+                        <h2>Telegram Alerts</h2>
+                    </div>
+                    <p class="app-copy">Choose which server events should also be sent to your Telegram chat. These preferences are saved per user for this strategy.</p>
+                    <div class="rolling-demo-notice">
+                        <% if (currentAccount?.telegramChatId) { %>
+                            Telegram Chat ID configured: <strong><%= currentAccount.telegramChatId %></strong>
+                        <% } else { %>
+                            Telegram Chat ID is not set on your profile yet. Add it in <a href="/account/profile">My Profile</a> to receive alerts.
+                        <% } %>
+                    </div>
+                    <div class="rolling-demo-check-panel">
+                        <label class="rolling-demo-check rolling-demo-check-wide" for="chkRollingDemoTelegramAlertsEnabled">
+                            <input type="checkbox" id="chkRollingDemoTelegramAlertsEnabled" />
+                            <span>Enable Telegram alerts for Rolling Options - Demo</span>
+                        </label>
+                    </div>
+                    <div class="rolling-demo-event-prefs">
+                        <% for (const eventType of rollingTelegramEventTypes || []) { %>
+                            <label class="rolling-demo-check rolling-demo-check-wide" for="pref-<%= eventType %>">
+                                <input type="checkbox" class="rolling-demo-telegram-event" id="pref-<%= eventType %>" value="<%= eventType %>" />
+                                <span><%= eventType.replaceAll('_', ' ') %></span>
+                            </label>
+                        <% } %>
+                    </div>
+                </div>
+
+                <div class="app-panel rolling-demo-card">
+                    <div class="rolling-demo-card-head">
+                        <h2>Activity Log</h2>
+                        <div class="rolling-demo-card-tools">
+                            <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDemoClearEvents" title="Delete all activity log messages for this user" aria-label="Delete all activity log messages for this user">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M3 6h18" />
+                                    <path d="M8 6V4h8v2" />
+                                    <path d="M19 6l-1 14H6L5 6" />
+                                    <path d="M10 11v6" />
+                                    <path d="M14 11v6" />
+                                </svg>
+                            </button>
+                            <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDemoRefreshEvents" title="Refresh activity log" aria-label="Refresh activity log">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                    <path d="M21 3v6h-6" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <p class="app-copy">Recent server-side actions are shown here. The app keeps only the latest 500 messages per user for this strategy and automatically prunes messages older than 10 days.</p>
+                    <div class="rolling-demo-event-log" id="rollingDemoEventLog">
+                        <div class="rolling-demo-event-empty">No server activity has been logged yet.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+    <script src="/js/rolling-options-pt-de.js"></script>
+</body>
+</html>
