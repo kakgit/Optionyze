@@ -13,6 +13,66 @@ function clampNumber(pValue: number, pMin: number, pMax: number): number {
     return Math.min(Math.max(pValue, pMin), pMax);
 }
 
+function formatDateInputValue(pDateValue: Date): string {
+    if (!(pDateValue instanceof Date) || Number.isNaN(pDateValue.getTime())) {
+        return "";
+    }
+
+    const vYear = String(pDateValue.getFullYear());
+    const vMonth = String(pDateValue.getMonth() + 1).padStart(2, "0");
+    const vDay = String(pDateValue.getDate()).padStart(2, "0");
+    return `${vYear}-${vMonth}-${vDay}`;
+}
+
+function getLastFridayOfMonth(pYear: number, pMonthIndex: number): Date {
+    const objDate = new Date(pYear, pMonthIndex + 1, 0);
+    while (objDate.getDay() !== 5) {
+        objDate.setDate(objDate.getDate() - 1);
+    }
+    return objDate;
+}
+
+export function resolveExpiryDateByMode(
+    pExpiryMode: string,
+    pReferenceDate = new Date()
+): string {
+    const vMode = String(pExpiryMode || "").trim();
+    const objCurrentDate = new Date(pReferenceDate);
+    const vCurrentDayOfWeek = objCurrentDate.getDay();
+
+    if (vMode === "1") {
+        objCurrentDate.setDate(objCurrentDate.getDate() + 1);
+        return formatDateInputValue(objCurrentDate);
+    }
+
+    if (vMode === "2") {
+        objCurrentDate.setDate(objCurrentDate.getDate() + 2);
+        return formatDateInputValue(objCurrentDate);
+    }
+
+    if (vMode === "4") {
+        const vDaysToThisFriday = (5 - vCurrentDayOfWeek + 7) % 7;
+        const vDaysToWeeklyFriday = vCurrentDayOfWeek >= 2 ? (vDaysToThisFriday + 7) : vDaysToThisFriday;
+        objCurrentDate.setDate(objCurrentDate.getDate() + vDaysToWeeklyFriday);
+        return formatDateInputValue(objCurrentDate);
+    }
+
+    if (vMode === "5") {
+        const vDaysToThisFriday = (5 - vCurrentDayOfWeek + 7) % 7;
+        const vDaysToBiWeeklyFriday = vCurrentDayOfWeek >= 2 ? (vDaysToThisFriday + 14) : (vDaysToThisFriday + 7);
+        objCurrentDate.setDate(objCurrentDate.getDate() + vDaysToBiWeeklyFriday);
+        return formatDateInputValue(objCurrentDate);
+    }
+
+    if (vMode === "6") {
+        const objLastFridayOfMonth = getLastFridayOfMonth(objCurrentDate.getFullYear(), objCurrentDate.getMonth());
+        const objLastFridayOfNextMonth = getLastFridayOfMonth(objCurrentDate.getFullYear(), objCurrentDate.getMonth() + 1);
+        return formatDateInputValue(objCurrentDate.getDate() > 15 ? objLastFridayOfNextMonth : objLastFridayOfMonth);
+    }
+
+    return formatDateInputValue(objCurrentDate);
+}
+
 function getStandardBricks(
     pMark: number,
     pStep: number,
@@ -82,7 +142,11 @@ export function updateRenkoState(
     const objTransitions: Array<"R2G" | "G2R"> = [];
     const vPrice = pConfig.renkoPriceSource === "spot_price"
         ? pSnapshot.spotPrice
-        : pSnapshot.futuresPrice;
+        : (pConfig.renkoPriceSource === "best_bid"
+            ? pSnapshot.bestBidPrice
+            : (pConfig.renkoPriceSource === "best_ask"
+                ? pSnapshot.bestAskPrice
+                : pSnapshot.futuresPrice));
     const vStep = Math.max(1, Number(pConfig.renkoStepPoints || 10));
 
     if (!Number.isFinite(vPrice) || vPrice <= 0) {
@@ -232,6 +296,9 @@ export function buildConfigFromUiState(pUiState: Record<string, unknown>): Rolli
         ? vPriceSourceRaw
         : "spot_price";
 
+    const vExpiryMode = String(pUiState.expiryMode1 || "1") as "1" | "2" | "4" | "5" | "6";
+    const vEffectiveExpiryDate = resolveExpiryDateByMode(vExpiryMode);
+
     return {
         symbol: vSymbol,
         contractName: vSymbol === "ETH" ? "ETHUSD" : "BTCUSD",
@@ -240,10 +307,11 @@ export function buildConfigFromUiState(pUiState: Record<string, unknown>): Rolli
         futureOrderType: String(pUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         action: vAction,
         legSide: vLegSide,
-        expiryMode: String(pUiState.expiryMode1 || "1") as "1" | "2" | "4" | "5" | "6",
-        expiryDate: String(pUiState.expiryDate1 || ""),
+        expiryMode: vExpiryMode,
+        expiryDate: vEffectiveExpiryDate,
         optionQty: Math.max(1, Math.floor(Number(pUiState.manualOptQty1 || 1))),
-        autoOptionQtyPct: Math.max(1, Math.round(Number(pUiState.autoOptQtyPct || 100))),
+        redOptionQtyPct: Math.max(1, Math.round(Number(pUiState.redOptQtyPct ?? pUiState.autoOptQtyPct ?? 100))),
+        greenOptionQtyPct: Math.max(1, Math.round(Number(pUiState.greenOptQtyPct || 100))),
         newDelta: Number(pUiState.newDelta1 || 0.53),
         reDelta: Number(pUiState.reDelta1 || 0.53),
         deltaTakeProfit: Number(pUiState.deltaTp1 || 0.15),

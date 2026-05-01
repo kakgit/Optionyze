@@ -9,7 +9,8 @@ export interface RollingOptionsPtDeConfig {
     expiryMode: "1" | "2" | "4" | "5" | "6";
     expiryDate: string;
     optionQty: number;
-    autoOptionQtyPct: number;
+    redOptionQtyPct: number;
+    greenOptionQtyPct: number;
     newDelta: number;
     reDelta: number;
     deltaTakeProfit: number;
@@ -33,6 +34,8 @@ export interface RollingOptionsPtDeMarketSnapshot {
     contractName: string;
     spotPrice: number;
     futuresPrice: number;
+    bestBidPrice: number;
+    bestAskPrice: number;
     priceSource: "public" | "simulated";
     ts: string;
 }

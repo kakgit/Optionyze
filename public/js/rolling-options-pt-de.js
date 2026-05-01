@@ -14,7 +14,8 @@
         deltaTp1: document.getElementById("txtDeltaTPCoveredCall1"),
         deltaSl1: document.getElementById("txtDeltaSLCoveredCall1"),
         reEnter1: document.getElementById("chkReLegCoveredCall1"),
-        autoOptQtyPct: document.getElementById("txtAutoOptQtyPctCoveredCall"),
+        redOptQtyPct: document.getElementById("txtRedOptQtyPctCoveredCall"),
+        greenOptQtyPct: document.getElementById("txtGreenOptQtyPctCoveredCall"),
         addOneLotFuture: document.getElementById("chkAddOneLotFutIfNegFut"),
         renkoFeedEnabled: document.querySelector(".rolling-demo-switch input"),
         renkoFeedPts: document.getElementById("txtRenkoFeedPts"),
@@ -39,7 +40,6 @@
         execStrategyButton: document.getElementById("btnRollingDemoExecStrategy"),
         openOptionButton: document.getElementById("btnRollingDemoOpenOption"),
         exitOptionButton: document.getElementById("btnRollingDemoExitOption"),
-        exitFutureButton: document.getElementById("btnRollingDemoExitFuture"),
         clearOpenPositionsButton: document.getElementById("btnRollingDemoClearOpenPositions"),
         killSwitchButton: document.getElementById("btnRollingDemoKillSwitch"),
         clearClosedPositionsButton: document.getElementById("btnRollingDemoClearClosedPositions"),
@@ -60,6 +60,7 @@
     let gPreviousOpenPositionLtps = new Map();
     let gLatestRuntimeState = null;
     let gLatestOpenPositions = [];
+    let gHasLoadedProfile = false;
 
     function getSelectedConfig() {
         const selectedSymbol = String(ids.symbol?.value || "BTC").trim().toUpperCase();
@@ -127,16 +128,12 @@
         }
 
         if (ids.renkoFeedMeta) {
-            ids.renkoFeedMeta.textContent = `Symbol: ${selectedConfig.contractName} | Signal box and feed log are present for the future server-side paper implementation.`;
+            ids.renkoFeedMeta.textContent = `Symbol: ${selectedConfig.contractName} | Renko state is driven from the server cycle using the selected price source and point size.`;
         }
     }
 
     function applyExpiryModeDefaults() {
         if (!ids.expiryMode1 || !ids.expiryDate1) {
-            return;
-        }
-
-        if (gIsApplyingState && String(ids.expiryDate1.value || "").trim()) {
             return;
         }
 
@@ -309,7 +306,8 @@
             deltaTp1: Number(ids.deltaTp1?.value || 0.15),
             deltaSl1: Number(ids.deltaSl1?.value || 0.85),
             reEnter1: Boolean(ids.reEnter1?.checked),
-            autoOptQtyPct: Number(ids.autoOptQtyPct?.value || 100),
+            redOptQtyPct: Number(ids.redOptQtyPct?.value || 100),
+            greenOptQtyPct: Number(ids.greenOptQtyPct?.value || 100),
             addOneLotFuture: Boolean(ids.addOneLotFuture?.checked),
             renkoFeedEnabled: Boolean(ids.renkoFeedEnabled?.checked),
             renkoFeedPts: Number(ids.renkoFeedPts?.value || 10),
@@ -355,7 +353,8 @@
         setFieldValue("deltaTp1", uiState.deltaTp1);
         setFieldValue("deltaSl1", uiState.deltaSl1);
         setFieldValue("reEnter1", uiState.reEnter1);
-        setFieldValue("autoOptQtyPct", uiState.autoOptQtyPct);
+        setFieldValue("redOptQtyPct", uiState.redOptQtyPct);
+        setFieldValue("greenOptQtyPct", uiState.greenOptQtyPct);
         setFieldValue("addOneLotFuture", uiState.addOneLotFuture);
         setFieldValue("renkoFeedEnabled", uiState.renkoFeedEnabled);
         setFieldValue("renkoFeedPts", uiState.renkoFeedPts);
@@ -416,7 +415,7 @@
         if (!Array.isArray(rows) || rows.length === 0) {
             gLatestOpenPositions = [];
             gPreviousOpenPositionLtps = new Map();
-            ids.openPositionsBody.innerHTML = "<tr><td colspan=\"14\" class=\"rolling-demo-empty\">No open paper positions found for this user.</td></tr>";
+            ids.openPositionsBody.innerHTML = "<tr><td colspan=\"15\" class=\"rolling-demo-empty\">No open paper positions found for this user.</td></tr>";
             updateTotalMarginMetric([]);
             return;
         }
@@ -452,6 +451,23 @@
                     <td>${escapeHtml(formatDisplayDateTime(row.openedAt))}</td>
                     <td>${escapeHtml(formatDisplayDateTime(row.closedAt))}</td>
                     <td>${escapeHtml(row.status || "-")}</td>
+                    <td>
+                        <button class="rolling-demo-icon-btn primary rolling-demo-close-open-position" type="button" data-position-id="${escapeHtml(positionId)}" title="Close this open position" aria-label="Close this open position">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="m6 6 12 12" />
+                                <path d="M18 6 6 18" />
+                            </svg>
+                        </button>
+                        <button class="rolling-demo-icon-btn warn rolling-demo-delete-open-position" type="button" data-position-id="${escapeHtml(positionId)}" title="Delete this open position permanently" aria-label="Delete this open position permanently">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M3 6h18" />
+                                <path d="M8 6V4h8v2" />
+                                <path d="M19 6l-1 14H6L5 6" />
+                                <path d="M10 11v6" />
+                                <path d="M14 11v6" />
+                            </svg>
+                        </button>
+                    </td>
                 </tr>
             `;
         }).join("");
@@ -462,7 +478,7 @@
                 <td colspan="9">Total</td>
                 <td class="rolling-demo-total-value">${escapeHtml(formatNumericValue(totalCharges, 3))}</td>
                 <td class="rolling-demo-total-value">${escapeHtml(formatNumericValue(totalPnl, 3))}</td>
-                <td colspan="3">-</td>
+                <td colspan="4">-</td>
             </tr>
         `;
         gPreviousOpenPositionLtps = nextLtps;
@@ -661,6 +677,28 @@
         await loadServerPanels();
     }
 
+    async function deleteOpenPosition(positionId) {
+        const normalizedPositionId = String(positionId || "").trim();
+        if (!normalizedPositionId) {
+            return;
+        }
+
+        await runServerAction("/api/rollingoptions-pt-de/open-positions/delete", {
+            positionId: normalizedPositionId
+        });
+    }
+
+    async function closeOpenPosition(positionId) {
+        const normalizedPositionId = String(positionId || "").trim();
+        if (!normalizedPositionId) {
+            return;
+        }
+
+        await runServerAction("/api/rollingoptions-pt-de/open-positions/close", {
+            positionId: normalizedPositionId
+        });
+    }
+
     async function toggleManualRenkoSignal() {
         if (!ids.renkoFeedEnabled?.checked) {
             return;
@@ -681,7 +719,9 @@
 
     ids.expiryMode1?.addEventListener("change", function () {
         applyExpiryModeDefaults();
-        queueProfileSave();
+        if (gHasLoadedProfile) {
+            queueProfileSave();
+        }
     });
 
     ids.renkoFeedEnabled?.addEventListener("change", function () {
@@ -695,6 +735,30 @@
 
     ids.refreshOpenPositionsButton?.addEventListener("click", function () {
         void Promise.all([loadStatus(), loadOpenPositions()]);
+    });
+
+    ids.openPositionsBody?.addEventListener("click", function (objEvent) {
+        const objTarget = objEvent.target instanceof Element ? objEvent.target : null;
+        const objCloseButton = objTarget?.closest(".rolling-demo-close-open-position");
+        if (objCloseButton instanceof HTMLButtonElement) {
+            const vClosePositionId = String(objCloseButton.dataset.positionId || "").trim();
+            if (vClosePositionId) {
+                void closeOpenPosition(vClosePositionId);
+            }
+            return;
+        }
+
+        const objButton = objTarget?.closest(".rolling-demo-delete-open-position");
+        if (!(objButton instanceof HTMLButtonElement)) {
+            return;
+        }
+
+        const vPositionId = String(objButton.dataset.positionId || "").trim();
+        if (!vPositionId) {
+            return;
+        }
+
+        void deleteOpenPosition(vPositionId);
     });
 
     ids.refreshEventsButton?.addEventListener("click", function () {
@@ -780,7 +844,8 @@
         ids.deltaTp1,
         ids.deltaSl1,
         ids.reEnter1,
-        ids.autoOptQtyPct,
+        ids.redOptQtyPct,
+        ids.greenOptQtyPct,
         ids.addOneLotFuture,
         ids.renkoFeedPts,
         ids.renkoFeedPriceSrc,
@@ -807,6 +872,8 @@
     });
 
     loadProfile().then(function () {
+        gHasLoadedProfile = true;
+        queueProfileSave();
         return loadServerPanels();
     }).catch(function () {
         applySymbolDefaults();

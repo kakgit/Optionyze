@@ -147,8 +147,12 @@
 
                 <div class="rolling-demo-subgrid">
                     <div class="rolling-demo-field">
-                        <label for="txtAutoOptQtyPctCoveredCall">Auto Option Qty %</label>
-                        <input type="number" min="1" step="1" id="txtAutoOptQtyPctCoveredCall" value="100" />
+                        <label for="txtRedOptQtyPctCoveredCall">Red Opt Qty %</label>
+                        <input type="number" min="1" step="1" id="txtRedOptQtyPctCoveredCall" value="100" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtGreenOptQtyPctCoveredCall">Green Opt Qty %</label>
+                        <input type="number" min="1" step="1" id="txtGreenOptQtyPctCoveredCall" value="100" />
                     </div>
                     <div class="rolling-demo-field">
                         <label for="chkAddOneLotFutIfNegFut">Add 1 Lot Future</label>
@@ -169,10 +173,6 @@
                     <div class="rolling-demo-field">
                         <label>&nbsp;</label>
                         <button class="rolling-demo-btn warn" type="button" id="btnRollingDemoExitOption">EXIT OPTION</button>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn warn" type="button" id="btnRollingDemoExitFuture">EXIT FUT</button>
                     </div>
                 </div>
 
@@ -259,11 +259,12 @@
                                 <th>Start DT</th>
                                 <th>End DT</th>
                                 <th>Status</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="rollingDemoOpenPositionsBody">
                             <tr>
-                                <td colspan="14" class="rolling-demo-empty">No open paper positions yet. Server-side wiring will populate this table later.</td>
+                                <td colspan="15" class="rolling-demo-empty">No open paper positions yet. Server-side wiring will populate this table later.</td>
                             </tr>
                         </tbody>
                     </table>
@@ -365,10 +366,10 @@
                         </div>
                     </div>
                 </div>
-                <p class="app-copy rolling-demo-feed-meta">Symbol: BTCUSD | Signal box and feed log are present for the future server-side paper implementation.</p>
+                <p class="app-copy rolling-demo-feed-meta">Symbol: BTCUSD | Renko state is driven from the server cycle using the selected price source and point size.</p>
                 <div class="rolling-demo-feed">
-                    <div class="rolling-demo-feed-item">Feed is idle. Turn on "Delta Renko Feed" in this section to begin receiving renko-style public market data.</div>
-                    <div class="rolling-demo-feed-item">No live wiring has been added yet. This area is UI-only for the server-side build phase.</div>
+                    <div class="rolling-demo-feed-item">Enable the feed to let the server evaluate Renko transitions from public Delta market data.</div>
+                    <div class="rolling-demo-feed-item">Spot Price, Mark Price, Best Bid, and Best Ask now flow through the Renko engine according to the selected source.</div>
                 </div>
             </div>
         </section>

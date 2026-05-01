@@ -295,3 +295,36 @@ export async function clearRollingOptionsPtDeClosedPositions(pUserId: string): P
     await writeJsonFileAtomic(gPositionsFile, objRemainingRows);
     return vBeforeCount - objRemainingRows.length;
 }
+
+export async function deleteRollingOptionsPtDeOpenPosition(
+    pUserId: string,
+    pPositionId: string
+): Promise<boolean> {
+    const vPositionId = String(pPositionId || "").trim();
+    if (!vPositionId) {
+        return false;
+    }
+
+    if (isPostgresConfigured()) {
+        const objPool = getPostgresPool();
+        const objResult = await objPool.query(`
+            DELETE FROM optionyze_rolling_options_pt_de_positions
+            WHERE user_id = $1
+              AND position_id = $2
+              AND status = 'OPEN'
+        `, [pUserId, vPositionId]);
+        return Number(objResult.rowCount || 0) > 0;
+    }
+
+    const objRows = await loadAllPositionsJson();
+    const objRemainingRows = objRows.filter((objRow) => {
+        return !(objRow.userId === pUserId && objRow.positionId === vPositionId && objRow.status === "OPEN");
+    });
+
+    if (objRemainingRows.length === objRows.length) {
+        return false;
+    }
+
+    await writeJsonFileAtomic(gPositionsFile, objRemainingRows);
+    return true;
+}

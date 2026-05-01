@@ -123,7 +123,8 @@ export class RollingOptionsPtDeService {
             deltaTp1: 0.15,
             deltaSl1: 0.85,
             reEnter1: false,
-            autoOptQtyPct: 100,
+            redOptQtyPct: 100,
+            greenOptQtyPct: 100,
             addOneLotFuture: false,
             renkoFeedEnabled: true,
             renkoFeedPts: 10,
@@ -140,12 +141,16 @@ export class RollingOptionsPtDeService {
         const vTrendMove = vBias * (pConfig.renkoStepPoints / 5);
         const vSpotPrice = Number(Math.max(1, vLastSpot + vRandomMove + vTrendMove).toFixed(2));
         const vFuturesPrice = Number((vSpotPrice * 1.0012).toFixed(2));
+        const vBestBidPrice = Number((vFuturesPrice * 0.9998).toFixed(2));
+        const vBestAskPrice = Number((vFuturesPrice * 1.0002).toFixed(2));
 
         return {
             symbol: pConfig.symbol,
             contractName: pConfig.contractName,
             spotPrice: vSpotPrice,
             futuresPrice: vFuturesPrice,
+            bestBidPrice: vBestBidPrice,
+            bestAskPrice: vBestAskPrice,
             priceSource: "simulated",
             ts: new Date().toISOString()
         };
@@ -419,6 +424,10 @@ export class RollingOptionsPtDeService {
         return objClosed;
     }
 
+    private getRenkoOptionQty(pFutureQty: number, pQtyPct: number): number {
+        return Math.max(1, Math.round(pFutureQty * pQtyPct / 100));
+    }
+
     public async executeStrategy(pUserId: string): Promise<{ status: string; message: string; }> {
         const objState = this.getOrCreateState(pUserId);
         const objConfig = await this.loadConfig(pUserId);
@@ -430,7 +439,7 @@ export class RollingOptionsPtDeService {
 
         const objNextSummary = getOpenPositionsSummary(await listRollingOptionsPtDeOpenPositions(pUserId));
         if (!objNextSummary.hasOpenOption && objNextSummary.futureQty > 0) {
-            const vQty = Math.max(1, Math.round(objNextSummary.futureQty * objConfig.autoOptionQtyPct / 100));
+            const vQty = this.getRenkoOptionQty(objNextSummary.futureQty, objConfig.redOptionQtyPct);
             await this.openOptionPositions(pUserId, objConfig, vQty, "Strategy initial option entry");
         }
 
@@ -513,7 +522,11 @@ export class RollingOptionsPtDeService {
         return { status: "success", message: "Auto trader stopped." };
     }
 
-    private async handleRenkoRedFlow(pUserId: string, pConfig: RollingOptionsPtDeConfig): Promise<void> {
+    private async handleRenkoOptionEntry(
+        pUserId: string,
+        pConfig: RollingOptionsPtDeConfig,
+        pColorCode: "R" | "G"
+    ): Promise<void> {
         const objOpenPositions = await listRollingOptionsPtDeOpenPositions(pUserId);
         const objSummary = getOpenPositionsSummary(objOpenPositions);
         if (objSummary.hasOpenOption) {
@@ -521,14 +534,25 @@ export class RollingOptionsPtDeService {
         }
 
         if (objSummary.futureQty <= 0) {
-            await this.openFuturePosition(pUserId, pConfig, pConfig.futureQty, "Renko RED futures entry");
+            return;
         }
 
-        const objNextSummary = getOpenPositionsSummary(await listRollingOptionsPtDeOpenPositions(pUserId));
-        if (objNextSummary.futureQty > 0) {
-            const vQty = Math.max(1, Math.round(objNextSummary.futureQty * pConfig.autoOptionQtyPct / 100));
-            await this.openOptionPositions(pUserId, pConfig, vQty, "Renko RED option entry");
-        }
+        const vQtyPct = pColorCode === "R" ? pConfig.redOptionQtyPct : pConfig.greenOptionQtyPct;
+        const vQty = this.getRenkoOptionQty(objSummary.futureQty, vQtyPct);
+        await this.openOptionPositions(
+            pUserId,
+            pConfig,
+            vQty,
+            pColorCode === "R" ? "Renko RED option entry" : "Renko GREEN option entry"
+        );
+    }
+
+    private async handleRenkoRedFlow(pUserId: string, pConfig: RollingOptionsPtDeConfig): Promise<void> {
+        await this.handleRenkoOptionEntry(pUserId, pConfig, "R");
+    }
+
+    private async handleRenkoGreenFlow(pUserId: string, pConfig: RollingOptionsPtDeConfig): Promise<void> {
+        await this.handleRenkoOptionEntry(pUserId, pConfig, "G");
     }
 
     private async handleOptionTrigger(
@@ -616,6 +640,21 @@ export class RollingOptionsPtDeService {
                     }
                 });
                 await this.handleRenkoRedFlow(pUserId, objConfig);
+            }
+
+            if (objTransitions.includes("R2G") && objState.running) {
+                await logRollingOptionsPtDeEvent({
+                    userId: pUserId,
+                    eventType: "manual_action",
+                    severity: "info",
+                    title: "Renko Green Detected",
+                    message: "Server detected a GREEN renko transition.",
+                    payload: {
+                        symbol: objConfig.symbol,
+                        reason: "R2G"
+                    }
+                });
+                await this.handleRenkoGreenFlow(pUserId, objConfig);
             }
 
             const objOpenFutures = objCurrentOpenPositions
@@ -784,8 +823,13 @@ export class RollingOptionsPtDeService {
             }
         });
 
-        if (vColorCode === "R" && objState.running) {
-            await this.handleRenkoRedFlow(pUserId, objConfig);
+        if (objState.running) {
+            if (vColorCode === "R") {
+                await this.handleRenkoRedFlow(pUserId, objConfig);
+            }
+            else {
+                await this.handleRenkoGreenFlow(pUserId, objConfig);
+            }
         }
 
         return {

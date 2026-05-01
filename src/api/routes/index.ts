@@ -21,8 +21,10 @@ import {
     validateStrategyFoPaperLogin
 } from "../controllers/strategyfo-paper-controller";
 import {
+    closeRollingOptionsPtDeOpenPositionController,
     clearRollingOptionsPtDeClosedPositionsController,
     clearRollingOptionsPtDeEventsController,
+    deleteRollingOptionsPtDeOpenPositionController,
     executeRollingOptionsPtDeManualFuture,
     executeRollingOptionsPtDeManualOption,
     exitRollingOptionsPtDeManualPositions,
@@ -135,6 +137,12 @@ export function createApiRouter(
     });
     objRouter.get("/rollingoptions-pt-de/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getRollingOptionsPtDeOpenPositions(req, res);
+    });
+    objRouter.post("/rollingoptions-pt-de/open-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteRollingOptionsPtDeOpenPositionController(req, res);
+    });
+    objRouter.post("/rollingoptions-pt-de/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await closeRollingOptionsPtDeOpenPositionController(req, res);
     });
     objRouter.get("/rollingoptions-pt-de/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getRollingOptionsPtDeClosedPositions(req, res);

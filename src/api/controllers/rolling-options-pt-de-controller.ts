@@ -1,12 +1,21 @@
 import crypto from "node:crypto";
 import type { Request, Response } from "express";
 import {
+    buildConfigFromUiState,
     estimatePositionCharges,
     getPositionPnl,
+    resolveExpiryDateByMode,
 } from "../../strategies/rolling-options-pt-de/engine";
 import { applyClosedOptionPnlToProfile } from "../../strategies/rolling-options-pt-de/options-pnl";
 import {
+    ensureLiveTickerSymbols,
+    findBestLiveOptionContract,
+    getLiveMarketSnapshot,
+    getLiveOptionTicker
+} from "../../strategies/rolling-options-pt-de/market-data";
+import {
     clearRollingOptionsPtDeClosedPositions,
+    deleteRollingOptionsPtDeOpenPosition,
     listRollingOptionsPtDeClosedPositions,
     listRollingOptionsPtDeOpenPositions,
     saveRollingOptionsPtDePosition,
@@ -47,7 +56,8 @@ function getDefaultUiState(): Record<string, unknown> {
         deltaTp1: 0.15,
         deltaSl1: 0.85,
         reEnter1: false,
-        autoOptQtyPct: 100,
+        redOptQtyPct: 100,
+        greenOptQtyPct: 100,
         addOneLotFuture: false,
         renkoFeedEnabled: true,
         renkoFeedPts: 10,
@@ -88,9 +98,20 @@ function normalizeNumber(pValue: unknown, pFallback: number): number {
 
 async function getMergedUiState(pUserId: string): Promise<Record<string, unknown>> {
     const objProfile = await loadRollingOptionsPtDeProfile(pUserId);
-    return {
+    const objUiState = {
         ...getDefaultUiState(),
         ...(objProfile?.uiState || {})
+    };
+    if (!Number.isFinite(Number(objUiState.redOptQtyPct))) {
+        objUiState.redOptQtyPct = Number(objUiState.autoOptQtyPct || 100);
+    }
+    if (!Number.isFinite(Number(objUiState.greenOptQtyPct))) {
+        objUiState.greenOptQtyPct = 100;
+    }
+    const vExpiryMode = String(objUiState.expiryMode1 || "1");
+    return {
+        ...objUiState,
+        expiryDate1: resolveExpiryDateByMode(vExpiryMode)
     };
 }
 
@@ -143,6 +164,178 @@ function getSimulatedOptionPrice(pSymbol: string, pDelta: number): number {
     return Number((vSpotPrice * vPremiumFactor).toFixed(2));
 }
 
+async function getLiveOrFallbackMarketSnapshot(pUiState: Record<string, unknown>): Promise<{
+    spotPrice: number;
+    futuresPrice: number;
+    bestBidPrice: number;
+    bestAskPrice: number;
+    ts: string;
+    priceSource: "public" | "simulated";
+}> {
+    const objConfig = buildConfigFromUiState(pUiState);
+    ensureLiveTickerSymbols([objConfig.contractName]);
+
+    try {
+        const objSnapshot = await getLiveMarketSnapshot(objConfig);
+        return {
+            spotPrice: objSnapshot.spotPrice,
+            futuresPrice: objSnapshot.futuresPrice,
+            bestBidPrice: objSnapshot.bestBidPrice,
+            bestAskPrice: objSnapshot.bestAskPrice,
+            ts: objSnapshot.ts,
+            priceSource: objSnapshot.priceSource
+        };
+    }
+    catch (_objError) {
+        const vNow = new Date().toISOString();
+        const vSpotPrice = getSimulatedSpotPrice(objConfig.symbol);
+        const vFuturesPrice = getSimulatedFuturePrice(objConfig.symbol);
+        return {
+            spotPrice: vSpotPrice,
+            futuresPrice: vFuturesPrice,
+            bestBidPrice: Number((vFuturesPrice * 0.9998).toFixed(2)),
+            bestAskPrice: Number((vFuturesPrice * 1.0002).toFixed(2)),
+            ts: vNow,
+            priceSource: "simulated"
+        };
+    }
+}
+
+async function getLiveOrFallbackOptionQuote(
+    pUiState: Record<string, unknown>,
+    pOptionSide: "CE" | "PE",
+    pDelta: number
+): Promise<{
+    contractName: string;
+    strike: number;
+    entryPrice: number;
+    entryDelta: number;
+    metadata: Record<string, unknown>;
+}> {
+    const objConfig = buildConfigFromUiState(pUiState);
+    const objSnapshot = await getLiveOrFallbackMarketSnapshot(pUiState);
+    const vFallbackStrike = Math.round(objSnapshot.spotPrice / 100) * 100;
+
+    try {
+        const objLiveContract = await findBestLiveOptionContract(objConfig, pOptionSide, pDelta);
+        if (objLiveContract?.contractSymbol) {
+            ensureLiveTickerSymbols([objLiveContract.contractSymbol]);
+        }
+        if (objLiveContract) {
+            return {
+                contractName: objLiveContract.contractSymbol,
+                strike: objLiveContract.strike,
+                entryPrice: objLiveContract.markPrice,
+                entryDelta: Math.abs(objLiveContract.delta),
+                metadata: {
+                    entrySpotPrice: objSnapshot.spotPrice,
+                    productSymbol: objLiveContract.contractSymbol,
+                    productDelta: objLiveContract.delta,
+                    productGamma: objLiveContract.gamma,
+                    productTheta: objLiveContract.theta,
+                    productVega: objLiveContract.vega,
+                    source: objSnapshot.priceSource === "public" ? "demo-manual-option-live" : "demo-manual-option-simulated"
+                }
+            };
+        }
+    }
+    catch (_objError) {
+        // Fall back to the existing simulated/manual approximation when live lookup is unavailable.
+    }
+
+    return {
+        contractName: `${objConfig.contractName} ${pOptionSide}`,
+        strike: vFallbackStrike,
+        entryPrice: getSimulatedOptionPrice(objConfig.symbol, pDelta),
+        entryDelta: pDelta,
+        metadata: {
+            entrySpotPrice: objSnapshot.spotPrice,
+            productSymbol: "",
+            productDelta: pDelta,
+            productGamma: 0,
+            productTheta: 0,
+            productVega: 0,
+            source: "demo-manual-option-simulated"
+        }
+    };
+}
+
+async function getLiveOrFallbackExitPrice(
+    pPosition: RollingOptionsPtDePositionRecord,
+    pUiState?: Record<string, unknown>
+): Promise<{ exitPrice: number; exitDelta: number | null; }> {
+    if (pPosition.instrumentType === "FUTURE") {
+        if (pUiState) {
+            const objSnapshot = await getLiveOrFallbackMarketSnapshot(pUiState);
+            return {
+                exitPrice: objSnapshot.futuresPrice,
+                exitDelta: null
+            };
+        }
+
+        return {
+            exitPrice: getSimulatedFuturePrice(pPosition.symbol),
+            exitDelta: null
+        };
+    }
+
+    const vProductSymbol = String(pPosition.metadata?.productSymbol || "").trim();
+    if (vProductSymbol) {
+        try {
+            ensureLiveTickerSymbols([vProductSymbol]);
+            const objLiveTicker = await getLiveOptionTicker(vProductSymbol);
+            if (objLiveTicker?.markPrice) {
+                return {
+                    exitPrice: objLiveTicker.markPrice,
+                    exitDelta: Math.abs(Number(objLiveTicker.delta || pPosition.exitDelta || pPosition.entryDelta || 0.53))
+                };
+            }
+        }
+        catch (_objError) {
+            // Fall through to the simulated/manual approximation below.
+        }
+    }
+
+    return {
+        exitPrice: getSimulatedOptionPrice(pPosition.symbol, pPosition.exitDelta ?? pPosition.entryDelta ?? 0.53),
+        exitDelta: pPosition.exitDelta ?? pPosition.entryDelta ?? 0.53
+    };
+}
+
+async function refreshOpenPositionMarks(
+    pUserId: string,
+    pPositions?: RollingOptionsPtDePositionRecord[]
+): Promise<RollingOptionsPtDePositionRecord[]> {
+    const objOpenPositions = pPositions || await listRollingOptionsPtDeOpenPositions(pUserId);
+    if (objOpenPositions.length === 0) {
+        return objOpenPositions;
+    }
+
+    const objUiState = await getMergedUiState(pUserId);
+    const objSnapshot = await getLiveOrFallbackMarketSnapshot(objUiState);
+    const objUpdatedPositions: RollingOptionsPtDePositionRecord[] = [];
+
+    for (const objPosition of objOpenPositions) {
+        const objQuote = await getLiveOrFallbackExitPrice(objPosition, objUiState);
+        const vMarkPrice = objPosition.instrumentType === "FUTURE"
+            ? objSnapshot.futuresPrice
+            : objQuote.exitPrice;
+        const vExitDelta = objPosition.instrumentType === "OPTION"
+            ? objQuote.exitDelta
+            : objPosition.exitDelta;
+
+        objUpdatedPositions.push(await saveRollingOptionsPtDePosition({
+            ...objPosition,
+            markPrice: vMarkPrice,
+            exitDelta: vExitDelta,
+            pnl: getPositionPnl(objPosition, vMarkPrice),
+            updatedAt: ""
+        }));
+    }
+
+    return objUpdatedPositions.sort((objA, objB) => String(objB.openedAt).localeCompare(String(objA.openedAt)));
+}
+
 function createPositionBase(pUserId: string): Pick<
     RollingOptionsPtDePositionRecord,
     "positionId" | "userId" | "groupId" | "cycleId" | "createdAt" | "updatedAt"
@@ -187,6 +380,7 @@ async function closeOpenPositionsByInstrument(
     pReason: string
 ): Promise<RollingOptionsPtDePositionRecord[]> {
     const objOpenPositions = await listRollingOptionsPtDeOpenPositions(pUserId);
+    const objUiState = await getMergedUiState(pUserId);
     const objTargetPositions = objOpenPositions.filter((objPosition) => {
         return pInstrumentType === "ALL" || objPosition.instrumentType === pInstrumentType;
     });
@@ -194,9 +388,8 @@ async function closeOpenPositionsByInstrument(
     const objClosedPositions: RollingOptionsPtDePositionRecord[] = [];
 
     for (const objPosition of objTargetPositions) {
-        const vExitPrice = objPosition.instrumentType === "FUTURE"
-            ? getSimulatedFuturePrice(objPosition.symbol)
-            : getSimulatedOptionPrice(objPosition.symbol, objPosition.exitDelta ?? objPosition.entryDelta ?? 0.53);
+        const objQuote = await getLiveOrFallbackExitPrice(objPosition, objUiState);
+        const vExitPrice = objQuote.exitPrice;
         const vExitCharges = estimatePositionCharges(objPosition.instrumentType, objPosition.qty, objPosition.lotSize, vExitPrice);
         const vPnl = getPositionPnl(objPosition, vExitPrice);
         const objClosed = await saveRollingOptionsPtDePosition({
@@ -204,6 +397,7 @@ async function closeOpenPositionsByInstrument(
             status: "CLOSED",
             exitPrice: vExitPrice,
             markPrice: vExitPrice,
+            exitDelta: objQuote.exitDelta,
             charges: Number((Number(objPosition.charges || 0) + vExitCharges).toFixed(4)),
             pnl: vPnl,
             closedReason: pReason,
@@ -218,6 +412,43 @@ async function closeOpenPositionsByInstrument(
     }
 
     return objClosedPositions;
+}
+
+async function closeOpenPositionById(
+    pUserId: string,
+    pPositionId: string,
+    pReason: string
+): Promise<RollingOptionsPtDePositionRecord | null> {
+    const vPositionId = String(pPositionId || "").trim();
+    if (!vPositionId) {
+        return null;
+    }
+
+    const objOpenPositions = await listRollingOptionsPtDeOpenPositions(pUserId);
+    const objPosition = objOpenPositions.find((objRow) => objRow.positionId === vPositionId) || null;
+    if (!objPosition) {
+        return null;
+    }
+
+    const objUiState = await getMergedUiState(pUserId);
+    const objQuote = await getLiveOrFallbackExitPrice(objPosition, objUiState);
+    const vExitPrice = objQuote.exitPrice;
+    const vExitCharges = estimatePositionCharges(objPosition.instrumentType, objPosition.qty, objPosition.lotSize, vExitPrice);
+    const objClosedPosition = await saveRollingOptionsPtDePosition({
+        ...objPosition,
+        status: "CLOSED",
+        exitPrice: vExitPrice,
+        markPrice: vExitPrice,
+        exitDelta: objQuote.exitDelta,
+        charges: Number((Number(objPosition.charges || 0) + vExitCharges).toFixed(4)),
+        pnl: getPositionPnl(objPosition, vExitPrice),
+        closedReason: pReason,
+        closedAt: new Date().toISOString(),
+        updatedAt: ""
+    });
+
+    await applyClosedOptionPnlToProfile(pUserId, [objClosedPosition]);
+    return objClosedPosition;
 }
 
 export function renderRollingOptionsPaperDemoPage(req: Request, res: Response): void {
@@ -284,11 +515,85 @@ export async function getRollingOptionsPtDeStatus(req: Request, res: Response): 
 
 export async function getRollingOptionsPtDeOpenPositions(req: Request, res: Response): Promise<void> {
     const vUserId = getUserIdFromReq(req);
-    const objRows = await listRollingOptionsPtDeOpenPositions(vUserId);
+    const objRows = await refreshOpenPositionMarks(vUserId);
 
     res.json({
         status: "success",
         data: objRows
+    });
+}
+
+export async function deleteRollingOptionsPtDeOpenPositionController(req: Request, res: Response): Promise<void> {
+    const vUserId = getUserIdFromReq(req);
+    const vPositionId = String(req.body?.positionId || "").trim();
+
+    if (!vPositionId) {
+        res.status(400).json({ status: "error", message: "Position id is required." });
+        return;
+    }
+
+    const bDeleted = await deleteRollingOptionsPtDeOpenPosition(vUserId, vPositionId);
+    if (!bDeleted) {
+        res.status(404).json({ status: "error", message: "Open position not found." });
+        return;
+    }
+
+    await logRollingOptionsPtDeEvent({
+        userId: vUserId,
+        eventType: "manual_action",
+        severity: "warning",
+        title: "Open Position Deleted",
+        message: "Open paper position was permanently deleted.",
+        payload: {
+            positionId: vPositionId,
+            reason: "manual_open_position_delete"
+        }
+    });
+
+    res.json({
+        status: "success",
+        data: {
+            positionId: vPositionId,
+            deleted: true
+        }
+    });
+}
+
+export async function closeRollingOptionsPtDeOpenPositionController(req: Request, res: Response): Promise<void> {
+    const vUserId = getUserIdFromReq(req);
+    const vPositionId = String(req.body?.positionId || "").trim();
+
+    if (!vPositionId) {
+        res.status(400).json({ status: "error", message: "Position id is required." });
+        return;
+    }
+
+    const objClosedPosition = await closeOpenPositionById(vUserId, vPositionId, "Manual row close");
+    if (!objClosedPosition) {
+        res.status(404).json({ status: "error", message: "Open position not found." });
+        return;
+    }
+
+    await logRollingOptionsPtDeEvent({
+        userId: vUserId,
+        eventType: "manual_action",
+        severity: "info",
+        title: "Open Position Closed",
+        message: "Open paper position was manually closed.",
+        payload: {
+            positionId: vPositionId,
+            contractName: objClosedPosition.contractName,
+            symbol: objClosedPosition.symbol,
+            qty: objClosedPosition.qty,
+            reason: "manual_open_position_close"
+        }
+    });
+
+    res.json({
+        status: "success",
+        data: {
+            position: objClosedPosition
+        }
     });
 }
 
@@ -337,8 +642,9 @@ export async function executeRollingOptionsPtDeManualFuture(req: Request, res: R
     const vAction = String(req.body?.action || "SELL").trim().toUpperCase() === "BUY" ? "BUY" : "SELL";
     const vQty = Math.max(1, Math.floor(normalizeNumber(objUiState.manualFutQty, 1)));
     const vLotSize = getLotSizeForSymbol(vSymbol);
-    const vEntryPrice = getSimulatedFuturePrice(vSymbol);
-    const vNow = new Date().toISOString();
+    const objSnapshot = await getLiveOrFallbackMarketSnapshot(objUiState);
+    const vEntryPrice = objSnapshot.futuresPrice;
+    const vNow = objSnapshot.ts;
 
     const objPosition: RollingOptionsPtDePositionRecord = {
         ...createPositionBase(vUserId),
@@ -365,7 +671,7 @@ export async function executeRollingOptionsPtDeManualFuture(req: Request, res: R
         closedAt: "",
         metadata: {
             orderType: String(objUiState.manualFutOrderType || "market_order"),
-            source: "demo-manual-future"
+            source: objSnapshot.priceSource === "public" ? "demo-manual-future-live" : "demo-manual-future-simulated"
         }
     };
 
@@ -375,7 +681,7 @@ export async function executeRollingOptionsPtDeManualFuture(req: Request, res: R
         currentSymbol: vSymbol,
         currentContractName: getContractNameForSymbol(vSymbol),
         lastFuturesPrice: vEntryPrice,
-        lastSpotPrice: getSimulatedSpotPrice(vSymbol),
+        lastSpotPrice: objSnapshot.spotPrice,
         lastSignal: `MANUAL_${vAction}_FUT`,
         lastCycleAt: vNow,
         lastError: ""
@@ -407,32 +713,31 @@ export async function executeRollingOptionsPtDeManualOption(req: Request, res: R
     const vLotSize = getLotSizeForSymbol(vSymbol);
     const vExpiryDate = String(objUiState.expiryDate1 || "");
     const vDelta = normalizeNumber(objUiState.newDelta1, 0.53);
-    const vSpotPrice = getSimulatedSpotPrice(vSymbol);
-    const vStrike = Math.round(vSpotPrice / 100) * 100;
+    const objSnapshot = await getLiveOrFallbackMarketSnapshot(objUiState);
     const objSides: Array<"CE" | "PE"> = vLegSide === "BOTH" ? ["CE", "PE"] : [vLegSide === "PE" ? "PE" : "CE"];
-    const vNow = new Date().toISOString();
+    const vNow = objSnapshot.ts;
     const objSavedPositions: RollingOptionsPtDePositionRecord[] = [];
 
     for (const vOptionSide of objSides) {
-        const vEntryPrice = getSimulatedOptionPrice(vSymbol, vDelta);
+        const objQuote = await getLiveOrFallbackOptionQuote(objUiState, vOptionSide, vDelta);
         const objPosition: RollingOptionsPtDePositionRecord = {
             ...createPositionBase(vUserId),
             status: "OPEN",
             symbol: vSymbol,
-            contractName: `${getContractNameForSymbol(vSymbol)} ${vOptionSide}`,
+            contractName: objQuote.contractName,
             instrumentType: "OPTION",
             optionSide: vOptionSide,
             action: vAction,
-            strike: vStrike,
+            strike: objQuote.strike,
             expiryDate: vExpiryDate,
             qty: vQty,
             lotSize: vLotSize,
-            entryPrice: vEntryPrice,
+            entryPrice: objQuote.entryPrice,
             exitPrice: null,
-            markPrice: vEntryPrice,
-            entryDelta: vDelta,
-            exitDelta: vDelta,
-            charges: estimatePositionCharges("OPTION", vQty, vLotSize, vEntryPrice),
+            markPrice: objQuote.entryPrice,
+            entryDelta: objQuote.entryDelta,
+            exitDelta: objQuote.entryDelta,
+            charges: estimatePositionCharges("OPTION", vQty, vLotSize, objQuote.entryPrice),
             pnl: 0,
             openedReason: `Manual ${vAction} ${vOptionSide}`,
             closedReason: "",
@@ -443,7 +748,7 @@ export async function executeRollingOptionsPtDeManualOption(req: Request, res: R
                 takeProfitDelta: normalizeNumber(objUiState.deltaTp1, 0.15),
                 stopLossDelta: normalizeNumber(objUiState.deltaSl1, 0.85),
                 reEnter: Boolean(objUiState.reEnter1),
-                source: "demo-manual-option"
+                ...objQuote.metadata
             }
         };
 
@@ -454,7 +759,8 @@ export async function executeRollingOptionsPtDeManualOption(req: Request, res: R
         status: "running",
         currentSymbol: vSymbol,
         currentContractName: getContractNameForSymbol(vSymbol),
-        lastSpotPrice: vSpotPrice,
+        lastSpotPrice: objSnapshot.spotPrice,
+        lastFuturesPrice: objSnapshot.futuresPrice,
         lastSignal: `MANUAL_OPEN_OPTION_${vLegSide === "BOTH" ? "BOTH" : vLegSide}`,
         lastCycleAt: vNow,
         lastError: ""

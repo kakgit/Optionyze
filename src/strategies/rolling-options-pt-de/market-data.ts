@@ -229,6 +229,8 @@ export async function getLiveMarketSnapshot(
         || {};
     const vSpotPrice = parseNumber(objTicker.spot_price);
     const vMarkPrice = parseNumber(objTicker.mark_price, vSpotPrice);
+    const vBestBid = parseNumber(objTicker.quotes?.best_bid, vMarkPrice);
+    const vBestAsk = parseNumber(objTicker.quotes?.best_ask, vMarkPrice);
 
     if (!(vSpotPrice > 0) && !(vMarkPrice > 0)) {
         throw new Error(`No live ticker price available for ${pConfig.contractName}.`);
@@ -239,6 +241,8 @@ export async function getLiveMarketSnapshot(
         contractName: pConfig.contractName,
         spotPrice: vSpotPrice > 0 ? vSpotPrice : vMarkPrice,
         futuresPrice: vMarkPrice > 0 ? vMarkPrice : vSpotPrice,
+        bestBidPrice: vBestBid > 0 ? vBestBid : (vMarkPrice > 0 ? vMarkPrice : vSpotPrice),
+        bestAskPrice: vBestAsk > 0 ? vBestAsk : (vMarkPrice > 0 ? vMarkPrice : vSpotPrice),
         priceSource: "public",
         ts: new Date().toISOString()
     };
