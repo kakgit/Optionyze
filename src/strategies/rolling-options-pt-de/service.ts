@@ -529,11 +529,35 @@ export class RollingOptionsPtDeService {
     ): Promise<void> {
         const objOpenPositions = await listRollingOptionsPtDeOpenPositions(pUserId);
         const objSummary = getOpenPositionsSummary(objOpenPositions);
+        const vColorLabel = pColorCode === "R" ? "RED" : "GREEN";
+
         if (objSummary.hasOpenOption) {
+            await logRollingOptionsPtDeEvent({
+                userId: pUserId,
+                eventType: "manual_action",
+                severity: "info",
+                title: `Renko ${vColorLabel} Skipped`,
+                message: `Skipped ${vColorLabel} Renko option entry because an option position is already open.`,
+                payload: {
+                    symbol: pConfig.symbol,
+                    reason: "renko_option_skipped_option_already_open"
+                }
+            });
             return;
         }
 
         if (objSummary.futureQty <= 0) {
+            await logRollingOptionsPtDeEvent({
+                userId: pUserId,
+                eventType: "manual_action",
+                severity: "info",
+                title: `Renko ${vColorLabel} Skipped`,
+                message: `Skipped ${vColorLabel} Renko option entry because no futures position is open.`,
+                payload: {
+                    symbol: pConfig.symbol,
+                    reason: "renko_option_skipped_no_open_future"
+                }
+            });
             return;
         }
 
@@ -623,35 +647,40 @@ export class RollingOptionsPtDeService {
             objState.market.lastFuturesPrice = objSnapshot.futuresPrice;
             objState.market.lastSource = objSnapshot.priceSource;
 
-            const objTransitions = objConfig.renkoEnabled
+            const objRenkoSignals = objConfig.renkoEnabled
                 ? updateRenkoState(objState, objSnapshot, objConfig)
                 : [];
 
-            if (objTransitions.includes("G2R") && objState.running) {
-                await logRollingOptionsPtDeEvent({
-                    userId: pUserId,
-                    eventType: "renko_red_detected",
-                    severity: "info",
-                    title: "Renko Red Detected",
-                    message: "Server detected a RED renko transition.",
-                    payload: {
-                        symbol: objConfig.symbol,
-                        reason: "G2R"
-                    }
-                });
-                await this.handleRenkoRedFlow(pUserId, objConfig);
-            }
+            for (const vRenkoSignal of objRenkoSignals) {
+                if (!objState.running) {
+                    break;
+                }
 
-            if (objTransitions.includes("R2G") && objState.running) {
+                if (vRenkoSignal === "R") {
+                    await logRollingOptionsPtDeEvent({
+                        userId: pUserId,
+                        eventType: "renko_red_detected",
+                        severity: "info",
+                        title: "Renko Red Detected",
+                        message: "Server detected a RED renko brick.",
+                        payload: {
+                            symbol: objConfig.symbol,
+                            reason: "renko_red_brick"
+                        }
+                    });
+                    await this.handleRenkoRedFlow(pUserId, objConfig);
+                    continue;
+                }
+
                 await logRollingOptionsPtDeEvent({
                     userId: pUserId,
                     eventType: "manual_action",
                     severity: "info",
                     title: "Renko Green Detected",
-                    message: "Server detected a GREEN renko transition.",
+                    message: "Server detected a GREEN renko brick.",
                     payload: {
                         symbol: objConfig.symbol,
-                        reason: "R2G"
+                        reason: "renko_green_brick"
                     }
                 });
                 await this.handleRenkoGreenFlow(pUserId, objConfig);
@@ -699,12 +728,15 @@ export class RollingOptionsPtDeService {
             objState.consecutiveFailures = 0;
             objState.lastError = "";
             objState.lastCycleAt = new Date().toISOString();
+            const vLastRenkoSignal = objRenkoSignals.at(-1);
             await this.syncRuntime(pUserId, objConfig, objState, {
                 status: objState.running ? "running" : "stopped",
                 autoTraderEnabled: objState.running,
                 lastSpotPrice: objSnapshot.spotPrice,
                 lastFuturesPrice: objSnapshot.futuresPrice,
-                lastSignal: objTransitions.at(-1) || (objState.renko.lastColor === "R" ? "RED" : (objState.renko.lastColor === "G" ? "GREEN" : "IDLE")),
+                lastSignal: vLastRenkoSignal
+                    ? (vLastRenkoSignal === "R" ? "RED" : "GREEN")
+                    : (objState.renko.lastColor === "R" ? "RED" : (objState.renko.lastColor === "G" ? "GREEN" : "IDLE")),
                 lastCycleAt: objState.lastCycleAt
             });
             return { status: "success", message: "Cycle completed." };

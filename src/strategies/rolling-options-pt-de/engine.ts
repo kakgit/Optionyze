@@ -138,8 +138,8 @@ export function updateRenkoState(
     pEngineState: RollingOptionsPtDeEngineState,
     pSnapshot: RollingOptionsPtDeMarketSnapshot,
     pConfig: RollingOptionsPtDeConfig
-): Array<"R2G" | "G2R"> {
-    const objTransitions: Array<"R2G" | "G2R"> = [];
+): Array<"R" | "G"> {
+    const objSignals: Array<"R" | "G"> = [];
     const vPrice = pConfig.renkoPriceSource === "spot_price"
         ? pSnapshot.spotPrice
         : (pConfig.renkoPriceSource === "best_bid"
@@ -150,14 +150,14 @@ export function updateRenkoState(
     const vStep = Math.max(1, Number(pConfig.renkoStepPoints || 10));
 
     if (!Number.isFinite(vPrice) || vPrice <= 0) {
-        return objTransitions;
+        return objSignals;
     }
 
     if (!Number.isFinite(Number(pEngineState.renko.anchor))) {
         pEngineState.renko.anchor = Math.floor(vPrice / vStep) * vStep;
         pEngineState.renko.lastDir = 0;
         pEngineState.renko.lastColor = "";
-        return objTransitions;
+        return objSignals;
     }
 
     const objBuild = getStandardBricks(
@@ -172,16 +172,11 @@ export function updateRenkoState(
 
     for (const objBrick of objBuild.bricks) {
         const vColor = objBrick.close > objBrick.open ? "G" : "R";
-        if (vColor === "G" && pEngineState.renko.lastColor === "R") {
-            objTransitions.push("R2G");
-        }
-        else if (vColor === "R" && pEngineState.renko.lastColor === "G") {
-            objTransitions.push("G2R");
-        }
+        objSignals.push(vColor);
         pEngineState.renko.lastColor = vColor;
     }
 
-    return objTransitions;
+    return objSignals;
 }
 
 export function getOpenPositionsSummary(pPositions: RollingOptionsPtDePositionRecord[]): {
