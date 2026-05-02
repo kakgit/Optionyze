@@ -6,34 +6,41 @@ export async function attachAuthContext(req: Request, res: Response, next: NextF
     req.authAccount = null;
     req.authSessionId = null;
 
-    const vSessionId = readCookie(req, getSessionCookieName());
-    if (!vSessionId) {
-        res.locals.currentAccount = null;
-        next();
-        return;
-    }
+    try {
+        const vSessionId = readCookie(req, getSessionCookieName());
+        if (!vSessionId) {
+            res.locals.currentAccount = null;
+            next();
+            return;
+        }
 
-    const objSession = await getSessionById(vSessionId);
-    if (!objSession) {
-        clearSessionCookie(res);
-        res.locals.currentAccount = null;
-        next();
-        return;
-    }
+        const objSession = await getSessionById(vSessionId);
+        if (!objSession) {
+            clearSessionCookie(res);
+            res.locals.currentAccount = null;
+            next();
+            return;
+        }
 
-    const objAccount = await getAccountById(objSession.accountId);
-    if (!objAccount || !objAccount.isActive) {
-        await deleteSession(vSessionId);
-        clearSessionCookie(res);
-        res.locals.currentAccount = null;
-        next();
-        return;
-    }
+        const objAccount = await getAccountById(objSession.accountId);
+        if (!objAccount || !objAccount.isActive) {
+            await deleteSession(vSessionId);
+            clearSessionCookie(res);
+            res.locals.currentAccount = null;
+            next();
+            return;
+        }
 
-    req.authAccount = objAccount;
-    req.authSessionId = objSession.sessionId;
-    res.locals.currentAccount = objAccount;
-    next();
+        req.authAccount = objAccount;
+        req.authSessionId = objSession.sessionId;
+        res.locals.currentAccount = objAccount;
+        next();
+    }
+    catch (objError) {
+        console.error("[auth] failed to attach auth context:", objError);
+        res.locals.currentAccount = null;
+        res.status(503).send("Database connection is temporarily unavailable. Please retry.");
+    }
 }
 
 export function requireGuestPage(req: Request, res: Response, next: NextFunction): void {

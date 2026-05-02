@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { getPostgresPool, isPostgresConfigured } from "./postgres";
+import { getPostgresPool, isPostgresConfigured, runPostgresQueryWithReconnect } from "./postgres";
 import type { SessionRecord } from "../types/models";
 
 interface SessionRow {
@@ -43,12 +43,11 @@ export async function getSessionById(pSessionId: string): Promise<SessionRecord 
         return null;
     }
 
-    const objPool = getPostgresPool();
-    const objResult = await objPool.query<SessionRow>(`
+    const objResult = await runPostgresQueryWithReconnect((pPool) => pPool.query<SessionRow>(`
         SELECT session_id, account_id, expires_at, created_at
         FROM optionyze_sessions
         WHERE session_id = $1
-    `, [pSessionId]);
+    `, [pSessionId]));
 
     const objRow = objResult.rows[0];
     if (!objRow) {

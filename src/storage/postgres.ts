@@ -2,6 +2,41 @@ import { Pool } from "pg";
 
 let gPool: Pool | null = null;
 
+function shouldRecyclePoolForError(pError: unknown): boolean {
+    const vMessage = pError instanceof Error
+        ? String(pError.message || "").toLowerCase()
+        : String((pError as { message?: unknown } | null)?.message || "").toLowerCase();
+
+    return vMessage.includes("connection terminated unexpectedly")
+        || vMessage.includes("connection ended unexpectedly")
+        || vMessage.includes("client has encountered a connection error")
+        || vMessage.includes("terminating connection due to administrator command")
+        || vMessage.includes("server closed the connection unexpectedly");
+}
+
+function attachPoolLifecycleHandlers(pPool: Pool): void {
+    pPool.on("error", (objError: Error) => {
+        console.error("[postgres] pool error:", objError.message);
+        if (gPool === pPool) {
+            gPool = null;
+        }
+    });
+}
+
+export async function resetPostgresPool(): Promise<void> {
+    const objPool = gPool;
+    gPool = null;
+    if (!objPool) {
+        return;
+    }
+
+    try {
+        await objPool.end();
+    }
+    catch (_objError) {
+    }
+}
+
 export function isPostgresConfigured(): boolean {
     return String(process.env.DATABASE_URL || "").trim().length > 0;
 }
@@ -21,8 +56,25 @@ export function getPostgresPool(): Pool {
             ? false
             : { rejectUnauthorized: false }
     });
+    attachPoolLifecycleHandlers(gPool);
 
     return gPool;
+}
+
+export async function runPostgresQueryWithReconnect<TResult>(
+    pRunner: (pPool: Pool) => Promise<TResult>
+): Promise<TResult> {
+    try {
+        return await pRunner(getPostgresPool());
+    }
+    catch (objError) {
+        if (!shouldRecyclePoolForError(objError)) {
+            throw objError;
+        }
+
+        await resetPostgresPool();
+        return await pRunner(getPostgresPool());
+    }
 }
 
 export async function ensurePostgresSchema(): Promise<void> {
@@ -108,6 +160,25 @@ export async function ensurePostgresSchema(): Promise<void> {
             last_cycle_at TIMESTAMPTZ NULL,
             last_error TEXT NOT NULL DEFAULT '',
             state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_rolling_options_lt_de_profiles (
+            user_id TEXT PRIMARY KEY,
+            selected_api_profile_id TEXT NOT NULL DEFAULT '',
+            connection_status_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_rolling_options_lt_de_runtime (
+            user_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'idle',
+            auto_trader_enabled BOOLEAN NOT NULL DEFAULT false,
+            selected_api_profile_id TEXT NOT NULL DEFAULT '',
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
     `);

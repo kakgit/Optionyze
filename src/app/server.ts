@@ -8,9 +8,11 @@ import { createApiRouter } from "../api/routes";
 import { RunnerManager } from "../runners/runner-manager";
 import { ensurePostgresSchema, isPostgresConfigured } from "../storage/postgres";
 import { StrategyFoGreeksPaperService } from "../strategies/strategy-fo-greeks-paper/service";
+import { startRollingOptionsLtDeConnectionMonitor, runRollingOptionsLtDeConnectionMonitorCycle } from "../strategies/rolling-options-lt-de/connection-monitor";
 import { RollingOptionsPtDeService } from "../strategies/rolling-options-pt-de/service";
 import { renderStrategyFoPaperPage } from "../api/controllers/strategyfo-paper-controller";
 import { renderRollingOptionsPaperDemoPage } from "../api/controllers/rolling-options-pt-de-controller";
+import { renderRollingOptionsLivePage } from "../api/controllers/rolling-options-lt-de-controller";
 import {
     changePassword,
     renderChangePasswordPage,
@@ -48,6 +50,8 @@ async function bootstrap(): Promise<void> {
     await cleanupExpiredSessions();
     await runnerManager.hydrate();
     await rollingOptionsPtDeService.hydrate();
+    startRollingOptionsLtDeConnectionMonitor(5 * 60 * 1000);
+    void runRollingOptionsLtDeConnectionMonitorCycle();
 
     app.set("view engine", "ejs");
     app.set("views", path.resolve(process.cwd(), "src", "views"));
@@ -71,6 +75,7 @@ async function bootstrap(): Promise<void> {
     });
     app.get("/dashboard", requireAuthPage, requireFreshPasswordPage, renderDashboardPage);
     app.get("/rollingoptions-pt-de", requireAuthPage, requireFreshPasswordPage, renderRollingOptionsPaperDemoPage);
+    app.get("/rollingoptions-lt-de", requireAuthPage, requireFreshPasswordPage, renderRollingOptionsLivePage);
     app.get("/mngusers", requireAuthPage, requireFreshPasswordPage, requireAdminPage, renderMngUsersPage);
     app.get("/account/profile", requireAuthPage, renderMyProfilePage);
     app.post("/account/profile", requireAuthPage, async (req, res) => {

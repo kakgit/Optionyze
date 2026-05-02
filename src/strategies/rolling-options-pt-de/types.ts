@@ -23,6 +23,12 @@ export interface RollingOptionsPtDeConfig {
     loopSeconds: number;
 }
 
+export interface RollingOptionsPtDeOptionLookupMeta {
+    requestedExpiryDate: string;
+    resolvedExpiryDate: string;
+    usedNextDayFallback: boolean;
+}
+
 export interface RollingOptionsPtDeRenkoState {
     anchor: number | null;
     lastDir: -1 | 0 | 1;

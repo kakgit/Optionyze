@@ -303,6 +303,22 @@ export class RollingOptionsPtDeService {
             }
             const vMark = objLiveContract?.markPrice || Number((objSnapshot.spotPrice * Math.max(0.002, Math.abs(vTargetDelta) * 0.012)).toFixed(2));
             const vEntryDelta = objLiveContract ? Math.abs(objLiveContract.delta) : vTargetDelta;
+            if (this.wouldOptionTriggerImmediately(pConfig, pConfig.action === "buy" ? "BUY" : "SELL", vEntryDelta)) {
+                await logRollingOptionsPtDeEvent({
+                    userId: pUserId,
+                    eventType: "manual_action",
+                    severity: "warning",
+                    title: "Option Re-entry Skipped",
+                    message: `Skipped ${pReason} because the replacement delta ${vEntryDelta.toFixed(4)} already violates TP/SL settings.`,
+                    payload: {
+                        symbol: pConfig.symbol,
+                        reason: "replacement_option_immediate_trigger_skip",
+                        contractName: objLiveContract?.contractSymbol || `${pConfig.contractName} ${vOptionSide}`,
+                        delta: vEntryDelta
+                    }
+                });
+                continue;
+            }
             objSaved.push(await saveRollingOptionsPtDePosition({
                 positionId: crypto.randomUUID(),
                 userId: pUserId,
@@ -315,7 +331,7 @@ export class RollingOptionsPtDeService {
                 optionSide: vOptionSide,
                 action: pConfig.action === "buy" ? "BUY" : "SELL",
                 strike: objLiveContract?.strike || vStrike,
-                expiryDate: pConfig.expiryDate,
+                expiryDate: objLiveContract?.expiryDate || pConfig.expiryDate,
                 qty: pQty,
                 lotSize: pConfig.lotSize,
                 entryPrice: vMark,
@@ -340,11 +356,33 @@ export class RollingOptionsPtDeService {
                     productTheta: objLiveContract?.theta || 0,
                     productVega: objLiveContract?.vega || 0,
                     expiryMode: pConfig.expiryMode,
+                    requestedExpiryDate: pConfig.expiryDate,
+                    resolvedExpiryDate: objLiveContract?.expiryDate || pConfig.expiryDate,
+                    usedNextDayExpiryFallback: Boolean(objLiveContract?.usedNextDayFallback),
                     source: objSnapshot.priceSource === "public" ? "server-strategy-live" : "server-strategy-simulated"
                 },
                 createdAt: objSnapshot.ts,
                 updatedAt: objSnapshot.ts
             }));
+        }
+
+        const objFallbackPositions = objSaved.filter((objRow) => Boolean(objRow.metadata?.usedNextDayExpiryFallback));
+        if (objFallbackPositions.length > 0) {
+            const objFirstFallback = objFallbackPositions[0];
+            await logRollingOptionsPtDeEvent({
+                userId: pUserId,
+                eventType: "manual_action",
+                severity: "info",
+                title: "Next-Day Expiry Fallback Used",
+                message: `Used next-day expiry fallback for ${objFallbackPositions.length} option leg(s).`,
+                payload: {
+                    symbol: pConfig.symbol,
+                    qty: objFallbackPositions.length,
+                    reason: "next_day_expiry_fallback",
+                    requestedExpiryDate: String(objFirstFallback.metadata?.requestedExpiryDate || pConfig.expiryDate),
+                    resolvedExpiryDate: String(objFirstFallback.metadata?.resolvedExpiryDate || objFirstFallback.expiryDate || pConfig.expiryDate)
+                }
+            });
         }
 
         await logRollingOptionsPtDeEvent({
@@ -365,6 +403,40 @@ export class RollingOptionsPtDeService {
         });
 
         return objSaved;
+    }
+
+    private wouldOptionTriggerImmediately(
+        pConfig: RollingOptionsPtDeConfig,
+        pAction: "BUY" | "SELL",
+        pDelta: number
+    ): boolean {
+        const vAbsDelta = Math.abs(Number(pDelta || 0));
+        const vDeltaSl = Number(pConfig.deltaStopLoss || 0);
+        const vDeltaTp = Number(pConfig.deltaTakeProfit || 0);
+        const bHasSl = Number.isFinite(vDeltaSl) && vDeltaSl > 0;
+        const bHasTp = Number.isFinite(vDeltaTp) && vDeltaTp > 0;
+
+        if (!Number.isFinite(vAbsDelta)) {
+            return false;
+        }
+
+        if (pAction === "SELL") {
+            if (bHasSl && vAbsDelta >= vDeltaSl) {
+                return true;
+            }
+            if (bHasTp && vAbsDelta <= vDeltaTp) {
+                return true;
+            }
+            return false;
+        }
+
+        if (bHasSl && vAbsDelta <= vDeltaSl) {
+            return true;
+        }
+        if (bHasTp && vAbsDelta >= vDeltaTp) {
+            return true;
+        }
+        return false;
     }
 
     private async closePositions(
@@ -586,11 +658,15 @@ export class RollingOptionsPtDeService {
         pReason: "sl" | "tp"
     ): Promise<void> {
         const vRenkoIsRed = pConfig.renkoEnabled && this.getOrCreateState(pUserId).renko.lastColor === "R";
+        const vCloseReason = pReason === "sl" ? "SL triggered" : "TP triggered";
+        const vCloseOnlyReason = pReason === "sl" ? "SL close only" : "TP close only";
 
         if (pConfig.renkoEnabled && !vRenkoIsRed) {
-            await this.closePositions([pPosition], pConfig, pReason === "sl" ? "SL close only" : "TP close only");
+            await this.closePositions([pPosition], pConfig, vCloseOnlyReason);
             return;
         }
+
+        await this.closePositions([pPosition], pConfig, vCloseReason);
 
         if (vRenkoIsRed) {
             if (pReason === "sl" && pConfig.addOneLotFuture) {
@@ -607,7 +683,6 @@ export class RollingOptionsPtDeService {
                     true
                 );
             }
-            await this.closePositions([pPosition], pConfig, pReason === "sl" ? "SL triggered" : "TP triggered");
             return;
         }
 
@@ -622,8 +697,6 @@ export class RollingOptionsPtDeService {
                 true
             );
         }
-
-        await this.closePositions([pPosition], pConfig, pReason === "sl" ? "SL triggered" : "TP triggered");
     }
 
     public async runCycle(pUserId: string): Promise<{ status: string; message: string; }> {

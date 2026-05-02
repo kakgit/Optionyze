@@ -37,6 +37,9 @@ export interface RollingOptionsPtDeLiveOptionContract {
     gamma: number;
     theta: number;
     vega: number;
+    expiryDate: string;
+    requestedExpiryDate: string;
+    usedNextDayFallback: boolean;
 }
 
 function parseNumber(pValue: unknown, pFallback = 0): number {
@@ -61,6 +64,18 @@ function toExpiryDateForDelta(pDateValue: string): string {
     const vMonth = String(objDate.getMonth() + 1).padStart(2, "0");
     const vYear = String(objDate.getFullYear());
     return `${vDay}-${vMonth}-${vYear}`;
+}
+
+function addDaysToIsoDate(pDateValue: string, pDays: number): string {
+    const objDate = new Date(`${String(pDateValue || "").trim()}T00:00:00`);
+    if (Number.isNaN(objDate.getTime())) {
+        return String(pDateValue || "").trim();
+    }
+    objDate.setDate(objDate.getDate() + pDays);
+    const vYear = String(objDate.getFullYear());
+    const vMonth = String(objDate.getMonth() + 1).padStart(2, "0");
+    const vDay = String(objDate.getDate()).padStart(2, "0");
+    return `${vYear}-${vMonth}-${vDay}`;
 }
 
 async function fetchJson<T>(pPath: string, pSearchParams?: URLSearchParams): Promise<T> {
@@ -253,51 +268,68 @@ export async function findBestLiveOptionContract(
     pOptionSide: "CE" | "PE",
     pTargetDelta: number
 ): Promise<RollingOptionsPtDeLiveOptionContract | null> {
-    const vExpiryDate = toExpiryDateForDelta(pConfig.expiryDate);
-    if (!vExpiryDate) {
-        return null;
-    }
+    const arrExpiryCandidates = [
+        { expiryDate: pConfig.expiryDate, usedNextDayFallback: false },
+        { expiryDate: addDaysToIsoDate(pConfig.expiryDate, 1), usedNextDayFallback: true }
+    ].filter((objCandidate, vIndex, arrRows) => (
+        Boolean(toExpiryDateForDelta(objCandidate.expiryDate)) &&
+        arrRows.findIndex((objRow) => objRow.expiryDate === objCandidate.expiryDate) === vIndex
+    ));
 
-    const objParams = new URLSearchParams({
-        contract_types: pOptionSide === "CE" ? "call_options" : "put_options",
-        underlying_asset_symbols: pConfig.symbol,
-        expiry_date: vExpiryDate
-    });
-    const objPayload = await fetchJson<DeltaApiResponse<DeltaTickerRow[]>>("/tickers", objParams);
-    const objRows = Array.isArray(objPayload.result) ? objPayload.result : [];
-
-    let objBestMatch: RollingOptionsPtDeLiveOptionContract | null = null;
-    let vBestGap = Number.POSITIVE_INFINITY;
-
-    for (const objRow of objRows) {
-        const vDelta = Math.abs(parseNumber(objRow.greeks?.delta, NaN));
-        const vStrike = parseNumber(objRow.strike_price, NaN);
-        const vMarkPrice = parseNumber(objRow.mark_price, NaN);
-        if (!Number.isFinite(vDelta) || !Number.isFinite(vStrike) || !Number.isFinite(vMarkPrice) || !(vMarkPrice > 0)) {
+    for (const objCandidate of arrExpiryCandidates) {
+        const vExpiryDate = toExpiryDateForDelta(objCandidate.expiryDate);
+        if (!vExpiryDate) {
             continue;
         }
 
-        const vGap = Math.abs(vDelta - Math.abs(pTargetDelta));
-        if (vGap >= vBestGap) {
-            continue;
+        const objParams = new URLSearchParams({
+            contract_types: pOptionSide === "CE" ? "call_options" : "put_options",
+            underlying_asset_symbols: pConfig.symbol,
+            expiry_date: vExpiryDate
+        });
+        const objPayload = await fetchJson<DeltaApiResponse<DeltaTickerRow[]>>("/tickers", objParams);
+        const objRows = Array.isArray(objPayload.result) ? objPayload.result : [];
+
+        let objBestMatch: RollingOptionsPtDeLiveOptionContract | null = null;
+        let vBestGap = Number.POSITIVE_INFINITY;
+
+        for (const objRow of objRows) {
+            const vDelta = Math.abs(parseNumber(objRow.greeks?.delta, NaN));
+            const vStrike = parseNumber(objRow.strike_price, NaN);
+            const vMarkPrice = parseNumber(objRow.mark_price, NaN);
+            if (!Number.isFinite(vDelta) || !Number.isFinite(vStrike) || !Number.isFinite(vMarkPrice) || !(vMarkPrice > 0)) {
+                continue;
+            }
+
+            const vGap = Math.abs(vDelta - Math.abs(pTargetDelta));
+            if (vGap >= vBestGap) {
+                continue;
+            }
+
+            vBestGap = vGap;
+            objBestMatch = {
+                contractSymbol: String(objRow.symbol || "").trim(),
+                optionSide: pOptionSide,
+                strike: vStrike,
+                markPrice: vMarkPrice,
+                bestBid: Number.isFinite(parseNumber(objRow.quotes?.best_bid, NaN)) ? parseNumber(objRow.quotes?.best_bid, NaN) : null,
+                bestAsk: Number.isFinite(parseNumber(objRow.quotes?.best_ask, NaN)) ? parseNumber(objRow.quotes?.best_ask, NaN) : null,
+                delta: parseNumber(objRow.greeks?.delta, 0),
+                gamma: parseNumber(objRow.greeks?.gamma, 0),
+                theta: parseNumber(objRow.greeks?.theta, 0),
+                vega: parseNumber(objRow.greeks?.vega, 0),
+                expiryDate: objCandidate.expiryDate,
+                requestedExpiryDate: pConfig.expiryDate,
+                usedNextDayFallback: objCandidate.usedNextDayFallback
+            };
         }
 
-        vBestGap = vGap;
-        objBestMatch = {
-            contractSymbol: String(objRow.symbol || "").trim(),
-            optionSide: pOptionSide,
-            strike: vStrike,
-            markPrice: vMarkPrice,
-            bestBid: Number.isFinite(parseNumber(objRow.quotes?.best_bid, NaN)) ? parseNumber(objRow.quotes?.best_bid, NaN) : null,
-            bestAsk: Number.isFinite(parseNumber(objRow.quotes?.best_ask, NaN)) ? parseNumber(objRow.quotes?.best_ask, NaN) : null,
-            delta: parseNumber(objRow.greeks?.delta, 0),
-            gamma: parseNumber(objRow.greeks?.gamma, 0),
-            theta: parseNumber(objRow.greeks?.theta, 0),
-            vega: parseNumber(objRow.greeks?.vega, 0)
-        };
+        if (objBestMatch) {
+            return objBestMatch;
+        }
     }
 
-    return objBestMatch;
+    return null;
 }
 
 export async function getLiveOptionTicker(pContractSymbol: string): Promise<RollingOptionsPtDeLiveOptionContract | null> {
@@ -318,6 +350,9 @@ export async function getLiveOptionTicker(pContractSymbol: string): Promise<Roll
         delta: parseNumber(objRow.greeks?.delta, 0),
         gamma: parseNumber(objRow.greeks?.gamma, 0),
         theta: parseNumber(objRow.greeks?.theta, 0),
-        vega: parseNumber(objRow.greeks?.vega, 0)
+        vega: parseNumber(objRow.greeks?.vega, 0),
+        expiryDate: "",
+        requestedExpiryDate: "",
+        usedNextDayFallback: false
     };
 }

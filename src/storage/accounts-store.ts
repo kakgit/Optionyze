@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { hashPassword } from "../security/passwords";
-import { getPostgresPool, isPostgresConfigured } from "./postgres";
+import { getPostgresPool, isPostgresConfigured, runPostgresQueryWithReconnect } from "./postgres";
 import type { AccountRecord } from "../types/models";
 
 const gBootstrapAdminDefaults = {
@@ -147,12 +147,11 @@ export async function getAccountById(pAccountId: string): Promise<AccountRecord 
         return null;
     }
 
-    const objPool = getPostgresPool();
-    const objResult = await objPool.query<AccountRow>(`
+    const objResult = await runPostgresQueryWithReconnect((pPool) => pPool.query<AccountRow>(`
         SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, must_change_password, created_at, updated_at
         FROM optionyze_accounts
         WHERE account_id = $1
-    `, [pAccountId]);
+    `, [pAccountId]));
 
     return mapAccountRow(objResult.rows[0]);
 }

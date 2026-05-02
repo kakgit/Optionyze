@@ -208,6 +208,7 @@ async function getLiveOrFallbackOptionQuote(
 ): Promise<{
     contractName: string;
     strike: number;
+    expiryDate: string;
     entryPrice: number;
     entryDelta: number;
     metadata: Record<string, unknown>;
@@ -225,6 +226,7 @@ async function getLiveOrFallbackOptionQuote(
             return {
                 contractName: objLiveContract.contractSymbol,
                 strike: objLiveContract.strike,
+                expiryDate: objLiveContract.expiryDate,
                 entryPrice: objLiveContract.markPrice,
                 entryDelta: Math.abs(objLiveContract.delta),
                 metadata: {
@@ -234,6 +236,9 @@ async function getLiveOrFallbackOptionQuote(
                     productGamma: objLiveContract.gamma,
                     productTheta: objLiveContract.theta,
                     productVega: objLiveContract.vega,
+                    requestedExpiryDate: objLiveContract.requestedExpiryDate,
+                    resolvedExpiryDate: objLiveContract.expiryDate,
+                    usedNextDayExpiryFallback: Boolean(objLiveContract.usedNextDayFallback),
                     source: objSnapshot.priceSource === "public" ? "demo-manual-option-live" : "demo-manual-option-simulated"
                 }
             };
@@ -246,6 +251,7 @@ async function getLiveOrFallbackOptionQuote(
     return {
         contractName: `${objConfig.contractName} ${pOptionSide}`,
         strike: vFallbackStrike,
+        expiryDate: objConfig.expiryDate,
         entryPrice: getSimulatedOptionPrice(objConfig.symbol, pDelta),
         entryDelta: pDelta,
         metadata: {
@@ -729,7 +735,7 @@ export async function executeRollingOptionsPtDeManualOption(req: Request, res: R
             optionSide: vOptionSide,
             action: vAction,
             strike: objQuote.strike,
-            expiryDate: vExpiryDate,
+            expiryDate: objQuote.expiryDate || vExpiryDate,
             qty: vQty,
             lotSize: vLotSize,
             entryPrice: objQuote.entryPrice,
@@ -765,6 +771,24 @@ export async function executeRollingOptionsPtDeManualOption(req: Request, res: R
         lastCycleAt: vNow,
         lastError: ""
     });
+    const objFallbackPositions = objSavedPositions.filter((objRow) => Boolean(objRow.metadata?.usedNextDayExpiryFallback));
+    if (objFallbackPositions.length > 0) {
+        const objFirstFallback = objFallbackPositions[0];
+        await logRollingOptionsPtDeEvent({
+            userId: vUserId,
+            eventType: "manual_action",
+            severity: "info",
+            title: "Next-Day Expiry Fallback Used",
+            message: `Manual option entry used next-day expiry fallback for ${objFallbackPositions.length} leg(s).`,
+            payload: {
+                symbol: vSymbol,
+                qty: objFallbackPositions.length,
+                reason: "manual_next_day_expiry_fallback",
+                requestedExpiryDate: String(objFirstFallback.metadata?.requestedExpiryDate || vExpiryDate),
+                resolvedExpiryDate: String(objFirstFallback.metadata?.resolvedExpiryDate || objFirstFallback.expiryDate || vExpiryDate)
+            }
+        });
+    }
     await logRollingOptionsPtDeEvent({
         userId: vUserId,
         eventType: "manual_action",
