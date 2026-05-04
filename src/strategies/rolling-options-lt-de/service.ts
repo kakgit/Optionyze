@@ -853,13 +853,20 @@ export class RollingOptionsLtDeService {
             }
         });
 
-        return this.syncRuntime(pUserId, objConfig, objState, {
+        const objRuntime = await this.syncRuntime(pUserId, objConfig, objState, {
             status: objState.running ? "running" : "stopped",
             autoTraderEnabled: objState.running,
             lastSignal: vColorCode === "R" ? "MANUAL_RED" : "MANUAL_GREEN",
             lastCycleAt: objState.lastCycleAt,
             lastError: ""
         });
+
+        if (!objState.running) {
+            return objRuntime;
+        }
+
+        await this.runCycle(pUserId);
+        return await loadRollingOptionsLtDeRuntime(pUserId) || objRuntime;
     }
 
     public async executeStrategy(
