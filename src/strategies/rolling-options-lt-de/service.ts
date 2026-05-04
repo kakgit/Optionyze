@@ -614,27 +614,28 @@ export class RollingOptionsLtDeService {
         pConfig: RollingOptionsPtDeConfig,
         pPositions: RollingOptionsLtDeImportedPositionRecord[],
         pColorCode: "R" | "G"
-    ): Promise<void> {
+    ): Promise<number> {
         const arrFutures = pPositions.filter((objRow) => !isOptionContract(objRow.contractName));
         const arrOptions = pPositions.filter((objRow) => isOptionContract(objRow.contractName));
         if (arrOptions.length > 0 || arrFutures.length <= 0) {
-            return;
+            return 0;
         }
 
         const vTotalFutureQty = arrFutures.reduce((pSum, objRow) => pSum + Math.max(0, Number(objRow.qty || 0)), 0);
         if (!(vTotalFutureQty > 0)) {
-            return;
+            return 0;
         }
 
         const vQtyPct = pColorCode === "R" ? pConfig.redOptionQtyPct : pConfig.greenOptionQtyPct;
         const vOptionQty = Math.max(1, Math.round(vTotalFutureQty * vQtyPct / 100));
-        await this.openOptionEntries(
+        const arrCreated = await this.openOptionEntries(
             pUserId,
             pConfig,
             vOptionQty,
             Number(pConfig.newDelta || 0.53),
             pColorCode === "R" ? "Renko RED option entry" : "Renko GREEN option entry"
         );
+        return arrCreated.length;
     }
 
     private async closeImportedPositionOnDelta(
@@ -878,6 +879,7 @@ export class RollingOptionsLtDeService {
         const arrExistingPositions = await listRollingOptionsLtDeImportedPositions(pUserId);
         const arrExistingFutures = arrExistingPositions.filter((objRow) => !isOptionContract(objRow.contractName));
         const arrExistingOptions = arrExistingPositions.filter((objRow) => isOptionContract(objRow.contractName));
+        const bHadTrackedOptions = arrExistingOptions.length > 0;
         let bOpenedFuture = false;
         let bOpenedOption = false;
 
@@ -897,16 +899,13 @@ export class RollingOptionsLtDeService {
             .reduce((pSum, objRow) => pSum + Math.max(0, Number(objRow.qty || 0)), 0);
 
         if (arrExistingOptions.length <= 0 && vTotalFutureQty > 0) {
-            const vQtyPct = vRenkoColor === "R" ? objConfig.redOptionQtyPct : objConfig.greenOptionQtyPct;
-            const vOptionQty = this.getRenkoOptionQty(vTotalFutureQty, vQtyPct);
-            const arrCreatedOptions = await this.openOptionEntries(
+            const arrCreatedOptions = await this.handleRenkoOptionEntry(
                 pUserId,
                 objConfig,
-                vOptionQty,
-                Number(objConfig.newDelta || 0.53),
-                vRenkoColor === "R" ? "Strategy initial option entry from RED Renko" : "Strategy initial option entry from GREEN Renko"
+                arrUpdatedPositions,
+                vRenkoColor
             );
-            bOpenedOption = arrCreatedOptions.length > 0;
+            bOpenedOption = arrCreatedOptions > 0;
         }
 
         objState.lastCycleAt = new Date().toISOString();
@@ -935,10 +934,12 @@ export class RollingOptionsLtDeService {
         });
 
         return {
-            status: "success",
+            status: bOpenedFuture || bOpenedOption ? "success" : "warning",
             message: bOpenedFuture || bOpenedOption
                 ? `Live strategy executed using ${vRenkoColor === "R" ? "RED" : "GREEN"} Renko sizing.`
-                : "Strategy execution skipped because open tracked positions already exist."
+                : (bHadTrackedOptions
+                    ? "Strategy execution skipped because option positions are already tracked."
+                    : "No option entry was placed from the current Renko state.")
         };
     }
 
@@ -974,6 +975,16 @@ export class RollingOptionsLtDeService {
                 }
                 const arrPositionsBeforeEntry = await listRollingOptionsLtDeImportedPositions(pUserId);
                 await this.handleRenkoOptionEntry(pUserId, objConfig, arrPositionsBeforeEntry, vRenkoSignal);
+            }
+
+            if (objState.running && objState.renko.lastColor) {
+                const arrPositionsBeforeFallbackEntry = await listRollingOptionsLtDeImportedPositions(pUserId);
+                await this.handleRenkoOptionEntry(
+                    pUserId,
+                    objConfig,
+                    arrPositionsBeforeFallbackEntry,
+                    objState.renko.lastColor === "G" ? "G" : "R"
+                );
             }
 
             const arrRefreshedPositions = await this.refreshImportedPositions(
