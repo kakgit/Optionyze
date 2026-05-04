@@ -6,6 +6,7 @@
         connectionStateValue: document.getElementById("rollingLiveConnectionStateValue"),
         lastCheckedValue: document.getElementById("rollingLiveLastCheckedValue"),
         whitelistIpValue: document.getElementById("rollingLiveWhitelistIpValue"),
+        copyWhitelistIpButton: document.getElementById("btnRollingLiveCopyWhitelistIp"),
         symbol: document.getElementById("ddlRollingLiveSymbol"),
         lotSize: document.getElementById("txtRollingLiveLotSize"),
         futQty: document.getElementById("txtRollingLiveFutQty"),
@@ -76,6 +77,7 @@
     let gAutoTraderEnabled = false;
     let gIsApplyingState = false;
     let gSaveTimer = null;
+    let gPreviousOpenPositionLtps = new Map();
 
     function formatDateInputValue(dateValue) {
         if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) {
@@ -155,6 +157,24 @@
             return "-";
         }
         return `${vNumber.toFixed(2)} USD`;
+    }
+
+    function getLtpBlinkClass(positionId, markPrice) {
+        const currentLtp = Number(markPrice);
+        if (!positionId || !Number.isFinite(currentLtp)) {
+            return "";
+        }
+        const previousLtp = gPreviousOpenPositionLtps.get(positionId);
+        if (!Number.isFinite(previousLtp)) {
+            return "";
+        }
+        if (currentLtp > previousLtp) {
+            return "rolling-demo-ltp-up";
+        }
+        if (currentLtp < previousLtp) {
+            return "rolling-demo-ltp-down";
+        }
+        return "";
     }
 
     function sumNumeric(rows, key) {
@@ -404,6 +424,11 @@
         if (ids.killSwitchButton instanceof HTMLButtonElement) {
             ids.killSwitchButton.disabled = !gSelectedApiProfileId;
         }
+
+        if (ids.copyWhitelistIpButton instanceof HTMLButtonElement) {
+            const vIp = String(ids.whitelistIpValue?.textContent || "").trim();
+            ids.copyWhitelistIpButton.disabled = !vIp || vIp === "-";
+        }
     }
 
     function applyConnectionStatus(connectionStatus) {
@@ -551,6 +576,31 @@
         });
         applyRuntimeStatus(objResult?.data || {});
         return objResult;
+    }
+
+    async function copyWhitelistIp() {
+        const vIp = String(ids.whitelistIpValue?.textContent || "").trim();
+        if (!vIp || vIp === "-") {
+            throw new Error("Whitelist IP is not available yet. Run connection check first.");
+        }
+
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+            await navigator.clipboard.writeText(vIp);
+            return vIp;
+        }
+
+        const objInput = document.createElement("input");
+        objInput.value = vIp;
+        document.body.appendChild(objInput);
+        objInput.select();
+        objInput.setSelectionRange(0, objInput.value.length);
+        const bCopied = document.execCommand("copy");
+        document.body.removeChild(objInput);
+        if (!bCopied) {
+            throw new Error("Unable to copy whitelist IP.");
+        }
+
+        return vIp;
     }
 
     async function placeManualFuture(action) {
@@ -736,35 +786,41 @@
         }
 
         if (!arrRows.length) {
-            ids.openPositionsBody.innerHTML = "<tr><td colspan=\"15\" class=\"rolling-demo-empty\">No imported live positions are currently shown.</td></tr>";
+            gPreviousOpenPositionLtps = new Map();
+            ids.openPositionsBody.innerHTML = "<tr><td colspan=\"14\" class=\"rolling-demo-empty\">No imported live positions are currently shown.</td></tr>";
             if (ids.openCount) {
                 ids.openCount.textContent = "0";
             }
             return;
         }
 
+        const nextLtps = new Map();
         const openRowsHtml = arrRows.map(function (row) {
             const vSide = String(row.side || "-").trim().toUpperCase();
             const vContractName = String(row.contractName || "-");
             const vLotSize = getLotSizeForContract(vContractName);
-            const vIsOption = isOptionContract(vContractName);
             const vImportId = String(row.importId || vContractName || "");
-            const vEntryDelta = vIsOption ? fmt(Number(ids.optionNewDelta?.value || 0.53), 2) : "-";
+            const vEntryDelta = Number.isFinite(Number(row.entryDelta)) ? fmt(row.entryDelta, 2) : "-";
+            const vCurrentDelta = Number.isFinite(Number(row.currentDelta)) ? fmt(row.currentDelta, 2) : "-";
+            const vLtpBlinkClass = getLtpBlinkClass(vImportId, row.markPrice);
+            const vCurrentLtp = Number(row.markPrice);
+            if (vImportId && Number.isFinite(vCurrentLtp)) {
+                nextLtps.set(vImportId, vCurrentLtp);
+            }
             return `
                 <tr>
                     <td>${escapeHtml(vEntryDelta)}</td>
-                    <td>${escapeHtml(vEntryDelta)}</td>
+                    <td>${escapeHtml(vCurrentDelta)}</td>
                     <td>${escapeHtml(vContractName)}</td>
                     <td>${escapeHtml(vSide || "-")}</td>
                     <td>${escapeHtml(fmt(vLotSize, 3))}</td>
                     <td>${escapeHtml(fmt(row.qty, 0))}</td>
                     <td>${escapeHtml(vSide === "BUY" ? fmt(row.entryPrice, 2) : "-")}</td>
                     <td>${escapeHtml(vSide === "SELL" ? fmt(row.entryPrice, 2) : "-")}</td>
-                    <td>${escapeHtml(fmt(row.markPrice, 2))}</td>
-                    <td>-</td>
+                    <td class="${vLtpBlinkClass}">${escapeHtml(fmt(row.markPrice, 2))}</td>
+                    <td>${escapeHtml(fmt(row.charges, 3))}</td>
                     <td>${escapeHtml(fmt(row.pnl, 2))}</td>
-                    <td>-</td>
-                    <td>-</td>
+                    <td>${escapeHtml(formatDateTime(row.openedAt))}</td>
                     <td>OPEN</td>
                     <td>
                         <button class="rolling-demo-icon-btn primary rolling-live-close-open-position" type="button" data-import-id="${escapeHtml(vImportId)}" title="Close this open position" aria-label="Close this open position">
@@ -786,16 +842,17 @@
                 </tr>
             `;
         }).join("");
-        const totalCharges = 0;
+        const totalCharges = sumNumeric(arrRows, "charges");
         const totalPnl = sumNumeric(arrRows, "pnl");
         ids.openPositionsBody.innerHTML = `${openRowsHtml}
             <tr class="rolling-demo-total-row">
                 <td colspan="9">Total</td>
                 <td class="rolling-demo-total-value">${escapeHtml(fmt(totalCharges, 3))}</td>
                 <td class="rolling-demo-total-value">${escapeHtml(fmt(totalPnl, 3))}</td>
-                <td colspan="4">-</td>
+                <td colspan="3">-</td>
             </tr>
         `;
+        gPreviousOpenPositionLtps = nextLtps;
 
         if (ids.openCount) {
             ids.openCount.textContent = String(arrRows.length);
@@ -1239,6 +1296,13 @@
             return loadEvents().catch(function () { return undefined; });
         }).catch(function (objError) {
             setStatus(ids.pageStatus, objError instanceof Error ? objError.message : "Unable to toggle Renko box.", "danger");
+        });
+    });
+    ids.copyWhitelistIpButton?.addEventListener("click", function () {
+        void copyWhitelistIp().then(function (vIp) {
+            setStatus(ids.pageStatus, `Whitelist IP copied: ${vIp}`, "success");
+        }).catch(function (objError) {
+            setStatus(ids.pageStatus, objError instanceof Error ? objError.message : "Unable to copy whitelist IP.", "warning");
         });
     });
     ids.importOverlay?.addEventListener("click", closeImportModal);

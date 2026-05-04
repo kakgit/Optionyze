@@ -94,26 +94,48 @@ async function fetchJson<T>(pPath: string, pSearchParams?: URLSearchParams): Pro
 }
 
 class DeltaPublicTickerFeed {
+    private static readonly SYMBOL_TTL_MS = 15 * 60 * 1000;
     private ws: WebSocket | null = null;
     private reconnectTimer: NodeJS.Timeout | null = null;
     private readonly desiredSymbols = new Set<string>();
+    private readonly lastRequestedAtBySymbol = new Map<string, number>();
+    private readonly symbolsByOwner = new Map<string, Set<string>>();
     private readonly tickerBySymbol = new Map<string, DeltaTickerRow>();
     private isOpen = false;
     private isConnecting = false;
 
     public ensureSymbols(pSymbols: string[]): void {
+        this.ensureSymbolsForOwner("__shared__", pSymbols);
+    }
+
+    public ensureSymbolsForOwner(pOwnerId: string, pSymbols: string[]): void {
+        this.pruneExpiredSymbols();
+        const vOwnerId = String(pOwnerId || "").trim() || "__shared__";
+        const arrSymbols = pSymbols
+            .map((pSymbolRaw) => String(pSymbolRaw || "").trim())
+            .filter(Boolean);
+        const objNextSymbols = new Set(arrSymbols);
+        const objPreviousSymbols = this.symbolsByOwner.get(vOwnerId) || new Set<string>();
+        this.symbolsByOwner.set(vOwnerId, objNextSymbols);
+
+        const vNowMs = Date.now();
+        for (const vSymbol of objNextSymbols) {
+            this.lastRequestedAtBySymbol.set(vSymbol, vNowMs);
+        }
+
         let bChanged = false;
-        for (const vSymbolRaw of pSymbols) {
-            const vSymbol = String(vSymbolRaw || "").trim();
-            if (!vSymbol) {
-                continue;
+        for (const vSymbol of objNextSymbols) {
+            if (!objPreviousSymbols.has(vSymbol) || !this.desiredSymbols.has(vSymbol)) {
+                bChanged = true;
             }
-            if (!this.desiredSymbols.has(vSymbol)) {
-                this.desiredSymbols.add(vSymbol);
+        }
+        for (const vSymbol of objPreviousSymbols) {
+            if (!objNextSymbols.has(vSymbol)) {
                 bChanged = true;
             }
         }
 
+        this.rebuildDesiredSymbols();
         if (!bChanged && this.ws && this.isOpen) {
             return;
         }
@@ -124,8 +146,38 @@ class DeltaPublicTickerFeed {
         }
     }
 
+    public releaseOwner(pOwnerId: string): void {
+        const vOwnerId = String(pOwnerId || "").trim() || "__shared__";
+        if (!this.symbolsByOwner.delete(vOwnerId)) {
+            return;
+        }
+        this.rebuildDesiredSymbols();
+        this.pruneExpiredSymbols();
+        if (this.ws && this.isOpen) {
+            this.subscribeAll();
+        }
+    }
+
     public getTicker(pSymbol: string): DeltaTickerRow | null {
         return this.tickerBySymbol.get(String(pSymbol || "").trim()) || null;
+    }
+
+    public getOwnerSymbols(pOwnerId: string): string[] {
+        return [...(this.symbolsByOwner.get(String(pOwnerId || "").trim() || "__shared__") || new Set<string>())].sort();
+    }
+
+    public getStats(): {
+        connectionState: "open" | "connecting" | "closed";
+        desiredSymbolCount: number;
+        cachedTickerCount: number;
+        ownerCount: number;
+    } {
+        return {
+            connectionState: this.isOpen ? "open" : (this.isConnecting ? "connecting" : "closed"),
+            desiredSymbolCount: this.desiredSymbols.size,
+            cachedTickerCount: this.tickerBySymbol.size,
+            ownerCount: this.symbolsByOwner.size
+        };
     }
 
     private ensureConnection(): void {
@@ -166,6 +218,36 @@ class DeltaPublicTickerFeed {
             this.isOpen = false;
             this.isConnecting = false;
         });
+    }
+
+    private pruneExpiredSymbols(): void {
+        const vNowMs = Date.now();
+        for (const vSymbol of [...this.desiredSymbols]) {
+            const vLastRequestedAtMs = Number(this.lastRequestedAtBySymbol.get(vSymbol) || 0);
+            if ((vNowMs - vLastRequestedAtMs) <= DeltaPublicTickerFeed.SYMBOL_TTL_MS) {
+                continue;
+            }
+            this.lastRequestedAtBySymbol.delete(vSymbol);
+            this.tickerBySymbol.delete(vSymbol);
+        }
+        for (const [vOwnerId, objSymbols] of [...this.symbolsByOwner.entries()]) {
+            const objFiltered = new Set([...objSymbols].filter((vSymbol) => this.lastRequestedAtBySymbol.has(vSymbol)));
+            if (objFiltered.size > 0) {
+                this.symbolsByOwner.set(vOwnerId, objFiltered);
+                continue;
+            }
+            this.symbolsByOwner.delete(vOwnerId);
+        }
+        this.rebuildDesiredSymbols();
+    }
+
+    private rebuildDesiredSymbols(): void {
+        this.desiredSymbols.clear();
+        for (const objSymbols of this.symbolsByOwner.values()) {
+            for (const vSymbol of objSymbols) {
+                this.desiredSymbols.add(vSymbol);
+            }
+        }
     }
 
     private scheduleReconnect(): void {
@@ -234,6 +316,27 @@ const gDeltaPublicTickerFeed = new DeltaPublicTickerFeed();
 
 export function ensureLiveTickerSymbols(pSymbols: string[]): void {
     gDeltaPublicTickerFeed.ensureSymbols(pSymbols);
+}
+
+export function ensureLiveTickerSymbolsForOwner(pOwnerId: string, pSymbols: string[]): void {
+    gDeltaPublicTickerFeed.ensureSymbolsForOwner(pOwnerId, pSymbols);
+}
+
+export function releaseLiveTickerSymbolsForOwner(pOwnerId: string): void {
+    gDeltaPublicTickerFeed.releaseOwner(pOwnerId);
+}
+
+export function getLiveTickerFeedStats(): {
+    connectionState: "open" | "connecting" | "closed";
+    desiredSymbolCount: number;
+    cachedTickerCount: number;
+    ownerCount: number;
+} {
+    return gDeltaPublicTickerFeed.getStats();
+}
+
+export function getLiveTickerSymbolsForOwner(pOwnerId: string): string[] {
+    return gDeltaPublicTickerFeed.getOwnerSymbols(pOwnerId);
 }
 
 export async function getLiveMarketSnapshot(

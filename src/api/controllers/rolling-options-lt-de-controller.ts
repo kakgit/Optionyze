@@ -453,9 +453,13 @@ function mapLivePosition(pRow: DeltaPositionRow, pIndex: number) {
         qty: Math.abs(vNetSize),
         entryPrice: toFiniteNumber(pRow.entry_price, 0),
         markPrice: toFiniteNumber(pRow.mark_price, 0),
+        entryDelta: null,
+        currentDelta: null,
+        charges: 0,
         pnl: Number((toFiniteNumber(pRow.realized_pnl, 0) + toFiniteNumber(pRow.unrealized_pnl, 0)).toFixed(2)),
         margin: toFiniteNumber(pRow.margin, 0),
-        liquidationPrice: toFiniteNumber(pRow.liquidation_price, 0)
+        liquidationPrice: toFiniteNumber(pRow.liquidation_price, 0),
+        openedAt: new Date().toISOString()
     };
 }
 
@@ -952,9 +956,13 @@ export async function executeRollingOptionsLtDeManualFuture(req: Request, res: R
             qty: vQty,
             entryPrice: Number(objSnapshot.futuresPrice || 0),
             markPrice: Number(objSnapshot.futuresPrice || 0),
+            entryDelta: null,
+            currentDelta: null,
+            charges: 0,
             pnl: 0,
             margin: 0,
             liquidationPrice: 0,
+            openedAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         }]);
 
@@ -1125,9 +1133,13 @@ export async function executeRollingOptionsLtDeManualOption(req: Request, res: R
                 qty: vQty,
                 entryPrice: Number(objContract.markPrice || 0),
                 markPrice: Number(objContract.markPrice || 0),
+                entryDelta: Number.isFinite(Number(objContract.delta)) ? Math.abs(Number(objContract.delta)) : null,
+                currentDelta: Number.isFinite(Number(objContract.delta)) ? Math.abs(Number(objContract.delta)) : null,
+                charges: 0,
                 pnl: 0,
                 margin: 0,
                 liquidationPrice: 0,
+                openedAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
             } satisfies RollingOptionsLtDeImportedPositionRecord)));
         }
@@ -1356,9 +1368,13 @@ export async function saveRollingOptionsLtDeOpenPositions(req: Request, res: Res
         qty: Number(objRow.qty || 0),
         entryPrice: Number(objRow.entryPrice || 0),
         markPrice: Number(objRow.markPrice || 0),
+        entryDelta: objRow.entryDelta === null || objRow.entryDelta === undefined ? null : Number(objRow.entryDelta),
+        currentDelta: objRow.currentDelta === null || objRow.currentDelta === undefined ? null : Number(objRow.currentDelta),
+        charges: Number(objRow.charges || 0),
         pnl: Number(objRow.pnl || 0),
         margin: Number(objRow.margin || 0),
         liquidationPrice: Number(objRow.liquidationPrice || 0),
+        openedAt: String(objRow.openedAt || "").trim(),
         updatedAt: ""
     }) satisfies RollingOptionsLtDeImportedPositionRecord));
     await logRollingOptionsLtDeEvent({

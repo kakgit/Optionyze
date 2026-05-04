@@ -16,10 +16,13 @@ import {
 } from "../../storage/rolling-options-lt-de-runtime-store";
 import { buildConfigFromUiState, updateRenkoState } from "../rolling-options-pt-de/engine";
 import {
-    ensureLiveTickerSymbols,
+    ensureLiveTickerSymbolsForOwner,
     findBestLiveOptionContract,
+    getLiveTickerFeedStats,
+    getLiveTickerSymbolsForOwner,
     getLiveMarketSnapshot,
-    getLiveOptionTicker
+    getLiveOptionTicker,
+    releaseLiveTickerSymbolsForOwner
 } from "../rolling-options-pt-de/market-data";
 import { logRollingOptionsLtDeEvent } from "./event-logger";
 import type { RollingOptionsPtDeConfig, RollingOptionsPtDeEngineState, RollingOptionsPtDeMarketSnapshot } from "../rolling-options-pt-de/types";
@@ -130,6 +133,18 @@ export class RollingOptionsLtDeService {
         return false;
     }
 
+    private getTickerOwnerId(pUserId: string): string {
+        return `rolling-options-lt-de:${String(pUserId || "").trim()}`;
+    }
+
+    private refreshTickerScope(pUserId: string, pSymbols: string[]): void {
+        ensureLiveTickerSymbolsForOwner(this.getTickerOwnerId(pUserId), pSymbols);
+    }
+
+    private releaseTickerScope(pUserId: string): void {
+        releaseLiveTickerSymbolsForOwner(this.getTickerOwnerId(pUserId));
+    }
+
     private async getDeltaClient(pUserId: string): Promise<{ client: any; profileId: string; }> {
         const objProfile = await loadRollingOptionsLtDeProfile(pUserId);
         const vProfileId = String(objProfile?.selectedApiProfileId || "").trim();
@@ -197,9 +212,13 @@ export class RollingOptionsLtDeService {
             qty: Math.abs(vNetSize),
             entryPrice: toFiniteNumber(pRow.entry_price, 0),
             markPrice: toFiniteNumber(pRow.mark_price, 0),
+            entryDelta: null,
+            currentDelta: null,
+            charges: 0,
             pnl: Number((toFiniteNumber(pRow.realized_pnl, 0) + toFiniteNumber(pRow.unrealized_pnl, 0)).toFixed(2)),
             margin: toFiniteNumber(pRow.margin, 0),
             liquidationPrice: toFiniteNumber(pRow.liquidation_price, 0),
+            openedAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
     }
@@ -225,7 +244,19 @@ export class RollingOptionsLtDeService {
         const arrLive = await this.fetchCurrentDeltaPositions(pUserId, vSymbol);
         const objLiveByContract = new Map(arrLive.map((objRow) => [objRow.contractName, objRow]));
         const arrReconciled = arrSaved
-            .map((objSavedRow) => objLiveByContract.get(objSavedRow.contractName) || null)
+            .map((objSavedRow) => {
+                const objLiveRow = objLiveByContract.get(objSavedRow.contractName);
+                if (!objLiveRow) {
+                    return null;
+                }
+                return {
+                    ...objLiveRow,
+                    entryDelta: objSavedRow.entryDelta ?? objLiveRow.entryDelta,
+                    currentDelta: objSavedRow.currentDelta ?? objLiveRow.currentDelta,
+                    charges: objSavedRow.charges ?? objLiveRow.charges,
+                    openedAt: objSavedRow.openedAt || objLiveRow.openedAt
+                };
+            })
             .filter((objRow): objRow is RollingOptionsLtDeImportedPositionRecord => Boolean(objRow));
 
         await this.persistImportedPositions(pUserId, arrReconciled);
@@ -374,7 +405,6 @@ export class RollingOptionsLtDeService {
     }
 
     private async getMarketSnapshot(pConfig: RollingOptionsPtDeConfig): Promise<RollingOptionsPtDeMarketSnapshot> {
-        ensureLiveTickerSymbols([pConfig.contractName]);
         return getLiveMarketSnapshot(pConfig);
     }
 
@@ -383,6 +413,15 @@ export class RollingOptionsLtDeService {
         pSnapshot: RollingOptionsPtDeMarketSnapshot,
         pPositions: RollingOptionsLtDeImportedPositionRecord[]
     ): Promise<EnrichedImportedPosition[]> {
+        const arrOptionContracts = pPositions
+            .filter((objPosition) => isOptionContract(objPosition.contractName))
+            .map((objPosition) => String(objPosition.contractName || "").trim())
+            .filter(Boolean);
+        const objTickerByContract = new Map<string, Awaited<ReturnType<typeof getLiveOptionTicker>>>();
+        await Promise.all(arrOptionContracts.map(async (pContractName) => {
+            objTickerByContract.set(pContractName, await getLiveOptionTicker(pContractName));
+        }));
+
         const arrEnriched: EnrichedImportedPosition[] = [];
         for (const objPosition of pPositions) {
             const bIsOption = isOptionContract(objPosition.contractName);
@@ -391,7 +430,9 @@ export class RollingOptionsLtDeService {
                 arrEnriched.push({
                     ...objPosition,
                     markPrice: vMarkPrice,
-                    pnl: calculateImportedPnl(objPosition, vMarkPrice),
+                    pnl: Number.isFinite(Number(objPosition.pnl))
+                        ? Number(objPosition.pnl)
+                        : calculateImportedPnl(objPosition, vMarkPrice),
                     updatedAt: new Date().toISOString(),
                     currentDelta: null,
                     isOption: false
@@ -399,7 +440,7 @@ export class RollingOptionsLtDeService {
                 continue;
             }
 
-            const objTicker = await getLiveOptionTicker(objPosition.contractName);
+            const objTicker = objTickerByContract.get(String(objPosition.contractName || "").trim()) || null;
             const vMarkPrice = Number(objTicker?.markPrice || objPosition.markPrice || objPosition.entryPrice || 0);
             const vCurrentDelta = objTicker?.delta === null || objTicker?.delta === undefined
                 ? null
@@ -407,7 +448,10 @@ export class RollingOptionsLtDeService {
             arrEnriched.push({
                 ...objPosition,
                 markPrice: vMarkPrice,
-                pnl: calculateImportedPnl(objPosition, vMarkPrice),
+                entryDelta: objPosition.entryDelta ?? (Number.isFinite(Number(vCurrentDelta)) ? Number(vCurrentDelta) : null),
+                pnl: Number.isFinite(Number(objPosition.pnl))
+                    ? Number(objPosition.pnl)
+                    : calculateImportedPnl(objPosition, vMarkPrice),
                 updatedAt: new Date().toISOString(),
                 currentDelta: Number.isFinite(Number(vCurrentDelta)) ? Number(vCurrentDelta) : null,
                 isOption: true
@@ -466,9 +510,13 @@ export class RollingOptionsLtDeService {
             qty: Math.max(1, Math.floor(Number(pQty || 1))),
             entryPrice: Number(objSnapshot.futuresPrice || 0),
             markPrice: Number(objSnapshot.futuresPrice || 0),
+            entryDelta: null,
+            currentDelta: null,
+            charges: 0,
             pnl: 0,
             margin: 0,
             liquidationPrice: 0,
+            openedAt: objSnapshot.ts,
             updatedAt: objSnapshot.ts
         };
         await this.appendImportedPosition(pUserId, objTrackedPosition);
@@ -516,9 +564,13 @@ export class RollingOptionsLtDeService {
             qty: 1,
             entryPrice: Number(pSnapshot.futuresPrice || 0),
             markPrice: Number(pSnapshot.futuresPrice || 0),
+            entryDelta: null,
+            currentDelta: null,
+            charges: 0,
             pnl: 0,
             margin: 0,
             liquidationPrice: 0,
+            openedAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         });
         await logRollingOptionsLtDeEvent({
@@ -582,9 +634,13 @@ export class RollingOptionsLtDeService {
                 qty: pQty,
                 entryPrice: Number(objContract.markPrice || 0),
                 markPrice: Number(objContract.markPrice || 0),
+                entryDelta: Number.isFinite(Number(objContract.delta)) ? Math.abs(Number(objContract.delta)) : null,
+                currentDelta: Number.isFinite(Number(objContract.delta)) ? Math.abs(Number(objContract.delta)) : null,
+                charges: 0,
                 pnl: 0,
                 margin: 0,
                 liquidationPrice: 0,
+                openedAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
             });
         }
@@ -708,6 +764,8 @@ export class RollingOptionsLtDeService {
         pOverrides: Partial<RollingOptionsLtDeRuntimeRecord> = {}
     ): Promise<RollingOptionsLtDeRuntimeRecord> {
         const arrImported = await listRollingOptionsLtDeImportedPositions(pUserId);
+        const arrWatchedSymbols = getLiveTickerSymbolsForOwner(this.getTickerOwnerId(pUserId));
+        const objFeedStats = getLiveTickerFeedStats();
         const vLastSignal = pOverrides.lastSignal
             || (pState.renko.lastColor === "R" ? "RED" : (pState.renko.lastColor === "G" ? "GREEN" : "IDLE"));
         return {
@@ -734,6 +792,12 @@ export class RollingOptionsLtDeService {
                 renkoLastDir: pState.renko.lastDir,
                 renkoLastColor: pState.renko.lastColor,
                 marketSource: pState.market.lastSource,
+                marketDataOwnerId: this.getTickerOwnerId(pUserId),
+                marketDataConnectionState: objFeedStats.connectionState,
+                marketDataOwnerCount: objFeedStats.ownerCount,
+                marketDataDesiredSymbolCount: objFeedStats.desiredSymbolCount,
+                marketDataCachedTickerCount: objFeedStats.cachedTickerCount,
+                marketDataWatchedSymbols: arrWatchedSymbols,
                 importedOpenPositions: arrImported.length,
                 importedOptionPositions: arrImported.filter((objRow) => String(objRow.contractName || "").toUpperCase().startsWith("C-") || String(objRow.contractName || "").toUpperCase().startsWith("P-")).length,
                 importedFuturePositions: arrImported.filter((objRow) => !(String(objRow.contractName || "").toUpperCase().startsWith("C-") || String(objRow.contractName || "").toUpperCase().startsWith("P-"))).length
@@ -784,6 +848,7 @@ export class RollingOptionsLtDeService {
             clearInterval(objState.timerRef);
             objState.timerRef = null;
         }
+        this.releaseTickerScope(pUserId);
         return this.syncRuntime(pUserId, objConfig, objState, {
             status: "stopped",
             autoTraderEnabled: false,
@@ -961,7 +1026,7 @@ export class RollingOptionsLtDeService {
             const objConfig = await this.loadConfig(pUserId);
             const objProfile = await loadRollingOptionsLtDeProfile(pUserId);
             const arrCurrentPositions = await this.reconcileUserPositions(pUserId, objConfig.symbol);
-            ensureLiveTickerSymbols([
+            this.refreshTickerScope(pUserId, [
                 objConfig.contractName,
                 ...arrCurrentPositions
                     .filter((objRow) => isOptionContract(objRow.contractName))
@@ -1007,9 +1072,13 @@ export class RollingOptionsLtDeService {
                 qty: objRow.qty,
                 entryPrice: objRow.entryPrice,
                 markPrice: objRow.markPrice,
+                entryDelta: objRow.entryDelta,
+                currentDelta: objRow.currentDelta,
+                charges: objRow.charges,
                 pnl: objRow.pnl,
                 margin: objRow.margin,
                 liquidationPrice: objRow.liquidationPrice,
+                openedAt: objRow.openedAt,
                 updatedAt: objRow.updatedAt
             })));
 

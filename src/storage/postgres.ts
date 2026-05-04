@@ -264,12 +264,32 @@ export async function ensurePostgresSchema(): Promise<void> {
             qty NUMERIC NOT NULL DEFAULT 0,
             entry_price NUMERIC NOT NULL DEFAULT 0,
             mark_price NUMERIC NOT NULL DEFAULT 0,
+            entry_delta NUMERIC NULL,
+            current_delta NUMERIC NULL,
+            charges NUMERIC NOT NULL DEFAULT 0,
             pnl NUMERIC NOT NULL DEFAULT 0,
             margin NUMERIC NOT NULL DEFAULT 0,
             liquidation_price NUMERIC NOT NULL DEFAULT 0,
+            opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (user_id, import_id)
         );
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_positions
+        ADD COLUMN IF NOT EXISTS charges NUMERIC NOT NULL DEFAULT 0;
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_positions
+        ADD COLUMN IF NOT EXISTS entry_delta NUMERIC NULL;
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_positions
+        ADD COLUMN IF NOT EXISTS current_delta NUMERIC NULL;
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_positions
+        ADD COLUMN IF NOT EXISTS opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     `);
 
     await objPool.query(`

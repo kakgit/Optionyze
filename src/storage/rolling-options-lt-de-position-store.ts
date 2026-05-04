@@ -10,9 +10,13 @@ export interface RollingOptionsLtDeImportedPositionRecord {
     qty: number;
     entryPrice: number;
     markPrice: number;
+    entryDelta: number | null;
+    currentDelta: number | null;
+    charges: number;
     pnl: number;
     margin: number;
     liquidationPrice: number;
+    openedAt: string;
     updatedAt: string;
 }
 
@@ -24,9 +28,13 @@ interface RollingOptionsLtDeImportedPositionRow {
     qty: number;
     entry_price: number;
     mark_price: number;
+    entry_delta: number | null;
+    current_delta: number | null;
+    charges: number;
     pnl: number;
     margin: number;
     liquidation_price: number;
+    opened_at: string | Date;
     updated_at: string | Date;
 }
 
@@ -37,6 +45,7 @@ async function loadAllJson(): Promise<RollingOptionsLtDeImportedPositionRecord[]
 }
 
 function mapRow(pRow: RollingOptionsLtDeImportedPositionRow): RollingOptionsLtDeImportedPositionRecord {
+    const vOpenedAt = pRow.opened_at ? new Date(pRow.opened_at) : new Date(pRow.updated_at);
     return {
         userId: String(pRow.user_id),
         importId: String(pRow.import_id),
@@ -45,9 +54,13 @@ function mapRow(pRow: RollingOptionsLtDeImportedPositionRow): RollingOptionsLtDe
         qty: Number(pRow.qty || 0),
         entryPrice: Number(pRow.entry_price || 0),
         markPrice: Number(pRow.mark_price || 0),
+        entryDelta: pRow.entry_delta === null || pRow.entry_delta === undefined ? null : Number(pRow.entry_delta),
+        currentDelta: pRow.current_delta === null || pRow.current_delta === undefined ? null : Number(pRow.current_delta),
+        charges: Number(pRow.charges || 0),
         pnl: Number(pRow.pnl || 0),
         margin: Number(pRow.margin || 0),
         liquidationPrice: Number(pRow.liquidation_price || 0),
+        openedAt: Number.isNaN(vOpenedAt.getTime()) ? new Date(pRow.updated_at).toISOString() : vOpenedAt.toISOString(),
         updatedAt: new Date(pRow.updated_at).toISOString()
     };
 }
@@ -57,7 +70,7 @@ export async function listRollingOptionsLtDeImportedPositions(pUserId: string): 
     if (isPostgresConfigured()) {
         const objPool = getPostgresPool();
         const objResult = await objPool.query<RollingOptionsLtDeImportedPositionRow>(`
-            SELECT user_id, import_id, contract_name, side, qty, entry_price, mark_price, pnl, margin, liquidation_price, updated_at
+            SELECT user_id, import_id, contract_name, side, qty, entry_price, mark_price, entry_delta, current_delta, charges, pnl, margin, liquidation_price, opened_at, updated_at
             FROM optionyze_rolling_options_lt_de_positions
             WHERE user_id = $1
             ORDER BY updated_at DESC, import_id ASC
@@ -84,9 +97,13 @@ export async function replaceRollingOptionsLtDeImportedPositions(
         qty: Number(pPosition.qty || 0),
         entryPrice: Number(pPosition.entryPrice || 0),
         markPrice: Number(pPosition.markPrice || 0),
+        entryDelta: pPosition.entryDelta === null || pPosition.entryDelta === undefined ? null : Number(pPosition.entryDelta),
+        currentDelta: pPosition.currentDelta === null || pPosition.currentDelta === undefined ? null : Number(pPosition.currentDelta),
+        charges: Number(pPosition.charges || 0),
         pnl: Number(pPosition.pnl || 0),
         margin: Number(pPosition.margin || 0),
         liquidationPrice: Number(pPosition.liquidationPrice || 0),
+        openedAt: String(pPosition.openedAt || "").trim() || new Date().toISOString(),
         updatedAt: new Date().toISOString()
     })).filter((objRow) => Boolean(objRow.importId));
 
@@ -103,11 +120,15 @@ export async function replaceRollingOptionsLtDeImportedPositions(
                     qty,
                     entry_price,
                     mark_price,
+                    entry_delta,
+                    current_delta,
+                    charges,
                     pnl,
                     margin,
                     liquidation_price,
+                    opened_at,
                     updated_at
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
             `, [
                 objPosition.userId,
                 objPosition.importId,
@@ -116,9 +137,13 @@ export async function replaceRollingOptionsLtDeImportedPositions(
                 objPosition.qty,
                 objPosition.entryPrice,
                 objPosition.markPrice,
+                objPosition.entryDelta,
+                objPosition.currentDelta,
+                objPosition.charges,
                 objPosition.pnl,
                 objPosition.margin,
                 objPosition.liquidationPrice,
+                objPosition.openedAt,
                 objPosition.updatedAt
             ]);
         }
