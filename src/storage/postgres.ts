@@ -298,7 +298,7 @@ export async function ensurePostgresSchema(): Promise<void> {
             vIsExpectedPk BOOLEAN;
         BEGIN
             SELECT tc.constraint_name = 'optionyze_rolling_options_lt_de_positions_pkey'
-                   AND array_agg(kcu.column_name ORDER BY kcu.ordinal_position) = ARRAY['user_id', 'import_id']
+                   AND string_agg(kcu.column_name::TEXT, ',' ORDER BY kcu.ordinal_position) = 'user_id,import_id'
             INTO vIsExpectedPk
             FROM information_schema.table_constraints tc
             JOIN information_schema.key_column_usage kcu
