@@ -12,6 +12,12 @@ export interface RollingOptionsPtDeConfig {
     redOptionQtyPct: number;
     greenOptionQtyPct: number;
     newDelta: number;
+    redReDelta?: number;
+    redDeltaTakeProfit?: number;
+    redDeltaStopLoss?: number;
+    greenReDelta?: number;
+    greenDeltaTakeProfit?: number;
+    greenDeltaStopLoss?: number;
     reDelta: number;
     deltaTakeProfit: number;
     deltaStopLoss: number;

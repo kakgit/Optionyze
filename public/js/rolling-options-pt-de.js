@@ -16,6 +16,9 @@
         reEnter1: document.getElementById("chkReLegCoveredCall1"),
         redOptQtyPct: document.getElementById("txtRedOptQtyPctCoveredCall"),
         greenOptQtyPct: document.getElementById("txtGreenOptQtyPctCoveredCall"),
+        greenReDelta: document.getElementById("txtReGreenDCoveredCall"),
+        greenTpDelta: document.getElementById("txtReGreenTPCoveredCall"),
+        greenSlDelta: document.getElementById("txtReGreenSLCoveredCall"),
         addOneLotFuture: document.getElementById("chkAddOneLotFutIfNegFut"),
         renkoFeedEnabled: document.querySelector(".rolling-demo-switch input"),
         renkoFeedPts: document.getElementById("txtRenkoFeedPts"),
@@ -308,6 +311,9 @@
             reEnter1: Boolean(ids.reEnter1?.checked),
             redOptQtyPct: Number(ids.redOptQtyPct?.value || 100),
             greenOptQtyPct: Number(ids.greenOptQtyPct?.value || 100),
+            greenReDelta: Number(ids.greenReDelta?.value || 0.53),
+            greenTpDelta: Number(ids.greenTpDelta?.value || 0.15),
+            greenSlDelta: Number(ids.greenSlDelta?.value || 0.85),
             addOneLotFuture: Boolean(ids.addOneLotFuture?.checked),
             renkoFeedEnabled: Boolean(ids.renkoFeedEnabled?.checked),
             renkoFeedPts: Number(ids.renkoFeedPts?.value || 10),
@@ -355,6 +361,9 @@
         setFieldValue("reEnter1", uiState.reEnter1);
         setFieldValue("redOptQtyPct", uiState.redOptQtyPct);
         setFieldValue("greenOptQtyPct", uiState.greenOptQtyPct);
+        setFieldValue("greenReDelta", uiState.greenReDelta);
+        setFieldValue("greenTpDelta", uiState.greenTpDelta);
+        setFieldValue("greenSlDelta", uiState.greenSlDelta);
         setFieldValue("addOneLotFuture", uiState.addOneLotFuture);
         setFieldValue("renkoFeedEnabled", uiState.renkoFeedEnabled);
         setFieldValue("renkoFeedPts", uiState.renkoFeedPts);
@@ -560,6 +569,19 @@
         }
     }
 
+    async function flushProfileSave() {
+        if (gIsApplyingState) {
+            return;
+        }
+
+        if (gSaveTimer) {
+            clearTimeout(gSaveTimer);
+            gSaveTimer = null;
+        }
+
+        await saveProfile();
+    }
+
     function queueProfileSave() {
         if (gIsApplyingState) {
             return;
@@ -673,6 +695,7 @@
     }
 
     async function runServerAction(url, payload) {
+        await flushProfileSave();
         await postJson(url, payload);
         await loadServerPanels();
     }
@@ -846,6 +869,9 @@
         ids.reEnter1,
         ids.redOptQtyPct,
         ids.greenOptQtyPct,
+        ids.greenReDelta,
+        ids.greenTpDelta,
+        ids.greenSlDelta,
         ids.addOneLotFuture,
         ids.renkoFeedPts,
         ids.renkoFeedPriceSrc,

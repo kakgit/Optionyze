@@ -297,6 +297,10 @@
     margin-top:14px;
 }
 
+.rolling-demo-field-new-row {
+    grid-column:1;
+}
+
 .rolling-demo-metric {
     padding:14px;
     border-radius:16px;

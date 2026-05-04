@@ -291,6 +291,45 @@ export async function ensurePostgresSchema(): Promise<void> {
         ALTER TABLE optionyze_rolling_options_lt_de_positions
         ADD COLUMN IF NOT EXISTS opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     `);
+    await objPool.query(`
+        DO $$
+        DECLARE
+            vConstraintName TEXT;
+            vIsExpectedPk BOOLEAN;
+        BEGIN
+            SELECT tc.constraint_name = 'optionyze_rolling_options_lt_de_positions_pkey'
+                   AND array_agg(kcu.column_name ORDER BY kcu.ordinal_position) = ARRAY['user_id', 'import_id']
+            INTO vIsExpectedPk
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+             AND tc.table_schema = kcu.table_schema
+            WHERE tc.table_schema = 'public'
+              AND tc.table_name = 'optionyze_rolling_options_lt_de_positions'
+              AND tc.constraint_type = 'PRIMARY KEY'
+            GROUP BY tc.constraint_name;
+
+            IF vIsExpectedPk IS DISTINCT FROM TRUE THEN
+                SELECT tc.constraint_name
+                INTO vConstraintName
+                FROM information_schema.table_constraints tc
+                WHERE tc.table_schema = 'public'
+                  AND tc.table_name = 'optionyze_rolling_options_lt_de_positions'
+                  AND tc.constraint_type = 'PRIMARY KEY'
+                LIMIT 1;
+
+                IF vConstraintName IS NOT NULL THEN
+                    EXECUTE format(
+                        'ALTER TABLE optionyze_rolling_options_lt_de_positions DROP CONSTRAINT %I',
+                        vConstraintName
+                    );
+                END IF;
+
+                ALTER TABLE optionyze_rolling_options_lt_de_positions
+                ADD CONSTRAINT optionyze_rolling_options_lt_de_positions_pkey PRIMARY KEY (user_id, import_id);
+            END IF;
+        END $$;
+    `);
 
     await objPool.query(`
         CREATE TABLE IF NOT EXISTS optionyze_accounts (

@@ -114,18 +114,6 @@
                         <input type="number" min="0.0" max="2.0" step="0.01" id="txtNewDeltaCoveredCall1" value="0.53" />
                     </div>
                     <div class="rolling-demo-field">
-                        <label for="txtReDeltaCoveredCall1">Re D</label>
-                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtReDeltaCoveredCall1" value="0.53" />
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="txtDeltaTPCoveredCall1">TP D</label>
-                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtDeltaTPCoveredCall1" value="0.15" />
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="txtDeltaSLCoveredCall1">SL D</label>
-                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtDeltaSLCoveredCall1" value="0.85" />
-                    </div>
-                    <div class="rolling-demo-field">
                         <label for="chkReLegCoveredCall1">Re Enter</label>
                         <div class="rolling-demo-check-wrap">
                             <label class="rolling-demo-check" for="chkReLegCoveredCall1">
@@ -137,12 +125,44 @@
 
                 <div class="rolling-demo-subgrid">
                     <div class="rolling-demo-field">
+                        <label for="txtGreenOptQtyPctCoveredCall">Green Opt Qty %</label>
+                        <input type="number" min="1" step="1" id="txtGreenOptQtyPctCoveredCall" value="100" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtReGreenDCoveredCall">Re Green D</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtReGreenDCoveredCall" value="0.53" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtReGreenTPCoveredCall">Green TP</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtReGreenTPCoveredCall" value="0.15" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtReGreenSLCoveredCall">Green SL</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtReGreenSLCoveredCall" value="0.85" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn buy" type="button" id="btnRollingDemoOpenOption">OPEN OPTION</button>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn warn" type="button" id="btnRollingDemoExitOption">EXIT OPTION</button>
+                    </div>
+                    <div class="rolling-demo-field rolling-demo-field-new-row">
                         <label for="txtRedOptQtyPctCoveredCall">Red Opt Qty %</label>
                         <input type="number" min="1" step="1" id="txtRedOptQtyPctCoveredCall" value="100" />
                     </div>
                     <div class="rolling-demo-field">
-                        <label for="txtGreenOptQtyPctCoveredCall">Green Opt Qty %</label>
-                        <input type="number" min="1" step="1" id="txtGreenOptQtyPctCoveredCall" value="100" />
+                        <label for="txtReDeltaCoveredCall1">Re Red D</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtReDeltaCoveredCall1" value="0.53" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtDeltaTPCoveredCall1">Red TP</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtDeltaTPCoveredCall1" value="0.15" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtDeltaSLCoveredCall1">Red SL</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtDeltaSLCoveredCall1" value="0.85" />
                     </div>
                     <div class="rolling-demo-field">
                         <label for="chkAddOneLotFutIfNegFut">Add 1 Lot Future</label>
@@ -155,14 +175,6 @@
                     <div class="rolling-demo-field">
                         <label>&nbsp;</label>
                         <button class="rolling-demo-btn primary" type="button" id="btnRollingDemoExecStrategy">Exec Strategy</button>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn buy" type="button" id="btnRollingDemoOpenOption">OPEN OPTION</button>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn warn" type="button" id="btnRollingDemoExitOption">EXIT OPTION</button>
                     </div>
                 </div>
 

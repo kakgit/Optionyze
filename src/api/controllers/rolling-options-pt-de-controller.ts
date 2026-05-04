@@ -58,6 +58,9 @@ function getDefaultUiState(): Record<string, unknown> {
         reEnter1: false,
         redOptQtyPct: 100,
         greenOptQtyPct: 100,
+        greenReDelta: 0.53,
+        greenTpDelta: 0.15,
+        greenSlDelta: 0.85,
         addOneLotFuture: false,
         renkoFeedEnabled: true,
         renkoFeedPts: 10,
@@ -107,6 +110,15 @@ async function getMergedUiState(pUserId: string): Promise<Record<string, unknown
     }
     if (!Number.isFinite(Number(objUiState.greenOptQtyPct))) {
         objUiState.greenOptQtyPct = 100;
+    }
+    if (!Number.isFinite(Number(objUiState.greenReDelta))) {
+        objUiState.greenReDelta = normalizeNumber(objUiState.reDelta1, 0.53);
+    }
+    if (!Number.isFinite(Number(objUiState.greenTpDelta))) {
+        objUiState.greenTpDelta = normalizeNumber(objUiState.deltaTp1, 0.15);
+    }
+    if (!Number.isFinite(Number(objUiState.greenSlDelta))) {
+        objUiState.greenSlDelta = normalizeNumber(objUiState.deltaSl1, 0.85);
     }
     const vExpiryMode = String(objUiState.expiryMode1 || "1");
     return {
@@ -751,9 +763,11 @@ export async function executeRollingOptionsPtDeManualOption(req: Request, res: R
             closedAt: "",
             metadata: {
                 expiryMode: String(objUiState.expiryMode1 || "1"),
-                takeProfitDelta: normalizeNumber(objUiState.deltaTp1, 0.15),
-                stopLossDelta: normalizeNumber(objUiState.deltaSl1, 0.85),
+                takeProfitDelta: normalizeNumber(objUiState.greenTpDelta, 0.15),
+                stopLossDelta: normalizeNumber(objUiState.greenSlDelta, 0.85),
+                reEntryDelta: normalizeNumber(objUiState.greenReDelta, 0.53),
                 reEnter: Boolean(objUiState.reEnter1),
+                ruleColor: "G",
                 ...objQuote.metadata
             }
         };
