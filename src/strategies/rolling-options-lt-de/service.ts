@@ -106,8 +106,29 @@ function toFiniteNumber(pValue: unknown, pFallback = 0): number {
 
 export class RollingOptionsLtDeService {
     private readonly stateByUserId = new Map<string, RollingOptionsPtDeEngineState>();
+    private readonly lastErrorLogByUserId = new Map<string, { message: string; loggedAtMs: number }>();
 
     public constructor(private readonly runnerManager: RunnerManager) {}
+
+    private shouldLogCycleError(pUserId: string, pMessage: string): boolean {
+        const vUserId = String(pUserId || "").trim();
+        const vMessage = String(pMessage || "").trim() || "Live cycle failed.";
+        const vNowMs = Date.now();
+        const objPrevious = this.lastErrorLogByUserId.get(vUserId);
+        if (!objPrevious) {
+            this.lastErrorLogByUserId.set(vUserId, { message: vMessage, loggedAtMs: vNowMs });
+            return true;
+        }
+
+        const bMessageChanged = objPrevious.message !== vMessage;
+        const bCooldownElapsed = (vNowMs - objPrevious.loggedAtMs) >= (5 * 60 * 1000);
+        if (bMessageChanged || bCooldownElapsed) {
+            this.lastErrorLogByUserId.set(vUserId, { message: vMessage, loggedAtMs: vNowMs });
+            return true;
+        }
+
+        return false;
+    }
 
     private async getDeltaClient(pUserId: string): Promise<{ client: any; profileId: string; }> {
         const objProfile = await loadRollingOptionsLtDeProfile(pUserId);
@@ -997,6 +1018,7 @@ export class RollingOptionsLtDeService {
             objState.consecutiveFailures = 0;
             objState.lastError = "";
             objState.lastCycleAt = objSnapshot.ts;
+            this.lastErrorLogByUserId.delete(pUserId);
 
             await this.syncRuntime(pUserId, objConfig, objState, {
                 status: objState.running ? "running" : "paused",
@@ -1030,17 +1052,19 @@ export class RollingOptionsLtDeService {
                 selectedApiProfileId: String(objProfile?.selectedApiProfileId || ""),
                 lastError: objState.lastError
             });
-            await logRollingOptionsLtDeEvent({
-                userId: pUserId,
-                eventType: "engine_error",
-                severity: "error",
-                title: "Live Runner Error",
-                message: objState.lastError,
-                payload: {
-                    symbol: objConfig.symbol,
-                    reason: "engine_error"
-                }
-            });
+            if (this.shouldLogCycleError(pUserId, objState.lastError)) {
+                await logRollingOptionsLtDeEvent({
+                    userId: pUserId,
+                    eventType: "engine_error",
+                    severity: "error",
+                    title: "Live Runner Error",
+                    message: objState.lastError,
+                    payload: {
+                        symbol: objConfig.symbol,
+                        reason: "engine_error"
+                    }
+                });
+            }
             return {
                 status: "danger",
                 message: objState.lastError
