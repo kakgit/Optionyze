@@ -78,6 +78,9 @@
     let gIsApplyingState = false;
     let gSaveTimer = null;
     let gPreviousOpenPositionLtps = new Map();
+    const gFutureBrokeragePct = 0.05;
+    const gOptionBrokeragePct = 0.01;
+    const gBrokerageGstMultiplier = 1.18;
 
     function formatDateInputValue(dateValue) {
         if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) {
@@ -187,6 +190,34 @@
     function getLotSizeForContract(contractName) {
         const value = String(contractName || "").trim().toUpperCase();
         return value.includes("ETH") ? 0.01 : 0.001;
+    }
+
+    function estimateOpenPositionCharges(row) {
+        const contractName = String(row?.contractName || "").trim();
+        const lotSize = Math.max(0, getLotSizeForContract(contractName));
+        const qty = Math.max(0, Number(row?.qty || 0));
+        const entryPrice = Math.max(0, Number(row?.entryPrice || 0));
+        if (!(lotSize > 0) || !(qty > 0) || !(entryPrice > 0)) {
+            return 0;
+        }
+        const notional = qty * lotSize * entryPrice;
+        const brokeragePct = isOptionContract(contractName) ? gOptionBrokeragePct : gFutureBrokeragePct;
+        return Number((((notional * brokeragePct) / 100) * gBrokerageGstMultiplier).toFixed(4));
+    }
+
+    function calculateOpenPositionPnl(row) {
+        const side = String(row?.side || "").trim().toUpperCase();
+        const lotSize = Math.max(0, getLotSizeForContract(row?.contractName || ""));
+        const qty = Math.max(0, Number(row?.qty || 0));
+        const entryPrice = Number(row?.entryPrice || 0);
+        const markPrice = Number(row?.markPrice || 0);
+        if (!(lotSize > 0) || !(qty > 0) || !Number.isFinite(entryPrice) || !Number.isFinite(markPrice)) {
+            return 0;
+        }
+        const signedMove = side === "BUY"
+            ? (markPrice - entryPrice)
+            : (entryPrice - markPrice);
+        return Number((signedMove * qty * lotSize).toFixed(2));
     }
 
     function isOptionContract(contractName) {
@@ -802,6 +833,8 @@
             const vImportId = String(row.importId || vContractName || "");
             const vEntryDelta = Number.isFinite(Number(row.entryDelta)) ? fmt(row.entryDelta, 2) : "-";
             const vCurrentDelta = Number.isFinite(Number(row.currentDelta)) ? fmt(row.currentDelta, 2) : "-";
+            const vCharges = estimateOpenPositionCharges(row);
+            const vPnl = calculateOpenPositionPnl(row);
             const vLtpBlinkClass = getLtpBlinkClass(vImportId, row.markPrice);
             const vCurrentLtp = Number(row.markPrice);
             if (vImportId && Number.isFinite(vCurrentLtp)) {
@@ -818,8 +851,8 @@
                     <td>${escapeHtml(vSide === "BUY" ? fmt(row.entryPrice, 2) : "-")}</td>
                     <td>${escapeHtml(vSide === "SELL" ? fmt(row.entryPrice, 2) : "-")}</td>
                     <td class="${vLtpBlinkClass}">${escapeHtml(fmt(row.markPrice, 2))}</td>
-                    <td>${escapeHtml(fmt(row.charges, 3))}</td>
-                    <td>${escapeHtml(fmt(row.pnl, 2))}</td>
+                    <td>${escapeHtml(fmt(vCharges, 3))}</td>
+                    <td>${escapeHtml(fmt(vPnl, 2))}</td>
                     <td>${escapeHtml(formatDateTime(row.openedAt))}</td>
                     <td>OPEN</td>
                     <td>
@@ -842,8 +875,12 @@
                 </tr>
             `;
         }).join("");
-        const totalCharges = sumNumeric(arrRows, "charges");
-        const totalPnl = sumNumeric(arrRows, "pnl");
+        const totalCharges = arrRows.reduce(function (sum, row) {
+            return sum + estimateOpenPositionCharges(row);
+        }, 0);
+        const totalPnl = arrRows.reduce(function (sum, row) {
+            return sum + calculateOpenPositionPnl(row);
+        }, 0);
         ids.openPositionsBody.innerHTML = `${openRowsHtml}
             <tr class="rolling-demo-total-row">
                 <td colspan="9">Total</td>

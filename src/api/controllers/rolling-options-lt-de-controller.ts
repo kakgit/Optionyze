@@ -25,7 +25,7 @@ import {
     listRollingOptionsEventsByStrategy
 } from "../../storage/rolling-options-pt-de-event-store";
 import { gRollingOptionsTelegramEventTypes, logRollingOptionsLtDeEvent } from "../../strategies/rolling-options-lt-de/event-logger";
-import { findBestLiveOptionContract, getLiveMarketSnapshot } from "../../strategies/rolling-options-pt-de/market-data";
+import { findBestLiveOptionContract, getLiveMarketSnapshot, getLiveOptionTicker } from "../../strategies/rolling-options-pt-de/market-data";
 
 interface DeltaWalletBalanceRow {
     asset_symbol?: string;
@@ -1680,13 +1680,35 @@ export async function getRollingOptionsLtDeImportableOpenPositions(req: Request,
         const arrPositions = arrRows
             .map(mapLivePosition)
             .filter((objRow) => objRow.qty > 0);
+        const arrOptionContracts = arrPositions
+            .filter((objRow) => String(objRow.contractName || "").trim().toUpperCase().startsWith("C-") || String(objRow.contractName || "").trim().toUpperCase().startsWith("P-"))
+            .map((objRow) => String(objRow.contractName || "").trim())
+            .filter(Boolean);
+        const objTickerByContract = new Map<string, Awaited<ReturnType<typeof getLiveOptionTicker>>>();
+        await Promise.all(arrOptionContracts.map(async (pContractName) => {
+            objTickerByContract.set(pContractName, await getLiveOptionTicker(pContractName));
+        }));
+        const arrEnrichedPositions = arrPositions.map((objRow) => {
+            const objTicker = objTickerByContract.get(String(objRow.contractName || "").trim()) || null;
+            const vDelta = objTicker && Number.isFinite(Number(objTicker.delta))
+                ? Math.abs(Number(objTicker.delta))
+                : null;
+            if (vDelta === null) {
+                return objRow;
+            }
+            return {
+                ...objRow,
+                entryDelta: vDelta,
+                currentDelta: vDelta
+            };
+        });
 
         res.json({
             status: "success",
             data: {
                 profileId: profile.profileId,
                 profileName: profile.referenceName,
-                positions: arrPositions
+                positions: arrEnrichedPositions
             }
         });
     }

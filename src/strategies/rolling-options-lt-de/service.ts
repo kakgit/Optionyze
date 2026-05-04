@@ -51,18 +51,24 @@ function isOptionContract(pContractName: string): boolean {
     return vContractName.startsWith("C-") || vContractName.startsWith("P-");
 }
 
+function getLotSizeForContractName(pContractName: string): number {
+    const vContractName = String(pContractName || "").trim().toUpperCase();
+    return vContractName.includes("ETH") ? 0.01 : 0.001;
+}
+
 function calculateImportedPnl(pPosition: RollingOptionsLtDeImportedPositionRecord, pMarkPrice: number): number {
     const vEntryPrice = Number(pPosition.entryPrice || 0);
     const vQty = Math.max(0, Number(pPosition.qty || 0));
+    const vLotSize = Math.max(0, getLotSizeForContractName(pPosition.contractName));
     const vMarkPrice = Number(pMarkPrice || 0);
     const vSide = String(pPosition.side || "").trim().toUpperCase();
-    if (!(vQty > 0) || !(Number.isFinite(vMarkPrice))) {
+    if (!(vQty > 0) || !(vLotSize > 0) || !(Number.isFinite(vMarkPrice))) {
         return Number(pPosition.pnl || 0);
     }
 
     const vRawPnl = vSide === "BUY"
-        ? ((vMarkPrice - vEntryPrice) * vQty)
-        : ((vEntryPrice - vMarkPrice) * vQty);
+        ? ((vMarkPrice - vEntryPrice) * vQty * vLotSize)
+        : ((vEntryPrice - vMarkPrice) * vQty * vLotSize);
     return Number(vRawPnl.toFixed(2));
 }
 
