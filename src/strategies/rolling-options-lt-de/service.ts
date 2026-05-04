@@ -430,9 +430,7 @@ export class RollingOptionsLtDeService {
                 arrEnriched.push({
                     ...objPosition,
                     markPrice: vMarkPrice,
-                    pnl: Number.isFinite(Number(objPosition.pnl))
-                        ? Number(objPosition.pnl)
-                        : calculateImportedPnl(objPosition, vMarkPrice),
+                    pnl: calculateImportedPnl(objPosition, vMarkPrice),
                     updatedAt: new Date().toISOString(),
                     currentDelta: null,
                     isOption: false
@@ -449,9 +447,7 @@ export class RollingOptionsLtDeService {
                 ...objPosition,
                 markPrice: vMarkPrice,
                 entryDelta: objPosition.entryDelta ?? (Number.isFinite(Number(vCurrentDelta)) ? Number(vCurrentDelta) : null),
-                pnl: Number.isFinite(Number(objPosition.pnl))
-                    ? Number(objPosition.pnl)
-                    : calculateImportedPnl(objPosition, vMarkPrice),
+                pnl: calculateImportedPnl(objPosition, vMarkPrice),
                 updatedAt: new Date().toISOString(),
                 currentDelta: Number.isFinite(Number(vCurrentDelta)) ? Number(vCurrentDelta) : null,
                 isOption: true
