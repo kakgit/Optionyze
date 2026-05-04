@@ -4,13 +4,6 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.rolling-live-hero-meta {
-    display: grid;
-    grid-template-columns: minmax(220px, 1.2fr) repeat(2, minmax(0, 0.9fr));
-    gap: 12px;
-    margin-top: 16px;
-}
-
 .rolling-live-status {
     display: none;
     margin-bottom: 14px;
@@ -40,8 +33,16 @@
     color: #ffb5b5;
 }
 
+.rolling-live-status-inline {
+    margin: 0;
+    min-width: min(420px, 100%);
+    text-align: center;
+}
+
 .rolling-live-filters {
-    grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
+    grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto auto;
+    align-items: end;
+    justify-content: end;
 }
 
 .rolling-live-connection-grid {
@@ -63,6 +64,57 @@
 .rolling-live-summary .rolling-demo-stat-value {
     margin-top: 6px;
     font-size: 1rem;
+}
+
+.rolling-live-open-head {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 16px;
+}
+
+.rolling-live-open-signal {
+    justify-self: center;
+    text-align: center;
+    color: var(--app-muted);
+    font-size: 0.92rem;
+    font-weight: 700;
+}
+
+.rolling-demo-hero .rolling-demo-grid.metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.rolling-demo-subgrid {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.rolling-live-renko-group {
+    min-width: 0;
+}
+
+.rolling-live-renko-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 68px;
+    gap: 10px;
+    align-items: center;
+}
+
+.rolling-live-renko-button {
+    min-width: 68px;
+    padding-inline: 0;
+}
+
+.rolling-live-renko-button.renko-red {
+    background: rgba(220, 53, 69, 0.16);
+    border-color: rgba(220, 53, 69, 0.38);
+    color: #ffb5b5;
+}
+
+.rolling-live-renko-button.renko-green {
+    background: rgba(25, 135, 84, 0.16);
+    border-color: rgba(25, 135, 84, 0.38);
+    color: #8be2b4;
 }
 
 .rolling-demo-btn:disabled,
@@ -169,11 +221,11 @@
 }
 
 @media (max-width: 760px) {
-    .rolling-live-hero-meta {
+    .rolling-live-connection-grid {
         grid-template-columns: 1fr;
     }
 
-    .rolling-live-connection-grid {
+    .rolling-live-open-head {
         grid-template-columns: 1fr;
     }
 

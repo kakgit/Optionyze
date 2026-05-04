@@ -30,6 +30,7 @@ interface RollingOptionsPtDeEventRow {
 const gEventsFile = path.resolve(process.cwd(), "data", "rolling-options-pt-de", "events.json");
 const gMaxEventsPerUser = 500;
 const gMaxAgeMs = 10 * 24 * 60 * 60 * 1000;
+const gDefaultStrategyCode = "rolling-options-pt-de";
 
 async function loadAllEventsJson(): Promise<RollingOptionsPtDeEventRecord[]> {
     return readJsonFile<RollingOptionsPtDeEventRecord[]>(gEventsFile, []);
@@ -49,11 +50,13 @@ function mapRowToEvent(pRow: RollingOptionsPtDeEventRow): RollingOptionsPtDeEven
     };
 }
 
-export async function listRollingOptionsPtDeEvents(
+export async function listRollingOptionsEventsByStrategy(
     pUserId: string,
+    pStrategyCode: string,
     pLimit = 100
 ): Promise<RollingOptionsPtDeEventRecord[]> {
     const vLimit = Math.max(1, Math.min(500, Math.floor(Number(pLimit || 100))));
+    const vStrategyCode = String(pStrategyCode || gDefaultStrategyCode).trim() || gDefaultStrategyCode;
     if (isPostgresConfigured()) {
         const objPool = getPostgresPool();
         const objResult = await objPool.query<RollingOptionsPtDeEventRow>(`
@@ -69,19 +72,26 @@ export async function listRollingOptionsPtDeEvents(
                 created_at
             FROM optionyze_rolling_options_pt_de_events
             WHERE user_id = $1
-              AND strategy_code = 'rolling-options-pt-de'
+              AND strategy_code = $2
             ORDER BY created_at DESC
-            LIMIT $2
-        `, [pUserId, vLimit]);
+            LIMIT $3
+        `, [pUserId, vStrategyCode, vLimit]);
 
         return objResult.rows.map(mapRowToEvent);
     }
 
     const objRows = await loadAllEventsJson();
     return objRows
-        .filter((objRow) => objRow.userId === pUserId && objRow.strategyCode === "rolling-options-pt-de")
+        .filter((objRow) => objRow.userId === pUserId && objRow.strategyCode === vStrategyCode)
         .sort((objA, objB) => String(objB.createdAt).localeCompare(String(objA.createdAt)))
         .slice(0, vLimit);
+}
+
+export async function listRollingOptionsPtDeEvents(
+    pUserId: string,
+    pLimit = 100
+): Promise<RollingOptionsPtDeEventRecord[]> {
+    return listRollingOptionsEventsByStrategy(pUserId, gDefaultStrategyCode, pLimit);
 }
 
 async function prunePostgresEvents(pUserId: string, pStrategyCode: string): Promise<void> {
@@ -132,7 +142,7 @@ async function pruneJsonEvents(pUserId: string, pStrategyCode: string): Promise<
     await writeJsonFileAtomic(gEventsFile, objFinalRows);
 }
 
-export async function saveRollingOptionsPtDeEvent(
+export async function saveRollingOptionsEvent(
     pEvent: Omit<RollingOptionsPtDeEventRecord, "eventId" | "createdAt">
 ): Promise<RollingOptionsPtDeEventRecord> {
     const objEvent: RollingOptionsPtDeEventRecord = {
@@ -178,20 +188,31 @@ export async function saveRollingOptionsPtDeEvent(
     return objEvent;
 }
 
-export async function clearRollingOptionsPtDeEvents(pUserId: string): Promise<number> {
+export async function saveRollingOptionsPtDeEvent(
+    pEvent: Omit<RollingOptionsPtDeEventRecord, "eventId" | "createdAt">
+): Promise<RollingOptionsPtDeEventRecord> {
+    return saveRollingOptionsEvent(pEvent);
+}
+
+export async function clearRollingOptionsEventsByStrategy(pUserId: string, pStrategyCode: string): Promise<number> {
+    const vStrategyCode = String(pStrategyCode || gDefaultStrategyCode).trim() || gDefaultStrategyCode;
     if (isPostgresConfigured()) {
         const objPool = getPostgresPool();
         const objResult = await objPool.query(`
             DELETE FROM optionyze_rolling_options_pt_de_events
             WHERE user_id = $1
-              AND strategy_code = 'rolling-options-pt-de'
-        `, [pUserId]);
+              AND strategy_code = $2
+        `, [pUserId, vStrategyCode]);
         return Number(objResult.rowCount || 0);
     }
 
     const objRows = await loadAllEventsJson();
     const vBeforeCount = objRows.length;
-    const objRemainingRows = objRows.filter((objRow) => !(objRow.userId === pUserId && objRow.strategyCode === "rolling-options-pt-de"));
+    const objRemainingRows = objRows.filter((objRow) => !(objRow.userId === pUserId && objRow.strategyCode === vStrategyCode));
     await writeJsonFileAtomic(gEventsFile, objRemainingRows);
     return vBeforeCount - objRemainingRows.length;
+}
+
+export async function clearRollingOptionsPtDeEvents(pUserId: string): Promise<number> {
+    return clearRollingOptionsEventsByStrategy(pUserId, gDefaultStrategyCode);
 }

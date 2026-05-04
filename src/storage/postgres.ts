@@ -168,9 +168,15 @@ export async function ensurePostgresSchema(): Promise<void> {
         CREATE TABLE IF NOT EXISTS optionyze_rolling_options_lt_de_profiles (
             user_id TEXT PRIMARY KEY,
             selected_api_profile_id TEXT NOT NULL DEFAULT '',
+            ui_state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             connection_status_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+    `);
+
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_profiles
+        ADD COLUMN IF NOT EXISTS ui_state_json JSONB NOT NULL DEFAULT '{}'::jsonb;
     `);
 
     await objPool.query(`
@@ -179,7 +185,90 @@ export async function ensurePostgresSchema(): Promise<void> {
             status TEXT NOT NULL DEFAULT 'idle',
             auto_trader_enabled BOOLEAN NOT NULL DEFAULT false,
             selected_api_profile_id TEXT NOT NULL DEFAULT '',
+            current_symbol TEXT NOT NULL DEFAULT '',
+            current_contract_name TEXT NOT NULL DEFAULT '',
+            current_expiry_mode TEXT NOT NULL DEFAULT '',
+            current_expiry_date TEXT NOT NULL DEFAULT '',
+            renko_enabled BOOLEAN NOT NULL DEFAULT false,
+            renko_points NUMERIC NOT NULL DEFAULT 0,
+            renko_source TEXT NOT NULL DEFAULT '',
+            last_spot_price NUMERIC NULL,
+            last_futures_price NUMERIC NULL,
+            last_signal TEXT NOT NULL DEFAULT '',
+            last_cycle_at TIMESTAMPTZ NULL,
+            last_error TEXT NOT NULL DEFAULT '',
+            state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_runtime
+        ADD COLUMN IF NOT EXISTS current_symbol TEXT NOT NULL DEFAULT '';
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_runtime
+        ADD COLUMN IF NOT EXISTS current_contract_name TEXT NOT NULL DEFAULT '';
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_runtime
+        ADD COLUMN IF NOT EXISTS current_expiry_mode TEXT NOT NULL DEFAULT '';
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_runtime
+        ADD COLUMN IF NOT EXISTS current_expiry_date TEXT NOT NULL DEFAULT '';
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_runtime
+        ADD COLUMN IF NOT EXISTS renko_enabled BOOLEAN NOT NULL DEFAULT false;
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_runtime
+        ADD COLUMN IF NOT EXISTS renko_points NUMERIC NOT NULL DEFAULT 0;
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_runtime
+        ADD COLUMN IF NOT EXISTS renko_source TEXT NOT NULL DEFAULT '';
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_runtime
+        ADD COLUMN IF NOT EXISTS last_spot_price NUMERIC NULL;
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_runtime
+        ADD COLUMN IF NOT EXISTS last_futures_price NUMERIC NULL;
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_runtime
+        ADD COLUMN IF NOT EXISTS last_signal TEXT NOT NULL DEFAULT '';
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_runtime
+        ADD COLUMN IF NOT EXISTS last_cycle_at TIMESTAMPTZ NULL;
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_runtime
+        ADD COLUMN IF NOT EXISTS last_error TEXT NOT NULL DEFAULT '';
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_runtime
+        ADD COLUMN IF NOT EXISTS state_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_rolling_options_lt_de_positions (
+            user_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            import_id TEXT NOT NULL,
+            contract_name TEXT NOT NULL DEFAULT '',
+            side TEXT NOT NULL DEFAULT '',
+            qty NUMERIC NOT NULL DEFAULT 0,
+            entry_price NUMERIC NOT NULL DEFAULT 0,
+            mark_price NUMERIC NOT NULL DEFAULT 0,
+            pnl NUMERIC NOT NULL DEFAULT 0,
+            margin NUMERIC NOT NULL DEFAULT 0,
+            liquidation_price NUMERIC NOT NULL DEFAULT 0,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (user_id, import_id)
         );
     `);
 

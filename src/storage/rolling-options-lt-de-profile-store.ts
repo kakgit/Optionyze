@@ -17,6 +17,7 @@ export interface RollingOptionsLtDeConnectionStatus {
 export interface RollingOptionsLtDeProfileRecord {
     userId: string;
     selectedApiProfileId: string;
+    uiState: Record<string, unknown>;
     connectionStatus: RollingOptionsLtDeConnectionStatus;
     updatedAt: string;
 }
@@ -24,6 +25,7 @@ export interface RollingOptionsLtDeProfileRecord {
 interface RollingOptionsLtDeProfileRow {
     user_id: string;
     selected_api_profile_id: string;
+    ui_state_json: Record<string, unknown> | null;
     connection_status_json: RollingOptionsLtDeConnectionStatus | null;
     updated_at: string | Date;
 }
@@ -52,6 +54,7 @@ function mapRow(pRow?: RollingOptionsLtDeProfileRow | null): RollingOptionsLtDeP
     return {
         userId: String(pRow.user_id),
         selectedApiProfileId: String(pRow.selected_api_profile_id || ""),
+        uiState: (pRow.ui_state_json ?? {}) as Record<string, unknown>,
         connectionStatus: {
             ...getDefaultConnectionStatus(),
             ...((pRow.connection_status_json ?? {}) as RollingOptionsLtDeConnectionStatus)
@@ -68,6 +71,7 @@ export function getDefaultRollingOptionsLtDeProfile(pUserId: string): RollingOpt
     return {
         userId: String(pUserId || "").trim(),
         selectedApiProfileId: "",
+        uiState: {},
         connectionStatus: getDefaultConnectionStatus(),
         updatedAt: ""
     };
@@ -78,7 +82,7 @@ export async function loadRollingOptionsLtDeProfile(pUserId: string): Promise<Ro
     if (isPostgresConfigured()) {
         const objPool = getPostgresPool();
         const objResult = await objPool.query<RollingOptionsLtDeProfileRow>(`
-            SELECT user_id, selected_api_profile_id, connection_status_json, updated_at
+            SELECT user_id, selected_api_profile_id, ui_state_json, connection_status_json, updated_at
             FROM optionyze_rolling_options_lt_de_profiles
             WHERE user_id = $1
         `, [vUserId]);
@@ -93,7 +97,7 @@ export async function listRollingOptionsLtDeProfiles(): Promise<RollingOptionsLt
     if (isPostgresConfigured()) {
         const objPool = getPostgresPool();
         const objResult = await objPool.query<RollingOptionsLtDeProfileRow>(`
-            SELECT user_id, selected_api_profile_id, connection_status_json, updated_at
+            SELECT user_id, selected_api_profile_id, ui_state_json, connection_status_json, updated_at
             FROM optionyze_rolling_options_lt_de_profiles
             ORDER BY updated_at DESC
         `);
@@ -111,6 +115,7 @@ export async function saveRollingOptionsLtDeProfile(
     const objProfile: RollingOptionsLtDeProfileRecord = {
         ...getDefaultRollingOptionsLtDeProfile(pProfile.userId),
         ...pProfile,
+        uiState: (pProfile.uiState ?? {}) as Record<string, unknown>,
         connectionStatus: {
             ...getDefaultConnectionStatus(),
             ...(pProfile.connectionStatus || {})
@@ -124,17 +129,20 @@ export async function saveRollingOptionsLtDeProfile(
             INSERT INTO optionyze_rolling_options_lt_de_profiles (
                 user_id,
                 selected_api_profile_id,
+                ui_state_json,
                 connection_status_json,
                 updated_at
-            ) VALUES ($1, $2, $3::jsonb, $4)
+            ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5)
             ON CONFLICT (user_id)
             DO UPDATE SET
                 selected_api_profile_id = EXCLUDED.selected_api_profile_id,
+                ui_state_json = EXCLUDED.ui_state_json,
                 connection_status_json = EXCLUDED.connection_status_json,
                 updated_at = EXCLUDED.updated_at
         `, [
             objProfile.userId,
             objProfile.selectedApiProfileId,
+            JSON.stringify(objProfile.uiState || {}),
             JSON.stringify(objProfile.connectionStatus || getDefaultConnectionStatus()),
             objProfile.updatedAt
         ]);

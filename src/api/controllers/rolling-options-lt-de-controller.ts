@@ -1,5 +1,7 @@
+import crypto from "node:crypto";
 import type { Request, Response } from "express";
 const DeltaRestClient = require("delta-rest-client");
+import type { RollingOptionsLtDeService } from "../../strategies/rolling-options-lt-de/service";
 import { getAccountById } from "../../storage/accounts-store";
 import { getDeltaApiProfile } from "../../storage/delta-api-profile-store";
 import {
@@ -12,7 +14,17 @@ import {
     loadRollingOptionsLtDeRuntime,
     saveRollingOptionsLtDeRuntime
 } from "../../storage/rolling-options-lt-de-runtime-store";
-import { gRollingOptionsTelegramEventTypes } from "../../strategies/rolling-options-pt-de/event-logger";
+import {
+    deleteRollingOptionsLtDeImportedPosition,
+    listRollingOptionsLtDeImportedPositions,
+    replaceRollingOptionsLtDeImportedPositions,
+    type RollingOptionsLtDeImportedPositionRecord
+} from "../../storage/rolling-options-lt-de-position-store";
+import {
+    clearRollingOptionsEventsByStrategy,
+    listRollingOptionsEventsByStrategy
+} from "../../storage/rolling-options-pt-de-event-store";
+import { gRollingOptionsTelegramEventTypes, logRollingOptionsLtDeEvent } from "../../strategies/rolling-options-lt-de/event-logger";
 import { findBestLiveOptionContract, getLiveMarketSnapshot } from "../../strategies/rolling-options-pt-de/market-data";
 
 interface DeltaWalletBalanceRow {
@@ -21,6 +33,12 @@ interface DeltaWalletBalanceRow {
     available_balance?: number | string | null;
     balance?: number | string | null;
     wallet_balance?: number | string | null;
+    total_margin?: number | string | null;
+    total_margin_inr?: number | string | null;
+    available_balance_inr?: number | string | null;
+    balance_inr?: number | string | null;
+    wallet_balance_inr?: number | string | null;
+    blocked_margin_inr?: number | string | null;
     blocked_margin?: number | string | null;
     position_margin?: number | string | null;
     order_margin?: number | string | null;
@@ -247,6 +265,19 @@ async function syncLiveRuntimeProfileSelection(pUserId: string, pSelectedApiProf
         status: objExisting?.status || "idle",
         autoTraderEnabled: objExisting?.autoTraderEnabled || false,
         selectedApiProfileId: String(pSelectedApiProfileId || "").trim(),
+        currentSymbol: objExisting?.currentSymbol || "",
+        currentContractName: objExisting?.currentContractName || "",
+        currentExpiryMode: objExisting?.currentExpiryMode || "",
+        currentExpiryDate: objExisting?.currentExpiryDate || "",
+        renkoEnabled: objExisting?.renkoEnabled || false,
+        renkoPoints: objExisting?.renkoPoints || 0,
+        renkoSource: objExisting?.renkoSource || "",
+        lastSpotPrice: objExisting?.lastSpotPrice ?? null,
+        lastFuturesPrice: objExisting?.lastFuturesPrice ?? null,
+        lastSignal: objExisting?.lastSignal || "IDLE",
+        lastCycleAt: objExisting?.lastCycleAt || "",
+        lastError: objExisting?.lastError || "",
+        state: objExisting?.state || {},
         updatedAt: ""
     });
 }
@@ -346,6 +377,17 @@ function getAvailableBalanceUsd(pRow: DeltaWalletBalanceRow | null): number {
     );
 }
 
+function getTotalBalanceUsd(pRow: DeltaWalletBalanceRow | null): number {
+    if (!pRow) {
+        return 0;
+    }
+
+    return toFiniteNumber(
+        pRow.total_margin ?? pRow.balance ?? pRow.wallet_balance,
+        Number.NaN
+    ) || Math.max(0, getAvailableBalanceUsd(pRow) + getBlockedMarginUsd(pRow));
+}
+
 function getBlockedMarginUsd(pRow: DeltaWalletBalanceRow | null): number {
     if (!pRow) {
         return 0;
@@ -362,6 +404,42 @@ function getBlockedMarginUsd(pRow: DeltaWalletBalanceRow | null): number {
     const vBalance = toFiniteNumber(pRow.balance ?? pRow.wallet_balance, 0);
     const vAvailable = getAvailableBalanceUsd(pRow);
     return Math.max(0, vBalance - vAvailable);
+}
+
+function isFutureContractSymbol(pValue: unknown): boolean {
+    const vSymbol = String(pValue || "").trim().toUpperCase();
+    return Boolean(vSymbol) && !vSymbol.startsWith("C-") && !vSymbol.startsWith("P-");
+}
+
+function getSelectedFuturePositionValue(
+    pRows: DeltaPositionRow[],
+    pSelectedSymbol: string,
+    pLivePrice: number
+): number {
+    const vSymbol = String(pSelectedSymbol || "").trim().toUpperCase();
+    const vFallbackLotSize = getLotSizeForSymbol(vSymbol);
+    return pRows.reduce((pSum, pRow) => {
+        const vContractSymbol = String(pRow.product_symbol || pRow.symbol || "").trim().toUpperCase();
+        if (!isFutureContractSymbol(vContractSymbol) || !vContractSymbol.startsWith(vSymbol)) {
+            return pSum;
+        }
+
+        const vQty = Math.abs(toFiniteNumber(pRow.net_size ?? pRow.size, 0));
+        if (!(vQty > 0)) {
+            return pSum;
+        }
+
+        const vMarkPrice = toFiniteNumber(pRow.mark_price, Number.NaN);
+        const vEntryPrice = toFiniteNumber(pRow.entry_price, Number.NaN);
+        const vPrice = Number.isFinite(vMarkPrice) && vMarkPrice > 0
+            ? vMarkPrice
+            : (Number.isFinite(pLivePrice) && pLivePrice > 0 ? pLivePrice : vEntryPrice);
+        if (!(Number.isFinite(vPrice) && vPrice > 0)) {
+            return pSum;
+        }
+
+        return pSum + (vQty * vFallbackLotSize * vPrice);
+    }, 0);
 }
 
 function mapLivePosition(pRow: DeltaPositionRow, pIndex: number) {
@@ -439,6 +517,107 @@ function getLotSizeForSymbol(pSymbol: string): number {
     return String(pSymbol || "").trim().toUpperCase() === "ETH" ? 0.01 : 0.001;
 }
 
+function formatIsoDate(pDateValue: Date): string {
+    const vYear = String(pDateValue.getFullYear());
+    const vMonth = String(pDateValue.getMonth() + 1).padStart(2, "0");
+    const vDay = String(pDateValue.getDate()).padStart(2, "0");
+    return `${vYear}-${vMonth}-${vDay}`;
+}
+
+function resolveLiveExpiryDateByMode(pExpiryMode: string): string {
+    const vMode = String(pExpiryMode || "1").trim();
+    const objDate = new Date();
+    const vDayOfWeek = objDate.getDay();
+
+    if (vMode === "1") {
+        objDate.setDate(objDate.getDate() + 1);
+        return formatIsoDate(objDate);
+    }
+    if (vMode === "2") {
+        objDate.setDate(objDate.getDate() + 2);
+        return formatIsoDate(objDate);
+    }
+    if (vMode === "4") {
+        const vDaysToFriday = (5 - vDayOfWeek + 7) % 7;
+        objDate.setDate(objDate.getDate() + (vDayOfWeek >= 2 ? vDaysToFriday + 7 : vDaysToFriday));
+        return formatIsoDate(objDate);
+    }
+    if (vMode === "5") {
+        const vDaysToFriday = (5 - vDayOfWeek + 7) % 7;
+        objDate.setDate(objDate.getDate() + (vDayOfWeek >= 2 ? vDaysToFriday + 14 : vDaysToFriday + 7));
+        return formatIsoDate(objDate);
+    }
+    if (vMode === "6") {
+        const getLastFridayOfMonth = (pYear: number, pMonthIndex: number): Date => {
+            const objLastDay = new Date(pYear, pMonthIndex + 1, 0);
+            while (objLastDay.getDay() !== 5) {
+                objLastDay.setDate(objLastDay.getDate() - 1);
+            }
+            return objLastDay;
+        };
+        const objLastFriday = getLastFridayOfMonth(objDate.getFullYear(), objDate.getMonth());
+        const objNextLastFriday = getLastFridayOfMonth(objDate.getFullYear(), objDate.getMonth() + 1);
+        return formatIsoDate(objDate.getDate() > 15 ? objNextLastFriday : objLastFriday);
+    }
+
+    return formatIsoDate(objDate);
+}
+
+function getDefaultLiveUiState(): Record<string, unknown> {
+    return {
+        symbol: "BTC",
+        manualFutQty: 1,
+        manualFutOrderType: "market_order",
+        action1: "sell",
+        legSide1: "ce",
+        expiryMode1: "1",
+        expiryDate1: "",
+        manualOptQty1: 1,
+        newDelta1: 0.53,
+        reDelta1: 0.53,
+        deltaTp1: 0.15,
+        deltaSl1: 0.85,
+        reEnter1: false,
+        redOptQtyPct: 100,
+        greenOptQtyPct: 100,
+        addOneLotFuture: false,
+        renkoFeedPts: 10,
+        closedFromDate: "",
+        closedToDate: "",
+        telegramAlertsEnabled: false,
+        telegramAlertTypes: [...gRollingOptionsTelegramEventTypes]
+    };
+}
+
+function getMergedLiveUiState(pProfile?: { uiState?: Record<string, unknown> | null } | null): Record<string, unknown> {
+    const objUiState = {
+        ...getDefaultLiveUiState(),
+        ...(pProfile?.uiState || {})
+    };
+    return {
+        ...objUiState,
+        expiryDate1: String(objUiState.expiryDate1 || "").trim() || resolveLiveExpiryDateByMode(String(objUiState.expiryMode1 || "1"))
+    };
+}
+
+const gLiveStrategyCode = "rolling-options-lt-de";
+
+async function appendTrackedLivePositions(
+    pUserId: string,
+    pPositions: RollingOptionsLtDeImportedPositionRecord[]
+): Promise<RollingOptionsLtDeImportedPositionRecord[]> {
+    const arrExisting = await listRollingOptionsLtDeImportedPositions(pUserId);
+    return replaceRollingOptionsLtDeImportedPositions(pUserId, [...arrExisting, ...pPositions]);
+}
+
+async function removeTrackedLivePositions(
+    pUserId: string,
+    pPredicate: (pPosition: RollingOptionsLtDeImportedPositionRecord) => boolean
+): Promise<RollingOptionsLtDeImportedPositionRecord[]> {
+    const arrExisting = await listRollingOptionsLtDeImportedPositions(pUserId);
+    return replaceRollingOptionsLtDeImportedPositions(pUserId, arrExisting.filter((objRow) => !pPredicate(objRow)));
+}
+
 export function renderRollingOptionsLivePage(req: Request, res: Response): void {
     res.render("rolling-options-lt-de", {
         pageTitle: "Rolling Option - Live | Optionyze",
@@ -452,7 +631,10 @@ export async function getRollingOptionsLtDeProfile(req: Request, res: Response):
     const objProfile = await readLiveProfile(vUserId);
     res.json({
         status: "success",
-        data: objProfile
+        data: {
+            ...objProfile,
+            uiState: getMergedLiveUiState(objProfile)
+        }
     });
 }
 
@@ -460,16 +642,26 @@ export async function saveRollingOptionsLtDeProfileController(req: Request, res:
     const vUserId = getAccountId(req);
     const objExisting = await readLiveProfile(vUserId);
     const vSelectedApiProfileId = String(req.body?.selectedApiProfileId || "").trim();
+    const objIncomingUiState = req.body?.uiState && typeof req.body.uiState === "object"
+        ? req.body.uiState as Record<string, unknown>
+        : {};
     const objSaved = await saveRollingOptionsLtDeProfile({
         ...objExisting,
         userId: vUserId,
-        selectedApiProfileId: vSelectedApiProfileId
+        selectedApiProfileId: vSelectedApiProfileId || String(objExisting.selectedApiProfileId || "").trim(),
+        uiState: {
+            ...getMergedLiveUiState(objExisting),
+            ...objIncomingUiState
+        }
     });
-    await syncLiveRuntimeProfileSelection(vUserId, vSelectedApiProfileId);
+    await syncLiveRuntimeProfileSelection(vUserId, objSaved.selectedApiProfileId);
     res.json({
         status: "success",
         message: "Live profile saved.",
-        data: objSaved
+        data: {
+            ...objSaved,
+            uiState: getMergedLiveUiState(objSaved)
+        }
     });
 }
 
@@ -495,12 +687,25 @@ export async function getRollingOptionsLtDeRuntimeStatus(req: Request, res: Resp
             status: "idle",
             autoTraderEnabled: false,
             selectedApiProfileId: String((await readLiveProfile(vUserId)).selectedApiProfileId || "").trim(),
+            currentSymbol: "",
+            currentContractName: "",
+            currentExpiryMode: "",
+            currentExpiryDate: "",
+            renkoEnabled: false,
+            renkoPoints: 0,
+            renkoSource: "",
+            lastSpotPrice: null,
+            lastFuturesPrice: null,
+            lastSignal: "IDLE",
+            lastCycleAt: "",
+            lastError: "",
+            state: {},
             updatedAt: ""
         }
     });
 }
 
-export async function enableRollingOptionsLtDeAutoTrader(req: Request, res: Response): Promise<void> {
+export async function enableRollingOptionsLtDeAutoTrader(req: Request, res: Response, pService: RollingOptionsLtDeService): Promise<void> {
     const vUserId = getAccountId(req);
     const objProfile = await readLiveProfile(vUserId);
     const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
@@ -519,12 +724,17 @@ export async function enableRollingOptionsLtDeAutoTrader(req: Request, res: Resp
         return;
     }
 
-    const objRuntime = await saveRollingOptionsLtDeRuntime({
+    const objRuntime = await pService.startUser(vUserId);
+    await logRollingOptionsLtDeEvent({
         userId: vUserId,
-        status: "running",
-        autoTraderEnabled: true,
-        selectedApiProfileId: vSelectedApiProfileId,
-        updatedAt: ""
+        eventType: "engine_started",
+        severity: "success",
+        title: "Live Auto Trader Started",
+        message: "Server-side live auto trader started.",
+        payload: {
+            symbol: objRuntime.currentSymbol || "",
+            reason: "engine_started"
+        }
     });
     res.json({
         status: "success",
@@ -533,20 +743,115 @@ export async function enableRollingOptionsLtDeAutoTrader(req: Request, res: Resp
     });
 }
 
-export async function disableRollingOptionsLtDeAutoTrader(req: Request, res: Response): Promise<void> {
+export async function disableRollingOptionsLtDeAutoTrader(req: Request, res: Response, pService: RollingOptionsLtDeService): Promise<void> {
     const vUserId = getAccountId(req);
-    const objRuntime = await saveRollingOptionsLtDeRuntime({
+    const objRuntime = await pService.stopUser(vUserId);
+    await logRollingOptionsLtDeEvent({
         userId: vUserId,
-        status: "stopped",
-        autoTraderEnabled: false,
-        selectedApiProfileId: String((await readLiveProfile(vUserId)).selectedApiProfileId || "").trim(),
-        updatedAt: ""
+        eventType: "engine_stopped",
+        severity: "info",
+        title: "Live Auto Trader Stopped",
+        message: "Server-side live auto trader stopped.",
+        payload: {
+            symbol: objRuntime.currentSymbol || "",
+            reason: "engine_stopped"
+        }
     });
     res.json({
         status: "success",
         message: "Live auto trader disabled.",
         data: objRuntime
     });
+}
+
+export async function executeRollingOptionsLtDeStrategy(
+    req: Request,
+    res: Response,
+    pService: RollingOptionsLtDeService
+): Promise<void> {
+    const vUserId = getAccountId(req);
+    const objProfile = await readLiveProfile(vUserId);
+    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        res.status(400).json({ status: "warning", message: "Select an API profile before executing the live strategy." });
+        return;
+    }
+
+    const objCheck = await performRollingOptionsLtDeConnectionCheck(vUserId, vSelectedApiProfileId);
+    if (objCheck.profile.connectionStatus.state !== "connected") {
+        res.status(400).json({
+            status: "warning",
+            message: objCheck.profile.connectionStatus.message || "Delta connection is not healthy.",
+            data: objCheck.profile
+        });
+        return;
+    }
+
+    const vRenkoColor = String(req.body?.renkoColor || "").trim().toUpperCase() === "G" ? "G" : "R";
+    const objResult = await pService.executeStrategy(vUserId, vRenkoColor);
+    const [objRuntime, arrPositions] = await Promise.all([
+        loadRollingOptionsLtDeRuntime(vUserId),
+        listRollingOptionsLtDeImportedPositions(vUserId)
+    ]);
+
+    res.json({
+        status: objResult.status,
+        message: objResult.message,
+        data: {
+            runtime: objRuntime,
+            trackedOpenPositions: arrPositions
+        }
+    });
+}
+
+export async function executeRollingOptionsLtDeKillSwitch(req: Request, res: Response, pService: RollingOptionsLtDeService): Promise<void> {
+    const vUserId = getAccountId(req);
+    const objProfile = await readLiveProfile(vUserId);
+    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        res.status(400).json({ status: "warning", message: "Select an API profile before using the live kill switch." });
+        return;
+    }
+
+    const objCheck = await performRollingOptionsLtDeConnectionCheck(vUserId, vSelectedApiProfileId);
+    if (objCheck.profile.connectionStatus.state !== "connected") {
+        res.status(400).json({
+            status: "warning",
+            message: objCheck.profile.connectionStatus.message || "Delta connection is not healthy.",
+            data: objCheck.profile
+        });
+        return;
+    }
+
+    try {
+        const objResult = await pService.emergencyStopUser(vUserId);
+        res.json({
+            status: "success",
+            message: objResult.closedPositions.length > 0
+                ? `Kill switch closed ${objResult.closedPositions.length} live position${objResult.closedPositions.length === 1 ? "" : "s"} and stopped auto trader.`
+                : "Kill switch stopped auto trader. No saved imported live positions were open.",
+            data: {
+                runtime: objResult.runtime,
+                closedPositions: objResult.closedPositions
+            }
+        });
+    }
+    catch (objError) {
+        await logRollingOptionsLtDeEvent({
+            userId: vUserId,
+            eventType: "engine_error",
+            severity: "error",
+            title: "Kill Switch Failed",
+            message: getErrorMessage(objError, "Unable to complete live kill switch."),
+            payload: {
+                reason: "kill_switch_error"
+            }
+        });
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to complete live kill switch.")
+        });
+    }
 }
 
 export async function executeRollingOptionsLtDeManualFuture(req: Request, res: Response): Promise<void> {
@@ -626,6 +931,32 @@ export async function executeRollingOptionsLtDeManualFuture(req: Request, res: R
             order: objOrderPayload
         });
         const objPayload = readResponsePayload(objResponse);
+        await logRollingOptionsLtDeEvent({
+            userId: vUserId,
+            eventType: "future_opened",
+            severity: "success",
+            title: `${vAction} Future Order Placed`,
+            message: `${vAction} future live order placed using ${profile.referenceName}.`,
+            payload: {
+                symbol: vSymbol,
+                contractName: vProductSymbol,
+                qty: vQty,
+                reason: "manual_future"
+            }
+        });
+        const arrTrackedPositions = await appendTrackedLivePositions(vUserId, [{
+            userId: vUserId,
+            importId: crypto.randomUUID(),
+            contractName: vProductSymbol,
+            side: vAction,
+            qty: vQty,
+            entryPrice: Number(objSnapshot.futuresPrice || 0),
+            markPrice: Number(objSnapshot.futuresPrice || 0),
+            pnl: 0,
+            margin: 0,
+            liquidationPrice: 0,
+            updatedAt: new Date().toISOString()
+        }]);
 
         res.json({
             status: "success",
@@ -633,6 +964,7 @@ export async function executeRollingOptionsLtDeManualFuture(req: Request, res: R
             data: {
                 order: objPayload.result || objPayload,
                 request: objOrderPayload,
+                trackedOpenPositions: arrTrackedPositions,
                 snapshot: {
                     productSymbol: vProductSymbol,
                     futuresPrice: objSnapshot.futuresPrice,
@@ -642,6 +974,18 @@ export async function executeRollingOptionsLtDeManualFuture(req: Request, res: R
         });
     }
     catch (objError) {
+        await logRollingOptionsLtDeEvent({
+            userId: vUserId,
+            eventType: "engine_error",
+            severity: "error",
+            title: "Future Order Failed",
+            message: getErrorMessage(objError, "Unable to place live future order."),
+            payload: {
+                symbol: vSymbol,
+                qty: vQty,
+                reason: "manual_future_error"
+            }
+        });
         res.status(500).json({
             status: "danger",
             message: getErrorMessage(objError, "Unable to place live future order.")
@@ -759,6 +1103,45 @@ export async function executeRollingOptionsLtDeManualOption(req: Request, res: R
             });
         }
 
+        await logRollingOptionsLtDeEvent({
+            userId: vUserId,
+            eventType: vOperation === "exit" ? "option_closed" : "option_opened",
+            severity: "success",
+            title: vOperation === "exit" ? "Manual Option Exit Placed" : "Manual Option Opened",
+            message: `${vOperation === "exit" ? "Exit" : "Open"} option live order${arrOrders.length === 1 ? "" : "s"} placed using ${profile.referenceName}.`,
+            payload: {
+                symbol: vSymbol,
+                qty: vQty,
+                reason: vOperation === "exit" ? "manual_option_exit" : "manual_option_open"
+            }
+        });
+        let arrTrackedPositions = await listRollingOptionsLtDeImportedPositions(vUserId);
+        if (vOperation === "open") {
+            arrTrackedPositions = await appendTrackedLivePositions(vUserId, arrContracts.map((objContract) => ({
+                userId: vUserId,
+                importId: crypto.randomUUID(),
+                contractName: String(objContract.contractSymbol || "").trim(),
+                side: vAction.toUpperCase(),
+                qty: vQty,
+                entryPrice: Number(objContract.markPrice || 0),
+                markPrice: Number(objContract.markPrice || 0),
+                pnl: 0,
+                margin: 0,
+                liquidationPrice: 0,
+                updatedAt: new Date().toISOString()
+            } satisfies RollingOptionsLtDeImportedPositionRecord)));
+        }
+        else {
+            const arrClosedContractNames = arrContracts
+                .map((objContract) => String(objContract.contractSymbol || "").trim())
+                .filter(Boolean);
+            const vOriginalSide = vAction.toUpperCase();
+            arrTrackedPositions = await removeTrackedLivePositions(vUserId, (objRow) => {
+                return arrClosedContractNames.includes(String(objRow.contractName || "").trim())
+                    && String(objRow.side || "").trim().toUpperCase() === vOriginalSide;
+            });
+        }
+
         res.json({
             status: "success",
             message: `${vOperation === "exit" ? "Exit" : "Open"} option live order${arrOrders.length === 1 ? "" : "s"} placed using ${profile.referenceName}.`,
@@ -767,16 +1150,263 @@ export async function executeRollingOptionsLtDeManualOption(req: Request, res: R
                 action: vAction,
                 qty: vQty,
                 orders: arrOrders,
-                contracts: arrContracts
+                contracts: arrContracts,
+                trackedOpenPositions: arrTrackedPositions
             }
         });
     }
     catch (objError) {
+        await logRollingOptionsLtDeEvent({
+            userId: vUserId,
+            eventType: "engine_error",
+            severity: "error",
+            title: "Option Order Failed",
+            message: getErrorMessage(objError, "Unable to place live option order."),
+            payload: {
+                symbol: vSymbol,
+                qty: vQty,
+                reason: "manual_option_error"
+            }
+        });
         res.status(500).json({
             status: "danger",
             message: getErrorMessage(objError, "Unable to place live option order.")
         });
     }
+}
+
+export async function closeRollingOptionsLtDeImportedOpenPosition(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const objProfile = await readLiveProfile(vUserId);
+    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        res.status(400).json({ status: "warning", message: "Select an API profile before closing live positions." });
+        return;
+    }
+
+    const objCheck = await performRollingOptionsLtDeConnectionCheck(vUserId, vSelectedApiProfileId);
+    if (objCheck.profile.connectionStatus.state !== "connected") {
+        res.status(400).json({
+            status: "warning",
+            message: objCheck.profile.connectionStatus.message || "Delta connection is not healthy.",
+            data: objCheck.profile
+        });
+        return;
+    }
+
+    const vContractName = String(req.body?.contractName || "").trim();
+    const vSide = String(req.body?.side || "").trim().toUpperCase();
+    const vQty = Math.max(1, Math.floor(Number(req.body?.qty || 0)));
+    const vImportId = String(req.body?.importId || "").trim();
+    if (!vContractName) {
+        res.status(400).json({ status: "warning", message: "Contract name is required to close an imported live position." });
+        return;
+    }
+    if (vSide !== "BUY" && vSide !== "SELL") {
+        res.status(400).json({ status: "warning", message: "Imported live position side must be BUY or SELL." });
+        return;
+    }
+    if (!(vQty > 0)) {
+        res.status(400).json({ status: "warning", message: "Imported live position quantity must be greater than zero." });
+        return;
+    }
+
+    try {
+        const { client, profile } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
+        const vCloseSide = vSide === "BUY" ? "sell" : "buy";
+        const objOrderPayload: Record<string, unknown> = {
+            product_symbol: vContractName,
+            size: vQty,
+            side: vCloseSide,
+            order_type: "market_order",
+            time_in_force: "gtc",
+            post_only: false,
+            reduce_only: true
+        };
+        const objResponse = await client.apis.Orders.placeOrder({
+            order: objOrderPayload
+        });
+        const objPayload = readResponsePayload(objResponse);
+
+        if (vImportId) {
+            await deleteRollingOptionsLtDeImportedPosition(vUserId, vImportId);
+        }
+        await logRollingOptionsLtDeEvent({
+            userId: vUserId,
+            eventType: "option_closed",
+            severity: "warning",
+            title: "Imported Position Closed",
+            message: `Close order placed on Delta Exchange for ${vContractName} using ${profile.referenceName}.`,
+            payload: {
+                contractName: vContractName,
+                qty: vQty,
+                reason: "manual_imported_position_close"
+            }
+        });
+        res.json({
+            status: "success",
+            message: `Close order placed on Delta Exchange for ${vContractName} using ${profile.referenceName}.`,
+            data: {
+                order: objPayload.result || objPayload,
+                request: objOrderPayload
+            }
+        });
+    }
+    catch (objError) {
+        await logRollingOptionsLtDeEvent({
+            userId: vUserId,
+            eventType: "engine_error",
+            severity: "error",
+            title: "Imported Position Close Failed",
+            message: getErrorMessage(objError, "Unable to close imported live position on Delta Exchange."),
+            payload: {
+                contractName: vContractName,
+                qty: vQty,
+                reason: "manual_imported_position_close_error"
+            }
+        });
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to close imported live position on Delta Exchange.")
+        });
+    }
+}
+
+export async function getRollingOptionsLtDeOpenPositions(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const arrPositions = await listRollingOptionsLtDeImportedPositions(vUserId);
+    res.json({
+        status: "success",
+        data: arrPositions
+    });
+}
+
+export async function reconcileRollingOptionsLtDeOpenPositions(
+    req: Request,
+    res: Response,
+    pService: RollingOptionsLtDeService
+): Promise<void> {
+    const vUserId = getAccountId(req);
+    const objProfile = await readLiveProfile(vUserId);
+    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        res.status(400).json({ status: "warning", message: "Select an API profile before reconciling live positions." });
+        return;
+    }
+
+    const objCheck = await performRollingOptionsLtDeConnectionCheck(vUserId, vSelectedApiProfileId);
+    if (objCheck.profile.connectionStatus.state !== "connected") {
+        res.status(400).json({
+            status: "warning",
+            message: objCheck.profile.connectionStatus.message || "Delta connection is not healthy.",
+            data: objCheck.profile
+        });
+        return;
+    }
+
+    const arrPositions = await pService.reconcileUserPositions(vUserId, String(req.body?.symbol || req.query?.symbol || "").trim().toUpperCase());
+    res.json({
+        status: "success",
+        message: `Reconciled ${arrPositions.length} live position${arrPositions.length === 1 ? "" : "s"} with Delta Exchange.`,
+        data: arrPositions
+    });
+}
+
+export async function setRollingOptionsLtDeManualRenkoSignal(
+    req: Request,
+    res: Response,
+    pService: RollingOptionsLtDeService
+): Promise<void> {
+    const vUserId = getAccountId(req);
+    const vColor = String(req.body?.color || "").trim().toUpperCase() === "G" ? "G" : "R";
+    const objRuntime = await pService.setManualRenkoSignal(vUserId, vColor);
+    res.json({
+        status: "success",
+        message: `Renko box changed to ${vColor}.`,
+        data: objRuntime
+    });
+}
+
+export async function getRollingOptionsLtDeEvents(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const arrEvents = await listRollingOptionsEventsByStrategy(vUserId, gLiveStrategyCode, 100);
+    res.json({
+        status: "success",
+        data: arrEvents
+    });
+}
+
+export async function clearRollingOptionsLtDeEventsController(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const vDeletedCount = await clearRollingOptionsEventsByStrategy(vUserId, gLiveStrategyCode);
+    res.json({
+        status: "success",
+        message: `Cleared ${vDeletedCount} live activity log event${vDeletedCount === 1 ? "" : "s"}.`
+    });
+}
+
+export async function saveRollingOptionsLtDeOpenPositions(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const arrIncoming = Array.isArray(req.body?.positions) ? req.body.positions as Array<Record<string, unknown>> : [];
+    const arrSaved = await replaceRollingOptionsLtDeImportedPositions(vUserId, arrIncoming.map((objRow) => ({
+        userId: vUserId,
+        importId: String(objRow.importId || "").trim(),
+        contractName: String(objRow.contractName || "").trim(),
+        side: String(objRow.side || "").trim().toUpperCase(),
+        qty: Number(objRow.qty || 0),
+        entryPrice: Number(objRow.entryPrice || 0),
+        markPrice: Number(objRow.markPrice || 0),
+        pnl: Number(objRow.pnl || 0),
+        margin: Number(objRow.margin || 0),
+        liquidationPrice: Number(objRow.liquidationPrice || 0),
+        updatedAt: ""
+    }) satisfies RollingOptionsLtDeImportedPositionRecord));
+    await logRollingOptionsLtDeEvent({
+        userId: vUserId,
+        eventType: "manual_action",
+        severity: "info",
+        title: "Imported Live Positions Updated",
+        message: arrSaved.length
+            ? `Saved ${arrSaved.length} imported live position${arrSaved.length === 1 ? "" : "s"} in the open grid.`
+            : "Cleared imported live positions from the open grid.",
+        payload: {
+            qty: arrSaved.length,
+            reason: "imported_positions_saved"
+        }
+    });
+
+    res.json({
+        status: "success",
+        message: "Imported open positions saved.",
+        data: arrSaved
+    });
+}
+
+export async function deleteRollingOptionsLtDeOpenPosition(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const vImportId = String(req.body?.importId || "").trim();
+    if (!vImportId) {
+        res.status(400).json({ status: "warning", message: "Import position id is required." });
+        return;
+    }
+
+    await deleteRollingOptionsLtDeImportedPosition(vUserId, vImportId);
+    await logRollingOptionsLtDeEvent({
+        userId: vUserId,
+        eventType: "manual_action",
+        severity: "info",
+        title: "Imported Position Removed",
+        message: "Imported open position removed from the live page only. No Delta Exchange order was placed.",
+        payload: {
+            qty: 1,
+            reason: "imported_position_removed"
+        }
+    });
+    res.json({
+        status: "success",
+        message: "Imported open position removed from the live page.",
+        data: { importId: vImportId }
+    });
 }
 
 export async function performRollingOptionsLtDeConnectionCheck(
@@ -909,26 +1539,93 @@ export async function getRollingOptionsLtDeAccountSummary(req: Request, res: Res
     }
 
     try {
+        const vUserId = getAccountId(req);
+        const objProfileState = await readLiveProfile(vUserId);
+        const objUiState = getMergedLiveUiState(objProfileState);
+        const vRequestedSymbol = String(req.query?.symbol || req.body?.symbol || "").trim().toUpperCase();
+        const vSelectedSymbol = vRequestedSymbol || (String(objUiState.symbol || "BTC").trim().toUpperCase() || "BTC");
+        const vLotSize = getLotSizeForSymbol(vSelectedSymbol);
         const { client, profile } = await getDeltaClientForProfile(req, vProfileId);
-        const objResponse = await client.apis.Wallet.getBalances();
-        const objPayload = readResponsePayload(objResponse);
+        const objMarketConfig = {
+            symbol: vSelectedSymbol,
+            contractName: getContractNameForSymbol(vSelectedSymbol),
+            lotSize: vLotSize,
+            futureQty: 1,
+            futureOrderType: "market_order" as const,
+            action: "sell" as const,
+            legSide: "ce" as const,
+            expiryMode: "1" as const,
+            expiryDate: String(objUiState.expiryDate1 || ""),
+            optionQty: 1,
+            redOptionQtyPct: 100,
+            greenOptionQtyPct: 100,
+            newDelta: Number(objUiState.newDelta1 || 0.53),
+            reDelta: Number(objUiState.reDelta1 || 0.53),
+            deltaTakeProfit: Number(objUiState.deltaTp1 || 0.15),
+            deltaStopLoss: Number(objUiState.deltaSl1 || 0.85),
+            reEnter: Boolean(objUiState.reEnter1),
+            addOneLotFuture: Boolean(objUiState.addOneLotFuture),
+            renkoEnabled: false,
+            renkoStepPoints: 10,
+            renkoPriceSource: "spot_price" as const,
+            loopSeconds: 8
+        };
+        const objPositionsApi = client.apis?.Positions as {
+            getMarginedPositions?: (pParams: Record<string, unknown>) => Promise<unknown>;
+            getPositions?: (pParams: Record<string, unknown>) => Promise<unknown>;
+        } | undefined;
+        const [objWalletResult, objMarketResult, objPositionsResult] = await Promise.allSettled([
+            client.apis.Wallet.getBalances(),
+            getLiveMarketSnapshot(objMarketConfig),
+            typeof objPositionsApi?.getMarginedPositions === "function"
+                ? objPositionsApi.getMarginedPositions({})
+                : (typeof objPositionsApi?.getPositions === "function"
+                    ? objPositionsApi.getPositions({
+                        underlying_asset_symbol: vSelectedSymbol
+                    }).catch(async () => objPositionsApi.getPositions!({
+                        underlying_asset_symbol: getContractNameForSymbol(vSelectedSymbol)
+                    }))
+                    : Promise.resolve(null))
+        ]);
+        if (objWalletResult.status !== "fulfilled") {
+            throw objWalletResult.reason;
+        }
+        const objWalletResponse = objWalletResult.value;
+        const objMarketSnapshot = objMarketResult.status === "fulfilled" ? objMarketResult.value : null;
+        const objPositionsResponse = objPositionsResult.status === "fulfilled" ? objPositionsResult.value : null;
+
+        const objPayload = readResponsePayload(objWalletResponse);
         const arrRows = Array.isArray(objPayload.result) ? objPayload.result as DeltaWalletBalanceRow[] : [];
         const objUsdRow = pickUsdBalanceRow(arrRows);
         const vAvailableBalance = getAvailableBalanceUsd(objUsdRow);
         const vBlockedMargin = getBlockedMarginUsd(objUsdRow);
-        const vTotalBalance = vAvailableBalance + vBlockedMargin;
-        const vHealthPct = vTotalBalance > 0 ? Number(((vAvailableBalance / vTotalBalance) * 100).toFixed(2)) : 0;
+        const vTotalBalance = getTotalBalanceUsd(objUsdRow);
+        const objPositionsPayload = readResponsePayload(objPositionsResponse || {});
+        const arrPositions = Array.isArray(objPositionsPayload.result)
+            ? objPositionsPayload.result as DeltaPositionRow[]
+            : (objPositionsPayload.result ? [objPositionsPayload.result as DeltaPositionRow] : []);
+        const vLivePrice = Number(objMarketSnapshot?.futuresPrice || 0);
+        const vOneLotValue = Number.isFinite(vLivePrice) && vLivePrice > 0 ? vLivePrice * vLotSize : Number.NaN;
+        const vSelectedFuturePositionValue = getSelectedFuturePositionValue(arrPositions, vSelectedSymbol, vLivePrice);
+        const vHealthPct = vAvailableBalance > 0 && vSelectedFuturePositionValue > 0
+            ? Number(((vSelectedFuturePositionValue / vAvailableBalance) * 100).toFixed(2))
+            : Number.NaN;
 
         res.json({
             status: "success",
             data: {
                 profileId: profile.profileId,
                 profileName: profile.referenceName,
+                selectedSymbol: vSelectedSymbol,
+                lotSize: vLotSize,
                 currency: String(objUsdRow?.asset_symbol || objUsdRow?.symbol || "USD").toUpperCase(),
                 availableBalance: Number(vAvailableBalance.toFixed(2)),
                 blockedMargin: Number(vBlockedMargin.toFixed(2)),
                 totalBalance: Number(vTotalBalance.toFixed(2)),
-                healthPct: vHealthPct,
+                healthPct: Number.isFinite(vHealthPct) ? vHealthPct : null,
+                oneLotValue: Number.isFinite(vOneLotValue) ? Number(vOneLotValue.toFixed(2)) : null,
+                livePrice: Number.isFinite(vLivePrice) ? Number(vLivePrice.toFixed(2)) : null,
+                selectedFuturePositionValue: Number.isFinite(vSelectedFuturePositionValue) ? Number(vSelectedFuturePositionValue.toFixed(2)) : null,
                 balances: arrRows
             }
         });
@@ -950,7 +1647,18 @@ export async function getRollingOptionsLtDeImportableOpenPositions(req: Request,
 
     try {
         const { client, profile } = await getDeltaClientForProfile(req, vProfileId);
-        const objResponse = await client.apis.Positions.getPositions({});
+        const objPositionsApi = client.apis?.Positions as {
+            getMarginedPositions?: (pParams: Record<string, unknown>) => Promise<unknown>;
+            getPositions?: (pParams: Record<string, unknown>) => Promise<unknown>;
+        };
+        if (typeof objPositionsApi?.getMarginedPositions !== "function" && typeof objPositionsApi?.getPositions !== "function") {
+            throw new Error("Delta positions API is not available in the installed client.");
+        }
+        const objResponse = typeof objPositionsApi?.getMarginedPositions === "function"
+            ? await objPositionsApi.getMarginedPositions({})
+            : await objPositionsApi.getPositions!({
+                underlying_asset_symbol: String((await readLiveProfile(getAccountId(req))).uiState?.symbol || "BTC").trim().toUpperCase() || "BTC"
+            });
         const objPayload = readResponsePayload(objResponse);
         const arrRows = Array.isArray(objPayload.result) ? objPayload.result as DeltaPositionRow[] : [];
         const arrPositions = arrRows

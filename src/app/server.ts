@@ -9,6 +9,7 @@ import { RunnerManager } from "../runners/runner-manager";
 import { ensurePostgresSchema, isPostgresConfigured } from "../storage/postgres";
 import { StrategyFoGreeksPaperService } from "../strategies/strategy-fo-greeks-paper/service";
 import { startRollingOptionsLtDeConnectionMonitor, runRollingOptionsLtDeConnectionMonitorCycle } from "../strategies/rolling-options-lt-de/connection-monitor";
+import { RollingOptionsLtDeService } from "../strategies/rolling-options-lt-de/service";
 import { RollingOptionsPtDeService } from "../strategies/rolling-options-pt-de/service";
 import { renderStrategyFoPaperPage } from "../api/controllers/strategyfo-paper-controller";
 import { renderRollingOptionsPaperDemoPage } from "../api/controllers/rolling-options-pt-de-controller";
@@ -44,12 +45,14 @@ async function bootstrap(): Promise<void> {
     const runnerManager = new RunnerManager();
     const strategyFoPaperService = new StrategyFoGreeksPaperService(runnerManager);
     const rollingOptionsPtDeService = new RollingOptionsPtDeService(runnerManager);
+    const rollingOptionsLtDeService = new RollingOptionsLtDeService(runnerManager);
 
     await ensurePostgresSchema();
     await ensureBootstrapAdminAccount();
     await cleanupExpiredSessions();
     await runnerManager.hydrate();
     await rollingOptionsPtDeService.hydrate();
+    await rollingOptionsLtDeService.hydrate();
     startRollingOptionsLtDeConnectionMonitor(5 * 60 * 1000);
     void runRollingOptionsLtDeConnectionMonitorCycle();
 
@@ -90,7 +93,7 @@ async function bootstrap(): Promise<void> {
         await changePassword(req, res);
     });
     app.get("/strategyfogreeks", requireAuthPage, requireFreshPasswordPage, renderStrategyFoPaperPage);
-    app.use("/api", createApiRouter(runnerManager, strategyFoPaperService, rollingOptionsPtDeService));
+    app.use("/api", createApiRouter(runnerManager, strategyFoPaperService, rollingOptionsPtDeService, rollingOptionsLtDeService));
 
     app.listen(port, () => {
         console.log(`Optionyze server listening on port ${port}`);
