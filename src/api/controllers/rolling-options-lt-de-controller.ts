@@ -62,17 +62,24 @@ interface DeltaPositionRow {
     [key: string]: unknown;
 }
 
-interface DeltaFillRow {
+interface DeltaOrderHistoryRow {
     id?: number | string | null;
+    state?: string | null;
     size?: number | string | null;
     side?: string | null;
-    price?: number | string | null;
-    commission?: number | string | null;
+    average_fill_price?: number | string | null;
+    paid_commission?: number | string | null;
     created_at?: string | number | null;
-    product_id?: number | string | null;
+    updated_at?: string | number | null;
     product_symbol?: string | null;
     order_id?: string | number | null;
+    product?: {
+        contract_value?: number | string | null;
+        [key: string]: unknown;
+    } | null;
     meta_data?: {
+        pnl?: number | string | null;
+        cashflow?: number | string | null;
         order_type?: string;
         order_price?: number | string | null;
         [key: string]: unknown;
@@ -491,12 +498,14 @@ function formatOrderType(pValue: unknown): string {
     return vValue.replaceAll("_", " ");
 }
 
-function mapLiveClosedPosition(pRow: DeltaFillRow, pIndex: number) {
+function mapLiveClosedPosition(pRow: DeltaOrderHistoryRow, pIndex: number) {
     const vSide = String(pRow.side || "").trim().toUpperCase();
-    const vPrice = toFiniteNumber(pRow.price, 0);
+    const vPrice = toFiniteNumber(pRow.average_fill_price, 0);
     const vQty = Math.abs(toFiniteNumber(pRow.size, 0));
-    const vCommission = toFiniteNumber(pRow.commission, 0);
-    const vCreatedAt = String(pRow.created_at || "").trim();
+    const vCommission = toFiniteNumber(pRow.paid_commission, 0);
+    const vCreatedAt = String(pRow.created_at || pRow.updated_at || "").trim();
+    const vUpdatedAt = String(pRow.updated_at || pRow.created_at || "").trim();
+    const vPnl = toFiniteNumber(pRow.meta_data?.pnl, Number.NaN);
 
     return {
         rowId: String(pRow.id ?? pRow.order_id ?? `fill-${pIndex}`),
@@ -508,9 +517,9 @@ function mapLiveClosedPosition(pRow: DeltaFillRow, pIndex: number) {
         sellPrice: vSide === "SELL" ? vPrice : null,
         price: vPrice,
         charges: vCommission,
-        pnl: null,
+        pnl: Number.isFinite(vPnl) ? vPnl : null,
         startAt: vCreatedAt,
-        endAt: vCreatedAt,
+        endAt: vUpdatedAt,
         orderType: formatOrderType(pRow.meta_data?.order_type)
     };
 }
@@ -1762,28 +1771,50 @@ export async function getRollingOptionsLtDeClosedPositions(req: Request, res: Re
 
     try {
         const { client, profile } = await getDeltaClientForProfile(req, vProfileId);
-        const objParams: Record<string, string | number> = {
-            page_size: 50
-        };
+        const vPageSize = 100;
+        const arrRows: DeltaOrderHistoryRow[] = [];
+        let vAfterCursor = "";
+        let vSafetyCounter = 0;
         const vStartTime = toEpochMicros(String(req.query?.fromDate || ""));
         const vEndTime = toEpochMicros(String(req.query?.toDate || ""), true);
-        if (vStartTime) {
-            objParams.start_time = vStartTime;
-        }
-        if (vEndTime) {
-            objParams.end_time = vEndTime;
+
+        while (vSafetyCounter < 100) {
+            const objParams: Record<string, string | number> = {
+                page_size: vPageSize
+            };
+            if (vStartTime) {
+                objParams.start_time = vStartTime;
+            }
+            if (vEndTime) {
+                objParams.end_time = vEndTime;
+            }
+            if (vAfterCursor) {
+                objParams.after = vAfterCursor;
+            }
+
+            const objResponse = await client.apis.TradeHistory.getOrderHistory(objParams);
+            const objPayload = readResponsePayload(objResponse);
+            const arrPageRows = Array.isArray(objPayload.result) ? objPayload.result as DeltaOrderHistoryRow[] : [];
+            arrRows.push(...arrPageRows);
+
+            const vNextAfter = String((objPayload.meta as { after?: unknown } | undefined)?.after || "").trim();
+            vSafetyCounter += 1;
+            if (!vNextAfter || vNextAfter === vAfterCursor || arrPageRows.length < vPageSize) {
+                break;
+            }
+            vAfterCursor = vNextAfter;
         }
 
-        const objResponse = await client.apis.TradeHistory.getUserfills(objParams);
-        const objPayload = readResponsePayload(objResponse);
-        const arrRows = Array.isArray(objPayload.result) ? objPayload.result as DeltaFillRow[] : [];
-        const arrClosedPositions = arrRows.map(mapLiveClosedPosition);
+        const arrClosedPositions = arrRows
+            .filter((objRow) => String(objRow.state || "").trim().toLowerCase() === "closed")
+            .map(mapLiveClosedPosition);
 
         res.json({
             status: "success",
             data: {
                 profileId: profile.profileId,
                 profileName: profile.referenceName,
+                totalCount: arrClosedPositions.length,
                 positions: arrClosedPositions
             }
         });

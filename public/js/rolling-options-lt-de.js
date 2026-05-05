@@ -52,6 +52,10 @@
         clearClosedFiltersButton: document.getElementById("btnRollingLiveClearClosedFilters"),
         refreshClosedPositionsButton: document.getElementById("btnRollingLiveRefreshClosedPositions"),
         closedPositionsBody: document.getElementById("rollingLiveClosedPositionsBody"),
+        closedPrevPageButton: document.getElementById("btnRollingLiveClosedPrevPage"),
+        closedNextPageButton: document.getElementById("btnRollingLiveClosedNextPage"),
+        closedPageInfo: document.getElementById("rollingLiveClosedPositionsPageInfo"),
+        closedPageNumbers: document.getElementById("rollingLiveClosedPageNumbers"),
         refreshEventsButton: document.getElementById("btnRollingLiveRefreshEvents"),
         clearEventsButton: document.getElementById("btnRollingLiveClearEvents"),
         eventLog: document.getElementById("rollingLiveEventLog"),
@@ -78,6 +82,9 @@
     let gIsApplyingState = false;
     let gSaveTimer = null;
     let gPreviousOpenPositionLtps = new Map();
+    let gClosedPositions = [];
+    let gClosedPositionsPage = 1;
+    const gClosedPositionsPageSize = 10;
     const gFutureBrokeragePct = 0.05;
     const gOptionBrokeragePct = 0.01;
     const gBrokerageGstMultiplier = 1.18;
@@ -896,16 +903,33 @@
 
     function renderClosedPositions(rows) {
         const arrRows = Array.isArray(rows) ? rows : [];
+        const vTotalRows = arrRows.length;
+        const vTotalPages = Math.max(1, Math.ceil(vTotalRows / gClosedPositionsPageSize));
+        gClosedPositionsPage = Math.min(Math.max(1, gClosedPositionsPage), vTotalPages);
+        const vStartIndex = (gClosedPositionsPage - 1) * gClosedPositionsPageSize;
+        const arrPageRows = arrRows.slice(vStartIndex, vStartIndex + gClosedPositionsPageSize);
         if (!ids.closedPositionsBody) {
             return;
         }
 
         if (!arrRows.length) {
-            ids.closedPositionsBody.innerHTML = "<tr><td colspan=\"10\" class=\"rolling-demo-empty\">No Delta fill history found for the selected date range.</td></tr>";
+            ids.closedPositionsBody.innerHTML = "<tr><td colspan=\"10\" class=\"rolling-demo-empty\">No Delta order history found for the selected date range.</td></tr>";
+            if (ids.closedPageInfo) {
+                ids.closedPageInfo.textContent = "Page 0 of 0";
+            }
+            if (ids.closedPrevPageButton instanceof HTMLButtonElement) {
+                ids.closedPrevPageButton.disabled = true;
+            }
+            if (ids.closedNextPageButton instanceof HTMLButtonElement) {
+                ids.closedNextPageButton.disabled = true;
+            }
+            if (ids.closedPageNumbers) {
+                ids.closedPageNumbers.innerHTML = "";
+            }
             return;
         }
 
-        const closedRowsHtml = arrRows.map(function (row) {
+        const closedRowsHtml = arrPageRows.map(function (row) {
             const vContractName = String(row.symbol || "-");
             return `
                 <tr>
@@ -933,6 +957,25 @@
                 <td class="rolling-demo-total-value">${escapeHtml(totalPnl === null ? "-" : fmt(totalPnl, 3))}</td>
             </tr>
         `;
+        if (ids.closedPageInfo) {
+            ids.closedPageInfo.textContent = `Page ${gClosedPositionsPage} of ${vTotalPages} | ${vTotalRows} records`;
+        }
+        if (ids.closedPrevPageButton instanceof HTMLButtonElement) {
+            ids.closedPrevPageButton.disabled = gClosedPositionsPage <= 1;
+        }
+        if (ids.closedNextPageButton instanceof HTMLButtonElement) {
+            ids.closedNextPageButton.disabled = gClosedPositionsPage >= vTotalPages;
+        }
+        if (ids.closedPageNumbers) {
+            const vStartPage = Math.max(1, gClosedPositionsPage - 2);
+            const vEndPage = Math.min(vTotalPages, vStartPage + 4);
+            const vNormalizedStartPage = Math.max(1, vEndPage - 4);
+            let vHtml = "";
+            for (let vPage = vNormalizedStartPage; vPage <= vEndPage; vPage += 1) {
+                vHtml += `<button class="rolling-demo-icon-btn ${vPage === gClosedPositionsPage ? "primary" : "warn"} rolling-live-closed-page-btn" type="button" data-page="${vPage}" title="Go to closed-positions page ${vPage}" aria-label="Go to closed-positions page ${vPage}">${escapeHtml(String(vPage))}</button>`;
+            }
+            ids.closedPageNumbers.innerHTML = vHtml;
+        }
     }
 
     function renderEvents(rows) {
@@ -1072,6 +1115,8 @@
 
     async function loadClosedPositions() {
         if (!canUseLiveActions()) {
+            gClosedPositions = [];
+            gClosedPositionsPage = 1;
             renderClosedPositions([]);
             return;
         }
@@ -1086,8 +1131,9 @@
 
         const vQuery = objSearch.toString();
         const objResult = await getJson(`/api/rollingoptions-lt-de/closed-positions${vQuery ? `?${vQuery}` : ""}`);
-        const arrPositions = Array.isArray(objResult?.data?.positions) ? objResult.data.positions : [];
-        renderClosedPositions(arrPositions);
+        gClosedPositions = Array.isArray(objResult?.data?.positions) ? objResult.data.positions : [];
+        gClosedPositionsPage = 1;
+        renderClosedPositions(gClosedPositions);
     }
 
     async function loadEvents() {
@@ -1285,6 +1331,35 @@
         }).catch(function (objError) {
             setStatus(ids.pageStatus, objError instanceof Error ? objError.message : "Unable to load closed positions.", "danger");
         });
+    });
+    ids.closedPrevPageButton?.addEventListener("click", function () {
+        if (gClosedPositionsPage <= 1) {
+            return;
+        }
+        gClosedPositionsPage -= 1;
+        renderClosedPositions(gClosedPositions);
+    });
+    ids.closedNextPageButton?.addEventListener("click", function () {
+        const vTotalPages = Math.max(1, Math.ceil(gClosedPositions.length / gClosedPositionsPageSize));
+        if (gClosedPositionsPage >= vTotalPages) {
+            return;
+        }
+        gClosedPositionsPage += 1;
+        renderClosedPositions(gClosedPositions);
+    });
+    ids.closedPageNumbers?.addEventListener("click", function (objEvent) {
+        const objTarget = objEvent.target instanceof Element
+            ? objEvent.target.closest(".rolling-live-closed-page-btn")
+            : null;
+        if (!(objTarget instanceof HTMLButtonElement)) {
+            return;
+        }
+        const vPage = Number(objTarget.dataset.page || 0);
+        if (!Number.isFinite(vPage) || vPage <= 0) {
+            return;
+        }
+        gClosedPositionsPage = vPage;
+        renderClosedPositions(gClosedPositions);
     });
     ids.clearClosedFiltersButton?.addEventListener("click", function () {
         if (ids.closedFromDate) {
