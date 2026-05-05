@@ -18,7 +18,8 @@ import {
     deleteRollingOptionsLtDeImportedPosition,
     listRollingOptionsLtDeImportedPositions,
     replaceRollingOptionsLtDeImportedPositions,
-    type RollingOptionsLtDeImportedPositionRecord
+    type RollingOptionsLtDeImportedPositionRecord,
+    type RollingOptionsLtDePositionMetadata
 } from "../../storage/rolling-options-lt-de-position-store";
 import {
     clearRollingOptionsEventsByStrategy,
@@ -26,6 +27,7 @@ import {
 } from "../../storage/rolling-options-pt-de-event-store";
 import { gRollingOptionsTelegramEventTypes, logRollingOptionsLtDeEvent } from "../../strategies/rolling-options-lt-de/event-logger";
 import { findBestLiveOptionContract, getLiveMarketSnapshot, getLiveOptionTicker } from "../../strategies/rolling-options-pt-de/market-data";
+import { buildConfigFromUiState } from "../../strategies/rolling-options-pt-de/engine";
 
 interface DeltaWalletBalanceRow {
     asset_symbol?: string;
@@ -604,6 +606,31 @@ function getMergedLiveUiState(pProfile?: { uiState?: Record<string, unknown> | n
     };
 }
 
+function getLiveRuleMetadataForColor(
+    pUiState: Record<string, unknown>,
+    pColorCode: "R" | "G",
+    pReason: string
+): RollingOptionsLtDePositionMetadata {
+    const objConfig = buildConfigFromUiState(pUiState);
+    if (pColorCode === "G") {
+        return {
+            ruleColor: "G",
+            takeProfitDelta: Number(objConfig.greenDeltaTakeProfit ?? objConfig.deltaTakeProfit ?? 0.15),
+            stopLossDelta: Number(objConfig.greenDeltaStopLoss ?? objConfig.deltaStopLoss ?? 0.85),
+            reEntryDelta: Number(objConfig.greenReDelta ?? objConfig.reDelta ?? 0.53),
+            openedReason: pReason
+        };
+    }
+
+    return {
+        ruleColor: "R",
+        takeProfitDelta: Number(objConfig.redDeltaTakeProfit ?? objConfig.deltaTakeProfit ?? 0.15),
+        stopLossDelta: Number(objConfig.redDeltaStopLoss ?? objConfig.deltaStopLoss ?? 0.85),
+        reEntryDelta: Number(objConfig.redReDelta ?? objConfig.reDelta ?? 0.53),
+        openedReason: pReason
+    };
+}
+
 const gLiveStrategyCode = "rolling-options-lt-de";
 
 async function appendTrackedLivePositions(
@@ -1125,6 +1152,10 @@ export async function executeRollingOptionsLtDeManualOption(req: Request, res: R
         });
         let arrTrackedPositions = await listRollingOptionsLtDeImportedPositions(vUserId);
         if (vOperation === "open") {
+            const objProfileState = await readLiveProfile(vUserId);
+            const objRuntime = await loadRollingOptionsLtDeRuntime(vUserId);
+            const objUiState = getMergedLiveUiState(objProfileState);
+            const vRuleColor: "R" | "G" = String(objRuntime?.state?.renkoLastColor || "").trim().toUpperCase() === "G" ? "G" : "R";
             arrTrackedPositions = await appendTrackedLivePositions(vUserId, arrContracts.map((objContract) => ({
                 userId: vUserId,
                 importId: crypto.randomUUID(),
@@ -1139,6 +1170,7 @@ export async function executeRollingOptionsLtDeManualOption(req: Request, res: R
                 pnl: 0,
                 margin: 0,
                 liquidationPrice: 0,
+                metadata: getLiveRuleMetadataForColor(objUiState, vRuleColor, "manual_option_open"),
                 openedAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
             } satisfies RollingOptionsLtDeImportedPositionRecord)));
@@ -1374,6 +1406,7 @@ export async function saveRollingOptionsLtDeOpenPositions(req: Request, res: Res
         pnl: Number(objRow.pnl || 0),
         margin: Number(objRow.margin || 0),
         liquidationPrice: Number(objRow.liquidationPrice || 0),
+        metadata: objRow.metadata && typeof objRow.metadata === "object" ? objRow.metadata as RollingOptionsLtDePositionMetadata : undefined,
         openedAt: String(objRow.openedAt || "").trim(),
         updatedAt: ""
     }) satisfies RollingOptionsLtDeImportedPositionRecord));

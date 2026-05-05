@@ -770,18 +770,32 @@ export class RollingOptionsPtDeService {
                 if (vRenkoSignal === "R") {
                     await logRollingOptionsPtDeEvent({
                         userId: pUserId,
-                        eventType: "renko_red_detected",
+                        eventType: "renko_change_detected",
                         severity: "info",
-                        title: "Renko Red Detected",
+                        title: "Renko Change Detected",
                         message: "Server detected a RED renko brick.",
                         payload: {
                             symbol: objConfig.symbol,
-                            reason: "renko_red_brick"
+                            reason: "renko_red_brick",
+                            renkoColor: "R"
                         }
                     });
                     await this.handleRenkoRedFlow(pUserId, objConfig);
                     continue;
                 }
+
+                await logRollingOptionsPtDeEvent({
+                    userId: pUserId,
+                    eventType: "renko_change_detected",
+                    severity: "info",
+                    title: "Renko Change Detected",
+                    message: "Server detected a GREEN renko brick.",
+                    payload: {
+                        symbol: objConfig.symbol,
+                        reason: "renko_green_brick",
+                        renkoColor: "G"
+                    }
+                });
 
                 await logRollingOptionsPtDeEvent({
                     userId: pUserId,

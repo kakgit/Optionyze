@@ -501,9 +501,7 @@
             ids.renkoBoxButton.classList.toggle("renko-green", vRenkoColor === "G");
         }
         if (ids.openRenkoSignal) {
-            ids.openRenkoSignal.textContent = vRenkoColor === "G"
-                ? "Renko Green Detected"
-                : (vRenkoColor === "R" ? "Renko Red Detected" : "-");
+            ids.openRenkoSignal.textContent = vRenkoColor ? "Renko Change Detected" : "-";
         }
         if (ids.autoTraderButton instanceof HTMLButtonElement) {
             ids.autoTraderButton.textContent = gAutoTraderEnabled ? "Auto Trader - ON" : "Auto Trader - OFF";

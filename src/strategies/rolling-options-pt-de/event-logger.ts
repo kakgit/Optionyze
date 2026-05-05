@@ -7,7 +7,7 @@ export const gRollingOptionsTelegramEventTypes = [
     "engine_stopped",
     "engine_error",
     "strategy_executed",
-    "renko_red_detected",
+    "renko_change_detected",
     "future_opened",
     "future_closed",
     "option_opened",
@@ -28,6 +28,7 @@ function normalizeSelectedEventTypes(pValue: unknown): string[] {
     }
     return pValue
         .map((vItem) => String(vItem || "").trim())
+        .map((vItem) => vItem === "renko_red_detected" ? "renko_change_detected" : vItem)
         .filter(Boolean);
 }
 

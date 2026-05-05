@@ -282,6 +282,11 @@ export function estimatePositionCharges(
 }
 
 export function buildConfigFromUiState(pUiState: Record<string, unknown>): RollingOptionsPtDeConfig {
+    const normalizeQtyPct = (pValue: unknown, pFallback: number): number => {
+        const vNumber = Number(pValue);
+        return Number.isFinite(vNumber) ? Math.max(0, Math.round(vNumber)) : pFallback;
+    };
+
     const vSymbol = String(pUiState.symbol || "BTC").trim().toUpperCase() || "BTC";
     const vAction = String(pUiState.action1 || "sell").trim().toLowerCase() === "buy" ? "buy" : "sell";
     const vLegSideRaw = String(pUiState.legSide1 || "ce").trim().toLowerCase();
@@ -305,8 +310,8 @@ export function buildConfigFromUiState(pUiState: Record<string, unknown>): Rolli
         expiryMode: vExpiryMode,
         expiryDate: vEffectiveExpiryDate,
         optionQty: Math.max(1, Math.floor(Number(pUiState.manualOptQty1 || 1))),
-        redOptionQtyPct: Math.max(1, Math.round(Number(pUiState.redOptQtyPct ?? pUiState.autoOptQtyPct ?? 100))),
-        greenOptionQtyPct: Math.max(1, Math.round(Number(pUiState.greenOptQtyPct || 100))),
+        redOptionQtyPct: normalizeQtyPct(pUiState.redOptQtyPct ?? pUiState.autoOptQtyPct, 100),
+        greenOptionQtyPct: normalizeQtyPct(pUiState.greenOptQtyPct, 100),
         newDelta: Number(pUiState.newDelta1 || 0.53),
         redReDelta: Number(pUiState.reDelta1 || 0.53),
         redDeltaTakeProfit: Number(pUiState.deltaTp1 || 0.15),

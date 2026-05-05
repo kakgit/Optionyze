@@ -14,6 +14,7 @@ function normalizeSelectedEventTypes(pValue: unknown): string[] {
     }
     return pValue
         .map((vItem) => String(vItem || "").trim())
+        .map((vItem) => vItem === "renko_red_detected" ? "renko_change_detected" : vItem)
         .filter(Boolean);
 }
 

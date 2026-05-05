@@ -16,8 +16,17 @@ export interface RollingOptionsLtDeImportedPositionRecord {
     pnl: number;
     margin: number;
     liquidationPrice: number;
+    metadata?: RollingOptionsLtDePositionMetadata;
     openedAt: string;
     updatedAt: string;
+}
+
+export interface RollingOptionsLtDePositionMetadata {
+    ruleColor?: "R" | "G";
+    takeProfitDelta?: number | null;
+    stopLossDelta?: number | null;
+    reEntryDelta?: number | null;
+    openedReason?: string;
 }
 
 interface RollingOptionsLtDeImportedPositionRow {
@@ -34,6 +43,7 @@ interface RollingOptionsLtDeImportedPositionRow {
     pnl: number;
     margin: number;
     liquidation_price: number;
+    metadata_json?: unknown;
     opened_at: string | Date;
     updated_at: string | Date;
 }
@@ -42,6 +52,43 @@ const gPositionsFile = path.resolve(process.cwd(), "data", "rolling-options-lt-d
 
 async function loadAllJson(): Promise<RollingOptionsLtDeImportedPositionRecord[]> {
     return readJsonFile<RollingOptionsLtDeImportedPositionRecord[]>(gPositionsFile, []);
+}
+
+function normalizeMetadata(pMetadata: unknown): RollingOptionsLtDePositionMetadata | undefined {
+    if (!pMetadata || typeof pMetadata !== "object" || Array.isArray(pMetadata)) {
+        return undefined;
+    }
+
+    const objMetadata = pMetadata as Record<string, unknown>;
+    const vRuleColor = String(objMetadata.ruleColor || "").trim().toUpperCase();
+    const vTakeProfitDelta = objMetadata.takeProfitDelta === null || objMetadata.takeProfitDelta === undefined
+        ? undefined
+        : Number(objMetadata.takeProfitDelta);
+    const vStopLossDelta = objMetadata.stopLossDelta === null || objMetadata.stopLossDelta === undefined
+        ? undefined
+        : Number(objMetadata.stopLossDelta);
+    const vReEntryDelta = objMetadata.reEntryDelta === null || objMetadata.reEntryDelta === undefined
+        ? undefined
+        : Number(objMetadata.reEntryDelta);
+    const objNormalized: RollingOptionsLtDePositionMetadata = {};
+
+    if (vRuleColor === "R" || vRuleColor === "G") {
+        objNormalized.ruleColor = vRuleColor;
+    }
+    if (Number.isFinite(vTakeProfitDelta)) {
+        objNormalized.takeProfitDelta = vTakeProfitDelta;
+    }
+    if (Number.isFinite(vStopLossDelta)) {
+        objNormalized.stopLossDelta = vStopLossDelta;
+    }
+    if (Number.isFinite(vReEntryDelta)) {
+        objNormalized.reEntryDelta = vReEntryDelta;
+    }
+    if (String(objMetadata.openedReason || "").trim()) {
+        objNormalized.openedReason = String(objMetadata.openedReason).trim();
+    }
+
+    return Object.keys(objNormalized).length > 0 ? objNormalized : undefined;
 }
 
 function normalizeImportedPositions(
@@ -71,6 +118,7 @@ function normalizeImportedPositions(
             pnl: Number(pPosition.pnl || 0),
             margin: Number(pPosition.margin || 0),
             liquidationPrice: Number(pPosition.liquidationPrice || 0),
+            metadata: normalizeMetadata(pPosition.metadata),
             openedAt: String(pPosition.openedAt || "").trim() || new Date().toISOString(),
             updatedAt: new Date().toISOString()
         });
@@ -95,6 +143,7 @@ function mapRow(pRow: RollingOptionsLtDeImportedPositionRow): RollingOptionsLtDe
         pnl: Number(pRow.pnl || 0),
         margin: Number(pRow.margin || 0),
         liquidationPrice: Number(pRow.liquidation_price || 0),
+        metadata: normalizeMetadata(pRow.metadata_json),
         openedAt: Number.isNaN(vOpenedAt.getTime()) ? new Date(pRow.updated_at).toISOString() : vOpenedAt.toISOString(),
         updatedAt: new Date(pRow.updated_at).toISOString()
     };
@@ -105,7 +154,7 @@ export async function listRollingOptionsLtDeImportedPositions(pUserId: string): 
     if (isPostgresConfigured()) {
         const objPool = getPostgresPool();
         const objResult = await objPool.query<RollingOptionsLtDeImportedPositionRow>(`
-            SELECT user_id, import_id, contract_name, side, qty, entry_price, mark_price, entry_delta, current_delta, charges, pnl, margin, liquidation_price, opened_at, updated_at
+            SELECT user_id, import_id, contract_name, side, qty, entry_price, mark_price, entry_delta, current_delta, charges, pnl, margin, liquidation_price, metadata_json, opened_at, updated_at
             FROM optionyze_rolling_options_lt_de_positions
             WHERE user_id = $1
             ORDER BY updated_at DESC, import_id ASC
@@ -148,9 +197,10 @@ export async function replaceRollingOptionsLtDeImportedPositions(
                         pnl,
                         margin,
                         liquidation_price,
+                        metadata_json,
                         opened_at,
                         updated_at
-                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
                     ON CONFLICT (user_id, import_id) DO UPDATE SET
                         contract_name = EXCLUDED.contract_name,
                         side = EXCLUDED.side,
@@ -163,6 +213,7 @@ export async function replaceRollingOptionsLtDeImportedPositions(
                         pnl = EXCLUDED.pnl,
                         margin = EXCLUDED.margin,
                         liquidation_price = EXCLUDED.liquidation_price,
+                        metadata_json = EXCLUDED.metadata_json,
                         opened_at = EXCLUDED.opened_at,
                         updated_at = EXCLUDED.updated_at
                 `, [
@@ -179,6 +230,7 @@ export async function replaceRollingOptionsLtDeImportedPositions(
                     objPosition.pnl,
                     objPosition.margin,
                     objPosition.liquidationPrice,
+                    JSON.stringify(objPosition.metadata || {}),
                     objPosition.openedAt,
                     objPosition.updatedAt
                 ]);

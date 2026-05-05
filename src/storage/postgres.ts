@@ -292,6 +292,10 @@ export async function ensurePostgresSchema(): Promise<void> {
         ADD COLUMN IF NOT EXISTS opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     `);
     await objPool.query(`
+        ALTER TABLE optionyze_rolling_options_lt_de_positions
+        ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+    `);
+    await objPool.query(`
         DO $$
         DECLARE
             vConstraintName TEXT;

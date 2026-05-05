@@ -5,7 +5,8 @@ import { getDeltaApiProfile } from "../../storage/delta-api-profile-store";
 import {
     listRollingOptionsLtDeImportedPositions,
     replaceRollingOptionsLtDeImportedPositions,
-    type RollingOptionsLtDeImportedPositionRecord
+    type RollingOptionsLtDeImportedPositionRecord,
+    type RollingOptionsLtDePositionMetadata
 } from "../../storage/rolling-options-lt-de-position-store";
 import { loadRollingOptionsLtDeProfile } from "../../storage/rolling-options-lt-de-profile-store";
 import {
@@ -250,7 +251,7 @@ export class RollingOptionsLtDeService {
         const arrLive = await this.fetchCurrentDeltaPositions(pUserId, vSymbol);
         const objLiveByContract = new Map(arrLive.map((objRow) => [objRow.contractName, objRow]));
         const arrReconciled = arrSaved
-            .map((objSavedRow) => {
+            .map((objSavedRow): RollingOptionsLtDeImportedPositionRecord | null => {
                 const objLiveRow = objLiveByContract.get(objSavedRow.contractName);
                 if (!objLiveRow) {
                     return null;
@@ -260,6 +261,7 @@ export class RollingOptionsLtDeService {
                     entryDelta: objSavedRow.entryDelta ?? objLiveRow.entryDelta,
                     currentDelta: objSavedRow.currentDelta ?? objLiveRow.currentDelta,
                     charges: objSavedRow.charges ?? objLiveRow.charges,
+                    metadata: objSavedRow.metadata ?? objLiveRow.metadata,
                     openedAt: objSavedRow.openedAt || objLiveRow.openedAt
                 };
             })
@@ -303,16 +305,60 @@ export class RollingOptionsLtDeService {
         return vAbsDelta >= vTargetDelta;
     }
 
+    private getRuleValues(
+        pConfig: RollingOptionsPtDeConfig,
+        pColorCode: "R" | "G"
+    ): {
+        colorCode: "R" | "G";
+        reDelta: number;
+        takeProfitDelta: number;
+        stopLossDelta: number;
+    } {
+        if (pColorCode === "G") {
+            return {
+                colorCode: "G",
+                reDelta: Number(pConfig.greenReDelta ?? pConfig.reDelta ?? 0.53),
+                takeProfitDelta: Number(pConfig.greenDeltaTakeProfit ?? pConfig.deltaTakeProfit ?? 0.15),
+                stopLossDelta: Number(pConfig.greenDeltaStopLoss ?? pConfig.deltaStopLoss ?? 0.85)
+            };
+        }
+
+        return {
+            colorCode: "R",
+            reDelta: Number(pConfig.redReDelta ?? pConfig.reDelta ?? 0.53),
+            takeProfitDelta: Number(pConfig.redDeltaTakeProfit ?? pConfig.deltaTakeProfit ?? 0.15),
+            stopLossDelta: Number(pConfig.redDeltaStopLoss ?? pConfig.deltaStopLoss ?? 0.85)
+        };
+    }
+
+    private buildOptionMetadata(
+        pConfig: RollingOptionsPtDeConfig,
+        pColorCode: "R" | "G",
+        pReason: string
+    ): RollingOptionsLtDePositionMetadata {
+        const objRuleValues = this.getRuleValues(pConfig, pColorCode);
+        return {
+            ruleColor: objRuleValues.colorCode,
+            takeProfitDelta: objRuleValues.takeProfitDelta,
+            stopLossDelta: objRuleValues.stopLossDelta,
+            reEntryDelta: objRuleValues.reDelta,
+            openedReason: pReason
+        };
+    }
+
     private wouldOptionTriggerImmediately(
-        _pConfig: RollingOptionsPtDeConfig,
+        pRuleValues: {
+            takeProfitDelta: number;
+            stopLossDelta: number;
+        },
         pPositionSide: "BUY" | "SELL",
         pDelta: number
     ): boolean {
         return shouldTriggerImportedOption(
             pPositionSide,
             pDelta,
-            Number(_pConfig.deltaTakeProfit || 0),
-            Number(_pConfig.deltaStopLoss || 0)
+            Number(pRuleValues.takeProfitDelta || 0),
+            Number(pRuleValues.stopLossDelta || 0)
         ).shouldAct;
     }
 
@@ -475,7 +521,7 @@ export class RollingOptionsLtDeService {
     }
 
     private getRenkoOptionQty(pFutureQty: number, pQtyPct: number): number {
-        return Math.max(1, Math.round(Math.max(0, Number(pFutureQty || 0)) * Math.max(0, Number(pQtyPct || 0)) / 100));
+        return Math.max(0, Math.round(Math.max(0, Number(pFutureQty || 0)) * Math.max(0, Number(pQtyPct || 0)) / 100));
     }
 
     private async openInitialFutureEntry(
@@ -595,14 +641,20 @@ export class RollingOptionsLtDeService {
         pConfig: RollingOptionsPtDeConfig,
         pQty: number,
         pTargetDelta: number,
-        pReason: string
+        pReason: string,
+        pColorCode: "R" | "G" = "R"
     ): Promise<RollingOptionsLtDeImportedPositionRecord[]> {
+        if (!(Number(pQty) > 0)) {
+            return [];
+        }
+
         const { client } = await this.getDeltaClient(pUserId);
         const vPositionSide = pConfig.action === "buy" ? "BUY" : "SELL";
         const arrOptionSides: Array<"CE" | "PE"> = pConfig.legSide === "both"
             ? ["CE", "PE"]
             : [pConfig.legSide === "pe" ? "PE" : "CE"];
         const arrCreated: RollingOptionsLtDeImportedPositionRecord[] = [];
+        const objRuleValues = this.getRuleValues(pConfig, pColorCode);
 
         for (const vOptionSide of arrOptionSides) {
             const objContract = await findBestLiveOptionContract(pConfig, vOptionSide, pTargetDelta);
@@ -612,7 +664,7 @@ export class RollingOptionsLtDeService {
             if (!this.meetsEntryDeltaRule(pConfig.action, objContract.delta, pTargetDelta)) {
                 continue;
             }
-            if (this.wouldOptionTriggerImmediately(pConfig, vPositionSide, Math.abs(objContract.delta))) {
+            if (this.wouldOptionTriggerImmediately(objRuleValues, vPositionSide, Math.abs(objContract.delta))) {
                 continue;
             }
 
@@ -642,6 +694,7 @@ export class RollingOptionsLtDeService {
                 pnl: 0,
                 margin: 0,
                 liquidationPrice: 0,
+                metadata: this.buildOptionMetadata(pConfig, pColorCode, pReason),
                 openedAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
             });
@@ -685,13 +738,17 @@ export class RollingOptionsLtDeService {
         }
 
         const vQtyPct = pColorCode === "R" ? pConfig.redOptionQtyPct : pConfig.greenOptionQtyPct;
-        const vOptionQty = Math.max(1, Math.round(vTotalFutureQty * vQtyPct / 100));
+        const vOptionQty = this.getRenkoOptionQty(vTotalFutureQty, vQtyPct);
+        if (!(vOptionQty > 0)) {
+            return 0;
+        }
         const arrCreated = await this.openOptionEntries(
             pUserId,
             pConfig,
             vOptionQty,
             Number(pConfig.newDelta || 0.53),
-            pColorCode === "R" ? "Renko RED option entry" : "Renko GREEN option entry"
+            pColorCode === "R" ? "Renko RED option entry" : "Renko GREEN option entry",
+            pColorCode
         );
         return arrCreated.length;
     }
@@ -739,22 +796,34 @@ export class RollingOptionsLtDeService {
             }
         });
 
-        const bRenkoIsRed = pConfig.renkoEnabled && this.getOrCreateState(pUserId).renko.lastColor === "R";
-        if (pReason === "sl" && pConfig.addOneLotFuture) {
+        const vCurrentRenkoColor = String(this.getOrCreateState(pUserId).renko.lastColor || "").trim().toUpperCase();
+        const vActiveRuleColor: "R" | "G" = pConfig.renkoEnabled && vCurrentRenkoColor === "G" ? "G" : "R";
+        const objRuleValues = this.getRuleValues(pConfig, vActiveRuleColor);
+        let arrNextPositions = arrRemaining;
+
+        if (vActiveRuleColor === "R" && pReason === "sl" && pConfig.addOneLotFuture) {
             await this.openFutureAddition(pUserId, pConfig, pSnapshot);
+            arrNextPositions = await listRollingOptionsLtDeImportedPositions(pUserId);
         }
 
-        if (bRenkoIsRed || pConfig.reEnter) {
-            const vFutureQty = arrRemaining
+        const bShouldReEnter = vActiveRuleColor === "R" || pConfig.reEnter;
+        if (bShouldReEnter) {
+            const vFutureQty = arrNextPositions
                 .filter((objRow) => !isOptionContract(objRow.contractName))
                 .reduce((pSum, objRow) => pSum + Math.max(0, Number(objRow.qty || 0)), 0);
-            const vReEntryQty = Math.max(1, vFutureQty || Number(pPosition.qty || 1));
+            const vBaseQty = Math.max(0, vFutureQty || Number(pPosition.qty || 0));
+            const vQtyPct = vActiveRuleColor === "R" ? pConfig.redOptionQtyPct : pConfig.greenOptionQtyPct;
+            const vReEntryQty = this.getRenkoOptionQty(vBaseQty, vQtyPct);
+            if (!(vReEntryQty > 0)) {
+                return;
+            }
             await this.openOptionEntries(
                 pUserId,
                 pConfig,
                 vReEntryQty,
-                Number(pConfig.reDelta || pConfig.newDelta || 0.53),
-                pReason === "sl" ? "SL replacement option" : "TP replacement option"
+                objRuleValues.reDelta,
+                pReason === "sl" ? "SL replacement option" : "TP replacement option",
+                vActiveRuleColor
             );
         }
     }
@@ -910,13 +979,14 @@ export class RollingOptionsLtDeService {
 
         await logRollingOptionsLtDeEvent({
             userId: pUserId,
-            eventType: "manual_action",
+            eventType: "renko_change_detected",
             severity: "info",
-            title: "Manual Renko Signal",
+            title: "Renko Change Detected",
             message: `Manual Renko signal changed to ${vColorCode === "R" ? "RED" : "GREEN"}.`,
             payload: {
                 symbol: objConfig.symbol,
-                reason: vColorCode === "R" ? "manual_renko_red" : "manual_renko_green"
+                reason: vColorCode === "R" ? "manual_renko_red" : "manual_renko_green",
+                renkoColor: vColorCode
             }
         });
 
@@ -1047,6 +1117,18 @@ export class RollingOptionsLtDeService {
                 if (!objState.running) {
                     break;
                 }
+                await logRollingOptionsLtDeEvent({
+                    userId: pUserId,
+                    eventType: "renko_change_detected",
+                    severity: "info",
+                    title: "Renko Change Detected",
+                    message: `Server detected a ${vRenkoSignal === "R" ? "RED" : "GREEN"} renko brick.`,
+                    payload: {
+                        symbol: objConfig.symbol,
+                        reason: vRenkoSignal === "R" ? "renko_red_brick" : "renko_green_brick",
+                        renkoColor: vRenkoSignal
+                    }
+                });
                 const arrPositionsBeforeEntry = await listRollingOptionsLtDeImportedPositions(pUserId);
                 await this.handleRenkoOptionEntry(pUserId, objConfig, arrPositionsBeforeEntry, vRenkoSignal);
             }
@@ -1080,6 +1162,7 @@ export class RollingOptionsLtDeService {
                 pnl: objRow.pnl,
                 margin: objRow.margin,
                 liquidationPrice: objRow.liquidationPrice,
+                metadata: objRow.metadata,
                 openedAt: objRow.openedAt,
                 updatedAt: objRow.updatedAt
             })));
@@ -1090,11 +1173,13 @@ export class RollingOptionsLtDeService {
                     continue;
                 }
 
+                const vStoredTakeProfitDelta = Number(objPosition.metadata?.takeProfitDelta);
+                const vStoredStopLossDelta = Number(objPosition.metadata?.stopLossDelta);
                 const objDecision = shouldTriggerImportedOption(
                     objPosition.side,
                     Number(objPosition.currentDelta),
-                    Number(objConfig.deltaTakeProfit || 0),
-                    Number(objConfig.deltaStopLoss || 0)
+                    Number.isFinite(vStoredTakeProfitDelta) ? vStoredTakeProfitDelta : Number(objConfig.deltaTakeProfit || 0),
+                    Number.isFinite(vStoredStopLossDelta) ? vStoredStopLossDelta : Number(objConfig.deltaStopLoss || 0)
                 );
                 if (objDecision.shouldAct && objDecision.reason) {
                     await this.handleOptionTrigger(pUserId, objConfig, objPosition, objDecision.reason, objSnapshot);
