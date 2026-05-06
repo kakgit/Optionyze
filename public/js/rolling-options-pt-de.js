@@ -261,6 +261,16 @@
         return parsedValue.toFixed(fractionDigits);
     }
 
+    function parseNumberInput(field, fallbackValue) {
+        const rawValue = field?.value;
+        if (rawValue === null || rawValue === undefined || rawValue === "") {
+            return fallbackValue;
+        }
+
+        const parsedValue = Number(rawValue);
+        return Number.isFinite(parsedValue) ? parsedValue : fallbackValue;
+    }
+
     function escapeHtml(value) {
         return String(value ?? "")
             .replaceAll("&", "&amp;")
@@ -297,28 +307,28 @@
     function getUiState() {
         return {
             symbol: String(ids.symbol?.value || "BTC"),
-            manualFutQty: Number(ids.manualFutQty?.value || 1),
+            manualFutQty: parseNumberInput(ids.manualFutQty, 1),
             manualFutOrderType: String(ids.manualFutOrderType?.value || "market_order"),
             action1: String(ids.action1?.value || "sell"),
             legSide1: String(ids.legSide1?.value || "ce"),
             expiryMode1: String(ids.expiryMode1?.value || "1"),
             expiryDate1: String(ids.expiryDate1?.value || ""),
-            manualOptQty1: Number(ids.manualOptQty1?.value || 1),
-            newDelta1: Number(ids.newDelta1?.value || 0.53),
-            reDelta1: Number(ids.reDelta1?.value || 0.53),
-            deltaTp1: Number(ids.deltaTp1?.value || 0.15),
-            deltaSl1: Number(ids.deltaSl1?.value || 0.85),
+            manualOptQty1: parseNumberInput(ids.manualOptQty1, 1),
+            newDelta1: parseNumberInput(ids.newDelta1, 0.53),
+            reDelta1: parseNumberInput(ids.reDelta1, 0.53),
+            deltaTp1: parseNumberInput(ids.deltaTp1, 0.15),
+            deltaSl1: parseNumberInput(ids.deltaSl1, 0.85),
             reEnter1: Boolean(ids.reEnter1?.checked),
-            redOptQtyPct: Number(ids.redOptQtyPct?.value || 100),
-            greenOptQtyPct: Number(ids.greenOptQtyPct?.value || 100),
-            greenReDelta: Number(ids.greenReDelta?.value || 0.53),
-            greenTpDelta: Number(ids.greenTpDelta?.value || 0.15),
-            greenSlDelta: Number(ids.greenSlDelta?.value || 0.85),
+            redOptQtyPct: parseNumberInput(ids.redOptQtyPct, 100),
+            greenOptQtyPct: parseNumberInput(ids.greenOptQtyPct, 100),
+            greenReDelta: parseNumberInput(ids.greenReDelta, 0.53),
+            greenTpDelta: parseNumberInput(ids.greenTpDelta, 0.15),
+            greenSlDelta: parseNumberInput(ids.greenSlDelta, 0.85),
             addOneLotFuture: Boolean(ids.addOneLotFuture?.checked),
             renkoFeedEnabled: Boolean(ids.renkoFeedEnabled?.checked),
-            renkoFeedPts: Number(ids.renkoFeedPts?.value || 10),
+            renkoFeedPts: parseNumberInput(ids.renkoFeedPts, 10),
             renkoFeedPriceSrc: String(ids.renkoFeedPriceSrc?.value || "spot_price"),
-            optionsPnl: Number(ids.optionsPnl?.value || 0),
+            optionsPnl: parseNumberInput(ids.optionsPnl, 0),
             telegramAlertsEnabled: Boolean(ids.telegramAlertsEnabled?.checked),
             telegramAlertTypes: ids.telegramEventCheckboxes
                 .filter(function (objCheckbox) { return objCheckbox.checked; })

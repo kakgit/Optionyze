@@ -521,7 +521,37 @@ export class RollingOptionsLtDeService {
     }
 
     private getRenkoOptionQty(pFutureQty: number, pQtyPct: number): number {
-        return Math.max(0, Math.round(Math.max(0, Number(pFutureQty || 0)) * Math.max(0, Number(pQtyPct || 0)) / 100));
+        const vBaseQty = Math.max(0, Number(pFutureQty || 0));
+        const vPercent = Math.max(0, Number(pQtyPct || 0));
+
+        if (!(vBaseQty > 0) || !(vPercent > 0)) {
+            return 0;
+        }
+
+        return Math.max(1, Math.round(vBaseQty * vPercent / 100));
+    }
+
+    private async openGreenRenkoFutureEntry(
+        pUserId: string,
+        pConfig: RollingOptionsPtDeConfig,
+        pPositions: RollingOptionsLtDeImportedPositionRecord[],
+        pReason: string
+    ): Promise<number> {
+        const arrFutures = pPositions.filter((objRow) => !isOptionContract(objRow.contractName));
+        const arrOptions = pPositions.filter((objRow) => isOptionContract(objRow.contractName));
+
+        if (arrOptions.length > 0 || arrFutures.length <= 0) {
+            return 0;
+        }
+
+        const vTotalFutureQty = arrFutures.reduce((pSum, objRow) => pSum + Math.max(0, Number(objRow.qty || 0)), 0);
+        const vFutureQty = this.getRenkoOptionQty(vTotalFutureQty, pConfig.greenOptionQtyPct);
+        if (!(vFutureQty > 0)) {
+            return 0;
+        }
+
+        await this.openInitialFutureEntry(pUserId, pConfig, vFutureQty, pReason);
+        return vFutureQty;
     }
 
     private async openInitialFutureEntry(
@@ -726,6 +756,15 @@ export class RollingOptionsLtDeService {
         pPositions: RollingOptionsLtDeImportedPositionRecord[],
         pColorCode: "R" | "G"
     ): Promise<number> {
+        if (pColorCode === "G") {
+            return await this.openGreenRenkoFutureEntry(
+                pUserId,
+                pConfig,
+                pPositions,
+                "Renko GREEN future entry"
+            );
+        }
+
         const arrFutures = pPositions.filter((objRow) => !isOptionContract(objRow.contractName));
         const arrOptions = pPositions.filter((objRow) => isOptionContract(objRow.contractName));
         if (arrOptions.length > 0 || arrFutures.length <= 0) {
@@ -806,14 +845,12 @@ export class RollingOptionsLtDeService {
             arrNextPositions = await listRollingOptionsLtDeImportedPositions(pUserId);
         }
 
-        const bShouldReEnter = vActiveRuleColor === "R" || pConfig.reEnter;
-        if (bShouldReEnter) {
+        if (vActiveRuleColor === "R") {
             const vFutureQty = arrNextPositions
                 .filter((objRow) => !isOptionContract(objRow.contractName))
                 .reduce((pSum, objRow) => pSum + Math.max(0, Number(objRow.qty || 0)), 0);
             const vBaseQty = Math.max(0, vFutureQty || Number(pPosition.qty || 0));
-            const vQtyPct = vActiveRuleColor === "R" ? pConfig.redOptionQtyPct : pConfig.greenOptionQtyPct;
-            const vReEntryQty = this.getRenkoOptionQty(vBaseQty, vQtyPct);
+            const vReEntryQty = this.getRenkoOptionQty(vBaseQty, pConfig.redOptionQtyPct);
             if (!(vReEntryQty > 0)) {
                 return;
             }
@@ -824,6 +861,16 @@ export class RollingOptionsLtDeService {
                 objRuleValues.reDelta,
                 pReason === "sl" ? "SL replacement option" : "TP replacement option",
                 vActiveRuleColor
+            );
+            return;
+        }
+
+        if (pReason === "sl") {
+            await this.openGreenRenkoFutureEntry(
+                pUserId,
+                pConfig,
+                arrNextPositions,
+                "SL GREEN future entry"
             );
         }
     }

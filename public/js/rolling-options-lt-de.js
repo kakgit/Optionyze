@@ -274,6 +274,16 @@
         });
     }
 
+    function parseNumberInput(field, fallbackValue) {
+        const rawValue = field?.value;
+        if (rawValue === null || rawValue === undefined || rawValue === "") {
+            return fallbackValue;
+        }
+
+        const parsedValue = Number(rawValue);
+        return Number.isFinite(parsedValue) ? parsedValue : fallbackValue;
+    }
+
     function applySymbolDefaults() {
         const objConfig = getSelectedConfig();
         if (ids.lotSize) {
@@ -303,22 +313,22 @@
     function getUiState() {
         return {
             symbol: normalizeSymbolValue(ids.symbol?.value || "BTC"),
-            manualFutQty: Number(ids.futQty?.value || 1),
+            manualFutQty: parseNumberInput(ids.futQty, 1),
             manualFutOrderType: String(ids.futureOrderType?.value || "market_order"),
             action1: String(ids.optionAction?.value || "sell"),
             legSide1: String(ids.optionLegSide?.value || "ce"),
             expiryMode1: String(ids.optionExpiryMode?.value || "1"),
             expiryDate1: String(ids.optionExpiryDate?.value || ""),
-            manualOptQty1: Number(ids.optionQty?.value || 1),
-            newDelta1: Number(ids.optionNewDelta?.value || 0.53),
-            reDelta1: Number(ids.optionReDelta?.value || 0.53),
-            deltaTp1: Number(ids.optionTpDelta?.value || 0.15),
-            deltaSl1: Number(ids.optionSlDelta?.value || 0.85),
+            manualOptQty1: parseNumberInput(ids.optionQty, 1),
+            newDelta1: parseNumberInput(ids.optionNewDelta, 0.53),
+            reDelta1: parseNumberInput(ids.optionReDelta, 0.53),
+            deltaTp1: parseNumberInput(ids.optionTpDelta, 0.15),
+            deltaSl1: parseNumberInput(ids.optionSlDelta, 0.85),
             reEnter1: Boolean(ids.optionReEnter?.checked),
-            redOptQtyPct: Number(ids.redOptQtyPct?.value || 100),
-            greenOptQtyPct: Number(ids.greenOptQtyPct?.value || 100),
+            redOptQtyPct: parseNumberInput(ids.redOptQtyPct, 100),
+            greenOptQtyPct: parseNumberInput(ids.greenOptQtyPct, 100),
             addOneLotFuture: Boolean(ids.addOneLotFuture?.checked),
-            renkoFeedPts: Number(ids.renkoValue?.value || 10),
+            renkoFeedPts: parseNumberInput(ids.renkoValue, 10),
             closedFromDate: String(ids.closedFromDate?.value || ""),
             closedToDate: String(ids.closedToDate?.value || ""),
             telegramAlertsEnabled: ids.telegramEventCheckboxes.some(function (objCheckbox) { return objCheckbox.checked; }),

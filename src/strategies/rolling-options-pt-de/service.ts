@@ -533,7 +533,40 @@ export class RollingOptionsPtDeService {
     }
 
     private getRenkoOptionQty(pFutureQty: number, pQtyPct: number): number {
-        return Math.max(1, Math.round(pFutureQty * pQtyPct / 100));
+        const vBaseQty = Math.max(0, Number(pFutureQty || 0));
+        const vPercent = Math.max(0, Number(pQtyPct || 0));
+
+        if (!(vBaseQty > 0) || !(vPercent > 0)) {
+            return 0;
+        }
+
+        return Math.max(1, Math.round(vBaseQty * vPercent / 100));
+    }
+
+    private async openGreenRenkoFuturePosition(
+        pUserId: string,
+        pConfig: RollingOptionsPtDeConfig,
+        pReason: string
+    ): Promise<void> {
+        const objSummary = getOpenPositionsSummary(await listRollingOptionsPtDeOpenPositions(pUserId));
+        const vFutureQty = this.getRenkoOptionQty(objSummary.futureQty, pConfig.greenOptionQtyPct);
+
+        if (!(vFutureQty > 0)) {
+            await logRollingOptionsPtDeEvent({
+                userId: pUserId,
+                eventType: "manual_action",
+                severity: "info",
+                title: "Renko GREEN Futures Skipped",
+                message: "Skipped GREEN Renko future entry because Green Opt Qty % is 0.",
+                payload: {
+                    symbol: pConfig.symbol,
+                    reason: "renko_green_future_skipped_zero_qty_pct"
+                }
+            });
+            return;
+        }
+
+        await this.openFuturePosition(pUserId, pConfig, vFutureQty, pReason);
     }
 
     public async executeStrategy(pUserId: string): Promise<{ status: string; message: string; }> {
@@ -671,6 +704,21 @@ export class RollingOptionsPtDeService {
 
         const vQtyPct = pColorCode === "R" ? pConfig.redOptionQtyPct : pConfig.greenOptionQtyPct;
         const vQty = this.getRenkoOptionQty(objSummary.futureQty, vQtyPct);
+        if (!(vQty > 0)) {
+            await logRollingOptionsPtDeEvent({
+                userId: pUserId,
+                eventType: "manual_action",
+                severity: "info",
+                title: `Renko ${vColorLabel} Skipped`,
+                message: `Skipped ${vColorLabel} Renko option entry because the configured qty % is 0.`,
+                payload: {
+                    symbol: pConfig.symbol,
+                    reason: "renko_option_skipped_zero_qty_pct",
+                    renkoColor: pColorCode
+                }
+            });
+            return;
+        }
         await this.openOptionPositions(
             pUserId,
             pConfig,
@@ -685,7 +733,39 @@ export class RollingOptionsPtDeService {
     }
 
     private async handleRenkoGreenFlow(pUserId: string, pConfig: RollingOptionsPtDeConfig): Promise<void> {
-        await this.handleRenkoOptionEntry(pUserId, pConfig, "G");
+        const objSummary = getOpenPositionsSummary(await listRollingOptionsPtDeOpenPositions(pUserId));
+
+        if (objSummary.futureQty <= 0) {
+            await logRollingOptionsPtDeEvent({
+                userId: pUserId,
+                eventType: "manual_action",
+                severity: "info",
+                title: "Renko GREEN Skipped",
+                message: "Skipped GREEN Renko future entry because no futures position is open.",
+                payload: {
+                    symbol: pConfig.symbol,
+                    reason: "renko_green_future_skipped_no_open_future"
+                }
+            });
+            return;
+        }
+
+        if (objSummary.hasOpenOption) {
+            await logRollingOptionsPtDeEvent({
+                userId: pUserId,
+                eventType: "manual_action",
+                severity: "info",
+                title: "Renko GREEN Skipped",
+                message: "Skipped GREEN Renko future entry because an option position is already open.",
+                payload: {
+                    symbol: pConfig.symbol,
+                    reason: "renko_green_future_skipped_option_already_open"
+                }
+            });
+            return;
+        }
+
+        await this.openGreenRenkoFuturePosition(pUserId, pConfig, "Renko GREEN future entry");
     }
 
     private async handleOptionTrigger(
@@ -711,10 +791,14 @@ export class RollingOptionsPtDeService {
 
             const objSummary = getOpenPositionsSummary(await listRollingOptionsPtDeOpenPositions(pUserId));
             if (objSummary.futureQty > 0) {
+                const vReplacementQty = this.getRenkoOptionQty(objSummary.futureQty, pConfig.redOptionQtyPct);
+                if (!(vReplacementQty > 0)) {
+                    return;
+                }
                 await this.openOptionPositions(
                     pUserId,
                     pConfig,
-                    objSummary.futureQty,
+                    vReplacementQty,
                     pReason === "sl" ? "SL replacement option" : "TP replacement option",
                     "R",
                     true
@@ -723,17 +807,8 @@ export class RollingOptionsPtDeService {
             return;
         }
 
-        if (pConfig.reEnter) {
-            const objSummary = getOpenPositionsSummary(await listRollingOptionsPtDeOpenPositions(pUserId));
-            const vQty = Math.max(1, objSummary.futureQty);
-            await this.openOptionPositions(
-                pUserId,
-                pConfig,
-                vQty,
-                pReason === "sl" ? "SL re-entry option" : "TP re-entry option",
-                String(pPosition.metadata?.ruleColor || "").trim().toUpperCase() === "G" ? "G" : "R",
-                true
-            );
+        if (pReason === "sl") {
+            await this.openGreenRenkoFuturePosition(pUserId, pConfig, "SL GREEN future entry");
         }
     }
 
