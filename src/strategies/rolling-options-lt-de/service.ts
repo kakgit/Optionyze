@@ -47,6 +47,18 @@ interface DeltaPositionRow {
     product_id?: number | string | null;
 }
 
+interface DeltaActiveOrderRow {
+    id?: number | string | null;
+    state?: string | null;
+    size?: number | string | null;
+    unfilled_size?: number | string | null;
+    product_symbol?: string | null;
+    [key: string]: unknown;
+}
+
+const gFutureLimitRetryDelayMs = 5000;
+const gFutureLimitRetryCount = 5;
+
 function isOptionContract(pContractName: string): boolean {
     const vContractName = String(pContractName || "").trim().toUpperCase();
     return vContractName.startsWith("C-") || vContractName.startsWith("P-");
@@ -112,6 +124,10 @@ function shouldTriggerImportedOption(
 function toFiniteNumber(pValue: unknown, pFallback = 0): number {
     const vNumber = Number(pValue);
     return Number.isFinite(vNumber) ? vNumber : pFallback;
+}
+
+function sleep(pDurationMs: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, pDurationMs));
 }
 
 export class RollingOptionsLtDeService {
@@ -206,6 +222,180 @@ export class RollingOptionsLtDeService {
     private readResponsePayload(pResponse: { data?: unknown; body?: unknown } | unknown): Record<string, unknown> {
         const objResponse = (pResponse || {}) as { data?: unknown; body?: unknown };
         return this.parseDeltaPayload(objResponse.data ?? objResponse.body ?? {});
+    }
+
+    private getOrderId(pPayload: Record<string, unknown>): string {
+        const objResult = (pPayload.result && typeof pPayload.result === "object")
+            ? pPayload.result as Record<string, unknown>
+            : {};
+        return String(objResult.id || objResult.order_id || "").trim();
+    }
+
+    private async findActiveFutureOrderById(
+        pClient: any,
+        pContractName: string,
+        pOrderId: string
+    ): Promise<DeltaActiveOrderRow | null> {
+        if (!pOrderId || typeof pClient?.apis?.Orders?.getOrders !== "function") {
+            return null;
+        }
+
+        const objResponse = await pClient.apis.Orders.getOrders({
+            product_symbol: pContractName,
+            state: "open",
+            page_size: 100
+        });
+        const objPayload = this.readResponsePayload(objResponse);
+        const arrRows = Array.isArray(objPayload.result) ? objPayload.result as DeltaActiveOrderRow[] : [];
+        return arrRows.find((objRow) => String(objRow.id || "").trim() === pOrderId) || null;
+    }
+
+    private async repriceOrReplaceLimitFutureOrder(
+        pClient: any,
+        pContractName: string,
+        pOrderId: string,
+        pSide: "buy" | "sell",
+        pQty: number,
+        pNextPrice: string
+    ): Promise<string> {
+        if (typeof pClient?.apis?.Orders?.editOrder === "function") {
+            const objResponse = await pClient.apis.Orders.editOrder({
+                order: {
+                    id: Number.isFinite(Number(pOrderId)) ? Number(pOrderId) : pOrderId,
+                    product_symbol: pContractName,
+                    size: pQty,
+                    limit_price: pNextPrice
+                }
+            });
+            const objPayload = this.readResponsePayload(objResponse);
+            return this.getOrderId(objPayload) || pOrderId;
+        }
+
+        if (typeof pClient?.apis?.Orders?.cancelOrder === "function") {
+            await pClient.apis.Orders.cancelOrder({
+                order: {
+                    id: Number.isFinite(Number(pOrderId)) ? Number(pOrderId) : pOrderId,
+                    product_symbol: pContractName
+                }
+            });
+            const objResponse = await pClient.apis.Orders.placeOrder({
+                order: {
+                    product_symbol: pContractName,
+                    size: pQty,
+                    side: pSide,
+                    order_type: "limit_order",
+                    limit_price: pNextPrice,
+                    time_in_force: "gtc",
+                    post_only: false,
+                    reduce_only: false
+                }
+            });
+            const objPayload = this.readResponsePayload(objResponse);
+            return this.getOrderId(objPayload);
+        }
+
+        throw new Error("Delta client does not support safe limit-order repricing.");
+    }
+
+    private async placeManagedFutureEntryOrder(
+        pUserId: string,
+        pConfig: RollingOptionsPtDeConfig,
+        pQty: number
+    ): Promise<{ entryPrice: number; orderTypeUsed: "limit_order" | "market_order"; }> {
+        const { client } = await this.getDeltaClient(pUserId);
+        const vQty = Math.max(1, Math.floor(Number(pQty || 1)));
+        const vSide = this.getFutureEntrySide(pConfig);
+        let objSnapshot = await this.getMarketSnapshot(pConfig);
+        const objOrderPayload: Record<string, unknown> = {
+            product_symbol: pConfig.contractName,
+            size: vQty,
+            side: vSide,
+            order_type: pConfig.futureOrderType,
+            time_in_force: "gtc",
+            post_only: false,
+            reduce_only: false
+        };
+
+        if (pConfig.futureOrderType !== "limit_order") {
+            await client.apis.Orders.placeOrder({
+                order: objOrderPayload
+            });
+            return {
+                entryPrice: Number(objSnapshot.futuresPrice || 0),
+                orderTypeUsed: "market_order"
+            };
+        }
+
+        objOrderPayload.limit_price = String(objSnapshot.futuresPrice);
+        let objResponse = await client.apis.Orders.placeOrder({
+            order: objOrderPayload
+        });
+        let objPayload = this.readResponsePayload(objResponse);
+        let vOrderId = this.getOrderId(objPayload);
+
+        for (let vAttempt = 0; vAttempt < gFutureLimitRetryCount; vAttempt += 1) {
+            await sleep(gFutureLimitRetryDelayMs);
+            const objActiveOrder = await this.findActiveFutureOrderById(client, pConfig.contractName, vOrderId);
+            if (!objActiveOrder) {
+                return {
+                    entryPrice: Number(objSnapshot.futuresPrice || 0),
+                    orderTypeUsed: "limit_order"
+                };
+            }
+
+            const vUnfilledSize = Math.max(0, Math.floor(Number(objActiveOrder.unfilled_size ?? objActiveOrder.size ?? vQty)));
+            if (!(vUnfilledSize > 0)) {
+                return {
+                    entryPrice: Number(objSnapshot.futuresPrice || 0),
+                    orderTypeUsed: "limit_order"
+                };
+            }
+
+            if (vAttempt === (gFutureLimitRetryCount - 1)) {
+                break;
+            }
+
+            objSnapshot = await this.getMarketSnapshot(pConfig);
+            vOrderId = await this.repriceOrReplaceLimitFutureOrder(
+                client,
+                pConfig.contractName,
+                vOrderId,
+                vSide,
+                vQty,
+                String(objSnapshot.futuresPrice)
+            );
+        }
+
+        const objActiveOrder = await this.findActiveFutureOrderById(client, pConfig.contractName, vOrderId);
+        const vRemainingSize = Math.max(0, Math.floor(Number(objActiveOrder?.unfilled_size ?? objActiveOrder?.size ?? vQty)));
+        if (objActiveOrder) {
+            if (typeof client?.apis?.Orders?.cancelOrder !== "function") {
+                throw new Error("Unable to cancel unfilled future limit order safely.");
+            }
+            await client.apis.Orders.cancelOrder({
+                order: {
+                    id: Number.isFinite(Number(vOrderId)) ? Number(vOrderId) : vOrderId,
+                    product_symbol: pConfig.contractName
+                }
+            });
+        }
+
+        objSnapshot = await this.getMarketSnapshot(pConfig);
+        await client.apis.Orders.placeOrder({
+            order: {
+                product_symbol: pConfig.contractName,
+                size: Math.max(1, vRemainingSize || vQty),
+                side: vSide,
+                order_type: "market_order",
+                time_in_force: "gtc",
+                post_only: false,
+                reduce_only: false
+            }
+        });
+        return {
+            entryPrice: Number(objSnapshot.futuresPrice || 0),
+            orderTypeUsed: "market_order"
+        };
     }
 
     private mapLivePosition(pUserId: string, pRow: DeltaPositionRow, pIndex: number): RollingOptionsLtDeImportedPositionRecord {
@@ -563,34 +753,18 @@ export class RollingOptionsLtDeService {
         pQty: number,
         pReason: string
     ): Promise<RollingOptionsLtDeImportedPositionRecord> {
-        const { client } = await this.getDeltaClient(pUserId);
-        const objSnapshot = await this.getMarketSnapshot(pConfig);
+        const vQty = Math.max(1, Math.floor(Number(pQty || 1)));
         const vSide = this.getFutureEntrySide(pConfig);
-        const objOrderPayload: Record<string, unknown> = {
-            product_symbol: pConfig.contractName,
-            size: Math.max(1, Math.floor(Number(pQty || 1))),
-            side: vSide,
-            order_type: pConfig.futureOrderType,
-            time_in_force: "gtc",
-            post_only: false,
-            reduce_only: false
-        };
-        if (pConfig.futureOrderType === "limit_order") {
-            objOrderPayload.limit_price = String(objSnapshot.futuresPrice);
-        }
-
-        await client.apis.Orders.placeOrder({
-            order: objOrderPayload
-        });
+        const objPlacedOrder = await this.placeManagedFutureEntryOrder(pUserId, pConfig, vQty);
 
         const objTrackedPosition: RollingOptionsLtDeImportedPositionRecord = {
             userId: pUserId,
             importId: crypto.randomUUID(),
             contractName: pConfig.contractName,
             side: vSide.toUpperCase(),
-            qty: Math.max(1, Math.floor(Number(pQty || 1))),
-            entryPrice: Number(objSnapshot.futuresPrice || 0),
-            markPrice: Number(objSnapshot.futuresPrice || 0),
+            qty: vQty,
+            entryPrice: Number(objPlacedOrder.entryPrice || 0),
+            markPrice: Number(objPlacedOrder.entryPrice || 0),
             entryDelta: null,
             currentDelta: null,
             charges: 0,
@@ -612,7 +786,7 @@ export class RollingOptionsLtDeService {
                 contractName: pConfig.contractName,
                 qty: objTrackedPosition.qty,
                 reason: pReason,
-                orderType: pConfig.futureOrderType
+                orderType: objPlacedOrder.orderTypeUsed
             }
         });
         return objTrackedPosition;
