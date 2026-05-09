@@ -1092,7 +1092,7 @@ export class RollingOptionsLtDeService {
             .filter((objRow) => !isOptionContract(objRow.contractName))
             .reduce((pSum, objRow) => pSum + Math.max(0, Number(objRow.qty || 0)), 0);
 
-        if (arrExistingOptions.length <= 0 && vTotalFutureQty > 0) {
+        if (arrExistingOptions.length <= 0 && vTotalFutureQty > 0 && vRenkoColor === "R") {
             const arrCreatedOptions = await this.handleRenkoOptionEntry(
                 pUserId,
                 objConfig,
@@ -1171,7 +1171,8 @@ export class RollingOptionsLtDeService {
                 if (!objState.running) {
                     break;
                 }
-                if (vPreviousRenkoColor !== vRenkoSignal) {
+                const bRenkoColorChanged = vPreviousRenkoColor !== vRenkoSignal;
+                if (bRenkoColorChanged) {
                     await logRollingOptionsLtDeEvent({
                         userId: pUserId,
                         eventType: "renko_change_detected",
@@ -1189,17 +1190,20 @@ export class RollingOptionsLtDeService {
                     });
                     vPreviousRenkoColor = vRenkoSignal;
                 }
+                if (vRenkoSignal === "G" && !bRenkoColorChanged) {
+                    continue;
+                }
                 const arrPositionsBeforeEntry = await listRollingOptionsLtDeImportedPositions(pUserId);
                 await this.handleRenkoOptionEntry(pUserId, objConfig, arrPositionsBeforeEntry, vRenkoSignal);
             }
 
-            if (objState.running && objState.renko.lastColor) {
+            if (objState.running && objState.renko.lastColor === "R") {
                 const arrPositionsBeforeFallbackEntry = await listRollingOptionsLtDeImportedPositions(pUserId);
                 await this.handleRenkoOptionEntry(
                     pUserId,
                     objConfig,
                     arrPositionsBeforeFallbackEntry,
-                    objState.renko.lastColor === "G" ? "G" : "R"
+                    "R"
                 );
             }
 
