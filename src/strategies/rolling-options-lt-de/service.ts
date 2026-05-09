@@ -1159,6 +1159,10 @@ export class RollingOptionsLtDeService {
             objState.market.lastSpotPrice = objSnapshot.spotPrice;
             objState.market.lastFuturesPrice = objSnapshot.futuresPrice;
             objState.market.lastSource = objSnapshot.priceSource;
+            let vPreviousRenkoColor = String(objState.renko.lastColor || "").trim().toUpperCase() === "G" ? "G" : "R";
+            if (String(objState.renko.lastColor || "").trim().toUpperCase() !== "G" && String(objState.renko.lastColor || "").trim().toUpperCase() !== "R") {
+                vPreviousRenkoColor = "";
+            }
             const arrRenkoSignals = objConfig.renkoEnabled
                 ? updateRenkoState(objState, objSnapshot, objConfig)
                 : [];
@@ -1167,18 +1171,24 @@ export class RollingOptionsLtDeService {
                 if (!objState.running) {
                     break;
                 }
-                await logRollingOptionsLtDeEvent({
-                    userId: pUserId,
-                    eventType: "renko_change_detected",
-                    severity: "info",
-                    title: "Renko Change Detected",
-                    message: `Server detected a ${vRenkoSignal === "R" ? "RED" : "GREEN"} renko brick.`,
-                    payload: {
-                        symbol: objConfig.symbol,
-                        reason: vRenkoSignal === "R" ? "renko_red_brick" : "renko_green_brick",
-                        renkoColor: vRenkoSignal
-                    }
-                });
+                if (vPreviousRenkoColor !== vRenkoSignal) {
+                    await logRollingOptionsLtDeEvent({
+                        userId: pUserId,
+                        eventType: "renko_change_detected",
+                        severity: "info",
+                        title: "Renko Change Detected",
+                        message: vPreviousRenkoColor
+                            ? `Renko changed from ${vPreviousRenkoColor === "R" ? "RED" : "GREEN"} to ${vRenkoSignal === "R" ? "RED" : "GREEN"}.`
+                            : `Renko changed to ${vRenkoSignal === "R" ? "RED" : "GREEN"}.`,
+                        payload: {
+                            symbol: objConfig.symbol,
+                            reason: vRenkoSignal === "R" ? "renko_red_brick" : "renko_green_brick",
+                            renkoColor: vRenkoSignal,
+                            previousRenkoColor: vPreviousRenkoColor || ""
+                        }
+                    });
+                    vPreviousRenkoColor = vRenkoSignal;
+                }
                 const arrPositionsBeforeEntry = await listRollingOptionsLtDeImportedPositions(pUserId);
                 await this.handleRenkoOptionEntry(pUserId, objConfig, arrPositionsBeforeEntry, vRenkoSignal);
             }
