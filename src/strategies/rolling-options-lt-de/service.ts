@@ -301,7 +301,7 @@ export class RollingOptionsLtDeService {
         pUserId: string,
         pConfig: RollingOptionsPtDeConfig,
         pQty: number
-    ): Promise<{ entryPrice: number; orderTypeUsed: "limit_order" | "market_order"; }> {
+    ): Promise<{ entryPrice: number; entryTs: string; orderTypeUsed: "limit_order" | "market_order"; }> {
         const { client } = await this.getDeltaClient(pUserId);
         const vQty = Math.max(1, Math.floor(Number(pQty || 1)));
         const vSide = this.getFutureEntrySide(pConfig);
@@ -322,6 +322,7 @@ export class RollingOptionsLtDeService {
             });
             return {
                 entryPrice: Number(objSnapshot.futuresPrice || 0),
+                entryTs: String(objSnapshot.ts || new Date().toISOString()),
                 orderTypeUsed: "market_order"
             };
         }
@@ -339,6 +340,7 @@ export class RollingOptionsLtDeService {
             if (!objActiveOrder) {
                 return {
                     entryPrice: Number(objSnapshot.futuresPrice || 0),
+                    entryTs: String(objSnapshot.ts || new Date().toISOString()),
                     orderTypeUsed: "limit_order"
                 };
             }
@@ -347,6 +349,7 @@ export class RollingOptionsLtDeService {
             if (!(vUnfilledSize > 0)) {
                 return {
                     entryPrice: Number(objSnapshot.futuresPrice || 0),
+                    entryTs: String(objSnapshot.ts || new Date().toISOString()),
                     orderTypeUsed: "limit_order"
                 };
             }
@@ -394,6 +397,7 @@ export class RollingOptionsLtDeService {
         });
         return {
             entryPrice: Number(objSnapshot.futuresPrice || 0),
+            entryTs: String(objSnapshot.ts || new Date().toISOString()),
             orderTypeUsed: "market_order"
         };
     }
@@ -771,8 +775,8 @@ export class RollingOptionsLtDeService {
             pnl: 0,
             margin: 0,
             liquidationPrice: 0,
-            openedAt: objSnapshot.ts,
-            updatedAt: objSnapshot.ts
+            openedAt: objPlacedOrder.entryTs,
+            updatedAt: objPlacedOrder.entryTs
         };
         await this.appendImportedPosition(pUserId, objTrackedPosition);
         await logRollingOptionsLtDeEvent({
