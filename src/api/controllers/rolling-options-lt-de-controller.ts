@@ -589,12 +589,15 @@ function getDefaultLiveUiState(): Record<string, unknown> {
         expiryDate1: "",
         manualOptQty1: 1,
         newDelta1: 0.53,
-        reDelta1: 0.53,
-        deltaTp1: 0.15,
-        deltaSl1: 0.85,
         reEnter1: false,
         redOptQtyPct: 100,
+        reRedDelta: 0.53,
+        redTpDelta: 0.15,
+        redSlDelta: 0.85,
         greenOptQtyPct: 100,
+        greenReDelta: 0.53,
+        greenTpDelta: 0.15,
+        greenSlDelta: 0.85,
         addOneLotFuture: false,
         renkoFeedPts: 10,
         closedFromDate: "",
@@ -604,11 +607,56 @@ function getDefaultLiveUiState(): Record<string, unknown> {
     };
 }
 
+function normalizeLiveNumber(pValue: unknown, pFallback: number): number {
+    const vNumber = Number(pValue);
+    return Number.isFinite(vNumber) ? vNumber : pFallback;
+}
+
+function sanitizeLiveUiState(pUiState?: Record<string, unknown> | null): Record<string, unknown> {
+    const objUiState = pUiState && typeof pUiState === "object" ? pUiState : {};
+    const {
+        reDelta1: _legacyReDelta1,
+        deltaTp1: _legacyDeltaTp1,
+        deltaSl1: _legacyDeltaSl1,
+        ...objSanitized
+    } = objUiState;
+    return objSanitized;
+}
+
+function normalizeLiveUiState(pUiState?: Record<string, unknown> | null): Record<string, unknown> {
+    const objUiState = pUiState && typeof pUiState === "object" ? { ...pUiState } : {};
+    if (!Number.isFinite(Number(objUiState.redOptQtyPct))) {
+        objUiState.redOptQtyPct = normalizeLiveNumber(objUiState.autoOptQtyPct, 100);
+    }
+    if (!Number.isFinite(Number(objUiState.greenOptQtyPct))) {
+        objUiState.greenOptQtyPct = 100;
+    }
+    if (!Number.isFinite(Number(objUiState.reRedDelta))) {
+        objUiState.reRedDelta = normalizeLiveNumber(objUiState.reDelta1, 0.53);
+    }
+    if (!Number.isFinite(Number(objUiState.redTpDelta))) {
+        objUiState.redTpDelta = normalizeLiveNumber(objUiState.deltaTp1, 0.15);
+    }
+    if (!Number.isFinite(Number(objUiState.redSlDelta))) {
+        objUiState.redSlDelta = normalizeLiveNumber(objUiState.deltaSl1, 0.85);
+    }
+    if (!Number.isFinite(Number(objUiState.greenReDelta))) {
+        objUiState.greenReDelta = normalizeLiveNumber(objUiState.reDelta1, 0.53);
+    }
+    if (!Number.isFinite(Number(objUiState.greenTpDelta))) {
+        objUiState.greenTpDelta = normalizeLiveNumber(objUiState.deltaTp1, 0.15);
+    }
+    if (!Number.isFinite(Number(objUiState.greenSlDelta))) {
+        objUiState.greenSlDelta = normalizeLiveNumber(objUiState.deltaSl1, 0.85);
+    }
+    return sanitizeLiveUiState(objUiState);
+}
+
 function getMergedLiveUiState(pProfile?: { uiState?: Record<string, unknown> | null } | null): Record<string, unknown> {
-    const objUiState = {
+    const objUiState = normalizeLiveUiState({
         ...getDefaultLiveUiState(),
         ...(pProfile?.uiState || {})
-    };
+    });
     return {
         ...objUiState,
         expiryDate1: String(objUiState.expiryDate1 || "").trim() || resolveLiveExpiryDateByMode(String(objUiState.expiryMode1 || "1"))
@@ -689,10 +737,10 @@ export async function saveRollingOptionsLtDeProfileController(req: Request, res:
         ...objExisting,
         userId: vUserId,
         selectedApiProfileId: vSelectedApiProfileId || String(objExisting.selectedApiProfileId || "").trim(),
-        uiState: {
+        uiState: normalizeLiveUiState({
             ...getMergedLiveUiState(objExisting),
             ...objIncomingUiState
-        }
+        })
     });
     await syncLiveRuntimeProfileSelection(vUserId, objSaved.selectedApiProfileId);
     res.json({
@@ -1618,9 +1666,9 @@ export async function getRollingOptionsLtDeAccountSummary(req: Request, res: Res
             redOptionQtyPct: 100,
             greenOptionQtyPct: 100,
             newDelta: Number(objUiState.newDelta1 || 0.53),
-            reDelta: Number(objUiState.reDelta1 || 0.53),
-            deltaTakeProfit: Number(objUiState.deltaTp1 || 0.15),
-            deltaStopLoss: Number(objUiState.deltaSl1 || 0.85),
+            reDelta: Number(objUiState.reRedDelta || 0.53),
+            deltaTakeProfit: Number(objUiState.redTpDelta || 0.15),
+            deltaStopLoss: Number(objUiState.redSlDelta || 0.85),
             reEnter: Boolean(objUiState.reEnter1),
             addOneLotFuture: Boolean(objUiState.addOneLotFuture),
             renkoEnabled: false,

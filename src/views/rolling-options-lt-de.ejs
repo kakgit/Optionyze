@@ -183,54 +183,12 @@
                         <input type="number" min="0.0" max="2.0" step="0.01" id="txtRollingLiveNewDelta1" value="0.53" />
                     </div>
                     <div class="rolling-demo-field">
-                        <label for="txtRollingLiveReDelta1">Re D</label>
-                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtRollingLiveReDelta1" value="0.53" />
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="txtRollingLiveTpDelta1">TP D</label>
-                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtRollingLiveTpDelta1" value="0.15" />
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="txtRollingLiveSlDelta1">SL D</label>
-                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtRollingLiveSlDelta1" value="0.85" />
-                    </div>
-                    <div class="rolling-demo-field">
                         <label for="chkRollingLiveReEnter1">Re Enter</label>
                         <div class="rolling-demo-check-wrap">
                             <label class="rolling-demo-check" for="chkRollingLiveReEnter1">
                                 <input type="checkbox" id="chkRollingLiveReEnter1" />
                             </label>
                         </div>
-                    </div>
-                </div>
-
-                <div class="rolling-demo-subgrid">
-                    <div class="rolling-demo-field">
-                        <label for="txtRollingLiveRedOptQtyPct">Red Opt Qty %</label>
-                        <input type="number" min="0" step="1" id="txtRollingLiveRedOptQtyPct" value="100" />
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="txtRollingLiveGreenOptQtyPct">Green Opt Qty %</label>
-                        <input type="number" min="0" step="1" id="txtRollingLiveGreenOptQtyPct" value="100" />
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="chkRollingLiveAddOneLotFuture">Add 1 Lot Future</label>
-                        <div class="rolling-demo-check-wrap">
-                            <label class="rolling-demo-check" for="chkRollingLiveAddOneLotFuture">
-                                <input type="checkbox" id="chkRollingLiveAddOneLotFuture" />
-                            </label>
-                        </div>
-                    </div>
-                    <div class="rolling-demo-field rolling-live-renko-group">
-                        <label for="txtRollingLiveRenkoValue">Renko Control</label>
-                        <div class="rolling-live-renko-controls">
-                            <input type="number" min="1" step="1" id="txtRollingLiveRenkoValue" value="10" />
-                            <button class="rolling-demo-btn rolling-live-renko-button" type="button" id="btnRollingLiveRenkoBox">R</button>
-                        </div>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn primary" type="button" id="btnRollingLiveExecStrategy">Exec Strategy</button>
                     </div>
                     <div class="rolling-demo-field">
                         <label>&nbsp;</label>
@@ -239,6 +197,60 @@
                     <div class="rolling-demo-field">
                         <label>&nbsp;</label>
                         <button class="rolling-demo-btn warn" type="button" id="btnRollingLiveExitOption">EXIT OPTION</button>
+                    </div>
+                </div>
+
+                <div class="rolling-demo-subgrid">
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingLiveGreenOptQtyPct">Green Opt Qty %</label>
+                        <input type="number" min="0" step="1" id="txtRollingLiveGreenOptQtyPct" value="100" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingLiveReGreenD">Re Green D</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtRollingLiveReGreenD" value="0.53" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingLiveGreenTp">Green TP</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtRollingLiveGreenTp" value="0.15" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingLiveGreenSl">Green SL</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtRollingLiveGreenSl" value="0.85" />
+                    </div>
+                    <div class="rolling-demo-field rolling-live-red-opt-qty">
+                        <label for="txtRollingLiveRedOptQtyPct">Red Opt Qty %</label>
+                        <input type="number" min="0" step="1" id="txtRollingLiveRedOptQtyPct" value="100" />
+                    </div>
+                    <div class="rolling-demo-field rolling-live-re-red-d">
+                        <label for="txtRollingLiveReRedD">Re Red D</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtRollingLiveReRedD" value="0.53" />
+                    </div>
+                    <div class="rolling-demo-field rolling-live-red-tp">
+                        <label for="txtRollingLiveRedTp">Red TP</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtRollingLiveRedTp" value="0.15" />
+                    </div>
+                    <div class="rolling-demo-field rolling-live-red-sl">
+                        <label for="txtRollingLiveRedSl">Red SL</label>
+                        <input type="number" min="0.0" max="2.0" step="0.01" id="txtRollingLiveRedSl" value="0.85" />
+                    </div>
+                    <div class="rolling-demo-field rolling-live-renko-group">
+                        <label for="txtRollingLiveRenkoValue">Renko Control</label>
+                        <div class="rolling-live-renko-controls">
+                            <input type="number" min="1" step="1" id="txtRollingLiveRenkoValue" value="10" />
+                            <button class="rolling-demo-btn rolling-live-renko-button" type="button" id="btnRollingLiveRenkoBox">R</button>
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field rolling-live-add-one-lot">
+                        <label for="chkRollingLiveAddOneLotFuture">Add 1 Lot Future</label>
+                        <div class="rolling-demo-check-wrap">
+                            <label class="rolling-demo-check" for="chkRollingLiveAddOneLotFuture">
+                                <input type="checkbox" id="chkRollingLiveAddOneLotFuture" />
+                            </label>
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field rolling-live-exec-strategy">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn primary" type="button" id="btnRollingLiveExecStrategy">Exec Strategy</button>
                     </div>
                 </div>
 

@@ -34,12 +34,15 @@
         optionExpiryDate: document.getElementById("txtRollingLiveExpiry1"),
         optionQty: document.getElementById("txtRollingLiveOptQty1"),
         optionNewDelta: document.getElementById("txtRollingLiveNewDelta1"),
-        optionReDelta: document.getElementById("txtRollingLiveReDelta1"),
-        optionTpDelta: document.getElementById("txtRollingLiveTpDelta1"),
-        optionSlDelta: document.getElementById("txtRollingLiveSlDelta1"),
         optionReEnter: document.getElementById("chkRollingLiveReEnter1"),
         redOptQtyPct: document.getElementById("txtRollingLiveRedOptQtyPct"),
+        reRedDelta: document.getElementById("txtRollingLiveReRedD"),
+        redTpDelta: document.getElementById("txtRollingLiveRedTp"),
+        redSlDelta: document.getElementById("txtRollingLiveRedSl"),
         greenOptQtyPct: document.getElementById("txtRollingLiveGreenOptQtyPct"),
+        greenReDelta: document.getElementById("txtRollingLiveReGreenD"),
+        greenTpDelta: document.getElementById("txtRollingLiveGreenTp"),
+        greenSlDelta: document.getElementById("txtRollingLiveGreenSl"),
         addOneLotFuture: document.getElementById("chkRollingLiveAddOneLotFuture"),
         renkoValue: document.getElementById("txtRollingLiveRenkoValue"),
         renkoBoxButton: document.getElementById("btnRollingLiveRenkoBox"),
@@ -321,12 +324,15 @@
             expiryDate1: String(ids.optionExpiryDate?.value || ""),
             manualOptQty1: parseNumberInput(ids.optionQty, 1),
             newDelta1: parseNumberInput(ids.optionNewDelta, 0.53),
-            reDelta1: parseNumberInput(ids.optionReDelta, 0.53),
-            deltaTp1: parseNumberInput(ids.optionTpDelta, 0.15),
-            deltaSl1: parseNumberInput(ids.optionSlDelta, 0.85),
             reEnter1: Boolean(ids.optionReEnter?.checked),
             redOptQtyPct: parseNumberInput(ids.redOptQtyPct, 100),
+            reRedDelta: parseNumberInput(ids.reRedDelta, 0.53),
+            redTpDelta: parseNumberInput(ids.redTpDelta, 0.15),
+            redSlDelta: parseNumberInput(ids.redSlDelta, 0.85),
             greenOptQtyPct: parseNumberInput(ids.greenOptQtyPct, 100),
+            greenReDelta: parseNumberInput(ids.greenReDelta, 0.53),
+            greenTpDelta: parseNumberInput(ids.greenTpDelta, 0.15),
+            greenSlDelta: parseNumberInput(ids.greenSlDelta, 0.85),
             addOneLotFuture: Boolean(ids.addOneLotFuture?.checked),
             renkoFeedPts: parseNumberInput(ids.renkoValue, 10),
             closedFromDate: String(ids.closedFromDate?.value || ""),
@@ -364,12 +370,15 @@
         setFieldValue(ids.optionExpiryDate, uiState.expiryDate1);
         setFieldValue(ids.optionQty, uiState.manualOptQty1);
         setFieldValue(ids.optionNewDelta, uiState.newDelta1);
-        setFieldValue(ids.optionReDelta, uiState.reDelta1);
-        setFieldValue(ids.optionTpDelta, uiState.deltaTp1);
-        setFieldValue(ids.optionSlDelta, uiState.deltaSl1);
         setFieldValue(ids.optionReEnter, uiState.reEnter1);
         setFieldValue(ids.redOptQtyPct, uiState.redOptQtyPct);
+        setFieldValue(ids.reRedDelta, uiState.reRedDelta);
+        setFieldValue(ids.redTpDelta, uiState.redTpDelta);
+        setFieldValue(ids.redSlDelta, uiState.redSlDelta);
         setFieldValue(ids.greenOptQtyPct, uiState.greenOptQtyPct);
+        setFieldValue(ids.greenReDelta, uiState.greenReDelta);
+        setFieldValue(ids.greenTpDelta, uiState.greenTpDelta);
+        setFieldValue(ids.greenSlDelta, uiState.greenSlDelta);
         setFieldValue(ids.addOneLotFuture, uiState.addOneLotFuture);
         setFieldValue(ids.renkoValue, uiState.renkoFeedPts);
         setFieldValue(ids.closedFromDate, uiState.closedFromDate);
@@ -1203,12 +1212,15 @@
     ids.optionExpiryDate?.addEventListener("change", queueProfileSave);
     ids.optionQty?.addEventListener("input", queueProfileSave);
     ids.optionNewDelta?.addEventListener("input", queueProfileSave);
-    ids.optionReDelta?.addEventListener("input", queueProfileSave);
-    ids.optionTpDelta?.addEventListener("input", queueProfileSave);
-    ids.optionSlDelta?.addEventListener("input", queueProfileSave);
     ids.optionReEnter?.addEventListener("change", queueProfileSave);
     ids.redOptQtyPct?.addEventListener("input", queueProfileSave);
+    ids.reRedDelta?.addEventListener("input", queueProfileSave);
+    ids.redTpDelta?.addEventListener("input", queueProfileSave);
+    ids.redSlDelta?.addEventListener("input", queueProfileSave);
     ids.greenOptQtyPct?.addEventListener("input", queueProfileSave);
+    ids.greenReDelta?.addEventListener("input", queueProfileSave);
+    ids.greenTpDelta?.addEventListener("input", queueProfileSave);
+    ids.greenSlDelta?.addEventListener("input", queueProfileSave);
     ids.addOneLotFuture?.addEventListener("change", queueProfileSave);
     ids.renkoValue?.addEventListener("input", queueProfileSave);
     ids.apiProfile?.addEventListener("change", function () {
