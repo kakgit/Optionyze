@@ -369,7 +369,8 @@ export async function getLiveMarketSnapshot(
 export async function findBestLiveOptionContract(
     pConfig: RollingOptionsPtDeConfig,
     pOptionSide: "CE" | "PE",
-    pTargetDelta: number
+    pTargetDelta: number,
+    pRequireAtOrBelowTarget = false
 ): Promise<RollingOptionsPtDeLiveOptionContract | null> {
     const arrExpiryCandidates = [
         { expiryDate: pConfig.expiryDate, usedNextDayFallback: false },
@@ -401,6 +402,9 @@ export async function findBestLiveOptionContract(
             const vStrike = parseNumber(objRow.strike_price, NaN);
             const vMarkPrice = parseNumber(objRow.mark_price, NaN);
             if (!Number.isFinite(vDelta) || !Number.isFinite(vStrike) || !Number.isFinite(vMarkPrice) || !(vMarkPrice > 0)) {
+                continue;
+            }
+            if (pRequireAtOrBelowTarget && vDelta > Math.abs(pTargetDelta)) {
                 continue;
             }
 

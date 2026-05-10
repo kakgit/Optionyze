@@ -336,6 +336,61 @@ export async function ensurePostgresSchema(): Promise<void> {
     `);
 
     await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_rolling_futures_lt_profiles (
+            user_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            strategy_code TEXT NOT NULL,
+            selected_api_profile_id TEXT NOT NULL DEFAULT '',
+            ui_state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            connection_status_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (user_id, strategy_code)
+        );
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_rolling_futures_lt_positions (
+            user_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            strategy_code TEXT NOT NULL,
+            import_id TEXT NOT NULL,
+            contract_name TEXT NOT NULL DEFAULT '',
+            side TEXT NOT NULL DEFAULT '',
+            qty NUMERIC NOT NULL DEFAULT 0,
+            entry_price NUMERIC NOT NULL DEFAULT 0,
+            mark_price NUMERIC NOT NULL DEFAULT 0,
+            charges NUMERIC NOT NULL DEFAULT 0,
+            pnl NUMERIC NOT NULL DEFAULT 0,
+            margin NUMERIC NOT NULL DEFAULT 0,
+            liquidation_price NUMERIC NOT NULL DEFAULT 0,
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (user_id, strategy_code, import_id)
+        );
+    `);
+
+    await objPool.query(`
+        ALTER TABLE optionyze_rolling_futures_lt_positions
+        ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_rolling_futures_lt_runtime (
+            user_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            strategy_code TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'idle',
+            auto_trader_enabled BOOLEAN NOT NULL DEFAULT false,
+            selected_api_profile_id TEXT NOT NULL DEFAULT '',
+            current_symbol TEXT NOT NULL DEFAULT '',
+            last_signal TEXT NOT NULL DEFAULT 'IDLE',
+            last_cycle_at TIMESTAMPTZ NULL,
+            last_error TEXT NOT NULL DEFAULT '',
+            state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (user_id, strategy_code)
+        );
+    `);
+
+    await objPool.query(`
         CREATE TABLE IF NOT EXISTS optionyze_accounts (
             account_id TEXT PRIMARY KEY,
             full_name TEXT NOT NULL,

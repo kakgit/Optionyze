@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 const DeltaRestClient = require("delta-rest-client");
 import type { StrategyFoGreeksPaperService } from "../../strategies/strategy-fo-greeks-paper/service";
 import type { StrategyFoGreeksPaperConfig } from "../../strategies/strategy-fo-greeks-paper/types";
+import { gRollingOptionsTelegramEventTypes } from "../../strategies/rolling-options-lt-de/event-logger";
 import {
     loadStrategyFoPaperProfile,
     saveStrategyFoPaperProfile,
@@ -18,6 +19,32 @@ export function renderStrategyFoPaperPage(req: Request, res: Response): void {
         pageTitle: "StrategyFOGreeks Paper | Optionyze",
         currentAccount: req.authAccount,
         defaultUserId: req.authAccount?.accountId || "demo-paper"
+    });
+}
+
+export function renderRollingFuturesPaperDemoPage(req: Request, res: Response): void {
+    res.render("rolling-futures-pt-de", {
+        pageTitle: "Rolling Futures Demo | Optionyze",
+        currentAccount: req.authAccount,
+        defaultUserId: req.authAccount?.accountId || "demo-paper"
+    });
+}
+
+export function renderRollingFuturesLiveLongPage(req: Request, res: Response): void {
+    res.render("rolling-futures-lt-long", {
+        pageTitle: "Long Rolling Futures - Live | Optionyze",
+        currentAccount: req.authAccount,
+        defaultUserId: req.authAccount?.accountId || "demo-paper",
+        rollingTelegramEventTypes: gRollingOptionsTelegramEventTypes
+    });
+}
+
+export function renderRollingFuturesLiveShortPage(req: Request, res: Response): void {
+    res.render("rolling-futures-lt-short", {
+        pageTitle: "Short Rolling Futures - Live | Optionyze",
+        currentAccount: req.authAccount,
+        defaultUserId: req.authAccount?.accountId || "demo-paper",
+        rollingTelegramEventTypes: gRollingOptionsTelegramEventTypes
     });
 }
 

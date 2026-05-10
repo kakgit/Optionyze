@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= pageTitle %></title>
+    <link rel="stylesheet" href="/css/app-shell.css" />
+    <link rel="stylesheet" href="/css/account-menu.css" />
+    <link rel="stylesheet" href="/css/rolling-options-pt-de.css" />
+    <style>
+        .rolling-futures-demo-grid {
+            display: grid;
+            gap: 12px;
+        }
+
+        .rolling-futures-demo-grid.top {
+            grid-template-columns: 1.2fr 1fr 1fr 1.3fr 1fr 1fr;
+        }
+
+        .rolling-futures-demo-grid.row {
+            grid-template-columns: .8fr .8fr 1.2fr 1.2fr .75fr .75fr .75fr .75fr .75fr .7fr;
+            margin-top: 12px;
+        }
+
+        .rolling-futures-demo-grid.rule-labels,
+        .rolling-futures-demo-grid.rule-values {
+            grid-template-columns: .8fr 1.25fr 1.3fr .5fr 1.3fr .5fr;
+            margin-top: 12px;
+            align-items: end;
+            justify-content: start;
+            gap: 10px;
+        }
+
+        .rolling-futures-center-field {
+            text-align: center;
+        }
+
+        .rolling-futures-center-field label {
+            text-align: center;
+        }
+
+        .rolling-futures-rule-controls {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 10px;
+            align-items: center;
+            justify-content: start;
+        }
+
+        .rolling-futures-theta-controls {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 8px;
+            align-items: center;
+            justify-content: start;
+        }
+
+        .rolling-futures-demo-grid.signal-labels,
+        .rolling-futures-demo-grid.signal-values {
+            grid-template-columns: 1.9fr;
+            margin-top: 12px;
+            align-items: end;
+        }
+
+        .rolling-futures-signal-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .rolling-futures-badges.align-right {
+            justify-content: flex-end;
+        }
+
+        .rolling-futures-demo-grid.metrics-row,
+        .rolling-futures-demo-grid.actions-row {
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            margin-top: 12px;
+        }
+
+        .rolling-futures-card-stack {
+            display: grid;
+            gap: 18px;
+        }
+
+        .rolling-futures-inline-tools {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .rolling-futures-start-qty {
+            width: 92px;
+        }
+
+        .rolling-futures-start-qty-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .rolling-futures-start-qty-row label {
+            margin: 0;
+            white-space: nowrap;
+        }
+
+        .rolling-demo-card-tools select {
+            min-height: 40px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,.08);
+            background: rgba(255,255,255,.03);
+            color: var(--app-text);
+            padding: 0 12px;
+            font: inherit;
+        }
+
+        .rolling-futures-split-input {
+            display: grid;
+            grid-template-columns: 42px 1fr 42px;
+            min-height: 44px;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,.08);
+            background: rgba(255,255,255,.03);
+        }
+
+        .rolling-futures-split-input button {
+            border: 0;
+            color: #fff;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .rolling-futures-split-input .sell-btn {
+            background: #d64545;
+        }
+
+        .rolling-futures-split-input .buy-btn {
+            background: #1f9d63;
+        }
+
+        .rolling-futures-split-input input {
+            width: 100%;
+            min-width: 0;
+            border: 0;
+            border-left: 1px solid rgba(255,255,255,.08);
+            border-right: 1px solid rgba(255,255,255,.08);
+            border-radius: 0;
+            text-align: center;
+            background: rgba(255,255,255,.02);
+            color: var(--app-text);
+            font: inherit;
+        }
+
+        .rolling-futures-mini-check,
+        .rolling-futures-toggle {
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .rolling-futures-mini-check input,
+        .rolling-futures-toggle input {
+            width: 18px;
+            height: 18px;
+        }
+
+        .rolling-futures-badges {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: flex-start;
+        }
+
+        .rolling-futures-badge {
+            display: inline-flex;
+            align-items: center;
+            min-height: 28px;
+            padding: 0 10px;
+            border-radius: 9px;
+            color: #fff;
+            font-size: .8rem;
+            font-weight: 700;
+            background: #6e7a8f;
+        }
+
+        .rolling-futures-badge.success {
+            background: #1f9d63;
+        }
+
+        .rolling-futures-metric {
+            text-align: center;
+        }
+
+        .rolling-futures-metric .rolling-demo-metric-value,
+        .rolling-futures-metric .rolling-demo-metric-input {
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .rolling-futures-metric .rolling-demo-metric-input {
+            text-align: center;
+        }
+
+        .rolling-futures-hidden {
+            display: none;
+        }
+
+        .rolling-futures-empty-body td {
+            text-align: center;
+            color: var(--app-muted);
+            padding: 22px 12px;
+        }
+
+        @media (max-width: 1200px) {
+            .rolling-futures-demo-grid.top,
+            .rolling-futures-demo-grid.row,
+            .rolling-futures-demo-grid.rule-labels,
+            .rolling-futures-demo-grid.rule-values,
+            .rolling-futures-demo-grid.signal-labels,
+            .rolling-futures-demo-grid.signal-values,
+            .rolling-futures-demo-grid.metrics-row,
+            .rolling-futures-demo-grid.actions-row {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 720px) {
+            .rolling-futures-demo-grid.top,
+            .rolling-futures-demo-grid.row,
+            .rolling-futures-demo-grid.rule-labels,
+            .rolling-futures-demo-grid.rule-values,
+            .rolling-futures-demo-grid.signal-labels,
+            .rolling-futures-demo-grid.signal-values,
+            .rolling-futures-demo-grid.metrics-row,
+            .rolling-futures-demo-grid.actions-row {
+                grid-template-columns: 1fr;
+            }
+
+            .rolling-demo-card-head {
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body class="app-page">
+    <div class="app-layout rolling-demo-layout">
+        <%- include('partials/app-header', { currentAccount }) %>
+
+        <section class="rolling-demo-hero">
+            <div class="app-panel rolling-demo-card">
+                <h1 class="rolling-demo-title">Rolling Futures - Demo</h1>
+            </div>
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-summary">
+                    <div class="app-stat rolling-demo-stat">
+                        <div class="rolling-demo-stat-label">Engine Status</div>
+                        <div class="rolling-demo-stat-value" id="rollingFuturesDemoEngineStatus">Idle</div>
+                    </div>
+                    <div class="app-stat rolling-demo-stat">
+                        <div class="rolling-demo-stat-label">Open Positions</div>
+                        <div class="rolling-demo-stat-value" id="rollingFuturesDemoOpenCount">0</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="rolling-demo-section rolling-futures-card-stack">
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <div class="rolling-futures-inline-tools">
+                        <span class="rolling-demo-manual-title">Manual Trader</span>
+                        <div class="rolling-demo-field rolling-futures-start-qty-row">
+                            <label for="txtRollingFuturesStartQty">Start Qty</label>
+                            <input class="rolling-futures-start-qty" type="number" min="1" step="1" id="txtRollingFuturesStartQty" value="1" />
+                        </div>
+                    </div>
+                    <div class="rolling-demo-card-tools">
+                        <button class="rolling-demo-btn warn" type="button" id="btnRollingFuturesDemoAutoTrader">Auto Trader - OFF</button>
+                    </div>
+                </div>
+
+                <div class="rolling-futures-demo-grid top">
+                    <div class="rolling-demo-field">
+                        <label for="ddlRollingFuturesSymbol">Symbols List</label>
+                        <select id="ddlRollingFuturesSymbol">
+                            <option value="">Select Symbol</option>
+                            <option value="BTC" selected>BTCUSD</option>
+                            <option value="ETH">ETHUSD</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesLotSize">Lot Size</label>
+                        <input type="text" id="txtRollingFuturesLotSize" value="0.001" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="ddlRollingFuturesOrderType">Order Type</label>
+                        <select id="ddlRollingFuturesOrderType">
+                            <option value="limit_order">Limit Order</option>
+                            <option value="market_order" selected>Market Order</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesBsQty">BS Fut Qty</label>
+                        <div class="rolling-futures-split-input">
+                            <button class="sell-btn" type="button" id="btnRollingFuturesSellFuture">S</button>
+                            <input type="text" id="txtRollingFuturesBsQty" value="100" />
+                            <button class="buy-btn" type="button" id="btnRollingFuturesBuyFuture">B</button>
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesMinusDelta">- Delta</label>
+                        <input type="number" id="txtRollingFuturesMinusDelta" value="-10" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesPlusDelta">+ Delta</label>
+                        <input type="number" id="txtRollingFuturesPlusDelta" value="10" />
+                    </div>
+                </div>
+
+                <div class="rolling-futures-demo-grid row">
+                    <div class="rolling-demo-field">
+                        <label for="ddlRollingFuturesAction1">Action</label>
+                        <select id="ddlRollingFuturesAction1">
+                            <option value="none">None</option>
+                            <option value="buy">Buy</option>
+                            <option value="sell" selected>Sell</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="ddlRollingFuturesLegs1">Legs</label>
+                        <select id="ddlRollingFuturesLegs1">
+                            <option value="both" selected>Both</option>
+                            <option value="ce">CE</option>
+                            <option value="pe">PE</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="ddlRollingFuturesExpiryType1">Expiry Type</label>
+                        <select id="ddlRollingFuturesExpiryType1">
+                            <option value="1">DAILY T+1</option>
+                            <option value="2">DAILY T+2</option>
+                            <option value="4" selected>WEEKLY</option>
+                            <option value="5">BI-WEEKLY</option>
+                            <option value="6">MONTHLY</option>
+                            <option value="7">BI-MONTHLY</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesExpiry1">Select Expiry</label>
+                        <input type="date" id="txtRollingFuturesExpiry1" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesQty1">Qty</label>
+                        <input type="number" min="1" id="txtRollingFuturesQty1" value="1" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesNewD1">New D</label>
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD1" value="0.50" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesReD1">Re D</label>
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesReD1" value="0.50" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesTpD1">TP D</label>
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD1" value="0.20" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesSlD1">SL D</label>
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD1" value="0.65" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="chkRollingFuturesReEnter1">Re Enter</label>
+                        <div class="rolling-futures-mini-check">
+                            <input type="checkbox" id="chkRollingFuturesReEnter1" />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="rolling-futures-demo-grid rule-labels">
+                    <div class="rolling-demo-field rolling-futures-center-field">
+                        <label for="chkRollingFuturesOnlyDeltaNeutral">Only Delta Neutral</label>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesThetaDeltaNeutral">Theta Delta Neutral</label>
+                    </div>
+                    <div class="rolling-demo-field rolling-futures-rule-label">
+                        <label for="chkRollingFuturesCloseNetProfitBrokerage">Close All when Net Profit is &gt; X of Brokerage</label>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="chkRollingFuturesReEnterBrok">Re Enter</label>
+                    </div>
+                    <div class="rolling-demo-field rolling-futures-rule-label">
+                        <label for="chkRollingFuturesCloseBlockedMargin">Close All if Net Profit is X % of Blocked Margin</label>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="chkRollingFuturesReEnterBlock">Re Enter</label>
+                    </div>
+                </div>
+
+                <div class="rolling-futures-demo-grid rule-values">
+                    <div class="rolling-demo-field rolling-futures-center-field">
+                        <div class="rolling-futures-toggle">
+                            <input type="checkbox" id="chkRollingFuturesOnlyDeltaNeutral" checked />
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <div class="rolling-futures-theta-controls">
+                            <input type="checkbox" id="chkRollingFuturesThetaMode" />
+                            <input type="number" id="txtRollingFuturesThetaDeltaNeutral" value="50" min="1" max="500" />
+                            <span>%</span>
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <div class="rolling-futures-rule-controls">
+                            <div class="rolling-futures-toggle">
+                                <input type="checkbox" id="chkRollingFuturesCloseNetProfitBrokerage" checked />
+                            </div>
+                            <input type="number" id="txtRollingFuturesBrokerageMultiplier" value="1" />
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <div class="rolling-futures-toggle">
+                            <input type="checkbox" id="chkRollingFuturesReEnterBrok" />
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <div class="rolling-futures-rule-controls">
+                            <div class="rolling-futures-toggle">
+                                <input type="checkbox" id="chkRollingFuturesCloseBlockedMargin" />
+                            </div>
+                            <input type="number" id="txtRollingFuturesBlockedMarginPct" value="10" />
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <div class="rolling-futures-toggle">
+                            <input type="checkbox" id="chkRollingFuturesReEnterBlock" />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="rolling-futures-demo-grid signal-labels">
+                    <div>
+                        <div class="rolling-futures-signal-row">
+                            <div class="rolling-futures-badges">
+                                <span class="rolling-futures-badge" id="spnRollingFuturesDeltaNeutralTotalDelta">Delta: 0.000</span>
+                                <span class="rolling-futures-badge" id="spnRollingFuturesDeltaNeutralRange">Range: 0.000 to 0.000</span>
+                                <span class="rolling-futures-badge" id="spnRollingFuturesDeltaNeutralBalance">Balance: Mode OFF</span>
+                            </div>
+                            <div class="rolling-futures-badges align-right">
+                                <span class="rolling-futures-badge" id="spnRollingFuturesThetaNeutralTotalDelta">Delta: 0.000</span>
+                                <span class="rolling-futures-badge" id="spnRollingFuturesThetaNeutralTheta">Theta 50%: 0.000</span>
+                                <span class="rolling-futures-badge success" id="spnRollingFuturesThetaNeutralBalance">Balance: Mode OFF</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="rolling-futures-demo-grid signal-values">
+                    <div></div>
+                </div>
+
+                <div class="rolling-futures-demo-grid metrics-row">
+                    <div class="rolling-futures-metric">
+                        <div class="rolling-demo-metric-label">Total Brokerage to Recvr</div>
+                        <input class="rolling-demo-metric-input" type="number" id="txtRollingFuturesBrok2Rec" value="0" />
+                    </div>
+                    <div class="rolling-futures-metric">
+                        <div class="rolling-demo-metric-label">Total PnL</div>
+                        <input class="rolling-demo-metric-input" type="number" id="txtRollingFuturesYet2Recover" value="0" />
+                    </div>
+                    <div class="rolling-futures-metric">
+                        <div class="rolling-demo-metric-label">Net PnL</div>
+                        <div class="rolling-demo-metric-value" id="divRollingFuturesNetPl">0.00</div>
+                    </div>
+                    <div class="rolling-futures-metric">
+                        <div class="rolling-demo-metric-label">Total Margin</div>
+                        <div class="rolling-demo-metric-value" id="divRollingFuturesTotalMargin">-</div>
+                    </div>
+                    <div class="rolling-futures-metric">
+                        <div class="rolling-demo-metric-label">Blocked Margin</div>
+                        <div class="rolling-demo-metric-value" id="divRollingFuturesBlockedMargin">-</div>
+                    </div>
+                    <div class="rolling-futures-metric">
+                        <div class="rolling-demo-metric-label">Available Balance</div>
+                        <div class="rolling-demo-metric-value" id="divRollingFuturesBalanceMargin">-</div>
+                    </div>
+                </div>
+
+                <div class="rolling-futures-demo-grid actions-row">
+                    <div class="rolling-demo-field">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn primary" type="button" id="btnRollingFuturesExecAllLegs">Exec Strategy</button>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label>&nbsp;</label>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesSellPe">SELL PE</button>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesSellCe">SELL CE</button>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesBuyCe">BUY CE</button>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesBuyPe">BUY PE</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <h2>Open Position(s)</h2>
+                    <div class="rolling-demo-card-tools">
+                        <div class="rolling-demo-inline">
+                            <span class="rolling-demo-badge secondary">Mode</span>
+                            <select id="ddlRollingFuturesTradeModeS2">
+                                <option value="flat">Flat</option>
+                                <option value="step" selected>Step</option>
+                                <option value="marti">Marti</option>
+                            </select>
+                        </div>
+                        <button class="rolling-demo-btn warn" type="button" id="btnRollingFuturesClearAll">Clear All</button>
+                        <button class="rolling-demo-icon-btn sell" type="button" id="btnRollingFuturesExitAllOpen" title="Exit all open positions" aria-label="Exit all open positions">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M12 2v10" />
+                                <path d="M6.2 6.2a8 8 0 1 0 11.3 0" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="rolling-demo-table-wrap">
+                    <table class="rolling-demo-table rolling-demo-table-open">
+                        <thead>
+                            <tr>
+                                <th>Actions</th>
+                                <th>Delta</th>
+                                <th>Gamma</th>
+                                <th>Theta</th>
+                                <th>Vega</th>
+                                <th>Symbol</th>
+                                <th>Tr Type</th>
+                                <th>Lot Sz</th>
+                                <th>Qty</th>
+                                <th>Buy Price</th>
+                                <th>Sell Price</th>
+                                <th>Charges</th>
+                                <th>P &amp; L</th>
+                                <th>Start DT</th>
+                                <th>End DT</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tBodyRollingFuturesCurrTrades">
+                            <tr class="rolling-futures-empty-body">
+                                <td colspan="16">No open positions yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <h2>Closed Positions</h2>
+                </div>
+                <div class="rolling-demo-table-wrap">
+                    <table class="rolling-demo-table rolling-demo-table-closed">
+                        <thead>
+                            <tr>
+                                <th>Actions</th>
+                                <th>Delta</th>
+                                <th>Gamma</th>
+                                <th>Theta</th>
+                                <th>Vega</th>
+                                <th>Symbol</th>
+                                <th>Tr Type</th>
+                                <th>Lot Sz</th>
+                                <th>Qty</th>
+                                <th>Buy Price</th>
+                                <th>Sell Price</th>
+                                <th>Charges</th>
+                                <th>P &amp; L</th>
+                                <th>Start DT</th>
+                                <th>End DT</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tBodyRollingFuturesClosedTrades">
+                            <tr class="rolling-futures-empty-body">
+                                <td colspan="16">No closed positions yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="app-panel rolling-demo-card rolling-futures-hidden" id="cardRollingFuturesDeltaDirec">
+                <div class="rolling-demo-card-head">
+                    <h2>Delta Direction</h2>
+                </div>
+                <div class="rolling-demo-table-wrap">
+                    <table class="rolling-demo-table">
+                        <thead>
+                            <tr>
+                                <th>Dated</th>
+                                <th>Daily Call</th>
+                                <th>Daily Put</th>
+                                <th>Direc</th>
+                                <th>Weekly Call</th>
+                                <th>Weekly Put</th>
+                                <th>Direc</th>
+                                <th>Monthly Call</th>
+                                <th>Monthly Put</th>
+                                <th>Direc</th>
+                                <th>OA Direc</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tBodyRollingFuturesDeltas">
+                            <tr class="rolling-futures-empty-body">
+                                <td colspan="11">No delta direction data yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </div>
+</body>
+</html>
