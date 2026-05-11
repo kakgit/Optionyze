@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import crypto from "node:crypto";
 const DeltaRestClient = require("delta-rest-client");
 import { getAccountById } from "../../storage/accounts-store";
 import { getDeltaApiProfile } from "../../storage/delta-api-profile-store";
@@ -517,6 +518,14 @@ function isFutureContractSymbol(pValue: unknown): boolean {
 function isOptionContractSymbol(pValue: unknown): boolean {
     const vSymbol = String(pValue || "").trim().toUpperCase();
     return vSymbol.startsWith("C-") || vSymbol.startsWith("P-");
+}
+
+function listTrackedOpenOptionPositions(
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
+): RollingFuturesLtImportedPositionRecord[] {
+    return Array.isArray(pTrackedPositions)
+        ? pTrackedPositions.filter((objPosition) => isOptionContractSymbol(objPosition.contractName))
+        : [];
 }
 
 function isTrackedContractForSymbol(pContractName: unknown, pSymbol: string): boolean {
@@ -2345,10 +2354,18 @@ async function executeStrategyPlacement(
 }> {
     const { client, profile } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const objUiState = getMergedUiState(pProfile);
+    const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
+    if (arrOpenOptions.length > 0) {
+        throw new Error(`An option position is already open (${arrOpenOptions[0].contractName}). Close the existing option before opening a new one.`);
+    }
     const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(objUiState, "strategy_option_open");
     const arrOptionSides: Array<"CE" | "PE"> = pInput.legSide === "both"
         ? ["CE", "PE"]
         : [pInput.legSide === "pe" ? "PE" : "CE"];
+    if (arrOptionSides.length > 1) {
+        throw new Error("Only one option position can be open at a time. Select either CE or PE, not both.");
+    }
     const objConfig = {
         symbol: pInput.symbol,
         contractName: getContractNameForSymbol(pInput.symbol),
@@ -2417,7 +2434,6 @@ async function executeStrategyPlacement(
         });
     }
 
-    const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
     const arrInitialSaved = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, [
         ...arrExisting,
         ...arrContracts.map((objContract) => ({
@@ -3896,6 +3912,11 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
     gManualOptionOrderLocks.add(vLockKey);
     try {
         const { client, profile } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
+        const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
+        const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
+        if (arrOpenOptions.length > 0) {
+            throw new Error(`An option position is already open (${arrOpenOptions[0].contractName}). Close the existing option before placing another option order.`);
+        }
         const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(getMergedUiState(objProfile), "manual_option_open");
         const objConfig = {
             symbol: vSymbol,
@@ -3944,9 +3965,9 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
             order: objOrderPayload
         });
         const objPayload = readResponsePayload(objResponse);
-        const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
+        const arrExistingAfterOrder = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
         const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, [
-            ...arrExisting,
+            ...arrExistingAfterOrder,
             {
                 userId: vUserId,
                 strategyCode: pStrategyCode,
