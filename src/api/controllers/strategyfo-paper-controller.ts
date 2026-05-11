@@ -14,6 +14,13 @@ function getUserIdFromReq(pReq: Request): string {
     return vUserId || "demo-paper";
 }
 
+const gRollingFuturesTelegramEventTypes = gRollingOptionsTelegramEventTypes.filter((vEventType) => ![
+    "renko_change_detected",
+    "reentry_opened",
+    "extra_future_added",
+    "manual_action"
+].includes(vEventType));
+
 export function renderStrategyFoPaperPage(req: Request, res: Response): void {
     res.render("strategyfo-paper", {
         pageTitle: "StrategyFOGreeks Paper | Optionyze",
@@ -35,7 +42,7 @@ export function renderRollingFuturesLiveLongPage(req: Request, res: Response): v
         pageTitle: "Long Rolling Futures - Live | Optionyze",
         currentAccount: req.authAccount,
         defaultUserId: req.authAccount?.accountId || "demo-paper",
-        rollingTelegramEventTypes: gRollingOptionsTelegramEventTypes
+        rollingTelegramEventTypes: gRollingFuturesTelegramEventTypes
     });
 }
 
@@ -44,7 +51,7 @@ export function renderRollingFuturesLiveShortPage(req: Request, res: Response): 
         pageTitle: "Short Rolling Futures - Live | Optionyze",
         currentAccount: req.authAccount,
         defaultUserId: req.authAccount?.accountId || "demo-paper",
-        rollingTelegramEventTypes: gRollingOptionsTelegramEventTypes
+        rollingTelegramEventTypes: gRollingFuturesTelegramEventTypes
     });
 }
 

@@ -68,6 +68,9 @@
         thetaDeltaNeutral: document.getElementById("txtRollingFuturesThetaDeltaNeutral"),
         closeNetProfitBrokerage: document.getElementById("chkRollingFuturesCloseNetProfitBrokerage"),
         brokerageMultiplier: document.getElementById("txtRollingFuturesBrokerageMultiplier"),
+        brok2Rec: document.getElementById("txtRollingFuturesBrok2Rec"),
+        yet2Recover: document.getElementById("txtRollingFuturesYet2Recover"),
+        netPl: document.getElementById("divRollingFuturesNetPl"),
         reEnterBrok: document.getElementById("chkRollingFuturesReEnterBrok"),
         closeBlockedMargin: document.getElementById("chkRollingFuturesCloseBlockedMargin"),
         blockedMarginPct: document.getElementById("txtRollingFuturesBlockedMarginPct"),
@@ -139,6 +142,27 @@
             return "-";
         }
         return objDate.toLocaleString();
+    }
+
+    function formatDateDisplay(value) {
+        const objDate = new Date(String(value || ""));
+        if (Number.isNaN(objDate.getTime())) {
+            return "-";
+        }
+        const day = String(objDate.getDate()).padStart(2, "0");
+        const month = String(objDate.getMonth() + 1).padStart(2, "0");
+        const year = String(objDate.getFullYear());
+        return `${day}-${month}-${year}`;
+    }
+
+    function formatDateTimeDisplay(value) {
+        const objDate = new Date(String(value || ""));
+        if (Number.isNaN(objDate.getTime())) {
+            return "-";
+        }
+        const dateValue = formatDateDisplay(value);
+        const timeValue = objDate.toLocaleTimeString();
+        return `${dateValue} ${timeValue}`;
     }
 
     function formatDateInputValue(dateValue) {
@@ -376,15 +400,30 @@
             return {
                 positions: payload,
                 totals: null,
-                neutralStatus: null
+                neutralStatus: null,
+                recoveryMetrics: null
             };
         }
         const objPayload = payload && typeof payload === "object" ? payload : {};
         return {
             positions: Array.isArray(objPayload.positions) ? objPayload.positions : [],
             totals: objPayload.totals || null,
-            neutralStatus: objPayload.neutralStatus || null
+            neutralStatus: objPayload.neutralStatus || null,
+            recoveryMetrics: objPayload.recoveryMetrics || null
         };
+    }
+
+    function applyRecoveryMetrics(recoveryMetrics) {
+        const objMetrics = recoveryMetrics || {};
+        if (ids.brok2Rec instanceof HTMLInputElement) {
+            ids.brok2Rec.value = fmt(objMetrics.totalBrokerageToRecover, 4) === "-" ? "0" : fmt(objMetrics.totalBrokerageToRecover, 4);
+        }
+        if (ids.yet2Recover instanceof HTMLInputElement) {
+            ids.yet2Recover.value = fmt(objMetrics.totalPnl, 4) === "-" ? "0" : fmt(objMetrics.totalPnl, 4);
+        }
+        if (ids.netPl) {
+            ids.netPl.textContent = fmt(objMetrics.netPnl, 4) === "-" ? "0.0000" : fmt(objMetrics.netPnl, 4);
+        }
     }
 
     function updateNeutralBadges(neutralStatus) {
@@ -413,9 +452,10 @@
         if (ids.deltaNeutralRange) {
             const minDelta = Number(objStatus.minDelta);
             const maxDelta = Number(objStatus.maxDelta);
+            const driftPct = Number(objStatus.deltaDriftPct);
             ids.deltaNeutralRange.textContent = Number.isFinite(minDelta) && Number.isFinite(maxDelta)
-                ? `Range: ${fmt(minDelta, 3)} to ${fmt(maxDelta, 3)}`
-                : "Range: 0.000 to 0.000";
+                ? `Drift: ${Number.isFinite(driftPct) ? fmt(driftPct, 2) : "0.00"}% | Trigger: ${fmt(minDelta, 2)}% to ${fmt(maxDelta, 2)}%`
+                : "Drift: 0.00% | Trigger: 0.00% to 0.00%";
         }
         if (ids.deltaNeutralBalance) {
             ids.deltaNeutralBalance.textContent = bRulesActive
@@ -456,6 +496,9 @@
             ? "success"
             : (connectionState === "not_selected" || connectionState === "checking" ? "warning" : "danger");
         setStatus(ids.connectionStatus, objStatus.message || "", tone);
+        if ((connectionState === "auth_failed" || connectionState === "disconnected" || connectionState === "rate_limited") && ids.pageStatus) {
+            setStatus(ids.pageStatus, objStatus.message || "", tone);
+        }
         setButtonsEnabled();
     }
 
@@ -474,6 +517,11 @@
             ids.autoTraderButton.classList.toggle("success", autoTraderEnabled);
             ids.autoTraderButton.classList.toggle("warn", !autoTraderEnabled);
         }
+        applyRecoveryMetrics({
+            totalBrokerageToRecover: Number(objRuntime.state?.brokerageRecoveryTotal || 0),
+            totalPnl: Number(objRuntime.state?.recoveredTotalPnl || 0),
+            netPnl: Number(objRuntime.state?.recoveredTotalPnl || 0) - Number(objRuntime.state?.brokerageRecoveryTotal || 0)
+        });
         updateNeutralBadges(lastNeutralStatus);
         setButtonsEnabled();
     }
@@ -864,6 +912,7 @@
         const objTotals = objPayload.totals || {};
         displayedPositions = arrRows;
         lastNeutralStatus = objPayload.neutralStatus || null;
+        applyRecoveryMetrics(objPayload.recoveryMetrics || null);
         updateNeutralBadges(lastNeutralStatus);
         if (!ids.openPositionsBody) {
             return;
@@ -891,10 +940,8 @@
             const greeks = row.greeks || {};
             return `
                 <tr>
-                    <td>${renderGreekCell(greeks.deltaPerContract, greeks.deltaTotal, 2)}</td>
-                    <td>${renderGreekCell(greeks.gammaPerContract, greeks.gammaTotal, 4)}</td>
-                    <td>${renderGreekCell(greeks.thetaPerContract, greeks.thetaTotal, 4)}</td>
-                    <td>${renderGreekCell(greeks.vegaPerContract, greeks.vegaTotal, 4)}</td>
+                    <td>${renderGreekCell(greeks.deltaTotal, greeks.deltaDisplayTotal ?? greeks.deltaTotal, 2)}</td>
+                    <td>${renderGreekCell(greeks.thetaDisplayTotal ?? greeks.thetaTotal, greeks.thetaBaseDisplayTotal ?? greeks.thetaTotal, 4)}</td>
                     <td>${escapeHtml(contractName)}</td>
                     <td>${escapeHtml(side)}</td>
                     <td>${escapeHtml(fmt(row.lotSize || lotSize, 3))}</td>
@@ -902,9 +949,9 @@
                     <td>${side === "BUY" ? escapeHtml(fmt(row.entryPrice, 2)) : "-"}</td>
                     <td>${side === "SELL" ? escapeHtml(fmt(row.entryPrice, 2)) : "-"}</td>
                     <td class="${escapeHtml(ltpBlinkClass)}">${escapeHtml(fmt(row.markPrice, 2))}</td>
-                    <td>${escapeHtml(fmt(row.charges, 2))}</td>
+                    <td>${escapeHtml(fmt(row.charges, 4))}</td>
                     <td>${escapeHtml(fmt(row.pnl, 2))}</td>
-                    <td>${escapeHtml(formatDateTime(row.openedAt))}</td>
+                    <td>${escapeHtml(formatDateTimeDisplay(row.openedAt))}</td>
                     <td>LIVE</td>
                     <td>
                         <div class="rolling-demo-table-actions">
@@ -927,10 +974,8 @@
         }).join("");
         ids.openPositionsBody.innerHTML = `${openRowsHtml}
             <tr class="rolling-demo-total-row">
-                <td>${renderGreekCell(objTotals.totalDeltaPerContract, objTotals.totalDelta, 2)}</td>
-                <td>${renderGreekCell(objTotals.totalGammaPerContract, objTotals.totalGamma, 4)}</td>
-                <td>${renderGreekCell(objTotals.totalThetaPerContract, objTotals.totalTheta, 4)}</td>
-                <td>${renderGreekCell(objTotals.totalVegaPerContract, objTotals.totalVega, 4)}</td>
+                <td>${renderGreekCell(objTotals.totalDelta, objTotals.totalDeltaDisplay ?? objTotals.totalDelta, 2)}</td>
+                <td>${renderGreekCell(objTotals.totalThetaDisplay ?? objTotals.totalTheta, objTotals.totalThetaBaseDisplay ?? objTotals.totalTheta, 4)}</td>
                 <td><strong>TOTAL</strong></td>
                 <td>-</td>
                 <td>-</td>
@@ -938,7 +983,7 @@
                 <td>-</td>
                 <td>-</td>
                 <td>-</td>
-                <td class="rolling-demo-total-value">${escapeHtml(fmt(objTotals.totalCharges, 2))}</td>
+                <td class="rolling-demo-total-value">${escapeHtml(fmt(objTotals.totalCharges, 4))}</td>
                 <td class="rolling-demo-total-value">${escapeHtml(fmt(objTotals.totalPnl, 2))}</td>
                 <td>-</td>
                 <td>-</td>
@@ -1009,8 +1054,8 @@
             const lotSize = contractName.includes("ETH") ? 0.01 : 0.001;
             return `
                 <tr>
-                    <td>${escapeHtml(formatDateTime(row.startAt))}</td>
-                    <td>${escapeHtml(formatDateTime(row.endAt))}</td>
+                    <td>${escapeHtml(formatDateTimeDisplay(row.startAt))}</td>
+                    <td>${escapeHtml(formatDateTimeDisplay(row.endAt))}</td>
                     <td>${escapeHtml(contractName)}</td>
                     <td>${escapeHtml(String(row.side || "-"))}</td>
                     <td>${escapeHtml(fmt(lotSize, 3))}</td>
@@ -1083,7 +1128,7 @@
             const severity = String(row.severity || "info").trim().toLowerCase();
             const title = String(row.title || "Activity").trim();
             const message = String(row.message || "").trim();
-            const createdAt = formatDateTime(row.createdAt);
+            const createdAt = formatDateTimeDisplay(row.createdAt);
             return `
                 <article class="rolling-demo-event-item ${escapeHtml(severity)}">
                     <div class="rolling-demo-event-head">
