@@ -94,6 +94,7 @@ import {
     getRollingFuturesLtLongOpenPositions,
     getRollingFuturesLtLongProfile,
     getRollingFuturesLtLongRuntimeStatus,
+    updateRollingFuturesLtLongRecoveryMetrics,
     getRollingFuturesLtShortAccountSummary,
     getRollingFuturesLtShortClosedPositions,
     getRollingFuturesLtShortConnectionStatus,
@@ -102,6 +103,7 @@ import {
     getRollingFuturesLtShortOpenPositions,
     getRollingFuturesLtShortProfile,
     getRollingFuturesLtShortRuntimeStatus,
+    updateRollingFuturesLtShortRecoveryMetrics,
     reconcileRollingFuturesLtLongOpenPositions,
     reconcileRollingFuturesLtShortOpenPositions,
     saveRollingFuturesLtLongOpenPositions,
@@ -372,6 +374,9 @@ export function createApiRouter(
     objRouter.post("/rollingfutures-lt-long/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await executeRollingFuturesLtLongKillSwitch(req, res);
     });
+    objRouter.post("/rollingfutures-lt-long/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateRollingFuturesLtLongRecoveryMetrics(req, res);
+    });
     objRouter.get("/rollingfutures-lt-long/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getRollingFuturesLtLongClosedPositions(req, res);
     });
@@ -435,6 +440,9 @@ export function createApiRouter(
     });
     objRouter.post("/rollingfutures-lt-short/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await executeRollingFuturesLtShortKillSwitch(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-short/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateRollingFuturesLtShortRecoveryMetrics(req, res);
     });
     objRouter.get("/rollingfutures-lt-short/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getRollingFuturesLtShortClosedPositions(req, res);

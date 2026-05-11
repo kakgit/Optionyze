@@ -362,11 +362,23 @@ function getLastFridayOfMonthUtc(pYear: number, pMonthIndex: number): Date {
     return objDate;
 }
 
+function getFutureFridayUtc(pBaseDate: Date, pFridayOffset: number): Date {
+    const vCurrentDayOfWeek = pBaseDate.getUTCDay();
+    const vDaysToThisFriday = (5 - vCurrentDayOfWeek + 7) % 7;
+    const objDate = new Date(pBaseDate.getTime());
+    objDate.setUTCDate(pBaseDate.getUTCDate() + vDaysToThisFriday + (pFridayOffset * 7));
+    return objDate;
+}
+
+function getDaysBetweenUtcDates(pFromDate: Date, pToDate: Date): number {
+    const vMsPerDay = 24 * 60 * 60 * 1000;
+    return Math.floor((pToDate.getTime() - pFromDate.getTime()) / vMsPerDay);
+}
+
 function resolveRollingFuturesExpiryDateByMode(pExpiryMode: string): string {
     const vMode = String(pExpiryMode || "").trim();
     const objNow = new Date();
     const objDate = new Date(Date.UTC(objNow.getUTCFullYear(), objNow.getUTCMonth(), objNow.getUTCDate()));
-    const vCurrentDayOfWeek = objDate.getUTCDay();
 
     if (vMode === "1") {
         objDate.setUTCDate(objDate.getUTCDate() + 1);
@@ -377,19 +389,27 @@ function resolveRollingFuturesExpiryDateByMode(pExpiryMode: string): string {
         return formatIsoDateFromParts(objDate.getUTCFullYear(), objDate.getUTCMonth(), objDate.getUTCDate());
     }
     if (vMode === "4") {
-        const vDaysToFriday = (5 - vCurrentDayOfWeek + 7) % 7;
-        objDate.setUTCDate(objDate.getUTCDate() + (vCurrentDayOfWeek >= 2 ? vDaysToFriday + 7 : vDaysToFriday));
-        return formatIsoDateFromParts(objDate.getUTCFullYear(), objDate.getUTCMonth(), objDate.getUTCDate());
+        const objWeekly = getFutureFridayUtc(objDate, objDate.getUTCDay() >= 1 ? 1 : 0);
+        return formatIsoDateFromParts(objWeekly.getUTCFullYear(), objWeekly.getUTCMonth(), objWeekly.getUTCDate());
     }
     if (vMode === "5") {
-        const vDaysToFriday = (5 - vCurrentDayOfWeek + 7) % 7;
-        objDate.setUTCDate(objDate.getUTCDate() + (vCurrentDayOfWeek >= 2 ? vDaysToFriday + 14 : vDaysToFriday + 7));
-        return formatIsoDateFromParts(objDate.getUTCFullYear(), objDate.getUTCMonth(), objDate.getUTCDate());
+        const objBiWeeklyCandidate = getFutureFridayUtc(objDate, 1);
+        const vDaysToCandidate = getDaysBetweenUtcDates(objDate, objBiWeeklyCandidate);
+        const objBiWeekly = vDaysToCandidate <= 7 ? getFutureFridayUtc(objDate, 2) : objBiWeeklyCandidate;
+        return formatIsoDateFromParts(objBiWeekly.getUTCFullYear(), objBiWeekly.getUTCMonth(), objBiWeekly.getUTCDate());
     }
     if (vMode === "6") {
         const objLastFriday = getLastFridayOfMonthUtc(objDate.getUTCFullYear(), objDate.getUTCMonth());
         const objLastFridayNextMonth = getLastFridayOfMonthUtc(objDate.getUTCFullYear(), objDate.getUTCMonth() + 1);
-        const objSelected = objDate.getUTCDate() > 15 ? objLastFridayNextMonth : objLastFriday;
+        const objSelected = getDaysBetweenUtcDates(objDate, objLastFriday) <= 14 ? objLastFridayNextMonth : objLastFriday;
+        return formatIsoDateFromParts(objSelected.getUTCFullYear(), objSelected.getUTCMonth(), objSelected.getUTCDate());
+    }
+    if (vMode === "7") {
+        const objLastFridayNextMonth = getLastFridayOfMonthUtc(objDate.getUTCFullYear(), objDate.getUTCMonth() + 1);
+        const objLastFridayThirdMonth = getLastFridayOfMonthUtc(objDate.getUTCFullYear(), objDate.getUTCMonth() + 2);
+        const objSelected = getDaysBetweenUtcDates(objDate, objLastFridayNextMonth) <= 30
+            ? objLastFridayThirdMonth
+            : objLastFridayNextMonth;
         return formatIsoDateFromParts(objSelected.getUTCFullYear(), objSelected.getUTCMonth(), objSelected.getUTCDate());
     }
 
@@ -1554,14 +1574,20 @@ async function buildOpenPositionsPayload(
     const objEnriched = await enrichTrackedOpenPositions(arrPositions);
     const bAutoTraderActive = Boolean(objRuntime?.autoTraderEnabled)
         && String(objRuntime?.status || "").trim().toLowerCase() === "running";
+    const vRuntimeBrokerageTotal = getBrokerageRecoveryTotal(objRuntime);
+    const vOpenPositionCharges = Number(objEnriched.totals.totalCharges || 0);
+    const vEffectiveBrokerageTotal = objEnriched.positions.length > 0
+        ? Math.max(vRuntimeBrokerageTotal, vOpenPositionCharges)
+        : vRuntimeBrokerageTotal;
+    const vRecoveredTotalPnl = getRecoveredTotalPnl(objRuntime);
     return {
         positions: objEnriched.positions,
         totals: objEnriched.totals,
         neutralStatus: buildNeutralStatus(objUiState, objEnriched.totals, bAutoTraderActive, objRuntime),
         recoveryMetrics: {
-            totalBrokerageToRecover: Number(getBrokerageRecoveryTotal(objRuntime).toFixed(4)),
-            totalPnl: Number(getRecoveredTotalPnl(objRuntime).toFixed(4)),
-            netPnl: Number((getRecoveredTotalPnl(objRuntime) + Number(objEnriched.totals.totalPnl || 0) - getBrokerageRecoveryTotal(objRuntime)).toFixed(4))
+            totalBrokerageToRecover: Number(vEffectiveBrokerageTotal.toFixed(4)),
+            totalPnl: Number(vRecoveredTotalPnl.toFixed(4)),
+            netPnl: Number((vRecoveredTotalPnl + Number(objEnriched.totals.totalPnl || 0) - vEffectiveBrokerageTotal).toFixed(4))
         }
     };
 }
@@ -1640,13 +1666,14 @@ function getProfitCloseRule(
     const bBrokerageEnabled = Boolean(pUiState.closeNetProfitBrokerage);
     const vBrokerageMultiplier = Math.max(0, Number(pUiState.brokerageMultiplier || 0));
     const vBrokerageBase = Math.max(0, Number(pOpenPositions.recoveryMetrics?.totalBrokerageToRecover || 0));
-    if (bBrokerageEnabled && vBrokerageMultiplier > 0 && vBrokerageBase > 0) {
-        const vThreshold = vBrokerageBase * vBrokerageMultiplier;
+    const vBrokerageBaseRounded = Number(vBrokerageBase.toFixed(4));
+    if (bBrokerageEnabled && vBrokerageMultiplier > 0 && vBrokerageBaseRounded >= 0.01) {
+        const vThreshold = vBrokerageBaseRounded * vBrokerageMultiplier;
         if (vNetProfit >= vThreshold) {
             return {
                 triggered: true,
                 reason: "brokerage",
-                message: `Net PnL ${vNetProfit.toFixed(2)} reached the brokerage target ${vThreshold.toFixed(2)} (${vBrokerageBase.toFixed(2)} x ${vBrokerageMultiplier.toFixed(2)}).`,
+                message: `Net PnL ${vNetProfit.toFixed(2)} reached the brokerage target ${vThreshold.toFixed(2)} (${vBrokerageBaseRounded.toFixed(2)} x ${vBrokerageMultiplier.toFixed(2)}).`,
                 thresholdValue: Number(vThreshold.toFixed(6)),
                 reEnterEnabled: Boolean(pUiState.reEnterBrok)
             };
@@ -1979,7 +2006,7 @@ async function logFuturesEvent(
     pMessage: string,
     pPayload: Record<string, unknown> = {}
 ): Promise<void> {
-    await saveRollingOptionsEvent({
+    const objEvent = {
         userId: pUserId,
         strategyCode: pStrategyCode,
         eventType: pEventType,
@@ -1987,7 +2014,10 @@ async function logFuturesEvent(
         title: pTitle,
         message: pMessage,
         payload: pPayload
-    });
+    };
+
+    await saveRollingOptionsEvent(objEvent);
+    await sendFuturesTelegramForEvent(pUserId, objEvent);
 }
 
 async function calculateTrackedNeutralTotals(
@@ -2061,6 +2091,95 @@ function buildRuntimeStateWithRecoveredTotalPnl(
     const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
     objState.recoveredTotalPnl = Number(Number(pTotal || 0).toFixed(4));
     return objState;
+}
+
+function normalizeRollingFuturesSelectedTelegramEventTypes(pValue: unknown): string[] {
+    if (!Array.isArray(pValue)) {
+        return [];
+    }
+    return pValue
+        .map((vItem) => String(vItem || "").trim())
+        .filter((vItem) => Boolean(vItem) && gRollingFuturesTelegramEventTypes.has(vItem));
+}
+
+async function shouldSendFuturesTelegram(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pEventType: string
+): Promise<boolean> {
+    if (!gRollingFuturesTelegramEventTypes.has(pEventType)) {
+        return false;
+    }
+    const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+    const arrSelectedTypes = normalizeRollingFuturesSelectedTelegramEventTypes(objProfile.uiState?.telegramAlertTypes);
+    if (!arrSelectedTypes.length) {
+        return false;
+    }
+    return arrSelectedTypes.includes(pEventType);
+}
+
+async function sendFuturesTelegramForEvent(
+    pUserId: string,
+    pEvent: {
+        strategyCode: RollingFuturesLtStrategyCode;
+        eventType: string;
+        title: string;
+        message: string;
+        payload: Record<string, unknown>;
+    }
+): Promise<void> {
+    const vBotToken = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
+    if (!vBotToken) {
+        return;
+    }
+
+    const objAccount = await getAccountById(pUserId);
+    const vTelegramChatId = String(objAccount?.telegramChatId || "").trim();
+    if (!vTelegramChatId) {
+        return;
+    }
+
+    if (!(await shouldSendFuturesTelegram(pUserId, pEvent.strategyCode, pEvent.eventType))) {
+        return;
+    }
+
+    const arrLines = [
+        pEvent.strategyCode === "rolling-futures-lt-short" ? "Short Rolling Futures - Live" : "Long Rolling Futures - Live",
+        `Time: ${new Date().toLocaleString("en-IN")}`,
+        "",
+        pEvent.title,
+        pEvent.message
+    ];
+
+    const vSymbol = String(pEvent.payload.symbol || "").trim();
+    const vContractName = String(pEvent.payload.contractName || "").trim();
+    const vQty = Number(pEvent.payload.qty || 0);
+    const vReason = String(pEvent.payload.reason || "").trim();
+    if (vSymbol) {
+        arrLines.push(`Symbol: ${vSymbol}`);
+    }
+    if (vContractName) {
+        arrLines.push(`Contract: ${vContractName}`);
+    }
+    if (Number.isFinite(vQty) && vQty > 0) {
+        arrLines.push(`Qty: ${vQty}`);
+    }
+    if (vReason) {
+        arrLines.push(`Reason: ${vReason}`);
+    }
+
+    try {
+        await fetch(`https://api.telegram.org/bot${encodeURIComponent(vBotToken)}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                chat_id: vTelegramChatId,
+                text: arrLines.join("\n")
+            })
+        });
+    }
+    catch (_objError) {
+    }
 }
 
 async function saveBrokerageRecoveryTotal(
@@ -2334,7 +2453,7 @@ async function executeStrategyPlacement(
         action: "buy" | "sell";
         symbol: "BTC" | "ETH";
         legSide: "ce" | "pe" | "both";
-        expiryMode: "1" | "2" | "4" | "5" | "6";
+        expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
         expiryDate: string;
         qty: number;
         targetDelta: number;
@@ -2540,9 +2659,9 @@ async function openTrackedOptionReEntry(
         futureOrderType: "market_order" as const,
         action: String(pClosedPosition.side || "").trim().toUpperCase() === "BUY" ? "buy" as const : "sell" as const,
         legSide: vLegSide,
-        expiryMode: (["1", "2", "4", "5", "6"].includes(String(objUiState.expiryMode1 || "5").trim())
+        expiryMode: (["1", "2", "4", "5", "6", "7"].includes(String(objUiState.expiryMode1 || "5").trim())
             ? String(objUiState.expiryMode1 || "5").trim()
-            : "5") as "1" | "2" | "4" | "5" | "6",
+            : "5") as "1" | "2" | "4" | "5" | "6" | "7",
         expiryDate: String(objUiState.expiryDate1 || "").trim(),
         optionQty: Math.max(1, Math.floor(Number(pClosedPosition.qty || 1))),
         redOptionQtyPct: 100,
@@ -2944,9 +3063,9 @@ async function runAutoTraderCycle(
                         legSide: String(objUiState.legs1 || "ce").trim().toLowerCase() === "pe"
                             ? "pe"
                             : (String(objUiState.legs1 || "ce").trim().toLowerCase() === "both" ? "both" : "ce"),
-                        expiryMode: (["1", "2", "4", "5", "6"].includes(String(objUiState.expiryMode1 || "5").trim())
+                        expiryMode: (["1", "2", "4", "5", "6", "7"].includes(String(objUiState.expiryMode1 || "5").trim())
                             ? String(objUiState.expiryMode1 || "5").trim()
-                            : "5") as "1" | "2" | "4" | "5" | "6",
+                            : "5") as "1" | "2" | "4" | "5" | "6" | "7",
                         expiryDate: String(objUiState.expiryDate1 || "").trim(),
                         qty: Math.max(1, Math.floor(Number(objUiState.qty1 || 1))),
                         targetDelta: Math.max(0, Number(objUiState.newD1 || 0.53))
@@ -3882,7 +4001,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
     const vAction = String(req.body?.action || "").trim().toLowerCase();
     const vSymbol = normalizeSymbolValue(req.body?.symbol || getMergedUiState(objProfile).symbol);
     const vLegSide = String(req.body?.legSide || "").trim().toLowerCase();
-    const vExpiryMode = String(req.body?.expiryMode || "5").trim() as "1" | "2" | "4" | "5" | "6";
+    const vExpiryMode = String(req.body?.expiryMode || "5").trim() as "1" | "2" | "4" | "5" | "6" | "7";
     const vExpiryDate = normalizeRollingFuturesExpiryDate(vExpiryMode, req.body?.expiryDate);
     const vQty = Math.max(1, Math.floor(Number(req.body?.qty || 1)));
     const vTargetDelta = Math.max(0, Number(req.body?.targetDelta || 0.53));
@@ -3926,7 +4045,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
             futureOrderType: "market_order" as const,
             action: vAction === "buy" ? "buy" as const : "sell" as const,
             legSide: vLegSide === "pe" ? "pe" as const : "ce" as const,
-            expiryMode: ["1", "2", "4", "5", "6"].includes(vExpiryMode) ? vExpiryMode : "5",
+            expiryMode: ["1", "2", "4", "5", "6", "7"].includes(vExpiryMode) ? vExpiryMode : "5",
             expiryDate: vExpiryDate,
             optionQty: vQty,
             redOptionQtyPct: 100,
@@ -4093,7 +4212,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
     const vAction = String(req.body?.action || "").trim().toLowerCase();
     const vSymbol = normalizeSymbolValue(req.body?.symbol || getMergedUiState(objProfile).symbol);
     const vLegSide = String(req.body?.legSide || "").trim().toLowerCase();
-    const vExpiryMode = String(req.body?.expiryMode || "5").trim() as "1" | "2" | "4" | "5" | "6";
+    const vExpiryMode = String(req.body?.expiryMode || "5").trim() as "1" | "2" | "4" | "5" | "6" | "7";
     const vExpiryDate = normalizeRollingFuturesExpiryDate(vExpiryMode, req.body?.expiryDate);
     const vQty = Math.max(1, Math.floor(Number(req.body?.qty || 1)));
     const vTargetDelta = Math.max(0, Number(req.body?.targetDelta || 0.53));
@@ -4131,7 +4250,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
                 action: vAction === "buy" ? "buy" : "sell",
                 symbol: vSymbol,
                 legSide: vLegSide === "both" ? "both" : (vLegSide === "pe" ? "pe" : "ce"),
-                expiryMode: ["1", "2", "4", "5", "6"].includes(vExpiryMode) ? vExpiryMode : "5",
+                expiryMode: ["1", "2", "4", "5", "6", "7"].includes(vExpiryMode) ? vExpiryMode : "5",
                 expiryDate: vExpiryDate,
                 qty: vQty,
                 targetDelta: vTargetDelta
@@ -4360,6 +4479,42 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
     }
 }
 
+async function updateRecoveryMetricsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
+    const vUserId = getAccountId(req);
+    const vBrokerageTotal = Math.max(0, Number(req.body?.totalBrokerageToRecover || 0));
+    const vRecoveredPnl = Number(req.body?.totalPnl || 0);
+    if (!Number.isFinite(vBrokerageTotal) || !Number.isFinite(vRecoveredPnl)) {
+        res.status(400).json({
+            status: "warning",
+            message: "Enter valid numeric values for Total Brokerage to Recvr and Total PnL."
+        });
+        return;
+    }
+
+    await saveBrokerageRecoveryTotal(vUserId, pStrategyCode, vBrokerageTotal);
+    await saveRecoveredTotalPnl(vUserId, pStrategyCode, vRecoveredPnl);
+    await logFuturesEvent(
+        vUserId,
+        pStrategyCode,
+        "manual_action",
+        "warning",
+        "Recovery Metrics Updated",
+        `Manual override saved. Brokerage to recover set to ${vBrokerageTotal.toFixed(4)} and total PnL set to ${vRecoveredPnl.toFixed(4)}.`,
+        {
+            reason: "manual_recovery_metrics_update",
+            totalBrokerageToRecover: Number(vBrokerageTotal.toFixed(4)),
+            totalPnl: Number(vRecoveredPnl.toFixed(4))
+        }
+    );
+
+    const objOpenPositions = await buildOpenPositionsPayload(vUserId, pStrategyCode);
+    res.json({
+        status: "success",
+        message: "Recovery metrics updated.",
+        data: objOpenPositions
+    });
+}
+
 export async function getRollingFuturesLtLongProfile(req: Request, res: Response): Promise<void> {
     await getProfileInternal(req, res, "rolling-futures-lt-long");
 }
@@ -4422,6 +4577,9 @@ export async function clearRollingFuturesLtLongEventsController(req: Request, re
 }
 export async function executeRollingFuturesLtLongKillSwitch(req: Request, res: Response): Promise<void> {
     await executeKillSwitchInternal(req, res, "rolling-futures-lt-long");
+}
+export async function updateRollingFuturesLtLongRecoveryMetrics(req: Request, res: Response): Promise<void> {
+    await updateRecoveryMetricsInternal(req, res, "rolling-futures-lt-long");
 }
 
 export async function getRollingFuturesLtShortProfile(req: Request, res: Response): Promise<void> {
@@ -4486,4 +4644,7 @@ export async function clearRollingFuturesLtShortEventsController(req: Request, r
 }
 export async function executeRollingFuturesLtShortKillSwitch(req: Request, res: Response): Promise<void> {
     await executeKillSwitchInternal(req, res, "rolling-futures-lt-short");
+}
+export async function updateRollingFuturesLtShortRecoveryMetrics(req: Request, res: Response): Promise<void> {
+    await updateRecoveryMetricsInternal(req, res, "rolling-futures-lt-short");
 }

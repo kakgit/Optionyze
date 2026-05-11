@@ -78,6 +78,29 @@ Still to port:
 - delta direction section
 - legacy action buttons:
   - exec all legs
+
+## Rolling Futures Live Note
+
+Delta Exchange tagging research for `Long Rolling Futures` / `Short Rolling Futures`:
+
+- Delta supports an order-level identifier using `client_order_id` at order creation time.
+- Delta docs show lookup and cancel support by `client_order_id`.
+- We did **not** find documented support to:
+  - retro-tag an already open/fill-derived position
+  - edit `client_order_id` later on an existing order
+  - remove a tag from an existing position before removing it from our app
+- Practical implication:
+  - new live strategy orders can be tagged forward using `client_order_id`
+  - already imported Delta positions cannot be safely retro-tagged through the API based on the docs checked
+  - if we later implement strict live reconciliation after hedge netting, we should prefer:
+    - Delta-side `client_order_id` for all new strategy orders
+    - plus app-side ownership metadata for imported legacy positions
+
+Current decision:
+
+- save this note for later
+- first observe how futures open/close/netting behaves in the current live setup
+- if app behavior differs materially from Delta net positions, then implement tagging/reconciliation changes
   - manual CE/PE buy/sell actions
   - futures buy/sell actions
   - close/kill switch actions
@@ -104,4 +127,3 @@ Next time, do this first:
 - `npm run build` passes
 - current page route is `/strategyfogreeks`
 - if `DATABASE_URL` is missing, app falls back to JSON files
-

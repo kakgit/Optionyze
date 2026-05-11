@@ -6,7 +6,7 @@ export interface RollingOptionsPtDeConfig {
     futureOrderType: "limit_order" | "market_order";
     action: "buy" | "sell";
     legSide: "ce" | "pe" | "both";
-    expiryMode: "1" | "2" | "4" | "5" | "6";
+    expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
     expiryDate: string;
     optionQty: number;
     redOptionQtyPct: number;

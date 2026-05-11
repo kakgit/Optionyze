@@ -248,10 +248,17 @@
         return dateValue;
     }
 
+    function getFutureFriday(baseDate, fridayOffset) {
+        const currentDayOfWeek = baseDate.getDay();
+        const daysToThisFriday = (5 - currentDayOfWeek + 7) % 7;
+        const dateValue = new Date(baseDate);
+        dateValue.setDate(baseDate.getDate() + daysToThisFriday + (fridayOffset * 7));
+        return dateValue;
+    }
+
     function resolveExpiryDateByMode(expiryMode) {
         const modeValue = String(expiryMode || "").trim();
         const currentDate = new Date();
-        const currentDayOfWeek = currentDate.getDay();
 
         if (modeValue === "1") {
             currentDate.setDate(currentDate.getDate() + 1);
@@ -262,19 +269,27 @@
             return currentDate;
         }
         if (modeValue === "4") {
-            const daysToThisFriday = (5 - currentDayOfWeek + 7) % 7;
-            currentDate.setDate(currentDate.getDate() + (currentDayOfWeek >= 2 ? daysToThisFriday + 7 : daysToThisFriday));
-            return currentDate;
+            return getFutureFriday(currentDate, currentDate.getDay() >= 1 ? 1 : 0);
         }
         if (modeValue === "5") {
-            const daysToThisFriday = (5 - currentDayOfWeek + 7) % 7;
-            currentDate.setDate(currentDate.getDate() + (currentDayOfWeek >= 2 ? daysToThisFriday + 14 : daysToThisFriday + 7));
-            return currentDate;
+            const biWeeklyCandidate = getFutureFriday(currentDate, 1);
+            const msPerDay = 24 * 60 * 60 * 1000;
+            const daysToCandidate = Math.floor((biWeeklyCandidate.getTime() - currentDate.getTime()) / msPerDay);
+            return daysToCandidate <= 7 ? getFutureFriday(currentDate, 2) : biWeeklyCandidate;
         }
         if (modeValue === "6") {
             const lastFridayOfMonth = getLastFridayOfMonth(currentDate.getFullYear(), currentDate.getMonth());
             const lastFridayOfNextMonth = getLastFridayOfMonth(currentDate.getFullYear(), currentDate.getMonth() + 1);
-            return currentDate.getDate() > 15 ? lastFridayOfNextMonth : lastFridayOfMonth;
+            const msPerDay = 24 * 60 * 60 * 1000;
+            const daysToCandidate = Math.floor((lastFridayOfMonth.getTime() - currentDate.getTime()) / msPerDay);
+            return daysToCandidate <= 14 ? lastFridayOfNextMonth : lastFridayOfMonth;
+        }
+        if (modeValue === "7") {
+            const lastFridayOfNextMonth = getLastFridayOfMonth(currentDate.getFullYear(), currentDate.getMonth() + 1);
+            const lastFridayOfThirdMonth = getLastFridayOfMonth(currentDate.getFullYear(), currentDate.getMonth() + 2);
+            const msPerDay = 24 * 60 * 60 * 1000;
+            const daysToCandidate = Math.floor((lastFridayOfNextMonth.getTime() - currentDate.getTime()) / msPerDay);
+            return daysToCandidate <= 30 ? lastFridayOfThirdMonth : lastFridayOfNextMonth;
         }
 
         return currentDate;
@@ -696,6 +711,20 @@
     async function loadRuntimeStatus() {
         const objResult = await getJson(`${endpointBase}/runtime`);
         applyRuntimeStatus(objResult?.data || {});
+    }
+
+    async function saveRecoveryMetricsOverride() {
+        const vBrokerage = Number(ids.brok2Rec instanceof HTMLInputElement ? ids.brok2Rec.value : 0);
+        const vTotalPnl = Number(ids.yet2Recover instanceof HTMLInputElement ? ids.yet2Recover.value : 0);
+        if (!Number.isFinite(vBrokerage) || !Number.isFinite(vTotalPnl)) {
+            throw new Error("Enter valid numeric values for Total Brokerage to Recvr and Total PnL.");
+        }
+        const objResult = await postJson(`${endpointBase}/metrics/update`, {
+            totalBrokerageToRecover: vBrokerage,
+            totalPnl: vTotalPnl
+        });
+        renderOpenPositions(objResult?.data);
+        return objResult;
     }
 
     async function checkConnection() {
@@ -1354,6 +1383,19 @@
         queueProfileSave();
         void loadClosedPositions().catch(function (error) {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to filter closed positions.", "danger");
+        });
+    });
+    [ids.brok2Rec, ids.yet2Recover].forEach(function (node) {
+        node?.addEventListener("change", function () {
+            void saveRecoveryMetricsOverride().then(function (objResult) {
+                setStatus(ids.pageStatus, String(objResult?.message || "Recovery metrics updated."), "success");
+                return Promise.all([
+                    loadRuntimeStatus().catch(function () { return undefined; }),
+                    loadEvents().catch(function () { return undefined; })
+                ]);
+            }).catch(function (error) {
+                setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to update recovery metrics.", "danger");
+            });
         });
     });
     ids.apiProfile?.addEventListener("change", function () {

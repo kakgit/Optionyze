@@ -296,7 +296,7 @@ export function buildConfigFromUiState(pUiState: Record<string, unknown>): Rolli
         ? vPriceSourceRaw
         : "spot_price";
 
-    const vExpiryMode = String(pUiState.expiryMode1 || "1") as "1" | "2" | "4" | "5" | "6";
+    const vExpiryMode = String(pUiState.expiryMode1 || "1") as "1" | "2" | "4" | "5" | "6" | "7";
     const vEffectiveExpiryDate = resolveExpiryDateByMode(vExpiryMode);
 
     return {
