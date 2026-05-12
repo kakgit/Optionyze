@@ -35,6 +35,15 @@
             gap: 10px;
         }
 
+        .rolling-futures-demo-grid.profit-summary-labels,
+        .rolling-futures-demo-grid.profit-summary-values {
+            grid-template-columns: 1.9fr .55fr 1.9fr .55fr 1fr 1fr 1fr;
+            margin-top: 12px;
+            align-items: end;
+            justify-content: start;
+            gap: 10px;
+        }
+
         .rolling-futures-center-field {
             text-align: center;
         }
@@ -49,6 +58,19 @@
             gap: 10px;
             align-items: center;
             justify-content: start;
+        }
+
+        .rolling-futures-compact-check {
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .rolling-futures-compact-check input {
+            margin: 0;
+            width: 18px;
+            height: 18px;
         }
 
         .rolling-futures-theta-controls {
@@ -316,8 +338,22 @@
 
         .rolling-futures-neutral-modes {
             margin-top: 10px;
-            display: grid;
-            gap: 8px;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .rolling-futures-neutral-modes-row {
+            margin-top: 12px;
+        }
+
+        .rolling-futures-neutral-item {
+            flex: 1 1 220px;
+            min-width: 0;
+            padding: 12px 14px;
+            border-radius: 14px;
+            border: 1px solid rgba(255,255,255,.08);
+            background: rgba(255,255,255,.03);
         }
 
         .rolling-futures-neutral-mode {
@@ -337,6 +373,7 @@
             font-size: 0.75rem;
             color: var(--app-muted);
             line-height: 1.35;
+            margin-top: 6px;
         }
 
         .rolling-futures-card-stack {
@@ -551,6 +588,8 @@
             .rolling-futures-demo-grid.row,
             .rolling-futures-demo-grid.rule-labels,
             .rolling-futures-demo-grid.rule-values,
+            .rolling-futures-demo-grid.profit-summary-labels,
+            .rolling-futures-demo-grid.profit-summary-values,
             .rolling-futures-demo-grid.signal-labels,
             .rolling-futures-demo-grid.signal-values,
             .rolling-futures-demo-grid.metrics-row,
@@ -564,6 +603,8 @@
             .rolling-futures-demo-grid.row,
             .rolling-futures-demo-grid.rule-labels,
             .rolling-futures-demo-grid.rule-values,
+            .rolling-futures-demo-grid.profit-summary-labels,
+            .rolling-futures-demo-grid.profit-summary-values,
             .rolling-futures-demo-grid.signal-labels,
             .rolling-futures-demo-grid.signal-values,
             .rolling-futures-demo-grid.metrics-row,
@@ -617,11 +658,6 @@
                         <span class="rolling-futures-badge" id="spnRollingFuturesDeltaNeutralTotalDelta">Delta: 0.000</span>
                         <span class="rolling-futures-badge" id="spnRollingFuturesDeltaNeutralRange">Range: 0.000 to 0.000</span>
                         <span class="rolling-futures-badge" id="spnRollingFuturesDeltaNeutralBalance">Balance: Mode OFF</span>
-                    </div>
-                    <div class="rolling-futures-badges align-right" id="rollingFuturesThetaBadgesGroup" hidden>
-                        <span class="rolling-futures-badge" id="spnRollingFuturesThetaNeutralTotalDelta">Delta: 0.000</span>
-                        <span class="rolling-futures-badge" id="spnRollingFuturesThetaNeutralTheta">Theta 50%: 0.000</span>
-                        <span class="rolling-futures-badge success" id="spnRollingFuturesThetaNeutralBalance">Balance: Mode OFF</span>
                     </div>
                 </div>
             </div>
@@ -800,13 +836,7 @@
                     </div>
                 </div>
 
-                <div class="rolling-futures-demo-grid rule-labels">
-                    <div class="rolling-demo-field rolling-futures-center-field">
-                        <label for="chkRollingFuturesOnlyDeltaNeutral">Only Delta Neutral</label>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="txtRollingFuturesThetaDeltaNeutral">Theta Delta Neutral</label>
-                    </div>
+                <div class="rolling-futures-demo-grid profit-summary-labels">
                     <div class="rolling-demo-field rolling-futures-rule-label">
                         <label for="chkRollingFuturesCloseNetProfitBrokerage">Close All when Net Profit is &gt; X of Brokerage</label>
                     </div>
@@ -819,21 +849,18 @@
                     <div class="rolling-demo-field">
                         <label for="chkRollingFuturesReEnterBlock">Re Enter</label>
                     </div>
-                </div>
-
-                <div class="rolling-futures-demo-grid rule-values">
-                    <div class="rolling-demo-field rolling-futures-center-field">
-                        <div class="rolling-futures-toggle">
-                            <input type="checkbox" id="chkRollingFuturesOnlyDeltaNeutral" />
-                        </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesBrok2Rec">Total Brokerage to Recvr</label>
                     </div>
                     <div class="rolling-demo-field">
-                        <div class="rolling-futures-theta-controls">
-                            <input type="checkbox" id="chkRollingFuturesThetaMode" checked />
-                            <input type="number" id="txtRollingFuturesThetaDeltaNeutral" value="25" min="1" max="500" />
-                            <span>%</span>
-                        </div>
+                        <label for="txtRollingFuturesYet2Recover">Total PnL</label>
                     </div>
+                    <div class="rolling-demo-field">
+                        <label for="divRollingFuturesNetPl">Net PnL</label>
+                    </div>
+                </div>
+
+                <div class="rolling-futures-demo-grid profit-summary-values">
                     <div class="rolling-demo-field">
                         <div class="rolling-futures-rule-controls">
                             <div class="rolling-futures-toggle">
@@ -843,7 +870,7 @@
                         </div>
                     </div>
                     <div class="rolling-demo-field">
-                        <div class="rolling-futures-toggle">
+                        <div class="rolling-futures-compact-check">
                             <input type="checkbox" id="chkRollingFuturesReEnterBrok" />
                         </div>
                     </div>
@@ -856,39 +883,46 @@
                         </div>
                     </div>
                     <div class="rolling-demo-field">
-                        <div class="rolling-futures-toggle">
+                        <div class="rolling-futures-compact-check">
                             <input type="checkbox" id="chkRollingFuturesReEnterBlock" />
                         </div>
                     </div>
-                </div>
-
-                <div class="rolling-futures-demo-grid metrics-row">
                     <div class="rolling-futures-metric">
-                        <div class="rolling-demo-metric-label">Total Brokerage to Recvr</div>
                         <input class="rolling-demo-metric-input" type="number" id="txtRollingFuturesBrok2Rec" value="0" />
                     </div>
                     <div class="rolling-futures-metric">
-                        <div class="rolling-demo-metric-label">Total PnL</div>
                         <input class="rolling-demo-metric-input" type="number" id="txtRollingFuturesYet2Recover" value="0" />
                     </div>
                     <div class="rolling-futures-metric">
-                        <div class="rolling-demo-metric-label">Net PnL</div>
                         <div class="rolling-demo-metric-value" id="divRollingFuturesNetPl">0.00</div>
-                        <div class="rolling-futures-neutral-modes">
-                            <label class="rolling-futures-neutral-mode" for="chkRollingFuturesRangeDeltaNeutral">
-                                <input type="checkbox" id="chkRollingFuturesRangeDeltaNeutral" />
-                                <span>Range Delta Neutral</span>
-                            </label>
-                            <div class="rolling-futures-neutral-help">
-                                Uses <code>- Delta</code> / <code>+ Delta</code> as absolute live delta band. Safe start: <code>-3</code> / <code>+3</code>.
-                            </div>
-                            <label class="rolling-futures-neutral-mode" for="chkRollingFuturesGammaAwareNeutral">
-                                <input type="checkbox" id="chkRollingFuturesGammaAwareNeutral" />
-                                <span>Gamma-Aware Delta Neutral</span>
-                            </label>
-                            <div class="rolling-futures-neutral-help">
-                                Uses <code>- Delta</code> / <code>+ Delta</code> as drift % from hedged baseline, then tightens as gamma rises. Safe start: <code>-30</code> / <code>+30</code>.
-                            </div>
+                    </div>
+                </div>
+                <div class="rolling-futures-neutral-modes rolling-futures-neutral-modes-row">
+                    <div class="rolling-futures-neutral-item">
+                        <label class="rolling-futures-neutral-mode" for="chkRollingFuturesRangeDeltaNeutral">
+                            <input type="checkbox" id="chkRollingFuturesRangeDeltaNeutral" />
+                            <span>Range Delta Neutral</span>
+                        </label>
+                        <div class="rolling-futures-neutral-help">
+                            Uses <code>- Delta</code> / <code>+ Delta</code> as absolute live delta band. Safe start: <code>-3</code> / <code>+3</code>.
+                        </div>
+                    </div>
+                    <div class="rolling-futures-neutral-item">
+                        <label class="rolling-futures-neutral-mode" for="chkRollingFuturesOnlyDeltaNeutral">
+                            <input type="checkbox" id="chkRollingFuturesOnlyDeltaNeutral" />
+                            <span>Only Delta Neutral</span>
+                        </label>
+                        <div class="rolling-futures-neutral-help">
+                            Uses <code>- Delta</code> / <code>+ Delta</code> as drift % from hedged baseline. Safe start: <code>-25</code> / <code>+25</code>.
+                        </div>
+                    </div>
+                    <div class="rolling-futures-neutral-item">
+                        <label class="rolling-futures-neutral-mode" for="chkRollingFuturesGammaAwareNeutral">
+                            <input type="checkbox" id="chkRollingFuturesGammaAwareNeutral" />
+                            <span>Gamma-Aware Delta Neutral</span>
+                        </label>
+                        <div class="rolling-futures-neutral-help">
+                            Uses <code>- Delta</code> / <code>+ Delta</code> as drift % from hedged baseline, then tightens as gamma rises. Safe start: <code>-30</code> / <code>+30</code>.
                         </div>
                     </div>
                 </div>

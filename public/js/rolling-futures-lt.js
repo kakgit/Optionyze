@@ -47,17 +47,12 @@
         action1: document.getElementById("ddlRollingFuturesAction1"),
         legs1: document.getElementById("ddlRollingFuturesLegs1"),
         onlyDeltaNeutral: document.getElementById("chkRollingFuturesOnlyDeltaNeutral"),
-        thetaMode: document.getElementById("chkRollingFuturesThetaMode"),
         rangeDeltaNeutral: document.getElementById("chkRollingFuturesRangeDeltaNeutral"),
         gammaAwareNeutral: document.getElementById("chkRollingFuturesGammaAwareNeutral"),
         deltaNeutralTotalDelta: document.getElementById("spnRollingFuturesDeltaNeutralTotalDelta"),
         deltaNeutralRange: document.getElementById("spnRollingFuturesDeltaNeutralRange"),
         deltaNeutralBalance: document.getElementById("spnRollingFuturesDeltaNeutralBalance"),
         deltaBadgesGroup: document.getElementById("rollingFuturesDeltaBadgesGroup"),
-        thetaNeutralTotalDelta: document.getElementById("spnRollingFuturesThetaNeutralTotalDelta"),
-        thetaNeutralTheta: document.getElementById("spnRollingFuturesThetaNeutralTheta"),
-        thetaNeutralBalance: document.getElementById("spnRollingFuturesThetaNeutralBalance"),
-        thetaBadgesGroup: document.getElementById("rollingFuturesThetaBadgesGroup"),
         neutralBadgesRow: document.getElementById(`${prefix}NeutralBadges`),
         optionExpiryMode: document.getElementById("ddlRollingFuturesExpiryType1"),
         optionExpiryDate: document.getElementById("txtRollingFuturesExpiry1"),
@@ -67,7 +62,6 @@
         tpD1: document.getElementById("txtRollingFuturesTpD1"),
         slD1: document.getElementById("txtRollingFuturesSlD1"),
         reEnter1: document.getElementById("chkRollingFuturesReEnter1"),
-        thetaDeltaNeutral: document.getElementById("txtRollingFuturesThetaDeltaNeutral"),
         closeNetProfitBrokerage: document.getElementById("chkRollingFuturesCloseNetProfitBrokerage"),
         brokerageMultiplier: document.getElementById("txtRollingFuturesBrokerageMultiplier"),
         brok2Rec: document.getElementById("txtRollingFuturesBrok2Rec"),
@@ -136,14 +130,6 @@
     function fmtUsd(value) {
         const vNumber = Number(value);
         return Number.isFinite(vNumber) ? `${vNumber.toFixed(2)} USD` : "-";
-    }
-
-    function formatDateTime(value) {
-        const objDate = new Date(String(value || ""));
-        if (Number.isNaN(objDate.getTime())) {
-            return "-";
-        }
-        return objDate.toLocaleString();
     }
 
     function formatDateDisplay(value) {
@@ -220,7 +206,6 @@
             action1: "sell",
             legs1: mode === "short" ? "pe" : "ce",
             onlyDeltaNeutral: false,
-            thetaMode: true,
             rangeDeltaNeutral: false,
             gammaAwareNeutral: false,
             expiryMode1: "5",
@@ -231,7 +216,6 @@
             tpD1: "0.25",
             slD1: "0.65",
             reEnter1: true,
-            thetaDeltaNeutral: "25",
             closeNetProfitBrokerage: false,
             brokerageMultiplier: "3",
             reEnterBrok: false,
@@ -365,16 +349,14 @@
 
     function syncNeutralModeCheckboxes(changedKey) {
         const onlyDeltaNeutral = ids.onlyDeltaNeutral instanceof HTMLInputElement ? ids.onlyDeltaNeutral : null;
-        const thetaMode = ids.thetaMode instanceof HTMLInputElement ? ids.thetaMode : null;
         const rangeDeltaNeutral = ids.rangeDeltaNeutral instanceof HTMLInputElement ? ids.rangeDeltaNeutral : null;
         const gammaAwareNeutral = ids.gammaAwareNeutral instanceof HTMLInputElement ? ids.gammaAwareNeutral : null;
-        if (!onlyDeltaNeutral || !thetaMode || !rangeDeltaNeutral || !gammaAwareNeutral) {
+        if (!onlyDeltaNeutral || !rangeDeltaNeutral || !gammaAwareNeutral) {
             return;
         }
 
         const checkboxMap = {
             only: onlyDeltaNeutral,
-            theta: thetaMode,
             range: rangeDeltaNeutral,
             gamma: gammaAwareNeutral
         };
@@ -400,13 +382,10 @@
         if (ids.rangeDeltaNeutral instanceof HTMLInputElement && ids.rangeDeltaNeutral.checked) {
             return "range";
         }
-        if (ids.thetaMode instanceof HTMLInputElement && ids.thetaMode.checked) {
-            return "theta";
-        }
         if (ids.onlyDeltaNeutral instanceof HTMLInputElement && ids.onlyDeltaNeutral.checked) {
             return "only";
         }
-        return "theta";
+        return "only";
     }
 
     function getCurrentNeutralModeFromCheckboxes() {
@@ -415,9 +394,6 @@
         }
         if (ids.rangeDeltaNeutral instanceof HTMLInputElement && ids.rangeDeltaNeutral.checked) {
             return "range";
-        }
-        if (ids.thetaMode instanceof HTMLInputElement && ids.thetaMode.checked) {
-            return "theta";
         }
         if (ids.onlyDeltaNeutral instanceof HTMLInputElement && ids.onlyDeltaNeutral.checked) {
             return "delta";
@@ -520,19 +496,14 @@
     function updateNeutralBadges(neutralStatus) {
         const objStatus = neutralStatus || {};
         const totalDelta = Number(objStatus.totalDelta || 0);
-        const totalTheta = Number(objStatus.thetaThreshold || 0);
         const bRulesActive = autoTraderEnabled;
         const currentNeutralMode = getCurrentNeutralModeFromCheckboxes();
         const bShowDeltaGroup = bRulesActive && ["delta", "range", "gamma"].includes(currentNeutralMode);
-        const bShowThetaGroup = bRulesActive && currentNeutralMode === "theta";
         if (ids.deltaBadgesGroup) {
             ids.deltaBadgesGroup.hidden = !bShowDeltaGroup;
         }
-        if (ids.thetaBadgesGroup) {
-            ids.thetaBadgesGroup.hidden = !bShowThetaGroup;
-        }
         if (ids.neutralBadgesRow) {
-            ids.neutralBadgesRow.hidden = !bShowDeltaGroup && !bShowThetaGroup;
+            ids.neutralBadgesRow.hidden = !bShowDeltaGroup;
         }
         if (ids.deltaNeutralTotalDelta) {
             ids.deltaNeutralTotalDelta.textContent = `Delta: ${fmt(totalDelta, 3)}`;
@@ -546,21 +517,6 @@
                 : "Balance: Mode OFF";
             applyBadgeTone(ids.deltaNeutralBalance, bRulesActive ? String(objStatus.deltaBalanceTone || "secondary") : "secondary");
         }
-        if (ids.thetaNeutralTotalDelta) {
-            ids.thetaNeutralTotalDelta.textContent = `Delta: ${fmt(totalDelta, 3)}`;
-        }
-        if (ids.thetaNeutralTheta) {
-            const thetaPct = Number(objStatus.thetaPct);
-            ids.thetaNeutralTheta.textContent = Number.isFinite(thetaPct) && thetaPct > 0
-                ? `Theta ${thetaPct.toFixed(0)}%: ${fmt(totalTheta, 3)}`
-                : "Theta 50%: 0.000";
-        }
-        if (ids.thetaNeutralBalance) {
-            ids.thetaNeutralBalance.textContent = bRulesActive
-                ? String(objStatus.thetaBalanceText || "Balance: Mode OFF")
-                : "Balance: Mode OFF";
-            applyBadgeTone(ids.thetaNeutralBalance, bRulesActive ? String(objStatus.thetaBalanceTone || "secondary") : "secondary");
-        }
     }
 
     function applyConnectionStatus(connectionStatus) {
@@ -570,7 +526,7 @@
             ids.connectionStateValue.textContent = connectionState.replaceAll("_", " ").toUpperCase();
         }
         if (ids.lastCheckedValue) {
-            ids.lastCheckedValue.textContent = objStatus.lastCheckedAt ? formatDateTime(objStatus.lastCheckedAt) : "-";
+            ids.lastCheckedValue.textContent = objStatus.lastCheckedAt ? formatDateTimeDisplay(objStatus.lastCheckedAt) : "-";
         }
         if (ids.whitelistIpValue) {
             ids.whitelistIpValue.textContent = String(objStatus.outboundIp || "").trim() || "-";
@@ -635,7 +591,6 @@
             action1: getInputValue(ids.action1, "sell").toLowerCase() === "buy" ? "buy" : "sell",
             legs1: getInputValue(ids.legs1, mode === "short" ? "pe" : "ce").toLowerCase() === "pe" ? "pe" : "ce",
             onlyDeltaNeutral: getCheckboxValue(ids.onlyDeltaNeutral, false),
-            thetaMode: getCheckboxValue(ids.thetaMode, true),
             rangeDeltaNeutral: getCheckboxValue(ids.rangeDeltaNeutral, false),
             gammaAwareNeutral: getCheckboxValue(ids.gammaAwareNeutral, false),
             expiryMode1: String(ids.optionExpiryMode?.value || "5").trim(),
@@ -646,7 +601,6 @@
             tpD1: getInputValue(ids.tpD1, "0.25"),
             slD1: getInputValue(ids.slD1, "0.65"),
             reEnter1: getCheckboxValue(ids.reEnter1, true),
-            thetaDeltaNeutral: getInputValue(ids.thetaDeltaNeutral, "25"),
             closeNetProfitBrokerage: getCheckboxValue(ids.closeNetProfitBrokerage, false),
             brokerageMultiplier: getInputValue(ids.brokerageMultiplier, "3"),
             reEnterBrok: getCheckboxValue(ids.reEnterBrok, false),
@@ -676,7 +630,6 @@
             setInputValue(ids.action1, String(objUiState.action1 || "sell").trim().toLowerCase() === "buy" ? "buy" : "sell");
             setInputValue(ids.legs1, String(objUiState.legs1 || (mode === "short" ? "pe" : "ce")).trim().toLowerCase() === "pe" ? "pe" : "ce");
             setCheckboxValue(ids.onlyDeltaNeutral, objUiState.onlyDeltaNeutral);
-            setCheckboxValue(ids.thetaMode, objUiState.thetaMode);
             setCheckboxValue(ids.rangeDeltaNeutral, objUiState.rangeDeltaNeutral);
             setCheckboxValue(ids.gammaAwareNeutral, objUiState.gammaAwareNeutral);
             setInputValue(ids.optionExpiryMode, String(objUiState.expiryMode1 || "5").trim() || "5");
@@ -687,7 +640,6 @@
             setInputValue(ids.tpD1, objUiState.tpD1);
             setInputValue(ids.slD1, objUiState.slD1);
             setCheckboxValue(ids.reEnter1, objUiState.reEnter1);
-            setInputValue(ids.thetaDeltaNeutral, objUiState.thetaDeltaNeutral);
             setCheckboxValue(ids.closeNetProfitBrokerage, objUiState.closeNetProfitBrokerage);
             setInputValue(ids.brokerageMultiplier, objUiState.brokerageMultiplier);
             setCheckboxValue(ids.reEnterBrok, objUiState.reEnterBrok);
@@ -977,9 +929,6 @@
         if (ids.profileLabel) {
             ids.profileLabel.textContent = String(objData.profileLabel || "").trim() || "-";
         }
-        if (ids.openCount) {
-            ids.openCount.textContent = String(objData.openCount || 0);
-        }
     }
 
     function getLtpBlinkClass(positionId, markPrice) {
@@ -1230,16 +1179,29 @@
             const title = String(row.title || "Activity").trim();
             const message = String(row.message || "").trim();
             const createdAt = formatDateTimeDisplay(row.createdAt);
+            const eventId = String(row.eventId || "").trim();
             return `
                 <article class="rolling-demo-event-item ${escapeHtml(severity)}">
                     <div class="rolling-demo-event-head">
                         <strong>${escapeHtml(title)}</strong>
-                        <span>${escapeHtml(createdAt)}</span>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <span>${escapeHtml(createdAt)}</span>
+                            <button class="rolling-demo-icon-btn warn rolling-live-delete-event" type="button" data-event-id="${escapeHtml(eventId)}" title="Delete this activity log entry" aria-label="Delete this activity log entry">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M18 6 6 18" />
+                                    <path d="m6 6 12 12" />
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                     <p>${escapeHtml(message)}</p>
                 </article>
             `;
         }).join("");
+    }
+
+    async function deleteEvent(eventId) {
+        return postJson(`${endpointBase}/events/delete`, { eventId: eventId });
     }
 
     async function loadEvents() {
@@ -1407,11 +1369,6 @@
         updateNeutralBadges(lastNeutralStatus);
         queueProfileSave();
     });
-    ids.thetaMode?.addEventListener("change", function () {
-        syncNeutralModeCheckboxes("theta");
-        updateNeutralBadges(lastNeutralStatus);
-        queueProfileSave();
-    });
     ids.rangeDeltaNeutral?.addEventListener("change", function () {
         syncNeutralModeCheckboxes("range");
         updateNeutralBadges(lastNeutralStatus);
@@ -1434,7 +1391,6 @@
         ids.tpD1,
         ids.slD1,
         ids.reEnter1,
-        ids.thetaDeltaNeutral,
         ids.closeNetProfitBrokerage,
         ids.brokerageMultiplier,
         ids.reEnterBrok,
@@ -1745,11 +1701,33 @@
         });
     });
     ids.clearEventsButton?.addEventListener("click", function () {
+        const confirmed = window.confirm("Clear all messages from the Activity Log?");
+        if (!confirmed) {
+            return;
+        }
         void postJson(`${endpointBase}/events/clear`, {}).then(function (objResult) {
             renderEvents([]);
             setStatus(ids.pageStatus, objResult?.message || "Live activity log cleared.", "success");
         }).catch(function (error) {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to clear activity log.", "danger");
+        });
+    });
+    ids.eventLog?.addEventListener("click", function (event) {
+        const target = event.target instanceof Element ? event.target : null;
+        const deleteButton = target ? target.closest(".rolling-live-delete-event") : null;
+        if (!(deleteButton instanceof HTMLButtonElement)) {
+            return;
+        }
+        const eventId = String(deleteButton.dataset.eventId || "").trim();
+        if (!eventId) {
+            setStatus(ids.pageStatus, "Unable to find the selected activity log entry.", "danger");
+            return;
+        }
+        void deleteEvent(eventId).then(function (objResult) {
+            setStatus(ids.pageStatus, objResult?.message || "Activity log entry deleted.", "success");
+            return loadEvents();
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to delete activity log entry.", "danger");
         });
     });
     ids.copyWhitelistIpButton?.addEventListener("click", function () {

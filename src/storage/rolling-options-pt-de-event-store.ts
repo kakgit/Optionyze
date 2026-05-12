@@ -216,3 +216,38 @@ export async function clearRollingOptionsEventsByStrategy(pUserId: string, pStra
 export async function clearRollingOptionsPtDeEvents(pUserId: string): Promise<number> {
     return clearRollingOptionsEventsByStrategy(pUserId, gDefaultStrategyCode);
 }
+
+export async function deleteRollingOptionsEventByStrategy(
+    pUserId: string,
+    pStrategyCode: string,
+    pEventId: string
+): Promise<boolean> {
+    const vStrategyCode = String(pStrategyCode || gDefaultStrategyCode).trim() || gDefaultStrategyCode;
+    const vEventId = String(pEventId || "").trim();
+    if (!vEventId) {
+        return false;
+    }
+
+    if (isPostgresConfigured()) {
+        const objPool = getPostgresPool();
+        const objResult = await objPool.query(`
+            DELETE FROM optionyze_rolling_options_pt_de_events
+            WHERE user_id = $1
+              AND strategy_code = $2
+              AND event_id = $3
+        `, [pUserId, vStrategyCode, vEventId]);
+        return Number(objResult.rowCount || 0) > 0;
+    }
+
+    const objRows = await loadAllEventsJson();
+    const objRemainingRows = objRows.filter((objRow) => !(
+        objRow.userId === pUserId
+        && objRow.strategyCode === vStrategyCode
+        && objRow.eventId === vEventId
+    ));
+    const bDeleted = objRemainingRows.length !== objRows.length;
+    if (bDeleted) {
+        await writeJsonFileAtomic(gEventsFile, objRemainingRows);
+    }
+    return bDeleted;
+}

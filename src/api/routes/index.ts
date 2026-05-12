@@ -70,6 +70,8 @@ import {
     checkRollingFuturesLtShortConnection,
     clearRollingFuturesLtLongEventsController,
     clearRollingFuturesLtShortEventsController,
+    deleteRollingFuturesLtLongEventController,
+    deleteRollingFuturesLtShortEventController,
     closeRollingFuturesLtLongImportedOpenPosition,
     closeRollingFuturesLtShortImportedOpenPosition,
     deleteRollingFuturesLtLongOpenPosition,
@@ -383,6 +385,9 @@ export function createApiRouter(
     objRouter.get("/rollingfutures-lt-long/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getRollingFuturesLtLongEvents(req, res);
     });
+    objRouter.post("/rollingfutures-lt-long/events/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteRollingFuturesLtLongEventController(req, res);
+    });
     objRouter.post("/rollingfutures-lt-long/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await clearRollingFuturesLtLongEventsController(req, res);
     });
@@ -449,6 +454,9 @@ export function createApiRouter(
     });
     objRouter.get("/rollingfutures-lt-short/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getRollingFuturesLtShortEvents(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-short/events/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteRollingFuturesLtShortEventController(req, res);
     });
     objRouter.post("/rollingfutures-lt-short/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await clearRollingFuturesLtShortEventsController(req, res);

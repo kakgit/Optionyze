@@ -24,6 +24,7 @@ import {
 } from "../../storage/rolling-futures-lt-runtime-store";
 import {
     clearRollingOptionsEventsByStrategy,
+    deleteRollingOptionsEventByStrategy,
     listRollingOptionsEventsByStrategy,
     saveRollingOptionsEvent
 } from "../../storage/rolling-options-pt-de-event-store";
@@ -154,7 +155,7 @@ interface RollingFuturesLtOpenPositionTotals {
 }
 
 interface RollingFuturesLtNeutralStatus {
-    mode: "none" | "delta" | "theta" | "range" | "gamma";
+    mode: "none" | "delta" | "range" | "gamma";
     totalDelta: number;
     totalTheta: number;
     totalGamma: number;
@@ -162,13 +163,9 @@ interface RollingFuturesLtNeutralStatus {
     maxDelta: number | null;
     deltaDriftPct: number | null;
     baseOptionDeltaAbs: number | null;
-    thetaPct: number | null;
-    thetaThreshold: number | null;
     gammaFactor: number | null;
     deltaBalanceTone: "secondary" | "success" | "danger";
     deltaBalanceText: string;
-    thetaBalanceTone: "secondary" | "success" | "warning" | "danger";
-    thetaBalanceText: string;
 }
 
 interface RollingFuturesLtOpenPositionsPayload {
@@ -511,7 +508,6 @@ function getDefaultManualTraderUiState(
         action1: "sell",
         legs1: pStrategyCode === "rolling-futures-lt-short" ? "pe" : "ce",
         onlyDeltaNeutral: false,
-        thetaMode: true,
         rangeDeltaNeutral: false,
         gammaAwareNeutral: false,
         expiryMode1: "5",
@@ -522,7 +518,6 @@ function getDefaultManualTraderUiState(
         tpD1: "0.25",
         slD1: "0.65",
         reEnter1: true,
-        thetaDeltaNeutral: "25",
         closeNetProfitBrokerage: false,
         brokerageMultiplier: "3",
         reEnterBrok: false,
@@ -1006,7 +1001,6 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         action1: String(objUiState.action1 || objDefaults.action1).trim().toLowerCase() === "buy" ? "buy" : "sell",
         legs1: String(objUiState.legs1 || objDefaults.legs1).trim().toLowerCase() === "pe" ? "pe" : "ce",
         onlyDeltaNeutral: normalizeBooleanValue(objUiState.onlyDeltaNeutral, Boolean(objDefaults.onlyDeltaNeutral)),
-        thetaMode: normalizeBooleanValue(objUiState.thetaMode, Boolean(objDefaults.thetaMode)),
         rangeDeltaNeutral: normalizeBooleanValue(objUiState.rangeDeltaNeutral, Boolean(objDefaults.rangeDeltaNeutral)),
         gammaAwareNeutral: normalizeBooleanValue(objUiState.gammaAwareNeutral, Boolean(objDefaults.gammaAwareNeutral)),
         expiryMode1: normalizeStringValue(objUiState.expiryMode1, String(objDefaults.expiryMode1)),
@@ -1020,7 +1014,6 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         tpD1: normalizeStringValue(objUiState.tpD1, String(objDefaults.tpD1)),
         slD1: normalizeStringValue(objUiState.slD1, String(objDefaults.slD1)),
         reEnter1: normalizeBooleanValue(objUiState.reEnter1, Boolean(objDefaults.reEnter1)),
-        thetaDeltaNeutral: normalizeStringValue(objUiState.thetaDeltaNeutral, String(objDefaults.thetaDeltaNeutral)),
         closeNetProfitBrokerage: normalizeBooleanValue(objUiState.closeNetProfitBrokerage, Boolean(objDefaults.closeNetProfitBrokerage)),
         brokerageMultiplier: normalizeStringValue(objUiState.brokerageMultiplier, String(objDefaults.brokerageMultiplier)),
         reEnterBrok: normalizeBooleanValue(objUiState.reEnterBrok, Boolean(objDefaults.reEnterBrok)),
@@ -1061,7 +1054,6 @@ function normalizeProfileSaveInput(
             action1: String(objUiState.action1 || objDefaults.action1).trim().toLowerCase() === "buy" ? "buy" : "sell",
             legs1: String(objUiState.legs1 || objDefaults.legs1).trim().toLowerCase() === "pe" ? "pe" : "ce",
             onlyDeltaNeutral: normalizeBooleanValue(objUiState.onlyDeltaNeutral, Boolean(objDefaults.onlyDeltaNeutral)),
-            thetaMode: normalizeBooleanValue(objUiState.thetaMode, Boolean(objDefaults.thetaMode)),
             rangeDeltaNeutral: normalizeBooleanValue(objUiState.rangeDeltaNeutral, Boolean(objDefaults.rangeDeltaNeutral)),
             gammaAwareNeutral: normalizeBooleanValue(objUiState.gammaAwareNeutral, Boolean(objDefaults.gammaAwareNeutral)),
             expiryMode1: normalizeStringValue(objUiState.expiryMode1, String(objDefaults.expiryMode1)),
@@ -1075,7 +1067,6 @@ function normalizeProfileSaveInput(
             tpD1: normalizeStringValue(objUiState.tpD1, String(objDefaults.tpD1)),
             slD1: normalizeStringValue(objUiState.slD1, String(objDefaults.slD1)),
             reEnter1: normalizeBooleanValue(objUiState.reEnter1, Boolean(objDefaults.reEnter1)),
-            thetaDeltaNeutral: normalizeStringValue(objUiState.thetaDeltaNeutral, String(objDefaults.thetaDeltaNeutral)),
             closeNetProfitBrokerage: normalizeBooleanValue(objUiState.closeNetProfitBrokerage, Boolean(objDefaults.closeNetProfitBrokerage)),
             brokerageMultiplier: normalizeStringValue(objUiState.brokerageMultiplier, String(objDefaults.brokerageMultiplier)),
             reEnterBrok: normalizeBooleanValue(objUiState.reEnterBrok, Boolean(objDefaults.reEnterBrok)),
@@ -1492,23 +1483,16 @@ function buildNeutralStatus(
             maxDelta: null,
             deltaDriftPct: null,
             baseOptionDeltaAbs: null,
-            thetaPct: null,
-            thetaThreshold: null,
             gammaFactor: null,
             deltaBalanceTone: "secondary",
-            deltaBalanceText: "Balance: Mode OFF",
-            thetaBalanceTone: "secondary",
-            thetaBalanceText: "Balance: Mode OFF"
+            deltaBalanceText: "Balance: Mode OFF"
         };
     }
 
     const vMode = getNeutralModeFromUiState(pUiState);
     const vMinDelta = Number.isFinite(Number(pUiState.minusDelta)) ? Number(pUiState.minusDelta) : -25;
     const vMaxDelta = Number.isFinite(Number(pUiState.plusDelta)) ? Number(pUiState.plusDelta) : 25;
-    const vThetaPct = Math.max(1, Number(pUiState.thetaDeltaNeutral || 25));
-    const vThetaThreshold = Math.abs(Number(pTotals.totalTheta || 0)) * (vThetaPct / 100);
     const vTotalDelta = Number(pTotals.totalDelta || 0);
-    const vAbsDelta = Math.abs(vTotalDelta);
     const vTotalGamma = Number(pTotals.totalGamma || 0);
     const objDeltaBaseline = getDeltaNeutralBaselineState(pRuntime);
     const vBaseOptionDeltaAbs = objDeltaBaseline.baseOptionDeltaAbs;
@@ -1567,23 +1551,6 @@ function buildNeutralStatus(
         }
     }
 
-    let vThetaBalanceTone: RollingFuturesLtNeutralStatus["thetaBalanceTone"] = "secondary";
-    let vThetaBalanceText = "Balance: Mode OFF";
-    if (vMode === "theta") {
-        if (!Number.isFinite(vThetaThreshold) || vThetaThreshold <= 0) {
-            vThetaBalanceTone = "warning";
-            vThetaBalanceText = "Balance: Theta not available";
-        }
-        else if (vAbsDelta <= vThetaThreshold) {
-            vThetaBalanceTone = "success";
-            vThetaBalanceText = `Balance: Balanced (${(vThetaThreshold - vAbsDelta).toFixed(3)} left)`;
-        }
-        else {
-            vThetaBalanceTone = "danger";
-            vThetaBalanceText = `Balance: Hedge Trigger (${Math.abs(vAbsDelta - vThetaThreshold).toFixed(3)} over)`;
-        }
-    }
-
     return {
         mode: vMode,
         totalDelta: Number(vTotalDelta.toFixed(6)),
@@ -1601,13 +1568,9 @@ function buildNeutralStatus(
                 : (vMode === "gamma" && Number.isFinite(vGammaMaxDelta) ? Number(vGammaMaxDelta) : null)),
         deltaDriftPct: bPctDriftMode && Number.isFinite(Number(vDeltaDriftPct)) ? Number(vDeltaDriftPct) : null,
         baseOptionDeltaAbs: bPctDriftMode && vBaseOptionDeltaAbs > 0 ? Number(vBaseOptionDeltaAbs.toFixed(6)) : null,
-        thetaPct: vMode === "theta" ? vThetaPct : null,
-        thetaThreshold: vMode === "theta" && Number.isFinite(vThetaThreshold) ? Number(vThetaThreshold.toFixed(6)) : null,
         gammaFactor: vMode === "gamma" && Number.isFinite(Number(vGammaFactor)) ? Number(vGammaFactor) : null,
         deltaBalanceTone: vDeltaBalanceTone,
-        deltaBalanceText: vDeltaBalanceText,
-        thetaBalanceTone: vThetaBalanceTone,
-        thetaBalanceText: vThetaBalanceText
+        deltaBalanceText: vDeltaBalanceText
     };
 }
 
@@ -2093,9 +2056,6 @@ function getNeutralModeFromUiState(
     if (Boolean(pUiState.rangeDeltaNeutral)) {
         return "range";
     }
-    if (Boolean(pUiState.thetaMode)) {
-        return "theta";
-    }
     if (Boolean(pUiState.onlyDeltaNeutral)) {
         return "delta";
     }
@@ -2405,7 +2365,7 @@ async function applyServerSideNeutralityCheck(
     hedgePlaced: boolean;
     totalDelta: number;
     totalTheta: number;
-    mode: "none" | "delta" | "theta" | "range" | "gamma";
+    mode: "none" | "delta" | "range" | "gamma";
     threshold: number | null;
     nextRuntimeState: Record<string, unknown> | null;
 }> {
@@ -2436,13 +2396,7 @@ async function applyServerSideNeutralityCheck(
     let bShouldHedge = false;
     let vThreshold: number | null = null;
     let objNextRuntimeState: Record<string, unknown> | null = null;
-    if (vMode === "theta") {
-        const vThetaPct = Math.max(1, Number(pUiState.thetaDeltaNeutral || 25));
-        vThreshold = Math.abs(objTotals.totalTheta) * (vThetaPct / 100);
-        bShouldHedge = Number.isFinite(vThreshold) && vThreshold > 0 && Math.abs(objTotals.totalDelta) > vThreshold;
-        objNextRuntimeState = buildRuntimeStateWithDeltaNeutralBaseline(pRuntime, null);
-    }
-    else if (vMode === "delta") {
+    if (vMode === "delta") {
         const vNegThresholdPct = Number.isFinite(Number(pUiState.minusDelta)) ? Number(pUiState.minusDelta) : -25;
         const vPosThresholdPct = Number.isFinite(Number(pUiState.plusDelta)) ? Number(pUiState.plusDelta) : 25;
         const vDriftPct = vBaselineOptionDeltaAbs > 0
@@ -2529,8 +2483,8 @@ async function applyServerSideNeutralityCheck(
         pStrategyCode,
         "future_opened",
         "warning",
-        vMode === "theta" ? "Theta Delta Hedge Executed" : "Delta Neutral Hedge Executed",
-        `${vHedgeAction} future hedge placed from server-side ${vMode === "theta" ? "theta-delta" : "delta-neutral"} check.`,
+        "Delta Neutral Hedge Executed",
+        `${vHedgeAction} future hedge placed from server-side delta-neutral check.`,
         {
             symbol: pSymbol,
             qty: vHedgeQty,
@@ -2538,7 +2492,7 @@ async function applyServerSideNeutralityCheck(
             totalTheta: objTotals.totalTheta,
             threshold: vThreshold,
             mode: vMode,
-            reason: vMode === "theta" ? "theta_delta_neutral_hedge" : "delta_neutral_hedge"
+            reason: "delta_neutral_hedge"
         }
     );
 
@@ -2576,7 +2530,7 @@ async function executeStrategyPlacement(
     contracts: Array<Record<string, unknown>>;
     orders: Array<Record<string, unknown>>;
     neutralCheck: {
-        mode: "none" | "delta" | "theta" | "range" | "gamma";
+        mode: "none" | "delta" | "range" | "gamma";
         hedgePlaced: boolean;
         totalDelta: number;
         totalTheta: number;
@@ -4508,6 +4462,23 @@ async function clearEventsInternal(req: Request, res: Response, pStrategyCode: R
     });
 }
 
+async function deleteEventInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
+    const vEventId = String(req.body?.eventId || "").trim();
+    if (!vEventId) {
+        res.status(400).json({ status: "warning", message: "Event ID is required." });
+        return;
+    }
+    const bDeleted = await deleteRollingOptionsEventByStrategy(getAccountId(req), pStrategyCode, vEventId);
+    if (!bDeleted) {
+        res.status(404).json({ status: "warning", message: "Activity log entry was not found." });
+        return;
+    }
+    res.json({
+        status: "success",
+        message: "Activity log entry deleted."
+    });
+}
+
 async function executeKillSwitchInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
     const objProfile = await readLiveProfile(vUserId, pStrategyCode);
@@ -4687,6 +4658,9 @@ export async function getRollingFuturesLtLongEvents(req: Request, res: Response)
 export async function clearRollingFuturesLtLongEventsController(req: Request, res: Response): Promise<void> {
     await clearEventsInternal(req, res, "rolling-futures-lt-long");
 }
+export async function deleteRollingFuturesLtLongEventController(req: Request, res: Response): Promise<void> {
+    await deleteEventInternal(req, res, "rolling-futures-lt-long");
+}
 export async function executeRollingFuturesLtLongKillSwitch(req: Request, res: Response): Promise<void> {
     await executeKillSwitchInternal(req, res, "rolling-futures-lt-long");
 }
@@ -4753,6 +4727,9 @@ export async function getRollingFuturesLtShortEvents(req: Request, res: Response
 }
 export async function clearRollingFuturesLtShortEventsController(req: Request, res: Response): Promise<void> {
     await clearEventsInternal(req, res, "rolling-futures-lt-short");
+}
+export async function deleteRollingFuturesLtShortEventController(req: Request, res: Response): Promise<void> {
+    await deleteEventInternal(req, res, "rolling-futures-lt-short");
 }
 export async function executeRollingFuturesLtShortKillSwitch(req: Request, res: Response): Promise<void> {
     await executeKillSwitchInternal(req, res, "rolling-futures-lt-short");
