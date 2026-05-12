@@ -101,6 +101,52 @@ Current decision:
 - save this note for later
 - first observe how futures open/close/netting behaves in the current live setup
 - if app behavior differs materially from Delta net positions, then implement tagging/reconciliation changes
+
+## Rolling Futures Neutrality Follow-Up
+
+Current `Only Delta Neutral` design in live futures:
+
+- uses `% drift from hedged-zero baseline`
+- this is kept as the main model because it scales across portfolio sizes
+
+Already implemented:
+
+- server-side `% drift` logic
+- baseline reset after hedge
+- server-side hedge cooldown timer
+  - current cooldown: `2 minutes`
+
+Recommended next improvements later:
+
+1. Minimum absolute delta filter
+- even if `% drift` is breached, do nothing unless absolute net delta is meaningful
+- example idea:
+  - hedge only if drift threshold is breached
+  - and `abs(net delta) >= 1`
+
+2. Reconcile / net futures after hedge
+- Delta nets futures positions automatically
+- app should refresh or normalize tracked futures rows after hedge so app state matches Delta net state
+
+3. Partial hedge logic
+- instead of always trying to reset near zero
+- hedge only enough to bring drift back into a safer band
+- reduces brokerage churn
+
+4. Hysteresis style bands
+- separate trigger band and calm band
+- avoids repeated hedge flipping around one threshold
+
+5. Separate add-vs-reduce hedge behavior
+- future enhancement if needed
+- adding futures can require stronger threshold
+- reducing hedge can use softer threshold
+
+Suggested future implementation order:
+
+1. minimum absolute delta filter
+2. reconcile/net futures after hedge
+3. partial hedge logic
   - manual CE/PE buy/sell actions
   - futures buy/sell actions
   - close/kill switch actions

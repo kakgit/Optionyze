@@ -48,6 +48,8 @@
         legs1: document.getElementById("ddlRollingFuturesLegs1"),
         onlyDeltaNeutral: document.getElementById("chkRollingFuturesOnlyDeltaNeutral"),
         thetaMode: document.getElementById("chkRollingFuturesThetaMode"),
+        rangeDeltaNeutral: document.getElementById("chkRollingFuturesRangeDeltaNeutral"),
+        gammaAwareNeutral: document.getElementById("chkRollingFuturesGammaAwareNeutral"),
         deltaNeutralTotalDelta: document.getElementById("spnRollingFuturesDeltaNeutralTotalDelta"),
         deltaNeutralRange: document.getElementById("spnRollingFuturesDeltaNeutralRange"),
         deltaNeutralBalance: document.getElementById("spnRollingFuturesDeltaNeutralBalance"),
@@ -219,6 +221,8 @@
             legs1: mode === "short" ? "pe" : "ce",
             onlyDeltaNeutral: false,
             thetaMode: true,
+            rangeDeltaNeutral: false,
+            gammaAwareNeutral: false,
             expiryMode1: "5",
             expiryDate1: "",
             qty1: "1",
@@ -362,16 +366,88 @@
     function syncNeutralModeCheckboxes(changedKey) {
         const onlyDeltaNeutral = ids.onlyDeltaNeutral instanceof HTMLInputElement ? ids.onlyDeltaNeutral : null;
         const thetaMode = ids.thetaMode instanceof HTMLInputElement ? ids.thetaMode : null;
-        if (!onlyDeltaNeutral || !thetaMode) {
+        const rangeDeltaNeutral = ids.rangeDeltaNeutral instanceof HTMLInputElement ? ids.rangeDeltaNeutral : null;
+        const gammaAwareNeutral = ids.gammaAwareNeutral instanceof HTMLInputElement ? ids.gammaAwareNeutral : null;
+        if (!onlyDeltaNeutral || !thetaMode || !rangeDeltaNeutral || !gammaAwareNeutral) {
             return;
         }
 
-        if (changedKey === "only" && onlyDeltaNeutral.checked) {
-            thetaMode.checked = false;
+        const checkboxMap = {
+            only: onlyDeltaNeutral,
+            theta: thetaMode,
+            range: rangeDeltaNeutral,
+            gamma: gammaAwareNeutral
+        };
+        const changedNode = checkboxMap[changedKey];
+        if (!changedNode) {
+            return;
         }
-        if (changedKey === "theta" && thetaMode.checked) {
-            onlyDeltaNeutral.checked = false;
+
+        if (changedNode.checked) {
+            Object.entries(checkboxMap).forEach(function ([key, checkbox]) {
+                if (key !== changedKey) {
+                    checkbox.checked = false;
+                }
+            });
+            return;
         }
+    }
+
+    function getActiveNeutralModeKey() {
+        if (ids.gammaAwareNeutral instanceof HTMLInputElement && ids.gammaAwareNeutral.checked) {
+            return "gamma";
+        }
+        if (ids.rangeDeltaNeutral instanceof HTMLInputElement && ids.rangeDeltaNeutral.checked) {
+            return "range";
+        }
+        if (ids.thetaMode instanceof HTMLInputElement && ids.thetaMode.checked) {
+            return "theta";
+        }
+        if (ids.onlyDeltaNeutral instanceof HTMLInputElement && ids.onlyDeltaNeutral.checked) {
+            return "only";
+        }
+        return "theta";
+    }
+
+    function getCurrentNeutralModeFromCheckboxes() {
+        if (ids.gammaAwareNeutral instanceof HTMLInputElement && ids.gammaAwareNeutral.checked) {
+            return "gamma";
+        }
+        if (ids.rangeDeltaNeutral instanceof HTMLInputElement && ids.rangeDeltaNeutral.checked) {
+            return "range";
+        }
+        if (ids.thetaMode instanceof HTMLInputElement && ids.thetaMode.checked) {
+            return "theta";
+        }
+        if (ids.onlyDeltaNeutral instanceof HTMLInputElement && ids.onlyDeltaNeutral.checked) {
+            return "delta";
+        }
+        return "none";
+    }
+
+    function getNeutralBadgeSummaryText(status) {
+        const minDelta = Number(status.minDelta);
+        const maxDelta = Number(status.maxDelta);
+        const driftPct = Number(status.deltaDriftPct);
+        const gammaFactor = Number(status.gammaFactor);
+        const totalGamma = Number(status.totalGamma || 0);
+        if (status.mode === "range") {
+            return Number.isFinite(minDelta) && Number.isFinite(maxDelta)
+                ? `Range: ${fmt(minDelta, 3)} to ${fmt(maxDelta, 3)}`
+                : "Range: 0.000 to 0.000";
+        }
+        if (status.mode === "gamma") {
+            const bandText = Number.isFinite(minDelta) && Number.isFinite(maxDelta)
+                ? `${fmt(minDelta, 2)}% to ${fmt(maxDelta, 2)}%`
+                : "0.00% to 0.00%";
+            const gammaText = Number.isFinite(totalGamma) ? fmt(totalGamma, 4) : "0.0000";
+            const factorText = Number.isFinite(gammaFactor) ? fmt(gammaFactor, 2) : "1.00";
+            const driftText = Number.isFinite(driftPct) ? fmt(driftPct, 2) : "0.00";
+            return `Gamma: ${gammaText} | Drift: ${driftText}% | Band: ${bandText} | x${factorText}`;
+        }
+        return Number.isFinite(minDelta) && Number.isFinite(maxDelta)
+            ? `Drift: ${Number.isFinite(driftPct) ? fmt(driftPct, 2) : "0.00"}% | Trigger: ${fmt(minDelta, 2)}% to ${fmt(maxDelta, 2)}%`
+            : "Drift: 0.00% | Trigger: 0.00% to 0.00%";
     }
 
     function canUseLiveActions() {
@@ -446,12 +522,9 @@
         const totalDelta = Number(objStatus.totalDelta || 0);
         const totalTheta = Number(objStatus.thetaThreshold || 0);
         const bRulesActive = autoTraderEnabled;
-        const bShowDeltaGroup = bRulesActive
-            && ids.onlyDeltaNeutral instanceof HTMLInputElement
-            && ids.onlyDeltaNeutral.checked;
-        const bShowThetaGroup = bRulesActive
-            && ids.thetaMode instanceof HTMLInputElement
-            && ids.thetaMode.checked;
+        const currentNeutralMode = getCurrentNeutralModeFromCheckboxes();
+        const bShowDeltaGroup = bRulesActive && ["delta", "range", "gamma"].includes(currentNeutralMode);
+        const bShowThetaGroup = bRulesActive && currentNeutralMode === "theta";
         if (ids.deltaBadgesGroup) {
             ids.deltaBadgesGroup.hidden = !bShowDeltaGroup;
         }
@@ -465,12 +538,7 @@
             ids.deltaNeutralTotalDelta.textContent = `Delta: ${fmt(totalDelta, 3)}`;
         }
         if (ids.deltaNeutralRange) {
-            const minDelta = Number(objStatus.minDelta);
-            const maxDelta = Number(objStatus.maxDelta);
-            const driftPct = Number(objStatus.deltaDriftPct);
-            ids.deltaNeutralRange.textContent = Number.isFinite(minDelta) && Number.isFinite(maxDelta)
-                ? `Drift: ${Number.isFinite(driftPct) ? fmt(driftPct, 2) : "0.00"}% | Trigger: ${fmt(minDelta, 2)}% to ${fmt(maxDelta, 2)}%`
-                : "Drift: 0.00% | Trigger: 0.00% to 0.00%";
+            ids.deltaNeutralRange.textContent = getNeutralBadgeSummaryText(objStatus);
         }
         if (ids.deltaNeutralBalance) {
             ids.deltaNeutralBalance.textContent = bRulesActive
@@ -568,6 +636,8 @@
             legs1: getInputValue(ids.legs1, mode === "short" ? "pe" : "ce").toLowerCase() === "pe" ? "pe" : "ce",
             onlyDeltaNeutral: getCheckboxValue(ids.onlyDeltaNeutral, false),
             thetaMode: getCheckboxValue(ids.thetaMode, true),
+            rangeDeltaNeutral: getCheckboxValue(ids.rangeDeltaNeutral, false),
+            gammaAwareNeutral: getCheckboxValue(ids.gammaAwareNeutral, false),
             expiryMode1: String(ids.optionExpiryMode?.value || "5").trim(),
             expiryDate1: String(ids.optionExpiryDate?.value || "").trim(),
             qty1: getInputValue(ids.qty1, "1"),
@@ -607,6 +677,8 @@
             setInputValue(ids.legs1, String(objUiState.legs1 || (mode === "short" ? "pe" : "ce")).trim().toLowerCase() === "pe" ? "pe" : "ce");
             setCheckboxValue(ids.onlyDeltaNeutral, objUiState.onlyDeltaNeutral);
             setCheckboxValue(ids.thetaMode, objUiState.thetaMode);
+            setCheckboxValue(ids.rangeDeltaNeutral, objUiState.rangeDeltaNeutral);
+            setCheckboxValue(ids.gammaAwareNeutral, objUiState.gammaAwareNeutral);
             setInputValue(ids.optionExpiryMode, String(objUiState.expiryMode1 || "5").trim() || "5");
             setInputValue(ids.optionExpiryDate, String(objUiState.expiryDate1 || "").trim());
             setInputValue(ids.qty1, objUiState.qty1);
@@ -632,7 +704,7 @@
             });
             applySymbolDefaults();
             applyExpiryModeDefaults(false);
-            syncNeutralModeCheckboxes(ids.thetaMode instanceof HTMLInputElement && ids.thetaMode.checked ? "theta" : "only");
+            syncNeutralModeCheckboxes(getActiveNeutralModeKey());
             updateNeutralBadges(lastNeutralStatus);
         }
         finally {
@@ -1337,6 +1409,16 @@
     });
     ids.thetaMode?.addEventListener("change", function () {
         syncNeutralModeCheckboxes("theta");
+        updateNeutralBadges(lastNeutralStatus);
+        queueProfileSave();
+    });
+    ids.rangeDeltaNeutral?.addEventListener("change", function () {
+        syncNeutralModeCheckboxes("range");
+        updateNeutralBadges(lastNeutralStatus);
+        queueProfileSave();
+    });
+    ids.gammaAwareNeutral?.addEventListener("change", function () {
+        syncNeutralModeCheckboxes("gamma");
         updateNeutralBadges(lastNeutralStatus);
         queueProfileSave();
     });
