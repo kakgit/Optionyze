@@ -95,6 +95,7 @@ const gFutureLimitRetryCount = 5;
 const gProfitCloseReEntryCooldownMs = 5 * 60 * 1000;
 const gRestartCloseProtectionMs = 5 * 60 * 1000;
 const gNeutralityHedgeCooldownMs = 2 * 60 * 1000;
+const gDeltaUiTimezoneOffsetMinutes = 5.5 * 60;
 const gManualFutureOrderLocks = new Set<string>();
 const gManualOptionOrderLocks = new Set<string>();
 const gExecStrategyLocks = new Set<string>();
@@ -573,6 +574,14 @@ function optionMetadataToRecord(pMetadata: RollingFuturesLtOptionMetadata): Reco
     };
 }
 
+function hasMissingTrackedOptionBaseGreeks(pPosition: RollingFuturesLtImportedPositionRecord): boolean {
+    if (!isOptionContractSymbol(pPosition.contractName)) {
+        return false;
+    }
+    const objMetadata = getTrackedOptionMetadata(pPosition);
+    return !(Number(objMetadata.baseDelta) > 0) || !Number.isFinite(Number(objMetadata.baseTheta));
+}
+
 function applyImportedBaseDelta(
     pPositions: RollingFuturesLtImportedPositionRecord[],
     pBaseDelta: number
@@ -792,14 +801,29 @@ function toEpochMicros(pDateValue: string, pEndOfMinute = false): number | null 
     if (!vValue) {
         return null;
     }
-    const objDate = new Date(vValue);
-    if (Number.isNaN(objDate.getTime())) {
+
+    if (/[zZ]$|[+\-]\d{2}:\d{2}$/.test(vValue)) {
+        const vEpochMs = Date.parse(vValue);
+        if (!Number.isNaN(vEpochMs)) {
+            return vEpochMs * 1000;
+        }
+    }
+
+    const objMatch = vValue.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?$/);
+    if (!objMatch) {
         return null;
     }
-    if (pEndOfMinute) {
-        objDate.setSeconds(59, 999);
-    }
-    return objDate.getTime() * 1000;
+
+    const vYear = Number(objMatch[1]);
+    const vMonthIndex = Number(objMatch[2]) - 1;
+    const vDay = Number(objMatch[3]);
+    const vHour = Number(objMatch[4]);
+    const vMinute = Number(objMatch[5]);
+    const vSecond = pEndOfMinute ? 59 : Number(objMatch[6] || 0);
+    const vMillisecond = pEndOfMinute ? 999 : 0;
+    const vUtcEpochMs = Date.UTC(vYear, vMonthIndex, vDay, vHour, vMinute, vSecond, vMillisecond)
+        - (gDeltaUiTimezoneOffsetMinutes * 60 * 1000);
+    return vUtcEpochMs * 1000;
 }
 
 function formatOrderType(pValue: unknown): string {
@@ -1582,7 +1606,11 @@ async function buildOpenPositionsPayload(
     const objProfile = await readLiveProfile(pUserId, pStrategyCode);
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const objUiState = getMergedUiState(objProfile);
-    const arrPositions = pPositions || await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    let arrPositions = pPositions || await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    if (arrPositions.some(hasMissingTrackedOptionBaseGreeks)) {
+        arrPositions = await applyImportedOptionBaseGreeks(arrPositions, Number(objUiState.newD1 || 0));
+        await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrPositions);
+    }
     const objEnriched = await enrichTrackedOpenPositions(arrPositions);
     const bAutoTraderActive = Boolean(objRuntime?.autoTraderEnabled)
         && String(objRuntime?.status || "").trim().toLowerCase() === "running";
@@ -2266,17 +2294,24 @@ async function saveRecoveredTotalPnl(
     });
 }
 
+async function resetRecoveryMetrics(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode
+): Promise<void> {
+    await saveBrokerageRecoveryTotal(pUserId, pStrategyCode, 0);
+    await saveRecoveredTotalPnl(pUserId, pStrategyCode, 0);
+}
+
 async function incrementBrokerageRecoveryTotal(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
     pDelta: number,
     pRemainingPositionCount: number
 ): Promise<RollingFuturesLtRuntimeRecord> {
+    void pRemainingPositionCount;
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
         || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
-    const vNextTotal = pRemainingPositionCount > 0
-        ? Number((getBrokerageRecoveryTotal(objRuntime) + Math.max(0, Number(pDelta || 0))).toFixed(4))
-        : 0;
+    const vNextTotal = Number((getBrokerageRecoveryTotal(objRuntime) + Math.max(0, Number(pDelta || 0))).toFixed(4));
     return saveRollingFuturesLtRuntime({
         ...objRuntime,
         userId: pUserId,
@@ -2294,11 +2329,10 @@ async function incrementRecoveredTotalPnl(
     pDelta: number,
     pRemainingPositionCount: number
 ): Promise<RollingFuturesLtRuntimeRecord> {
+    void pRemainingPositionCount;
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
         || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
-    const vNextTotal = pRemainingPositionCount > 0
-        ? Number((getRecoveredTotalPnl(objRuntime) + Number(pDelta || 0)).toFixed(4))
-        : 0;
+    const vNextTotal = Number((getRecoveredTotalPnl(objRuntime) + Number(pDelta || 0)).toFixed(4));
     return saveRollingFuturesLtRuntime({
         ...objRuntime,
         userId: pUserId,
@@ -2538,6 +2572,7 @@ async function executeStrategyPlacement(
     };
 }> {
     const { client, profile } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
+    await resetRecoveryMetrics(pUserId, pStrategyCode);
     const objUiState = getMergedUiState(pProfile);
     const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
     const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
@@ -2612,6 +2647,7 @@ async function executeStrategyPlacement(
             optionSide: objContract.optionSide,
             strike: objContract.strike,
             delta: objContract.delta,
+            theta: objContract.theta,
             markPrice: objContract.markPrice,
             requestedExpiryDate: objContract.requestedExpiryDate,
             resolvedExpiryDate: objContract.expiryDate,
@@ -3220,6 +3256,7 @@ async function runAutoTraderCycle(
                 vSelectedApiProfileId,
                 arrSavedPositions
             );
+            await resetRecoveryMetrics(pUserId, pStrategyCode);
             const vRunAt = objProfitRule.reEnterEnabled
                 ? new Date(Date.now() + gProfitCloseReEntryCooldownMs).toISOString()
                 : "";
@@ -3652,10 +3689,7 @@ async function saveOpenPositionsInternal(req: Request, res: Response, pStrategyC
     const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, arrPrepared);
     const objOpenPositions = await buildOpenPositionsPayload(vUserId, pStrategyCode, arrSaved);
     const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
-    if (!arrSaved.length) {
-        await saveBrokerageRecoveryTotal(vUserId, pStrategyCode, 0);
-    }
-    else if (!(getBrokerageRecoveryTotal(objRuntime) > 0)) {
+    if (arrSaved.length > 0 && !(getBrokerageRecoveryTotal(objRuntime) > 0)) {
         await saveBrokerageRecoveryTotal(vUserId, pStrategyCode, Number(objOpenPositions.totals?.totalCharges || 0));
     }
     await logFuturesEvent(
@@ -3719,10 +3753,7 @@ async function reconcileOpenPositionsInternal(req: Request, res: Response, pStra
         );
         const objOpenPositions = await buildOpenPositionsPayload(vUserId, pStrategyCode, arrSaved);
         const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
-        if (!arrSaved.length) {
-            await saveBrokerageRecoveryTotal(vUserId, pStrategyCode, 0);
-        }
-        else if (!(getBrokerageRecoveryTotal(objRuntime) > 0)) {
+        if (arrSaved.length > 0 && !(getBrokerageRecoveryTotal(objRuntime) > 0)) {
             await saveBrokerageRecoveryTotal(vUserId, pStrategyCode, Number(objOpenPositions.totals?.totalCharges || 0));
         }
         await logFuturesEvent(
@@ -3977,9 +4008,11 @@ async function executeManualFutureInternal(req: Request, res: Response, pStrateg
             entryPrice: Number(objPlacedOrder.entryPrice || 0),
             markPrice: Number(objPlacedOrder.entryPrice || 0)
         });
-        await incrementBrokerageRecoveryTotal(vUserId, pStrategyCode, vEntryCharge, arrSaved.length);
-        const vOrderId = String(objPlacedOrder.order.id || objPlacedOrder.order.order_id || "").trim();
         const bFilled = objPlacedOrder.filled;
+        if (bFilled) {
+            await incrementBrokerageRecoveryTotal(vUserId, pStrategyCode, vEntryCharge, arrSaved.length);
+        }
+        const vOrderId = String(objPlacedOrder.order.id || objPlacedOrder.order.order_id || "").trim();
         const vResponseStatus = bFilled ? "success" : "warning";
         const vResponseMessage = bFilled
             ? `${vAction} future live order placed using ${profile.referenceName}.`
@@ -4507,6 +4540,14 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
     }
     try {
         const { client, profile } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
+        const arrCloseCharges = await Promise.all(arrPositions.map((objPosition) => estimateTrackedPositionCharge(
+            objPosition,
+            Number(objPosition.markPrice || objPosition.entryPrice || 0)
+        )));
+        const arrClosePnls = arrPositions.map((objPosition) => estimateTrackedPositionPnl(
+            objPosition,
+            Number(objPosition.markPrice || objPosition.entryPrice || 0)
+        ));
         const arrClosed: Array<Record<string, unknown>> = [];
         for (const objPosition of arrPositions) {
             const objOrderPayload: Record<string, unknown> = {
@@ -4528,8 +4569,18 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
             });
         }
         await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, []);
-        await saveBrokerageRecoveryTotal(vUserId, pStrategyCode, 0);
-        await saveRecoveredTotalPnl(vUserId, pStrategyCode, 0);
+        await incrementBrokerageRecoveryTotal(
+            vUserId,
+            pStrategyCode,
+            arrCloseCharges.reduce((pSum, vValue) => pSum + Number(vValue || 0), 0),
+            0
+        );
+        await incrementRecoveredTotalPnl(
+            vUserId,
+            pStrategyCode,
+            arrClosePnls.reduce((pSum, vValue) => pSum + Number(vValue || 0), 0),
+            0
+        );
         await logFuturesEvent(
             vUserId,
             pStrategyCode,
@@ -4542,7 +4593,10 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
         res.json({
             status: "success",
             message: `Kill switch closed ${arrClosed.length} saved live futures position${arrClosed.length === 1 ? "" : "s"}.`,
-            data: { closedPositions: arrClosed }
+            data: {
+                closedPositions: arrClosed,
+                trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, [])
+            }
         });
     }
     catch (objError) {

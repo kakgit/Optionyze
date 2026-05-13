@@ -963,6 +963,15 @@
         `;
     }
 
+    function resolveSecondaryGreekValue(displayValue, fallbackValue) {
+        const vDisplayValue = Number(displayValue);
+        const vFallbackValue = Number(fallbackValue);
+        if (Number.isFinite(vDisplayValue) && (vDisplayValue !== 0 || !Number.isFinite(vFallbackValue) || vFallbackValue === 0)) {
+            return vDisplayValue;
+        }
+        return vFallbackValue;
+    }
+
     function renderOpenPositions(payload) {
         const objPayload = extractOpenPositionsPayload(payload);
         const arrRows = objPayload.positions;
@@ -997,7 +1006,7 @@
             const greeks = row.greeks || {};
             return `
                 <tr>
-                    <td>${renderGreekCell(greeks.deltaTotal, greeks.deltaDisplayTotal ?? greeks.deltaTotal, 2)}</td>
+                    <td>${renderGreekCell(greeks.deltaTotal, resolveSecondaryGreekValue(greeks.deltaDisplayTotal, greeks.deltaTotal), 2)}</td>
                     <td>${renderGreekCell(greeks.thetaDisplayTotal ?? greeks.thetaTotal, greeks.thetaBaseDisplayTotal ?? greeks.thetaTotal, 4)}</td>
                     <td>${escapeHtml(contractName)}</td>
                     <td>${escapeHtml(side)}</td>
@@ -1031,7 +1040,7 @@
         }).join("");
         ids.openPositionsBody.innerHTML = `${openRowsHtml}
             <tr class="rolling-demo-total-row">
-                <td>${renderGreekCell(objTotals.totalDelta, objTotals.totalDeltaDisplay ?? objTotals.totalDelta, 2)}</td>
+                <td>${renderGreekCell(objTotals.totalDelta, resolveSecondaryGreekValue(objTotals.totalDeltaDisplay, objTotals.totalDelta), 2)}</td>
                 <td>${renderGreekCell(objTotals.totalThetaDisplay ?? objTotals.totalTheta, objTotals.totalThetaBaseDisplay ?? objTotals.totalTheta, 4)}</td>
                 <td><strong>TOTAL</strong></td>
                 <td>-</td>
@@ -1643,9 +1652,16 @@
             return;
         }
         void runKillSwitch().then(function (objResult) {
-            renderOpenPositions([]);
+            const trackedPayload = objResult?.data?.trackedOpenPositions || null;
+            if (trackedPayload) {
+                renderOpenPositions(trackedPayload);
+            }
+            else {
+                renderOpenPositions([]);
+            }
             setStatus(ids.pageStatus, objResult?.message || "Live kill switch completed.", "success");
             return Promise.all([
+                loadRuntimeStatus().catch(function () { return undefined; }),
                 loadAccountSummary().catch(function () { return undefined; }),
                 loadEvents().catch(function () { return undefined; }),
                 loadClosedPositions().catch(function () { return undefined; })
