@@ -256,6 +256,27 @@ export async function ensurePostgresSchema(): Promise<void> {
     `);
 
     await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_accounts (
+            account_id TEXT PRIMARY KEY,
+            full_name TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            mobile_no TEXT NOT NULL DEFAULT '',
+            telegram_chat_id TEXT NOT NULL DEFAULT '',
+            password_hash TEXT NOT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT true,
+            is_admin BOOLEAN NOT NULL DEFAULT false,
+            must_change_password BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+
+    await objPool.query(`
+        ALTER TABLE optionyze_accounts
+        ADD COLUMN IF NOT EXISTS telegram_chat_id TEXT NOT NULL DEFAULT '';
+    `);
+
+    await objPool.query(`
         CREATE TABLE IF NOT EXISTS optionyze_rolling_options_lt_de_positions (
             user_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
             import_id TEXT NOT NULL,

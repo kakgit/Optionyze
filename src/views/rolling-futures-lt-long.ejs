@@ -168,6 +168,16 @@
             gap: 16px;
         }
 
+        .rolling-live-open-head .rolling-futures-signal-row {
+            min-width: 0;
+            justify-self: center;
+        }
+
+        .rolling-live-open-head .rolling-demo-card-tools {
+            justify-self: end;
+            margin-left: auto;
+        }
+
         .rolling-live-open-signal {
             justify-self: center;
             text-align: center;
@@ -620,6 +630,11 @@
                 grid-template-columns: 1fr;
             }
 
+            .rolling-live-open-head .rolling-demo-card-tools {
+                justify-self: stretch;
+                margin-left: 0;
+            }
+
             .rolling-live-filters {
                 grid-template-columns: 1fr;
                 justify-content: stretch;
@@ -651,13 +666,6 @@
                     <div class="rolling-demo-metric">
                         <div class="rolling-demo-metric-label">Available Balance</div>
                         <div class="rolling-demo-metric-value" id="rollingLongFuturesAvailableBalanceValue">-</div>
-                    </div>
-                </div>
-                <div class="rolling-futures-signal-row" id="rollingLongFuturesNeutralBadges" hidden>
-                    <div class="rolling-futures-badges" id="rollingFuturesDeltaBadgesGroup" hidden>
-                        <span class="rolling-futures-badge" id="spnRollingFuturesDeltaNeutralTotalDelta">Delta: 0.000</span>
-                        <span class="rolling-futures-badge" id="spnRollingFuturesDeltaNeutralRange">Range: 0.000 to 0.000</span>
-                        <span class="rolling-futures-badge" id="spnRollingFuturesDeltaNeutralBalance">Balance: Mode OFF</span>
                     </div>
                 </div>
             </div>
@@ -766,14 +774,14 @@
                             <button class="buy-btn" type="button" id="btnRollingFuturesBuyFuture">B</button>
                         </div>
                     </div>
-                    <div class="rolling-demo-field">
-                        <label for="txtRollingFuturesMinusDelta">- Delta</label>
-                        <input type="number" id="txtRollingFuturesMinusDelta" value="-25" />
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="txtRollingFuturesPlusDelta">+ Delta</label>
-                        <input type="number" id="txtRollingFuturesPlusDelta" value="25" />
-                    </div>
+<div class="rolling-demo-field">
+                            <label for="txtRollingFuturesMinusDelta">- Delta</label>
+                            <input type="number" id="txtRollingFuturesMinusDelta" value="-15" />
+                        </div>
+                        <div class="rolling-demo-field">
+                            <label for="txtRollingFuturesPlusDelta">+ Delta</label>
+                            <input type="number" id="txtRollingFuturesPlusDelta" value="20" />
+                        </div>
                 </div>
 
                 <div class="rolling-futures-demo-grid row">
@@ -814,19 +822,19 @@
                     </div>
                     <div class="rolling-demo-field">
                         <label for="txtRollingFuturesNewD1">New D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD1" value="0.53" />
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD1" value="0.65" />
                     </div>
                     <div class="rolling-demo-field">
                         <label for="txtRollingFuturesReD1">Re D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesReD1" value="0.53" />
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesReD1" value="0.65" />
                     </div>
                     <div class="rolling-demo-field">
                         <label for="txtRollingFuturesTpD1">TP D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD1" value="0.25" />
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD1" value="0.30" />
                     </div>
                     <div class="rolling-demo-field">
                         <label for="txtRollingFuturesSlD1">SL D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD1" value="0.65" />
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD1" value="0.80" />
                     </div>
                     <div class="rolling-demo-field">
                         <label for="chkRollingFuturesReEnter1">Re Enter</label>
@@ -864,27 +872,27 @@
                     <div class="rolling-demo-field">
                         <div class="rolling-futures-rule-controls">
                             <div class="rolling-futures-toggle">
-                                <input type="checkbox" id="chkRollingFuturesCloseNetProfitBrokerage" />
+                                <input type="checkbox" id="chkRollingFuturesCloseNetProfitBrokerage" checked />
                             </div>
-                            <input type="number" id="txtRollingFuturesBrokerageMultiplier" value="3" />
+                            <input type="number" id="txtRollingFuturesBrokerageMultiplier" value="10" />
                         </div>
                     </div>
                     <div class="rolling-demo-field">
                         <div class="rolling-futures-compact-check">
-                            <input type="checkbox" id="chkRollingFuturesReEnterBrok" />
+                            <input type="checkbox" id="chkRollingFuturesReEnterBrok" checked />
                         </div>
                     </div>
                     <div class="rolling-demo-field">
                         <div class="rolling-futures-rule-controls">
                             <div class="rolling-futures-toggle">
-                                <input type="checkbox" id="chkRollingFuturesCloseBlockedMargin" />
+                                <input type="checkbox" id="chkRollingFuturesCloseBlockedMargin" checked />
                             </div>
-                            <input type="number" id="txtRollingFuturesBlockedMarginPct" value="20" />
+                            <input type="number" id="txtRollingFuturesBlockedMarginPct" value="10" />
                         </div>
                     </div>
                     <div class="rolling-demo-field">
                         <div class="rolling-futures-compact-check">
-                            <input type="checkbox" id="chkRollingFuturesReEnterBlock" />
+                            <input type="checkbox" id="chkRollingFuturesReEnterBlock" checked />
                         </div>
                     </div>
                     <div class="rolling-futures-metric">
@@ -909,7 +917,7 @@
                     </div>
                     <div class="rolling-futures-neutral-item">
                         <label class="rolling-futures-neutral-mode" for="chkRollingFuturesOnlyDeltaNeutral">
-                            <input type="checkbox" id="chkRollingFuturesOnlyDeltaNeutral" />
+                            <input type="checkbox" id="chkRollingFuturesOnlyDeltaNeutral" checked />
                             <span>Only Delta Neutral</span>
                         </label>
                         <div class="rolling-futures-neutral-help">
@@ -957,7 +965,13 @@
             <div class="app-panel rolling-demo-card">
                 <div class="rolling-demo-card-head rolling-live-open-head">
                     <h2>Open Positions</h2>
-                    <div class="rolling-live-open-signal" id="rollingLongFuturesOpenRenkoSignal">-</div>
+                    <div class="rolling-futures-signal-row" id="rollingLongFuturesNeutralBadges" hidden>
+                        <div class="rolling-futures-badges" id="rollingFuturesDeltaBadgesGroup" hidden>
+                            <span class="rolling-futures-badge" id="spnRollingFuturesDeltaNeutralTotalDelta">Delta: 0.000</span>
+                            <span class="rolling-futures-badge" id="spnRollingFuturesDeltaNeutralRange">Range: 0.000 to 0.000</span>
+                            <span class="rolling-futures-badge" id="spnRollingFuturesDeltaNeutralBalance">Balance: Mode OFF</span>
+                        </div>
+                    </div>
                     <div class="rolling-demo-card-tools">
                         <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingLongFuturesImportPositions" title="Import existing live positions" aria-label="Import existing live positions">
                             <svg viewBox="0 0 24 24" aria-hidden="true">

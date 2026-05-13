@@ -196,13 +196,14 @@
     }
 
     function getDefaultUiState() {
+        const isLong = mode === "long";
         return {
             startQty: "1",
             symbol: "BTC",
             manualFutOrderType: "market_order",
             bsFutQty: "1",
-            minusDelta: "-25",
-            plusDelta: "25",
+            minusDelta: "-15",
+            plusDelta: "20",
             action1: "sell",
             legs1: mode === "short" ? "pe" : "ce",
             onlyDeltaNeutral: false,
@@ -211,17 +212,20 @@
             expiryMode1: "5",
             expiryDate1: "",
             qty1: "1",
-            newD1: "0.53",
-            reD1: "0.53",
-            tpD1: "0.25",
-            slD1: "0.65",
+            newD1: isLong ? "0.65" : "0.65",
+            reD1: isLong ? "0.65" : "0.65",
+            tpD1: isLong ? "0.30" : "0.30",
+            slD1: isLong ? "0.80" : "0.80",
             reEnter1: true,
-            closeNetProfitBrokerage: false,
-            brokerageMultiplier: "3",
-            reEnterBrok: false,
-            closeBlockedMargin: false,
-            blockedMarginPct: "20",
-            reEnterBlock: false,
+            closeNetProfitBrokerage: true,
+            brokerageMultiplier: "10",
+            reEnterBrok: true,
+            closeBlockedMargin: true,
+            blockedMarginPct: "10",
+            reEnterBlock: true,
+            onlyDeltaNeutral: true,
+            rangeDeltaNeutral: false,
+            gammaAwareNeutral: false,
             telegramAlertTypes: [],
             closedFromDate: "",
             closedToDate: ""
@@ -628,7 +632,10 @@
             setInputValue(ids.minusDelta, objUiState.minusDelta);
             setInputValue(ids.plusDelta, objUiState.plusDelta);
             setInputValue(ids.action1, String(objUiState.action1 || "sell").trim().toLowerCase() === "buy" ? "buy" : "sell");
-            setInputValue(ids.legs1, String(objUiState.legs1 || (mode === "short" ? "pe" : "ce")).trim().toLowerCase() === "pe" ? "pe" : "ce");
+            const defaultLegs = mode === "short" ? "pe" : "ce";
+            const savedLegs = objUiState.legs1;
+            const finalLegs = (savedLegs === "pe" || savedLegs === "ce") ? savedLegs : defaultLegs;
+            setInputValue(ids.legs1, finalLegs);
             setCheckboxValue(ids.onlyDeltaNeutral, objUiState.onlyDeltaNeutral);
             setCheckboxValue(ids.rangeDeltaNeutral, objUiState.rangeDeltaNeutral);
             setCheckboxValue(ids.gammaAwareNeutral, objUiState.gammaAwareNeutral);
