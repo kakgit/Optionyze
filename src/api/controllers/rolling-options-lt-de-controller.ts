@@ -480,6 +480,17 @@ function toEpochMicros(pDateValue: string, pEndOfMinute = false): number | null 
 
     const objDate = new Date(vValue);
     if (Number.isNaN(objDate.getTime())) {
+        const arrParts = vValue.split(/[T\s-:]/);
+        if (arrParts.length >= 5) {
+            const vYear = parseInt(arrParts[0], 10);
+            const vMonth = parseInt(arrParts[1], 10) - 1;
+            const vDay = parseInt(arrParts[2], 10);
+            const vHour = parseInt(arrParts[3], 10) || 0;
+            const vMin = parseInt(arrParts[4], 10) || 0;
+            const vSec = pEndOfMinute ? 59 : (parseInt(arrParts[5], 10) || 0);
+            const vMs = pEndOfMinute ? 999 : 0;
+            return new Date(vYear, vMonth, vDay, vHour, vMin, vSec, vMs).getTime() * 1000;
+        }
         return null;
     }
 

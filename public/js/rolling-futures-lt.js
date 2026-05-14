@@ -1,9 +1,16 @@
 (function () {
-    const mode = String(document.body?.dataset?.rollingFuturesLive || "").trim().toLowerCase() === "short" ? "short" : "long";
-    const prefix = mode === "short" ? "rollingShortFutures" : "rollingLongFutures";
-    const idPrefix = mode === "short" ? "RollingShortFutures" : "RollingLongFutures";
-    const endpointBase = mode === "short" ? "/api/rollingfutures-lt-short" : "/api/rollingfutures-lt-long";
-    const modeLabel = mode === "short" ? "Short Mode" : "Long Mode";
+    const rawMode = String(document.body?.dataset?.rollingFuturesLive || "").trim().toLowerCase();
+    const mode = rawMode === "short" || rawMode === "dual" ? rawMode : "long";
+    const prefix = mode === "short"
+        ? "rollingShortFutures"
+        : (mode === "dual" ? "rollingDualFutures" : "rollingLongFutures");
+    const idPrefix = mode === "short"
+        ? "RollingShortFutures"
+        : (mode === "dual" ? "RollingDualFutures" : "RollingLongFutures");
+    const endpointBase = mode === "short"
+        ? "/api/rollingfutures-lt-short"
+        : (mode === "dual" ? "/api/rollingfutures-lt-dual" : "/api/rollingfutures-lt-long");
+    const modeLabel = mode === "short" ? "Short Mode" : (mode === "dual" ? "Dual Mode" : "Long Mode");
     const symbolConfig = {
         BTC: { contractName: "BTCUSD", lotSize: 0.001 },
         ETH: { contractName: "ETHUSD", lotSize: 0.01 }
@@ -197,28 +204,29 @@
 
     function getDefaultUiState() {
         const isLong = mode === "long";
+        const isDual = mode === "dual";
         return {
             startQty: "1",
             symbol: "BTC",
             manualFutOrderType: "market_order",
             bsFutQty: "1",
-            minusDelta: "-15",
-            plusDelta: "20",
+            minusDelta: isDual ? "-10" : "-15",
+            plusDelta: isDual ? "10" : "20",
             action1: "sell",
-            legs1: mode === "short" ? "pe" : "ce",
+            legs1: mode === "dual" ? "both" : (mode === "short" ? "pe" : "ce"),
             onlyDeltaNeutral: false,
             rangeDeltaNeutral: false,
             gammaAwareNeutral: false,
-            expiryMode1: "5",
+            expiryMode1: isDual ? "6" : "5",
             expiryDate1: "",
             qty1: "1",
-            newD1: isLong ? "0.65" : "0.65",
-            reD1: isLong ? "0.65" : "0.65",
-            tpD1: isLong ? "0.30" : "0.30",
-            slD1: isLong ? "0.80" : "0.80",
+            newD1: isDual ? "0.25" : (isLong ? "0.65" : "0.65"),
+            reD1: isDual ? "0.25" : (isLong ? "0.65" : "0.65"),
+            tpD1: isDual ? "0.12" : (isLong ? "0.30" : "0.30"),
+            slD1: isDual ? "0.50" : (isLong ? "0.80" : "0.80"),
             reEnter1: true,
             closeNetProfitBrokerage: true,
-            brokerageMultiplier: "10",
+            brokerageMultiplier: isDual ? "10" : "10",
             reEnterBrok: true,
             closeBlockedMargin: true,
             blockedMarginPct: "10",
@@ -593,7 +601,13 @@
             minusDelta: getInputValue(ids.minusDelta, "-25"),
             plusDelta: getInputValue(ids.plusDelta, "25"),
             action1: getInputValue(ids.action1, "sell").toLowerCase() === "buy" ? "buy" : "sell",
-            legs1: getInputValue(ids.legs1, mode === "short" ? "pe" : "ce").toLowerCase() === "pe" ? "pe" : "ce",
+            legs1: (function () {
+                const vLegs = getInputValue(ids.legs1, mode === "dual" ? "both" : (mode === "short" ? "pe" : "ce")).toLowerCase();
+                if (mode === "dual" && vLegs === "both") {
+                    return "both";
+                }
+                return vLegs === "pe" ? "pe" : "ce";
+            }()),
             onlyDeltaNeutral: getCheckboxValue(ids.onlyDeltaNeutral, false),
             rangeDeltaNeutral: getCheckboxValue(ids.rangeDeltaNeutral, false),
             gammaAwareNeutral: getCheckboxValue(ids.gammaAwareNeutral, false),
@@ -632,9 +646,11 @@
             setInputValue(ids.minusDelta, objUiState.minusDelta);
             setInputValue(ids.plusDelta, objUiState.plusDelta);
             setInputValue(ids.action1, String(objUiState.action1 || "sell").trim().toLowerCase() === "buy" ? "buy" : "sell");
-            const defaultLegs = mode === "short" ? "pe" : "ce";
+            const defaultLegs = mode === "dual" ? "both" : (mode === "short" ? "pe" : "ce");
             const savedLegs = objUiState.legs1;
-            const finalLegs = (savedLegs === "pe" || savedLegs === "ce") ? savedLegs : defaultLegs;
+            const finalLegs = mode === "dual"
+                ? ((savedLegs === "both" || savedLegs === "pe" || savedLegs === "ce") ? savedLegs : defaultLegs)
+                : ((savedLegs === "pe" || savedLegs === "ce") ? savedLegs : defaultLegs);
             setInputValue(ids.legs1, finalLegs);
             setCheckboxValue(ids.onlyDeltaNeutral, objUiState.onlyDeltaNeutral);
             setCheckboxValue(ids.rangeDeltaNeutral, objUiState.rangeDeltaNeutral);

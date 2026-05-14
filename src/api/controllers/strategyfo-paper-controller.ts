@@ -55,6 +55,15 @@ export function renderRollingFuturesLiveShortPage(req: Request, res: Response): 
     });
 }
 
+export function renderRollingFuturesLiveDualPage(req: Request, res: Response): void {
+    res.render("rolling-futures-lt-dual", {
+        pageTitle: "Dual Rolling Futures - Live | Optionyze",
+        currentAccount: req.authAccount,
+        defaultUserId: req.authAccount?.accountId || "demo-paper",
+        rollingTelegramEventTypes: gRollingFuturesTelegramEventTypes
+    });
+}
+
 export async function startStrategyFoPaper(req: Request, res: Response, pService: StrategyFoGreeksPaperService): Promise<void> {
     const objConfig = (req.body?.config || {}) as Partial<StrategyFoGreeksPaperConfig>;
     res.json(await pService.start({

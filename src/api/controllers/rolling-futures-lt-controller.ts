@@ -88,7 +88,8 @@ interface DeltaActiveOrderRow {
 
 const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
     "rolling-futures-lt-long": "Long Rolling Futures",
-    "rolling-futures-lt-short": "Short Rolling Futures"
+    "rolling-futures-lt-short": "Short Rolling Futures",
+    "rolling-futures-lt-dual": "Dual Rolling Futures"
 };
 const gFutureLimitRetryDelayMs = 5000;
 const gFutureLimitRetryCount = 5;
@@ -99,8 +100,10 @@ const gDeltaUiTimezoneOffsetMinutes = 5.5 * 60;
 const gManualFutureOrderLocks = new Set<string>();
 const gManualOptionOrderLocks = new Set<string>();
 const gExecStrategyLocks = new Set<string>();
+const gNeutralityHedgeLocks = new Set<string>();
 const gAutoTraderIntervals = new Map<string, NodeJS.Timeout>();
 const gAutoTraderCycleLocks = new Set<string>();
+const gNeutralityHedgePendingMs = 45 * 1000;
 const gRollingFuturesTelegramEventTypes = new Set([
     "engine_started",
     "engine_stopped",
@@ -438,6 +441,10 @@ function getManualFutureOrderLockKey(pUserId: string, pStrategyCode: RollingFutu
     return `${String(pUserId || "").trim()}::${String(pStrategyCode || "").trim()}`;
 }
 
+function getNeutralityHedgeLockKey(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): string {
+    return `${getManualFutureOrderLockKey(pUserId, pStrategyCode)}::neutrality`;
+}
+
 function buildLiveMarketSnapshotConfig(pSymbol: string, pOrderType: "market_order" | "limit_order" = "market_order") {
     const vSymbol = normalizeSymbolValue(pSymbol);
     return {
@@ -496,35 +503,46 @@ function normalizeStringValue(pValue: unknown, pFallback: string): string {
     return vValue || pFallback;
 }
 
+function normalizeRollingFuturesLegSelection(pValue: unknown, pFallback: string): "ce" | "pe" | "both" {
+    const vFallback = String(pFallback || "").trim().toLowerCase();
+    const vValue = String(pValue || "").trim().toLowerCase();
+    if (vValue === "both" || vFallback === "both") {
+        return "both";
+    }
+    return vValue === "pe" ? "pe" : "ce";
+}
+
 function getDefaultManualTraderUiState(
     pStrategyCode: RollingFuturesLtStrategyCode
 ): Record<string, unknown> {
+    const bIsShort = pStrategyCode === "rolling-futures-lt-short";
+    const bIsDual = pStrategyCode === "rolling-futures-lt-dual";
     return {
         startQty: "1",
         symbol: "BTC",
         manualFutOrderType: "market_order",
         bsFutQty: "1",
-        minusDelta: "-25",
-        plusDelta: "25",
+        minusDelta: bIsDual ? "-10" : "-25",
+        plusDelta: bIsDual ? "10" : "25",
         action1: "sell",
-        legs1: pStrategyCode === "rolling-futures-lt-short" ? "pe" : "ce",
+        legs1: bIsDual ? "both" : (bIsShort ? "pe" : "ce"),
         onlyDeltaNeutral: false,
         rangeDeltaNeutral: false,
         gammaAwareNeutral: false,
-        expiryMode1: "5",
+        expiryMode1: bIsDual ? "6" : "5",
         expiryDate1: "",
         qty1: "1",
-        newD1: "0.53",
-        reD1: "0.53",
-        tpD1: "0.25",
-        slD1: "0.65",
+        newD1: bIsDual ? "0.25" : "0.53",
+        reD1: bIsDual ? "0.25" : "0.53",
+        tpD1: bIsDual ? "0.12" : "0.25",
+        slD1: bIsDual ? "0.50" : "0.65",
         reEnter1: true,
-        closeNetProfitBrokerage: false,
-        brokerageMultiplier: "3",
-        reEnterBrok: false,
-        closeBlockedMargin: false,
-        blockedMarginPct: "20",
-        reEnterBlock: false,
+        closeNetProfitBrokerage: bIsDual,
+        brokerageMultiplier: bIsDual ? "10" : "3",
+        reEnterBrok: bIsDual,
+        closeBlockedMargin: bIsDual,
+        blockedMarginPct: bIsDual ? "10" : "20",
+        reEnterBlock: bIsDual,
         telegramAlertTypes: [],
         closedFromDate: "",
         closedToDate: ""
@@ -547,6 +565,13 @@ function listTrackedOpenOptionPositions(
     return Array.isArray(pTrackedPositions)
         ? pTrackedPositions.filter((objPosition) => isOptionContractSymbol(objPosition.contractName))
         : [];
+}
+
+function hasTrackedOptionLeg(
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pLegSide: "ce" | "pe"
+): boolean {
+    return listTrackedOpenOptionPositions(pTrackedPositions).some((objPosition) => getTrackedOptionLegSide(objPosition.contractName) === pLegSide);
 }
 
 function isTrackedContractForSymbol(pContractName: unknown, pSymbol: string): boolean {
@@ -1076,7 +1101,7 @@ function normalizeProfileSaveInput(
             minusDelta: normalizeStringValue(objUiState.minusDelta, String(objDefaults.minusDelta)),
             plusDelta: normalizeStringValue(objUiState.plusDelta, String(objDefaults.plusDelta)),
             action1: String(objUiState.action1 || objDefaults.action1).trim().toLowerCase() === "buy" ? "buy" : "sell",
-            legs1: String(objUiState.legs1 || objDefaults.legs1).trim().toLowerCase() === "pe" ? "pe" : "ce",
+            legs1: normalizeRollingFuturesLegSelection(objUiState.legs1, String(objDefaults.legs1 || "ce")),
             onlyDeltaNeutral: normalizeBooleanValue(objUiState.onlyDeltaNeutral, Boolean(objDefaults.onlyDeltaNeutral)),
             rangeDeltaNeutral: normalizeBooleanValue(objUiState.rangeDeltaNeutral, Boolean(objDefaults.rangeDeltaNeutral)),
             gammaAwareNeutral: normalizeBooleanValue(objUiState.gammaAwareNeutral, Boolean(objDefaults.gammaAwareNeutral)),
@@ -2139,6 +2164,110 @@ function buildRuntimeStateWithDeltaNeutralBaseline(
     return objState;
 }
 
+function getNeutralityHedgePendingUntil(pRuntime: RollingFuturesLtRuntimeRecord | null): string {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    return String(objState.neutralityHedgePendingUntil || "").trim();
+}
+
+function buildRuntimeStateWithNeutralityHedgePending(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pPendingUntil = ""
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    const vPendingUntil = String(pPendingUntil || "").trim();
+    if (!vPendingUntil) {
+        delete objState.neutralityHedgePendingUntil;
+        return objState;
+    }
+    objState.neutralityHedgePendingUntil = vPendingUntil;
+    return objState;
+}
+
+function getNeutralityHedgeSkipAuditState(pRuntime: RollingFuturesLtRuntimeRecord | null): {
+    reason: string;
+    loggedAt: string;
+} {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    const objAudit = objState.neutralityHedgeSkipAudit && typeof objState.neutralityHedgeSkipAudit === "object"
+        ? objState.neutralityHedgeSkipAudit as Record<string, unknown>
+        : {};
+    return {
+        reason: String(objAudit.reason || "").trim(),
+        loggedAt: String(objAudit.loggedAt || "").trim()
+    };
+}
+
+function buildRuntimeStateWithNeutralityHedgeSkipAudit(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pReason = "",
+    pLoggedAt = ""
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    const vReason = String(pReason || "").trim();
+    const vLoggedAt = String(pLoggedAt || "").trim();
+    if (!vReason || !vLoggedAt) {
+        delete objState.neutralityHedgeSkipAudit;
+        return objState;
+    }
+    objState.neutralityHedgeSkipAudit = {
+        reason: vReason,
+        loggedAt: vLoggedAt
+    };
+    return objState;
+}
+
+async function logNeutralityHedgeSkippedOnce(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pReason: "cooldown" | "pending" | "lock",
+    pContext: {
+        symbol: "BTC" | "ETH";
+        qty: number;
+        totalDelta: number;
+        totalTheta: number;
+        mode: "none" | "delta" | "range" | "gamma";
+        threshold: number | null;
+    }
+): Promise<Record<string, unknown> | null> {
+    const objRuntime = pRuntime || await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const objAudit = getNeutralityHedgeSkipAuditState(objRuntime);
+    const vLastLoggedAtMs = Number.isFinite(new Date(objAudit.loggedAt).getTime())
+        ? new Date(objAudit.loggedAt).getTime()
+        : 0;
+    const vNowMs = Date.now();
+    if (objAudit.reason === pReason && vLastLoggedAtMs > 0 && (vNowMs - vLastLoggedAtMs) < 30_000) {
+        return null;
+    }
+
+    const vLoggedAt = new Date(vNowMs).toISOString();
+    const objNextState = buildRuntimeStateWithNeutralityHedgeSkipAudit(objRuntime, pReason, vLoggedAt);
+    await saveRollingFuturesLtRuntime({
+        ...objRuntime,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        state: objNextState
+    });
+    await logFuturesEvent(
+        pUserId,
+        pStrategyCode,
+        "manual_action",
+        "info",
+        "Neutral Hedge Skipped",
+        pReason === "cooldown"
+            ? "Delta-neutral hedge was skipped because the hedge cooldown is still active."
+            : (pReason === "pending"
+                ? "Delta-neutral hedge was skipped because another hedge is still being processed."
+                : "Delta-neutral hedge was skipped because another hedge path already owns the hedge lock."),
+        {
+            ...pContext,
+            reason: `delta_neutral_skip_${pReason}`
+        }
+    );
+    return objNextState;
+}
+
 function getBrokerageRecoveryTotal(pRuntime: RollingFuturesLtRuntimeRecord | null): number {
     const objState = (pRuntime?.state || {}) as Record<string, unknown>;
     const vTotal = Number(objState.brokerageRecoveryTotal || 0);
@@ -2220,7 +2349,7 @@ async function sendFuturesTelegramForEvent(
     }
 
     const arrLines = [
-        pEvent.strategyCode === "rolling-futures-lt-short" ? "Short Rolling Futures - Live" : "Long Rolling Futures - Live",
+        `${gStrategyNames[pEvent.strategyCode] || "Rolling Futures"} - Live`,
         `Time: ${new Date().toLocaleString("en-IN")}`,
         "",
         pEvent.title,
@@ -2404,16 +2533,23 @@ async function applyServerSideNeutralityCheck(
     nextRuntimeState: Record<string, unknown> | null;
 }> {
     const vMode = getNeutralModeFromUiState(pUiState);
+    const objRuntimeBase = pRuntime
+        || await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const objTotals = await calculateTrackedNeutralTotals(pTrackedPositions);
-    const objDeltaBaseline = getDeltaNeutralBaselineState(pRuntime);
+    const objDeltaBaseline = getDeltaNeutralBaselineState(objRuntimeBase);
     const vBaselineOptionDeltaAbs = objDeltaBaseline.baseOptionDeltaAbs > 0
         ? objDeltaBaseline.baseOptionDeltaAbs
         : objTotals.optionDeltaAbs;
     const vLastHedgeAtMs = Number.isFinite(new Date(objDeltaBaseline.lastHedgeAt).getTime())
         ? new Date(objDeltaBaseline.lastHedgeAt).getTime()
         : 0;
+    const vPendingUntilMs = Number.isFinite(new Date(getNeutralityHedgePendingUntil(objRuntimeBase)).getTime())
+        ? new Date(getNeutralityHedgePendingUntil(objRuntimeBase)).getTime()
+        : 0;
     const vNowMs = Date.now();
     const bHedgeCooldownActive = vLastHedgeAtMs > 0 && (vNowMs - vLastHedgeAtMs) < gNeutralityHedgeCooldownMs;
+    const bHedgePendingActive = vPendingUntilMs > vNowMs;
 
     if (vMode === "none") {
         return {
@@ -2423,7 +2559,10 @@ async function applyServerSideNeutralityCheck(
             totalTheta: objTotals.totalTheta,
             mode: vMode,
             threshold: null,
-            nextRuntimeState: buildRuntimeStateWithDeltaNeutralBaseline(pRuntime, null)
+            nextRuntimeState: buildRuntimeStateWithNeutralityHedgePending({
+                ...objRuntimeBase,
+                state: buildRuntimeStateWithDeltaNeutralBaseline(objRuntimeBase, null)
+            }, "")
         };
     }
 
@@ -2439,14 +2578,14 @@ async function applyServerSideNeutralityCheck(
         vThreshold = null;
         bShouldHedge = vBaselineOptionDeltaAbs > 0
             && (vDriftPct < vNegThresholdPct || vDriftPct > vPosThresholdPct);
-        objNextRuntimeState = buildRuntimeStateWithDeltaNeutralBaseline(pRuntime, vBaselineOptionDeltaAbs, objDeltaBaseline.lastHedgeAt);
+        objNextRuntimeState = buildRuntimeStateWithDeltaNeutralBaseline(objRuntimeBase, vBaselineOptionDeltaAbs, objDeltaBaseline.lastHedgeAt);
     }
     else if (vMode === "range") {
         const vMinDelta = Number.isFinite(Number(pUiState.minusDelta)) ? Number(pUiState.minusDelta) : -25;
         const vMaxDelta = Number.isFinite(Number(pUiState.plusDelta)) ? Number(pUiState.plusDelta) : 25;
         vThreshold = null;
         bShouldHedge = objTotals.totalDelta < vMinDelta || objTotals.totalDelta > vMaxDelta;
-        objNextRuntimeState = buildRuntimeStateWithDeltaNeutralBaseline(pRuntime, null, objDeltaBaseline.lastHedgeAt);
+        objNextRuntimeState = buildRuntimeStateWithDeltaNeutralBaseline(objRuntimeBase, null, objDeltaBaseline.lastHedgeAt);
     }
     else {
         const vNegThresholdPct = Number.isFinite(Number(pUiState.minusDelta)) ? Number(pUiState.minusDelta) : -25;
@@ -2460,11 +2599,11 @@ async function applyServerSideNeutralityCheck(
         vThreshold = null;
         bShouldHedge = vBaselineOptionDeltaAbs > 0
             && (vDriftPct < vGammaNegThresholdPct || vDriftPct > vGammaPosThresholdPct);
-        objNextRuntimeState = buildRuntimeStateWithDeltaNeutralBaseline(pRuntime, vBaselineOptionDeltaAbs, objDeltaBaseline.lastHedgeAt);
+        objNextRuntimeState = buildRuntimeStateWithDeltaNeutralBaseline(objRuntimeBase, vBaselineOptionDeltaAbs, objDeltaBaseline.lastHedgeAt);
     }
 
     const vHedgeQty = Math.round(Math.abs(objTotals.totalDelta));
-    if (!bShouldHedge || !(vHedgeQty >= 1) || bHedgeCooldownActive) {
+    if (!bShouldHedge || !(vHedgeQty >= 1)) {
         return {
             trackedOpenPositions: pTrackedPositions,
             hedgePlaced: false,
@@ -2476,72 +2615,229 @@ async function applyServerSideNeutralityCheck(
         };
     }
 
-    const vHedgeAction: "BUY" | "SELL" = objTotals.totalDelta > 0 ? "SELL" : "BUY";
-    const objPlacedHedge = await placeManagedManualFutureOrder(
-        pUserId,
-        pSelectedApiProfileId,
-        pSymbol,
-        vHedgeAction,
-        vHedgeQty,
-        "market_order"
-    );
-    const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, [
-        ...pTrackedPositions,
-        {
-            userId: pUserId,
-            strategyCode: pStrategyCode,
-            importId: crypto.randomUUID(),
-            contractName: objPlacedHedge.contractName,
-            side: vHedgeAction,
-            qty: vHedgeQty,
-            entryPrice: Number(objPlacedHedge.entryPrice || 0),
-            markPrice: Number(objPlacedHedge.entryPrice || 0),
-            charges: 0,
-            pnl: 0,
-            margin: 0,
-            liquidationPrice: 0,
-            openedAt: String(objPlacedHedge.entryTs || new Date().toISOString()),
-            updatedAt: String(objPlacedHedge.entryTs || new Date().toISOString())
-        }
-    ]);
-    const vHedgeCharge = await estimateTrackedPositionCharge({
-        contractName: objPlacedHedge.contractName,
-        qty: vHedgeQty,
-        entryPrice: Number(objPlacedHedge.entryPrice || 0),
-        markPrice: Number(objPlacedHedge.entryPrice || 0)
-    });
-    await incrementBrokerageRecoveryTotal(pUserId, pStrategyCode, vHedgeCharge, arrSaved.length);
-
-    await logFuturesEvent(
-        pUserId,
-        pStrategyCode,
-        "future_opened",
-        "warning",
-        "Delta Neutral Hedge Executed",
-        `${vHedgeAction} future hedge placed from server-side delta-neutral check.`,
-        {
-            symbol: pSymbol,
-            qty: vHedgeQty,
+    if (bHedgeCooldownActive) {
+        const objSkipState = await logNeutralityHedgeSkippedOnce(
+            pUserId,
+            pStrategyCode,
+            objRuntimeBase,
+            "cooldown",
+            {
+                symbol: pSymbol,
+                qty: vHedgeQty,
+                totalDelta: objTotals.totalDelta,
+                totalTheta: objTotals.totalTheta,
+                mode: vMode,
+                threshold: vThreshold
+            }
+        );
+        return {
+            trackedOpenPositions: pTrackedPositions,
+            hedgePlaced: false,
             totalDelta: objTotals.totalDelta,
             totalTheta: objTotals.totalTheta,
-            threshold: vThreshold,
             mode: vMode,
-            reason: "delta_neutral_hedge"
-        }
-    );
+            threshold: vThreshold,
+            nextRuntimeState: objSkipState || objNextRuntimeState
+        };
+    }
 
-    const objPostHedgeTotals = await calculateTrackedNeutralTotals(arrSaved);
-    return {
-        trackedOpenPositions: arrSaved,
-        hedgePlaced: true,
-        totalDelta: objTotals.totalDelta,
-        totalTheta: objTotals.totalTheta,
-        mode: vMode,
-        threshold: vThreshold,
-        nextRuntimeState: vMode === "delta" || vMode === "gamma"
-            ? buildRuntimeStateWithDeltaNeutralBaseline(pRuntime, objPostHedgeTotals.optionDeltaAbs, new Date().toISOString())
-            : buildRuntimeStateWithDeltaNeutralBaseline(pRuntime, null, new Date().toISOString())
-    };
+    if (bHedgePendingActive) {
+        const objSkipState = await logNeutralityHedgeSkippedOnce(
+            pUserId,
+            pStrategyCode,
+            objRuntimeBase,
+            "pending",
+            {
+                symbol: pSymbol,
+                qty: vHedgeQty,
+                totalDelta: objTotals.totalDelta,
+                totalTheta: objTotals.totalTheta,
+                mode: vMode,
+                threshold: vThreshold
+            }
+        );
+        return {
+            trackedOpenPositions: pTrackedPositions,
+            hedgePlaced: false,
+            totalDelta: objTotals.totalDelta,
+            totalTheta: objTotals.totalTheta,
+            mode: vMode,
+            threshold: vThreshold,
+            nextRuntimeState: objSkipState || objNextRuntimeState
+        };
+    }
+
+    const vHedgeLockKey = getNeutralityHedgeLockKey(pUserId, pStrategyCode);
+    if (gNeutralityHedgeLocks.has(vHedgeLockKey)) {
+        const objSkipState = await logNeutralityHedgeSkippedOnce(
+            pUserId,
+            pStrategyCode,
+            objRuntimeBase,
+            "lock",
+            {
+                symbol: pSymbol,
+                qty: vHedgeQty,
+                totalDelta: objTotals.totalDelta,
+                totalTheta: objTotals.totalTheta,
+                mode: vMode,
+                threshold: vThreshold
+            }
+        );
+        return {
+            trackedOpenPositions: pTrackedPositions,
+            hedgePlaced: false,
+            totalDelta: objTotals.totalDelta,
+            totalTheta: objTotals.totalTheta,
+            mode: vMode,
+            threshold: vThreshold,
+            nextRuntimeState: objSkipState || objNextRuntimeState
+        };
+    }
+
+    gNeutralityHedgeLocks.add(vHedgeLockKey);
+    const vHedgeAction: "BUY" | "SELL" = objTotals.totalDelta > 0 ? "SELL" : "BUY";
+    try {
+        const objLatestRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+            || objRuntimeBase;
+        const vLatestPendingUntilMs = Number.isFinite(new Date(getNeutralityHedgePendingUntil(objLatestRuntime)).getTime())
+            ? new Date(getNeutralityHedgePendingUntil(objLatestRuntime)).getTime()
+            : 0;
+        const objLatestBaseline = getDeltaNeutralBaselineState(objLatestRuntime);
+        const vLatestLastHedgeAtMs = Number.isFinite(new Date(objLatestBaseline.lastHedgeAt).getTime())
+            ? new Date(objLatestBaseline.lastHedgeAt).getTime()
+            : 0;
+        if (vLatestPendingUntilMs > Date.now() || (vLatestLastHedgeAtMs > 0 && (Date.now() - vLatestLastHedgeAtMs) < gNeutralityHedgeCooldownMs)) {
+            const vSkipReason: "pending" | "cooldown" = vLatestPendingUntilMs > Date.now() ? "pending" : "cooldown";
+            const objSkipState = await logNeutralityHedgeSkippedOnce(
+                pUserId,
+                pStrategyCode,
+                objLatestRuntime,
+                vSkipReason,
+                {
+                    symbol: pSymbol,
+                    qty: vHedgeQty,
+                    totalDelta: objTotals.totalDelta,
+                    totalTheta: objTotals.totalTheta,
+                    mode: vMode,
+                    threshold: vThreshold
+                }
+            );
+            return {
+                trackedOpenPositions: pTrackedPositions,
+                hedgePlaced: false,
+                totalDelta: objTotals.totalDelta,
+                totalTheta: objTotals.totalTheta,
+                mode: vMode,
+                threshold: vThreshold,
+                nextRuntimeState: objSkipState || objNextRuntimeState
+            };
+        }
+
+        await saveRollingFuturesLtRuntime({
+            ...objLatestRuntime,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithNeutralityHedgePending(
+                objLatestRuntime,
+                new Date(Date.now() + gNeutralityHedgePendingMs).toISOString()
+            )
+        });
+
+        const objPlacedHedge = await placeManagedManualFutureOrder(
+            pUserId,
+            pSelectedApiProfileId,
+            pSymbol,
+            vHedgeAction,
+            vHedgeQty,
+            "market_order"
+        );
+        const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, [
+            ...pTrackedPositions,
+            {
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                importId: crypto.randomUUID(),
+                contractName: objPlacedHedge.contractName,
+                side: vHedgeAction,
+                qty: vHedgeQty,
+                entryPrice: Number(objPlacedHedge.entryPrice || 0),
+                markPrice: Number(objPlacedHedge.entryPrice || 0),
+                charges: 0,
+                pnl: 0,
+                margin: 0,
+                liquidationPrice: 0,
+                openedAt: String(objPlacedHedge.entryTs || new Date().toISOString()),
+                updatedAt: String(objPlacedHedge.entryTs || new Date().toISOString())
+            }
+        ]);
+        const vHedgeCharge = await estimateTrackedPositionCharge({
+            contractName: objPlacedHedge.contractName,
+            qty: vHedgeQty,
+            entryPrice: Number(objPlacedHedge.entryPrice || 0),
+            markPrice: Number(objPlacedHedge.entryPrice || 0)
+        });
+        await incrementBrokerageRecoveryTotal(pUserId, pStrategyCode, vHedgeCharge, arrSaved.length);
+
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "future_opened",
+            "warning",
+            "Delta Neutral Hedge Executed",
+            `${vHedgeAction} future hedge placed from server-side delta-neutral check.`,
+            {
+                symbol: pSymbol,
+                qty: vHedgeQty,
+                totalDelta: objTotals.totalDelta,
+                totalTheta: objTotals.totalTheta,
+                threshold: vThreshold,
+                mode: vMode,
+                reason: "delta_neutral_hedge"
+            }
+        );
+
+        const vHedgePlacedAt = new Date().toISOString();
+        const objPostHedgeTotals = await calculateTrackedNeutralTotals(arrSaved);
+        const objRuntimeAfterHedge = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+            || objLatestRuntime;
+        const objBaselineState = vMode === "delta" || vMode === "gamma"
+            ? buildRuntimeStateWithDeltaNeutralBaseline(objRuntimeAfterHedge, objPostHedgeTotals.optionDeltaAbs, vHedgePlacedAt)
+            : buildRuntimeStateWithDeltaNeutralBaseline(objRuntimeAfterHedge, null, vHedgePlacedAt);
+        const objNextState = buildRuntimeStateWithNeutralityHedgePending({
+            ...objRuntimeAfterHedge,
+            state: objBaselineState
+        }, "");
+        await saveRollingFuturesLtRuntime({
+            ...objRuntimeAfterHedge,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: objNextState
+        });
+
+        return {
+            trackedOpenPositions: arrSaved,
+            hedgePlaced: true,
+            totalDelta: objTotals.totalDelta,
+            totalTheta: objTotals.totalTheta,
+            mode: vMode,
+            threshold: vThreshold,
+            nextRuntimeState: objNextState
+        };
+    }
+    catch (objError) {
+        const objRuntimeAfterError = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+            || objRuntimeBase;
+        await saveRollingFuturesLtRuntime({
+            ...objRuntimeAfterError,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithNeutralityHedgePending(objRuntimeAfterError, "")
+        });
+        throw objError;
+    }
+    finally {
+        gNeutralityHedgeLocks.delete(vHedgeLockKey);
+    }
 }
 
 async function executeStrategyPlacement(
@@ -2580,10 +2876,11 @@ async function executeStrategyPlacement(
         throw new Error(`An option position is already open (${arrOpenOptions[0].contractName}). Close the existing option before opening a new one.`);
     }
     const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(objUiState, "strategy_option_open");
+    const bIsDualStrategy = pStrategyCode === "rolling-futures-lt-dual";
     const arrOptionSides: Array<"CE" | "PE"> = pInput.legSide === "both"
-        ? ["CE", "PE"]
+        ? (bIsDualStrategy ? ["CE", "PE"] : [])
         : [pInput.legSide === "pe" ? "PE" : "CE"];
-    if (arrOptionSides.length > 1) {
+    if (!arrOptionSides.length) {
         throw new Error("Only one option position can be open at a time. Select either CE or PE, not both.");
     }
     const objConfig = {
@@ -3108,6 +3405,9 @@ async function runAutoTraderCycle(
     if (gAutoTraderCycleLocks.has(vRuntimeKey)) {
         return;
     }
+    if (gExecStrategyLocks.has(vRuntimeKey)) {
+        return;
+    }
 
     gAutoTraderCycleLocks.add(vRuntimeKey);
     try {
@@ -3428,7 +3728,7 @@ export async function recoverRollingFuturesLtAutoTraderCycles(): Promise<void> {
             && vStatus === "running"
             && !!vUserId
             && !!vSelectedApiProfileId
-            && (vStrategyCode === "rolling-futures-lt-long" || vStrategyCode === "rolling-futures-lt-short");
+            && (vStrategyCode === "rolling-futures-lt-long" || vStrategyCode === "rolling-futures-lt-short" || vStrategyCode === "rolling-futures-lt-dual");
 
         if (!bShouldResume) {
             continue;
@@ -4132,8 +4432,12 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
         const { client, profile } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
         const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
         const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
-        if (arrOpenOptions.length > 0) {
+        const bIsDualStrategy = pStrategyCode === "rolling-futures-lt-dual";
+        if (!bIsDualStrategy && arrOpenOptions.length > 0) {
             throw new Error(`An option position is already open (${arrOpenOptions[0].contractName}). Close the existing option before placing another option order.`);
+        }
+        if (bIsDualStrategy && hasTrackedOptionLeg(arrExisting, vLegSide === "pe" ? "pe" : "ce")) {
+            throw new Error(`A ${vLegSide.toUpperCase()} option is already open. Close the existing ${vLegSide.toUpperCase()} leg before placing another one.`);
         }
         const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(getMergedUiState(objProfile), "manual_option_open");
         const objConfig = {
@@ -4324,12 +4628,23 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
         res.status(400).json({ status: "warning", message: "Select valid Legs before executing the live strategy." });
         return;
     }
+    if (pStrategyCode !== "rolling-futures-lt-dual" && vLegSide === "both") {
+        res.status(400).json({ status: "warning", message: "Select either CE or PE for this live strategy page." });
+        return;
+    }
     if (!(vTargetDelta > 0)) {
         res.status(400).json({ status: "warning", message: "Enter a valid New D before executing the live strategy." });
         return;
     }
 
     const vLockKey = getManualFutureOrderLockKey(vUserId, pStrategyCode);
+    if (gAutoTraderCycleLocks.has(vLockKey)) {
+        res.status(409).json({
+            status: "warning",
+            message: "The live auto trader is in the middle of a server cycle. Please wait a few seconds and try Exec Strategy again."
+        });
+        return;
+    }
     if (gExecStrategyLocks.has(vLockKey)) {
         res.status(409).json({
             status: "warning",
@@ -4790,4 +5105,74 @@ export async function executeRollingFuturesLtShortKillSwitch(req: Request, res: 
 }
 export async function updateRollingFuturesLtShortRecoveryMetrics(req: Request, res: Response): Promise<void> {
     await updateRecoveryMetricsInternal(req, res, "rolling-futures-lt-short");
+}
+
+export async function getRollingFuturesLtDualProfile(req: Request, res: Response): Promise<void> {
+    await getProfileInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function saveRollingFuturesLtDualProfile(req: Request, res: Response): Promise<void> {
+    await saveProfileInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function getRollingFuturesLtDualConnectionStatus(req: Request, res: Response): Promise<void> {
+    await getConnectionStatusInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function getRollingFuturesLtDualRuntimeStatus(req: Request, res: Response): Promise<void> {
+    await getRuntimeStatusInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function checkRollingFuturesLtDualConnection(req: Request, res: Response): Promise<void> {
+    await checkConnectionInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function enableRollingFuturesLtDualAutoTrader(req: Request, res: Response): Promise<void> {
+    await enableAutoTraderInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function disableRollingFuturesLtDualAutoTrader(req: Request, res: Response): Promise<void> {
+    await disableAutoTraderInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function getRollingFuturesLtDualAccountSummary(req: Request, res: Response): Promise<void> {
+    await getAccountSummaryInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function executeRollingFuturesLtDualManualFuture(req: Request, res: Response): Promise<void> {
+    await executeManualFutureInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function executeRollingFuturesLtDualManualOption(req: Request, res: Response): Promise<void> {
+    await executeManualOptionInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function executeRollingFuturesLtDualStrategy(req: Request, res: Response): Promise<void> {
+    await executeStrategyInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function getRollingFuturesLtDualImportableOpenPositions(req: Request, res: Response): Promise<void> {
+    await getImportableOpenPositionsInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function getRollingFuturesLtDualOpenPositions(req: Request, res: Response): Promise<void> {
+    await getOpenPositionsInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function saveRollingFuturesLtDualOpenPositions(req: Request, res: Response): Promise<void> {
+    await saveOpenPositionsInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function deleteRollingFuturesLtDualOpenPosition(req: Request, res: Response): Promise<void> {
+    await deleteOpenPositionInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function reconcileRollingFuturesLtDualOpenPositions(req: Request, res: Response): Promise<void> {
+    await reconcileOpenPositionsInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function closeRollingFuturesLtDualImportedOpenPosition(req: Request, res: Response): Promise<void> {
+    await closeImportedOpenPositionInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function getRollingFuturesLtDualClosedPositions(req: Request, res: Response): Promise<void> {
+    await getClosedPositionsInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function getRollingFuturesLtDualEvents(req: Request, res: Response): Promise<void> {
+    await getEventsInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function clearRollingFuturesLtDualEventsController(req: Request, res: Response): Promise<void> {
+    await clearEventsInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function deleteRollingFuturesLtDualEventController(req: Request, res: Response): Promise<void> {
+    await deleteEventInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function executeRollingFuturesLtDualKillSwitch(req: Request, res: Response): Promise<void> {
+    await executeKillSwitchInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function updateRollingFuturesLtDualRecoveryMetrics(req: Request, res: Response): Promise<void> {
+    await updateRecoveryMetricsInternal(req, res, "rolling-futures-lt-dual");
 }

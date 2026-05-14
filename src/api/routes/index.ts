@@ -68,18 +68,25 @@ import {
 import {
     checkRollingFuturesLtLongConnection,
     checkRollingFuturesLtShortConnection,
+    checkRollingFuturesLtDualConnection,
     clearRollingFuturesLtLongEventsController,
     clearRollingFuturesLtShortEventsController,
+    clearRollingFuturesLtDualEventsController,
     deleteRollingFuturesLtLongEventController,
     deleteRollingFuturesLtShortEventController,
+    deleteRollingFuturesLtDualEventController,
     closeRollingFuturesLtLongImportedOpenPosition,
     closeRollingFuturesLtShortImportedOpenPosition,
+    closeRollingFuturesLtDualImportedOpenPosition,
     deleteRollingFuturesLtLongOpenPosition,
     deleteRollingFuturesLtShortOpenPosition,
+    deleteRollingFuturesLtDualOpenPosition,
     disableRollingFuturesLtLongAutoTrader,
     disableRollingFuturesLtShortAutoTrader,
+    disableRollingFuturesLtDualAutoTrader,
     enableRollingFuturesLtLongAutoTrader,
     enableRollingFuturesLtShortAutoTrader,
+    enableRollingFuturesLtDualAutoTrader,
     executeRollingFuturesLtLongKillSwitch,
     executeRollingFuturesLtLongManualFuture,
     executeRollingFuturesLtLongManualOption,
@@ -88,6 +95,10 @@ import {
     executeRollingFuturesLtShortManualFuture,
     executeRollingFuturesLtShortManualOption,
     executeRollingFuturesLtShortStrategy,
+    executeRollingFuturesLtDualKillSwitch,
+    executeRollingFuturesLtDualManualFuture,
+    executeRollingFuturesLtDualManualOption,
+    executeRollingFuturesLtDualStrategy,
     getRollingFuturesLtLongAccountSummary,
     getRollingFuturesLtLongClosedPositions,
     getRollingFuturesLtLongConnectionStatus,
@@ -106,12 +117,24 @@ import {
     getRollingFuturesLtShortProfile,
     getRollingFuturesLtShortRuntimeStatus,
     updateRollingFuturesLtShortRecoveryMetrics,
+    getRollingFuturesLtDualAccountSummary,
+    getRollingFuturesLtDualClosedPositions,
+    getRollingFuturesLtDualConnectionStatus,
+    getRollingFuturesLtDualEvents,
+    getRollingFuturesLtDualImportableOpenPositions,
+    getRollingFuturesLtDualOpenPositions,
+    getRollingFuturesLtDualProfile,
+    getRollingFuturesLtDualRuntimeStatus,
+    updateRollingFuturesLtDualRecoveryMetrics,
     reconcileRollingFuturesLtLongOpenPositions,
     reconcileRollingFuturesLtShortOpenPositions,
+    reconcileRollingFuturesLtDualOpenPositions,
     saveRollingFuturesLtLongOpenPositions,
     saveRollingFuturesLtLongProfile,
     saveRollingFuturesLtShortOpenPositions,
-    saveRollingFuturesLtShortProfile
+    saveRollingFuturesLtShortProfile,
+    saveRollingFuturesLtDualOpenPositions,
+    saveRollingFuturesLtDualProfile
 } from "../controllers/rolling-futures-lt-controller";
 import {
     createDeltaApiProfileController,
@@ -460,6 +483,76 @@ export function createApiRouter(
     });
     objRouter.post("/rollingfutures-lt-short/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await clearRollingFuturesLtShortEventsController(req, res);
+    });
+
+    objRouter.get("/rollingfutures-lt-dual/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRollingFuturesLtDualProfile(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveRollingFuturesLtDualProfile(req, res);
+    });
+    objRouter.get("/rollingfutures-lt-dual/connection/status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRollingFuturesLtDualConnectionStatus(req, res);
+    });
+    objRouter.get("/rollingfutures-lt-dual/runtime", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRollingFuturesLtDualRuntimeStatus(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/connection/check", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await checkRollingFuturesLtDualConnection(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/auto-trader/start", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await enableRollingFuturesLtDualAutoTrader(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/auto-trader/stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await disableRollingFuturesLtDualAutoTrader(req, res);
+    });
+    objRouter.get("/rollingfutures-lt-dual/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRollingFuturesLtDualAccountSummary(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeRollingFuturesLtDualManualFuture(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/manual/option", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeRollingFuturesLtDualManualOption(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/strategy/execute", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeRollingFuturesLtDualStrategy(req, res);
+    });
+    objRouter.get("/rollingfutures-lt-dual/open-positions/importable", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRollingFuturesLtDualImportableOpenPositions(req, res);
+    });
+    objRouter.get("/rollingfutures-lt-dual/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRollingFuturesLtDualOpenPositions(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveRollingFuturesLtDualOpenPositions(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/open-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteRollingFuturesLtDualOpenPosition(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/open-positions/reconcile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await reconcileRollingFuturesLtDualOpenPositions(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await closeRollingFuturesLtDualImportedOpenPosition(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeRollingFuturesLtDualKillSwitch(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateRollingFuturesLtDualRecoveryMetrics(req, res);
+    });
+    objRouter.get("/rollingfutures-lt-dual/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRollingFuturesLtDualClosedPositions(req, res);
+    });
+    objRouter.get("/rollingfutures-lt-dual/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRollingFuturesLtDualEvents(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/events/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteRollingFuturesLtDualEventController(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearRollingFuturesLtDualEventsController(req, res);
     });
 
     return objRouter;

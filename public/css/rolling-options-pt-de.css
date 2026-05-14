@@ -3,6 +3,37 @@
     margin:0 auto;
 }
 
+.rolling-live-status {
+    display: none;
+    width: 100%;
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--app-muted);
+    box-sizing: border-box;
+}
+
+.rolling-live-status.show {
+    display: block;
+}
+
+.rolling-live-status.success {
+    border-color: rgba(134, 239, 172, 0.22);
+    color: var(--app-good);
+}
+
+.rolling-live-status.warning {
+    border-color: rgba(242, 182, 90, 0.24);
+    color: var(--app-warn);
+}
+
+.rolling-live-status.danger {
+    border-color: rgba(248, 113, 113, 0.24);
+    color: #ffb5b5;
+}
+
 .rolling-demo-hero {
     display:grid;
     grid-template-columns:1.3fr .7fr;

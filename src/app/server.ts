@@ -12,6 +12,7 @@ import { startRollingOptionsLtDeConnectionMonitor, runRollingOptionsLtDeConnecti
 import { RollingOptionsLtDeService } from "../strategies/rolling-options-lt-de/service";
 import { RollingOptionsPtDeService } from "../strategies/rolling-options-pt-de/service";
 import {
+    renderRollingFuturesLiveDualPage,
     renderRollingFuturesLiveLongPage,
     renderRollingFuturesLiveShortPage,
     renderRollingFuturesPaperDemoPage,
@@ -89,6 +90,7 @@ async function bootstrap(): Promise<void> {
     app.get("/rollingoptions-lt-de", requireAuthPage, requireFreshPasswordPage, renderRollingOptionsLivePage);
     app.get("/rollingfutures-lt-long", requireAuthPage, requireFreshPasswordPage, renderRollingFuturesLiveLongPage);
     app.get("/rollingfutures-lt-short", requireAuthPage, requireFreshPasswordPage, renderRollingFuturesLiveShortPage);
+    app.get("/rollingfutures-lt-dual", requireAuthPage, requireFreshPasswordPage, renderRollingFuturesLiveDualPage);
     app.get("/mngusers", requireAuthPage, requireFreshPasswordPage, requireAdminPage, renderMngUsersPage);
     app.get("/account/profile", requireAuthPage, renderMyProfilePage);
     app.post("/account/profile", requireAuthPage, async (req, res) => {
