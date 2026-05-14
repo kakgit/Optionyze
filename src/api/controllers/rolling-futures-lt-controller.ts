@@ -296,6 +296,44 @@ function getOrderState(pPayload: Record<string, unknown>): string {
     return String(objResult.state || objResult.status || "").trim().toLowerCase();
 }
 
+function getOrderLikeAverageFillPrice(pPayload: Record<string, unknown>): number | null {
+    const objResult = (pPayload.result && typeof pPayload.result === "object")
+        ? pPayload.result as Record<string, unknown>
+        : pPayload;
+    const vPrice = toFiniteNumber(objResult.average_fill_price ?? objResult.avg_fill_price ?? objResult.fill_price, Number.NaN);
+    return Number.isFinite(vPrice) ? vPrice : null;
+}
+
+function getOrderLikeRealizedPnl(pPayload: Record<string, unknown>): number | null {
+    const objResult = (pPayload.result && typeof pPayload.result === "object")
+        ? pPayload.result as Record<string, unknown>
+        : pPayload;
+    const objMeta = objResult.meta_data && typeof objResult.meta_data === "object"
+        ? objResult.meta_data as Record<string, unknown>
+        : {};
+    const vPnl = toFiniteNumber(objMeta.pnl ?? objResult.pnl, Number.NaN);
+    return Number.isFinite(vPnl) ? vPnl : null;
+}
+
+function getOrderLikePaidCommission(pPayload: Record<string, unknown>): number | null {
+    const objResult = (pPayload.result && typeof pPayload.result === "object")
+        ? pPayload.result as Record<string, unknown>
+        : pPayload;
+    if (Object.prototype.hasOwnProperty.call(objResult, "paid_commission")) {
+        const vCommission = Number(objResult.paid_commission);
+        return Number.isFinite(vCommission) ? vCommission : null;
+    }
+    if (Object.prototype.hasOwnProperty.call(objResult, "commission")) {
+        const vCommission = Number(objResult.commission);
+        return Number.isFinite(vCommission) ? vCommission : null;
+    }
+    return null;
+}
+
+function getHistoryOrderId(pRow: DeltaOrderHistoryRow): string {
+    return String(pRow.order_id ?? pRow.id ?? "").trim();
+}
+
 function isCancelledLikeOrderState(pState: string): boolean {
     return ["cancelled", "canceled", "rejected", "expired", "failed"].includes(String(pState || "").trim().toLowerCase());
 }
@@ -877,6 +915,151 @@ function mapLiveClosedPosition(pRow: DeltaOrderHistoryRow, pIndex: number) {
         endAt: vUpdatedAt,
         orderType: formatOrderType(pRow.meta_data?.order_type)
     };
+}
+
+async function findRecentOrderHistoryRow(
+    pClient: any,
+    pContractName: string,
+    pOrderId: string,
+    pSide: string,
+    pQty: number,
+    pPlacedAtIso: string
+): Promise<DeltaOrderHistoryRow | null> {
+    if (typeof pClient?.apis?.TradeHistory?.getOrderHistory !== "function") {
+        return null;
+    }
+
+    const vPlacedAtMs = Number.isFinite(Date.parse(pPlacedAtIso)) ? Date.parse(pPlacedAtIso) : Date.now();
+    const vStartMicros = Math.max(0, (vPlacedAtMs - (10 * 60 * 1000)) * 1000);
+    const vQtyAbs = Math.abs(Math.floor(Number(pQty || 0)));
+    const vSideUpper = String(pSide || "").trim().toUpperCase();
+    const vContractUpper = String(pContractName || "").trim().toUpperCase();
+
+    for (let vAttempt = 0; vAttempt < 4; vAttempt += 1) {
+        const arrRows: DeltaOrderHistoryRow[] = [];
+        let vAfterCursor = "";
+        let vSafetyCounter = 0;
+        while (vSafetyCounter < 3) {
+            const objParams: Record<string, string | number> = {
+                page_size: 100,
+                start_time: vStartMicros,
+                end_time: Date.now() * 1000
+            };
+            if (vAfterCursor) {
+                objParams.after = vAfterCursor;
+            }
+            const objResponse = await pClient.apis.TradeHistory.getOrderHistory(objParams);
+            const objPayload = readResponsePayload(objResponse);
+            const arrPageRows = Array.isArray(objPayload.result) ? objPayload.result as DeltaOrderHistoryRow[] : [];
+            arrRows.push(...arrPageRows);
+            const vNextAfter = String((objPayload.meta as { after?: unknown } | undefined)?.after || "").trim();
+            vSafetyCounter += 1;
+            if (!vNextAfter || vNextAfter === vAfterCursor || arrPageRows.length < 100) {
+                break;
+            }
+            vAfterCursor = vNextAfter;
+        }
+
+        const arrCandidates = arrRows
+            .filter((objRow) => {
+                const vState = String(objRow.state || "").trim().toLowerCase();
+                return !vState || vState === "closed";
+            })
+            .filter((objRow) => String(objRow.product_symbol || "").trim().toUpperCase() === vContractUpper)
+            .filter((objRow) => {
+                const vRowOrderId = getHistoryOrderId(objRow);
+                if (pOrderId && vRowOrderId === pOrderId) {
+                    return true;
+                }
+                return String(objRow.side || "").trim().toUpperCase() === vSideUpper
+                    && Math.abs(Math.floor(toFiniteNumber(objRow.size, 0))) === vQtyAbs;
+            })
+            .sort((pLeft, pRight) => {
+                const vLeftTs = Number.isFinite(Date.parse(String(pLeft.updated_at || pLeft.created_at || "")))
+                    ? Date.parse(String(pLeft.updated_at || pLeft.created_at || ""))
+                    : 0;
+                const vRightTs = Number.isFinite(Date.parse(String(pRight.updated_at || pRight.created_at || "")))
+                    ? Date.parse(String(pRight.updated_at || pRight.created_at || ""))
+                    : 0;
+                return vRightTs - vLeftTs;
+            });
+        if (arrCandidates.length > 0) {
+            return arrCandidates[0];
+        }
+        await sleep(1500);
+    }
+
+    return null;
+}
+
+async function resolveOrderChargeFromDelta(
+    pClient: any,
+    pContractName: string,
+    pOrderPayload: Record<string, unknown>,
+    pSide: string,
+    pQty: number,
+    pPlacedAtIso: string
+): Promise<number | null> {
+    const vPayloadCommission = getOrderLikePaidCommission(pOrderPayload);
+    if (vPayloadCommission !== null) {
+        return vPayloadCommission;
+    }
+
+    const objHistoryRow = await findRecentOrderHistoryRow(
+        pClient,
+        pContractName,
+        getOrderId(pOrderPayload),
+        pSide,
+        pQty,
+        pPlacedAtIso
+    );
+    if (!objHistoryRow) {
+        return null;
+    }
+
+    const vHistoryCommission = Number(objHistoryRow.paid_commission);
+    return Number.isFinite(vHistoryCommission) ? vHistoryCommission : null;
+}
+
+async function resolveTrackedPositionClosePnl(
+    pClient: any,
+    pPosition: RollingFuturesLtImportedPositionRecord,
+    pClosePayload: Record<string, unknown>,
+    pPlacedAtIso: string
+): Promise<number | null> {
+    const vPayloadPnl = getOrderLikeRealizedPnl(pClosePayload);
+    if (Number.isFinite(vPayloadPnl)) {
+        return Number(vPayloadPnl);
+    }
+
+    const vPayloadFillPrice = getOrderLikeAverageFillPrice(pClosePayload);
+    if (Number.isFinite(vPayloadFillPrice)) {
+        return estimateTrackedPositionPnl(pPosition, Number(vPayloadFillPrice));
+    }
+
+    const objHistoryRow = await findRecentOrderHistoryRow(
+        pClient,
+        pPosition.contractName,
+        getOrderId(pClosePayload),
+        String(pPosition.side || "").trim().toUpperCase() === "BUY" ? "SELL" : "BUY",
+        Number(pPosition.qty || 0),
+        pPlacedAtIso
+    );
+    if (!objHistoryRow) {
+        return null;
+    }
+
+    const vHistoryPnl = toFiniteNumber(objHistoryRow.meta_data?.pnl, Number.NaN);
+    if (Number.isFinite(vHistoryPnl)) {
+        return Number(vHistoryPnl);
+    }
+
+    const vHistoryFillPrice = toFiniteNumber(objHistoryRow.average_fill_price, Number.NaN);
+    if (Number.isFinite(vHistoryFillPrice)) {
+        return estimateTrackedPositionPnl(pPosition, Number(vHistoryFillPrice));
+    }
+
+    return null;
 }
 
 async function getDeltaClientForAccountId(pAccountId: string, pProfileId: string) {
@@ -2473,6 +2656,67 @@ async function incrementRecoveredTotalPnl(
     });
 }
 
+function getTrackedPositionMatchKey(
+    pPosition: Pick<RollingFuturesLtImportedPositionRecord, "importId" | "contractName" | "side" | "qty">
+): string {
+    const vImportId = String(pPosition.importId || "").trim();
+    if (vImportId) {
+        return `id::${vImportId}`;
+    }
+    return [
+        String(pPosition.contractName || "").trim().toUpperCase(),
+        String(pPosition.side || "").trim().toUpperCase(),
+        String(Math.max(0, Number(pPosition.qty || 0)))
+    ].join("::");
+}
+
+async function reconcileRemovedTrackedPositionsPnl(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pSavedPositions: RollingFuturesLtImportedPositionRecord[],
+    pLivePositions: RollingFuturesLtImportedPositionRecord[],
+    pReason: string
+): Promise<number> {
+    const arrSaved = Array.isArray(pSavedPositions) ? pSavedPositions : [];
+    const arrLive = Array.isArray(pLivePositions) ? pLivePositions : [];
+    if (!arrSaved.length) {
+        return 0;
+    }
+
+    const objLiveKeys = new Set(arrLive.map((objPosition) => getTrackedPositionMatchKey(objPosition)));
+    const arrRemoved = arrSaved.filter((objPosition) => !objLiveKeys.has(getTrackedPositionMatchKey(objPosition)));
+    if (!arrRemoved.length) {
+        return 0;
+    }
+
+    const arrRemovedContracts = arrRemoved.map((objPosition) => String(objPosition.contractName || "").trim()).filter(Boolean);
+    const vRecoveredPnlDelta = Number(arrRemoved.reduce((pSum, objPosition) => pSum + estimateTrackedPositionPnl(
+        objPosition,
+        Number(objPosition.markPrice || objPosition.entryPrice || 0)
+    ), 0).toFixed(4));
+
+    if (vRecoveredPnlDelta !== 0) {
+        await incrementRecoveredTotalPnl(pUserId, pStrategyCode, vRecoveredPnlDelta, arrLive.length);
+    }
+
+    await logFuturesEvent(
+        pUserId,
+        pStrategyCode,
+        "future_closed",
+        "info",
+        "Tracked Position Removed From Live Book",
+        `Captured realized PnL ${vRecoveredPnlDelta.toFixed(2)} for ${arrRemoved.length} tracked position${arrRemoved.length === 1 ? "" : "s"} removed during live reconciliation.`,
+        {
+            qty: arrRemoved.length,
+            contractName: arrRemovedContracts.join(", "),
+            pnlDelta: vRecoveredPnlDelta,
+            reason: pReason
+        }
+    );
+
+    return vRecoveredPnlDelta;
+}
+
 async function estimateTrackedPositionCharge(
     pPosition: Pick<RollingFuturesLtImportedPositionRecord, "contractName" | "qty" | "entryPrice" | "markPrice">,
     pPriceOverride?: number
@@ -2770,12 +3014,23 @@ async function applyServerSideNeutralityCheck(
                 updatedAt: String(objPlacedHedge.entryTs || new Date().toISOString())
             }
         ]);
-        const vHedgeCharge = await estimateTrackedPositionCharge({
-            contractName: objPlacedHedge.contractName,
-            qty: vHedgeQty,
-            entryPrice: Number(objPlacedHedge.entryPrice || 0),
-            markPrice: Number(objPlacedHedge.entryPrice || 0)
-        });
+        const { client: objChargeClient } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
+        const vResolvedHedgeCharge = await resolveOrderChargeFromDelta(
+            objChargeClient,
+            objPlacedHedge.contractName,
+            objPlacedHedge.order,
+            vHedgeAction,
+            vHedgeQty,
+            String(objPlacedHedge.entryTs || new Date().toISOString())
+        );
+        const vHedgeCharge = vResolvedHedgeCharge !== null
+            ? vResolvedHedgeCharge
+            : await estimateTrackedPositionCharge({
+                contractName: objPlacedHedge.contractName,
+                qty: vHedgeQty,
+                entryPrice: Number(objPlacedHedge.entryPrice || 0),
+                markPrice: Number(objPlacedHedge.entryPrice || 0)
+            });
         await incrementBrokerageRecoveryTotal(pUserId, pStrategyCode, vHedgeCharge, arrSaved.length);
 
         await logFuturesEvent(
@@ -2976,12 +3231,28 @@ async function executeStrategyPlacement(
             updatedAt: new Date().toISOString()
         } satisfies RollingFuturesLtImportedPositionRecord))
     ]);
-    const arrEntryCharges = await Promise.all(arrContracts.map((objContract) => estimateTrackedPositionCharge({
-        contractName: String(objContract.contractSymbol || "").trim(),
-        qty: pInput.qty,
-        entryPrice: Number(objContract.markPrice || 0),
-        markPrice: Number(objContract.markPrice || 0)
-    })));
+    const arrEntryCharges = await Promise.all(arrOrders.map(async (objOrder, pIndex) => {
+        const objContract = arrContracts[pIndex] || {};
+        const vContractName = String(objContract.contractSymbol || "").trim();
+        const vSide = String(pInput.action || "").trim().toUpperCase();
+        const vResolvedCharge = await resolveOrderChargeFromDelta(
+            client,
+            vContractName,
+            (objOrder.order && typeof objOrder.order === "object") ? objOrder.order as Record<string, unknown> : {},
+            vSide,
+            pInput.qty,
+            new Date().toISOString()
+        );
+        if (vResolvedCharge !== null) {
+            return vResolvedCharge;
+        }
+        return estimateTrackedPositionCharge({
+            contractName: vContractName,
+            qty: pInput.qty,
+            entryPrice: Number(objContract.markPrice || 0),
+            markPrice: Number(objContract.markPrice || 0)
+        });
+    }));
     await incrementBrokerageRecoveryTotal(
         pUserId,
         pStrategyCode,
@@ -3017,9 +3288,10 @@ async function closeTrackedPositionOnDelta(
     pUserId: string,
     pSelectedApiProfileId: string,
     pPosition: RollingFuturesLtImportedPositionRecord
-): Promise<void> {
+) : Promise<{ payload: Record<string, unknown>; placedAt: string; realizedPnl: number | null; }> {
     const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
-    await client.apis.Orders.placeOrder({
+    const vPlacedAtIso = new Date().toISOString();
+    const objResponse = await client.apis.Orders.placeOrder({
         order: {
             product_symbol: pPosition.contractName,
             size: Math.max(1, Math.floor(Number(pPosition.qty || 0))),
@@ -3030,6 +3302,12 @@ async function closeTrackedPositionOnDelta(
             reduce_only: true
         }
     });
+    const objPayload = readResponsePayload(objResponse);
+    return {
+        payload: objPayload,
+        placedAt: vPlacedAtIso,
+        realizedPnl: await resolveTrackedPositionClosePnl(client, pPosition, objPayload, vPlacedAtIso)
+    };
 }
 
 async function openTrackedOptionReEntry(
@@ -3149,16 +3427,29 @@ async function applyTriggeredOptionRule(
     pReason: "sl" | "tp",
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
 ): Promise<RollingFuturesLtImportedPositionRecord[]> {
-    await closeTrackedPositionOnDelta(pUserId, pSelectedApiProfileId, pPosition);
+    const objCloseResult = await closeTrackedPositionOnDelta(pUserId, pSelectedApiProfileId, pPosition);
+    const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const objMetadata = getTrackedOptionMetadata(pPosition);
-    const vCloseCharge = await estimateTrackedPositionCharge(
-        pPosition,
-        Number(pPosition.markPrice || pPosition.entryPrice || 0)
+    const vResolvedCloseCharge = await resolveOrderChargeFromDelta(
+        client,
+        pPosition.contractName,
+        objCloseResult.payload,
+        String(pPosition.side || "").trim().toUpperCase() === "BUY" ? "SELL" : "BUY",
+        Number(pPosition.qty || 0),
+        objCloseResult.placedAt
     );
-    const vClosePnl = estimateTrackedPositionPnl(
-        pPosition,
-        Number(pPosition.markPrice || pPosition.entryPrice || 0)
-    );
+    const vCloseCharge = vResolvedCloseCharge !== null
+        ? vResolvedCloseCharge
+        : await estimateTrackedPositionCharge(
+            pPosition,
+            Number(pPosition.markPrice || pPosition.entryPrice || 0)
+        );
+    const vClosePnl = Number.isFinite(Number(objCloseResult.realizedPnl))
+        ? Number(objCloseResult.realizedPnl)
+        : estimateTrackedPositionPnl(
+            pPosition,
+            Number(pPosition.markPrice || pPosition.entryPrice || 0)
+        );
     let arrNextPositions = pTrackedPositions.filter((objRow) => objRow.importId !== pPosition.importId);
 
     await logFuturesEvent(
@@ -3268,14 +3559,8 @@ async function closeTrackedPositionsOnDelta(
     profileLabel: string;
 }> {
     const { client, profile } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
-    const arrCloseCharges = await Promise.all(pPositions.map((objPosition) => estimateTrackedPositionCharge(
-        objPosition,
-        Number(objPosition.markPrice || objPosition.entryPrice || 0)
-    )));
-    const arrClosePnls = pPositions.map((objPosition) => estimateTrackedPositionPnl(
-        objPosition,
-        Number(objPosition.markPrice || objPosition.entryPrice || 0)
-    ));
+    const arrCloseCharges: number[] = [];
+    const arrClosePnls: number[] = [];
     const arrClosed: Array<Record<string, unknown>> = [];
     for (const objPosition of pPositions) {
         const objOrderPayload: Record<string, unknown> = {
@@ -3287,8 +3572,30 @@ async function closeTrackedPositionsOnDelta(
             post_only: false,
             reduce_only: true
         };
+        const vPlacedAtIso = new Date().toISOString();
         const objResponse = await client.apis.Orders.placeOrder({ order: objOrderPayload });
         const objPayload = readResponsePayload(objResponse);
+        const vResolvedCharge = await resolveOrderChargeFromDelta(
+            client,
+            objPosition.contractName,
+            objPayload,
+            String(objPosition.side || "").trim().toUpperCase() === "BUY" ? "SELL" : "BUY",
+            Number(objPosition.qty || 0),
+            vPlacedAtIso
+        );
+        arrCloseCharges.push(vResolvedCharge !== null
+            ? vResolvedCharge
+            : await estimateTrackedPositionCharge(
+                objPosition,
+                Number(objPosition.markPrice || objPosition.entryPrice || 0)
+            ));
+        const vResolvedPnl = await resolveTrackedPositionClosePnl(client, objPosition, objPayload, vPlacedAtIso);
+        arrClosePnls.push(Number.isFinite(Number(vResolvedPnl))
+            ? Number(vResolvedPnl)
+            : estimateTrackedPositionPnl(
+                objPosition,
+                Number(objPosition.markPrice || objPosition.entryPrice || 0)
+            ));
         arrClosed.push({
             importId: objPosition.importId,
             contractName: objPosition.contractName,
@@ -3434,7 +3741,15 @@ async function runAutoTraderCycle(
             return;
         }
 
+        const arrPreviouslySavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
         const arrLivePositions = await fetchLiveFuturePositions(pUserId, pStrategyCode, vSelectedApiProfileId, vSymbol);
+        await reconcileRemovedTrackedPositionsPnl(
+            pUserId,
+            pStrategyCode,
+            arrPreviouslySavedPositions,
+            arrLivePositions,
+            "auto_trader_live_reconcile"
+        );
         let arrSavedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrLivePositions);
         const objScheduledReEntry = getScheduledReEntryState(objRuntime);
         const vRestartProtectionUntil = getRestartCloseProtectionUntil(objRuntime);
@@ -4042,7 +4357,15 @@ async function reconcileOpenPositionsInternal(req: Request, res: Response, pStra
         return;
     }
     try {
+        const arrPreviouslySaved = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
         const arrPositions = await fetchLiveFuturePositions(vUserId, pStrategyCode, vProfileId);
+        await reconcileRemovedTrackedPositionsPnl(
+            vUserId,
+            pStrategyCode,
+            arrPreviouslySaved,
+            arrPositions,
+            "manual_open_positions_reconcile"
+        );
         const objProfile = await readLiveProfile(vUserId, pStrategyCode);
         const objUiState = getMergedUiState(objProfile);
         const vBaseDelta = Math.max(0, Number(objUiState.newD1 || 0.53));
@@ -4105,11 +4428,19 @@ async function closeImportedOpenPositionInternal(req: Request, res: Response, pS
         return;
     }
     try {
+        const arrPreviouslySaved = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
         const arrLivePositions = await fetchLiveFuturePositions(vUserId, pStrategyCode, vSelectedApiProfileId);
         const objLivePosition = arrLivePositions.find((objRow) => String(objRow.importId || "").trim() === vImportId)
             || arrLivePositions.find((objRow) => String(objRow.contractName || "").trim() === vContractName);
 
         if (!objLivePosition) {
+            await reconcileRemovedTrackedPositionsPnl(
+                vUserId,
+                pStrategyCode,
+                arrPreviouslySaved,
+                arrLivePositions,
+                "manual_imported_position_missing_before_close"
+            );
             if (vImportId) {
                 await deleteRollingFuturesLtImportedPosition(vUserId, pStrategyCode, vImportId);
             }
@@ -4150,6 +4481,7 @@ async function closeImportedOpenPositionInternal(req: Request, res: Response, pS
             post_only: false,
             reduce_only: true
         };
+        const vPlacedAtIso = new Date().toISOString();
         const objResponse = await client.apis.Orders.placeOrder({ order: objOrderPayload });
         const objPayload = readResponsePayload(objResponse);
         if (vImportId) {
@@ -4157,14 +4489,27 @@ async function closeImportedOpenPositionInternal(req: Request, res: Response, pS
         }
         const arrLatestLivePositions = await fetchLiveFuturePositions(vUserId, pStrategyCode, vSelectedApiProfileId);
         const arrRemainingSaved = await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, arrLatestLivePositions);
-        const vCloseCharge = await estimateTrackedPositionCharge(
-            objLivePosition,
-            Number(objLivePosition.markPrice || objLivePosition.entryPrice || 0)
+        const vResolvedCloseCharge = await resolveOrderChargeFromDelta(
+            client,
+            String(objLivePosition.contractName || vContractName).trim(),
+            objPayload,
+            vCloseSide.toUpperCase(),
+            vLiveQty,
+            vPlacedAtIso
         );
-        const vClosePnl = estimateTrackedPositionPnl(
-            objLivePosition,
-            Number(objLivePosition.markPrice || objLivePosition.entryPrice || 0)
-        );
+        const vCloseCharge = vResolvedCloseCharge !== null
+            ? vResolvedCloseCharge
+            : await estimateTrackedPositionCharge(
+                objLivePosition,
+                Number(objLivePosition.markPrice || objLivePosition.entryPrice || 0)
+            );
+        const vResolvedClosePnl = await resolveTrackedPositionClosePnl(client, objLivePosition, objPayload, vPlacedAtIso);
+        const vClosePnl = Number.isFinite(Number(vResolvedClosePnl))
+            ? Number(vResolvedClosePnl)
+            : estimateTrackedPositionPnl(
+                objLivePosition,
+                Number(objLivePosition.markPrice || objLivePosition.entryPrice || 0)
+            );
         await incrementBrokerageRecoveryTotal(vUserId, pStrategyCode, vCloseCharge, arrRemainingSaved.length);
         await incrementRecoveredTotalPnl(vUserId, pStrategyCode, vClosePnl, arrRemainingSaved.length);
         await logFuturesEvent(
@@ -4188,10 +4533,18 @@ async function closeImportedOpenPositionInternal(req: Request, res: Response, pS
     }
     catch (objError) {
         try {
+            const arrPreviouslySaved = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
             const arrLatestLivePositions = await fetchLiveFuturePositions(vUserId, pStrategyCode, vSelectedApiProfileId);
             const objStillLive = arrLatestLivePositions.find((objRow) => String(objRow.importId || "").trim() === vImportId)
                 || arrLatestLivePositions.find((objRow) => String(objRow.contractName || "").trim() === vContractName);
             if (!objStillLive) {
+                await reconcileRemovedTrackedPositionsPnl(
+                    vUserId,
+                    pStrategyCode,
+                    arrPreviouslySaved,
+                    arrLatestLivePositions,
+                    "manual_imported_position_close_verified_closed"
+                );
                 if (vImportId) {
                     await deleteRollingFuturesLtImportedPosition(vUserId, pStrategyCode, vImportId);
                 }
@@ -4283,7 +4636,7 @@ async function executeManualFutureInternal(req: Request, res: Response, pStrateg
 
     gManualFutureOrderLocks.add(vLockKey);
     try {
-        const { profile } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
+        const { client, profile } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
         const objPlacedOrder = await placeManagedManualFutureOrder(
             vUserId,
             vSelectedApiProfileId,
@@ -4302,12 +4655,22 @@ async function executeManualFutureInternal(req: Request, res: Response, pStrateg
             ...arrPreserved,
             ...arrTrackedPositions
         ]);
-        const vEntryCharge = await estimateTrackedPositionCharge({
-            contractName: objPlacedOrder.contractName,
-            qty: vQty,
-            entryPrice: Number(objPlacedOrder.entryPrice || 0),
-            markPrice: Number(objPlacedOrder.entryPrice || 0)
-        });
+        const vResolvedEntryCharge = await resolveOrderChargeFromDelta(
+            client,
+            objPlacedOrder.contractName,
+            objPlacedOrder.order,
+            vAction,
+            vQty,
+            String(objPlacedOrder.entryTs || new Date().toISOString())
+        );
+        const vEntryCharge = vResolvedEntryCharge !== null
+            ? vResolvedEntryCharge
+            : await estimateTrackedPositionCharge({
+                contractName: objPlacedOrder.contractName,
+                qty: vQty,
+                entryPrice: Number(objPlacedOrder.entryPrice || 0),
+                markPrice: Number(objPlacedOrder.entryPrice || 0)
+            });
         const bFilled = objPlacedOrder.filled;
         if (bFilled) {
             await incrementBrokerageRecoveryTotal(vUserId, pStrategyCode, vEntryCharge, arrSaved.length);
@@ -4512,12 +4875,22 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
                 updatedAt: new Date().toISOString()
             } satisfies RollingFuturesLtImportedPositionRecord
         ]);
-        const vEntryCharge = await estimateTrackedPositionCharge({
-            contractName: String(objContract.contractSymbol || "").trim(),
-            qty: vQty,
-            entryPrice: Number(objContract.markPrice || 0),
-            markPrice: Number(objContract.markPrice || 0)
-        });
+        const vResolvedEntryCharge = await resolveOrderChargeFromDelta(
+            client,
+            String(objContract.contractSymbol || "").trim(),
+            objPayload.result && typeof objPayload.result === "object" ? objPayload.result as Record<string, unknown> : objPayload,
+            vAction.toUpperCase(),
+            vQty,
+            new Date().toISOString()
+        );
+        const vEntryCharge = vResolvedEntryCharge !== null
+            ? vResolvedEntryCharge
+            : await estimateTrackedPositionCharge({
+                contractName: String(objContract.contractSymbol || "").trim(),
+                qty: vQty,
+                entryPrice: Number(objContract.markPrice || 0),
+                markPrice: Number(objContract.markPrice || 0)
+            });
         await incrementBrokerageRecoveryTotal(vUserId, pStrategyCode, vEntryCharge, arrSaved.length);
 
         await logFuturesEvent(
@@ -4855,14 +5228,8 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
     }
     try {
         const { client, profile } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
-        const arrCloseCharges = await Promise.all(arrPositions.map((objPosition) => estimateTrackedPositionCharge(
-            objPosition,
-            Number(objPosition.markPrice || objPosition.entryPrice || 0)
-        )));
-        const arrClosePnls = arrPositions.map((objPosition) => estimateTrackedPositionPnl(
-            objPosition,
-            Number(objPosition.markPrice || objPosition.entryPrice || 0)
-        ));
+        const arrCloseCharges: number[] = [];
+        const arrClosePnls: number[] = [];
         const arrClosed: Array<Record<string, unknown>> = [];
         for (const objPosition of arrPositions) {
             const objOrderPayload: Record<string, unknown> = {
@@ -4874,8 +5241,30 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
                 post_only: false,
                 reduce_only: true
             };
+            const vPlacedAtIso = new Date().toISOString();
             const objResponse = await client.apis.Orders.placeOrder({ order: objOrderPayload });
             const objPayload = readResponsePayload(objResponse);
+            const vResolvedCharge = await resolveOrderChargeFromDelta(
+                client,
+                objPosition.contractName,
+                objPayload,
+                String(objPosition.side || "").trim().toUpperCase() === "BUY" ? "SELL" : "BUY",
+                Number(objPosition.qty || 0),
+                vPlacedAtIso
+            );
+            arrCloseCharges.push(vResolvedCharge !== null
+                ? vResolvedCharge
+                : await estimateTrackedPositionCharge(
+                    objPosition,
+                    Number(objPosition.markPrice || objPosition.entryPrice || 0)
+                ));
+            const vResolvedPnl = await resolveTrackedPositionClosePnl(client, objPosition, objPayload, vPlacedAtIso);
+            arrClosePnls.push(Number.isFinite(Number(vResolvedPnl))
+                ? Number(vResolvedPnl)
+                : estimateTrackedPositionPnl(
+                    objPosition,
+                    Number(objPosition.markPrice || objPosition.entryPrice || 0)
+                ));
             arrClosed.push({
                 importId: objPosition.importId,
                 contractName: objPosition.contractName,
