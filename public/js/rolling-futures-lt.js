@@ -349,9 +349,7 @@
         if (!(ids.optionExpiryMode instanceof HTMLSelectElement) || !(ids.optionExpiryDate instanceof HTMLInputElement)) {
             return;
         }
-        if (!force && String(ids.optionExpiryDate.value || "").trim()) {
-            return;
-        }
+        void force;
         const resolvedDate = resolveExpiryDateByMode(ids.optionExpiryMode.value);
         const formattedDate = formatDateInputValue(resolvedDate);
         if (formattedDate) {

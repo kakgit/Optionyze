@@ -459,20 +459,8 @@ function resolveRollingFuturesExpiryDateByMode(pExpiryMode: string): string {
 }
 
 function normalizeRollingFuturesExpiryDate(pExpiryMode: string, pExpiryDate: unknown): string {
-    const vSavedDate = String(pExpiryDate || "").trim();
-    if (!vSavedDate) {
-        return resolveRollingFuturesExpiryDateByMode(pExpiryMode);
-    }
-    const objSavedDate = new Date(`${vSavedDate}T00:00:00Z`);
-    if (Number.isNaN(objSavedDate.getTime())) {
-        return resolveRollingFuturesExpiryDateByMode(pExpiryMode);
-    }
-    const objToday = new Date();
-    const objTodayUtc = new Date(Date.UTC(objToday.getUTCFullYear(), objToday.getUTCMonth(), objToday.getUTCDate()));
-    if (objSavedDate.getTime() < objTodayUtc.getTime()) {
-        return resolveRollingFuturesExpiryDateByMode(pExpiryMode);
-    }
-    return vSavedDate;
+    void pExpiryDate;
+    return resolveRollingFuturesExpiryDateByMode(pExpiryMode);
 }
 
 function getManualFutureOrderLockKey(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): string {
