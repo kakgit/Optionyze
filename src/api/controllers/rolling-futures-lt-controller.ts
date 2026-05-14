@@ -2658,6 +2658,19 @@ function getTrackedPositionMatchKey(
     ].join("::");
 }
 
+function getTrackedPositionIdentityKey(
+    pPosition: Pick<RollingFuturesLtImportedPositionRecord, "importId" | "contractName" | "side">
+): string {
+    const vImportId = String(pPosition.importId || "").trim();
+    if (vImportId) {
+        return `id::${vImportId}`;
+    }
+    return [
+        String(pPosition.contractName || "").trim().toUpperCase(),
+        String(pPosition.side || "").trim().toUpperCase()
+    ].join("::");
+}
+
 async function reconcileRemovedTrackedPositionsPnl(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -2673,12 +2686,33 @@ async function reconcileRemovedTrackedPositionsPnl(
 
     const objLiveKeys = new Set(arrLive.map((objPosition) => getTrackedPositionMatchKey(objPosition)));
     const arrRemoved = arrSaved.filter((objPosition) => !objLiveKeys.has(getTrackedPositionMatchKey(objPosition)));
-    if (!arrRemoved.length) {
+    const objLiveByIdentity = new Map<string, RollingFuturesLtImportedPositionRecord>();
+    arrLive.forEach((objPosition) => {
+        objLiveByIdentity.set(getTrackedPositionIdentityKey(objPosition), objPosition);
+    });
+    const arrReduced = arrSaved.flatMap((objPosition) => {
+        const objLiveMatch = objLiveByIdentity.get(getTrackedPositionIdentityKey(objPosition));
+        if (!objLiveMatch) {
+            return [];
+        }
+        const vSavedQty = Math.max(0, Number(objPosition.qty || 0));
+        const vLiveQty = Math.max(0, Number(objLiveMatch.qty || 0));
+        if (!(vSavedQty > vLiveQty)) {
+            return [];
+        }
+        return [{
+            ...objPosition,
+            qty: Number((vSavedQty - vLiveQty).toFixed(8)),
+            markPrice: Number(objLiveMatch.markPrice || objPosition.markPrice || objPosition.entryPrice || 0)
+        } satisfies RollingFuturesLtImportedPositionRecord];
+    });
+    const arrRealizedSlices = [...arrRemoved, ...arrReduced];
+    if (!arrRealizedSlices.length) {
         return 0;
     }
 
-    const arrRemovedContracts = arrRemoved.map((objPosition) => String(objPosition.contractName || "").trim()).filter(Boolean);
-    const vRecoveredPnlDelta = Number(arrRemoved.reduce((pSum, objPosition) => pSum + estimateTrackedPositionPnl(
+    const arrRemovedContracts = arrRealizedSlices.map((objPosition) => String(objPosition.contractName || "").trim()).filter(Boolean);
+    const vRecoveredPnlDelta = Number(arrRealizedSlices.reduce((pSum, objPosition) => pSum + estimateTrackedPositionPnl(
         objPosition,
         Number(objPosition.markPrice || objPosition.entryPrice || 0)
     ), 0).toFixed(4));
@@ -2692,10 +2726,12 @@ async function reconcileRemovedTrackedPositionsPnl(
         pStrategyCode,
         "future_closed",
         "info",
-        "Tracked Position Removed From Live Book",
-        `Captured realized PnL ${vRecoveredPnlDelta.toFixed(2)} for ${arrRemoved.length} tracked position${arrRemoved.length === 1 ? "" : "s"} removed during live reconciliation.`,
+        "Tracked Futures Realized During Reconciliation",
+        `Captured realized PnL ${vRecoveredPnlDelta.toFixed(2)} for ${arrRealizedSlices.length} tracked futures slice${arrRealizedSlices.length === 1 ? "" : "s"} removed or reduced during live reconciliation.`,
         {
-            qty: arrRemoved.length,
+            qty: arrRealizedSlices.length,
+            removedCount: arrRemoved.length,
+            reducedCount: arrReduced.length,
             contractName: arrRemovedContracts.join(", "),
             pnlDelta: vRecoveredPnlDelta,
             reason: pReason
@@ -2983,25 +3019,24 @@ async function applyServerSideNeutralityCheck(
             vHedgeQty,
             "market_order"
         );
-        const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, [
-            ...pTrackedPositions,
-            {
-                userId: pUserId,
-                strategyCode: pStrategyCode,
-                importId: crypto.randomUUID(),
-                contractName: objPlacedHedge.contractName,
-                side: vHedgeAction,
-                qty: vHedgeQty,
-                entryPrice: Number(objPlacedHedge.entryPrice || 0),
-                markPrice: Number(objPlacedHedge.entryPrice || 0),
-                charges: 0,
-                pnl: 0,
-                margin: 0,
-                liquidationPrice: 0,
-                openedAt: String(objPlacedHedge.entryTs || new Date().toISOString()),
-                updatedAt: String(objPlacedHedge.entryTs || new Date().toISOString())
-            }
-        ]);
+        const arrLiveAfterHedge = await fetchLiveFuturePositions(
+            pUserId,
+            pStrategyCode,
+            pSelectedApiProfileId,
+            pSymbol
+        );
+        await reconcileRemovedTrackedPositionsPnl(
+            pUserId,
+            pStrategyCode,
+            pTrackedPositions,
+            arrLiveAfterHedge,
+            "neutrality_hedge"
+        );
+        const arrSaved = await replaceRollingFuturesLtImportedPositions(
+            pUserId,
+            pStrategyCode,
+            arrLiveAfterHedge
+        );
         const { client: objChargeClient } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
         const vResolvedHedgeCharge = await resolveOrderChargeFromDelta(
             objChargeClient,
@@ -3859,7 +3894,6 @@ async function runAutoTraderCycle(
                 vSelectedApiProfileId,
                 arrSavedPositions
             );
-            await resetRecoveryMetrics(pUserId, pStrategyCode);
             const vRunAt = objProfitRule.reEnterEnabled
                 ? new Date(Date.now() + gProfitCloseReEntryCooldownMs).toISOString()
                 : "";
