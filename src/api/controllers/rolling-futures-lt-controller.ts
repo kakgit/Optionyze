@@ -3341,7 +3341,11 @@ async function openTrackedOptionReEntry(
     pClosedPosition: RollingFuturesLtImportedPositionRecord,
     pMetadata: RollingFuturesLtOptionMetadata,
     pReason: "sl" | "tp"
-): Promise<RollingFuturesLtImportedPositionRecord | null> {
+): Promise<{
+    position: RollingFuturesLtImportedPositionRecord;
+    orderPayload: Record<string, unknown>;
+    placedAt: string;
+} | null> {
     const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const objUiState = getMergedUiState(pProfile);
     const vSymbol = normalizeSymbolValue(objUiState.symbol);
@@ -3401,7 +3405,8 @@ async function openTrackedOptionReEntry(
         return null;
     }
 
-    await client.apis.Orders.placeOrder({
+    const vPlacedAtIso = new Date().toISOString();
+    const objReEntryResponse = await client.apis.Orders.placeOrder({
         order: {
             product_symbol: objContract.contractSymbol,
             size: Math.max(1, Math.floor(Number(pClosedPosition.qty || 1))),
@@ -3412,31 +3417,36 @@ async function openTrackedOptionReEntry(
             reduce_only: false
         }
     });
+    const objReEntryPayload = readResponsePayload(objReEntryResponse);
 
     return {
-        userId: pUserId,
-        strategyCode: pStrategyCode,
-        importId: crypto.randomUUID(),
-        contractName: String(objContract.contractSymbol || "").trim(),
-        side: String(pClosedPosition.side || "").trim().toUpperCase(),
-        qty: Math.max(1, Math.floor(Number(pClosedPosition.qty || 1))),
-        entryPrice: Number(objContract.markPrice || 0),
-        markPrice: Number(objContract.markPrice || 0),
-        charges: 0,
-        pnl: 0,
-        margin: 0,
-        liquidationPrice: 0,
-        metadata: optionMetadataToRecord({
-            baseDelta: vAbsoluteDelta,
-            baseTheta: Math.abs(Number(objContract.theta || 0)),
-            takeProfitDelta: Math.max(0, Number(pMetadata.takeProfitDelta || objUiState.tpD1 || 0.25)),
-            stopLossDelta: Math.max(0, Number(pMetadata.stopLossDelta || objUiState.slD1 || 0.65)),
-            reEntryDelta: vTargetDelta,
-            reEnterEnabled: Boolean(pMetadata.reEnterEnabled),
-            openedReason: pReason === "sl" ? "sl_reentry" : "tp_reentry"
-        }),
-        openedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        position: {
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            importId: crypto.randomUUID(),
+            contractName: String(objContract.contractSymbol || "").trim(),
+            side: String(pClosedPosition.side || "").trim().toUpperCase(),
+            qty: Math.max(1, Math.floor(Number(pClosedPosition.qty || 1))),
+            entryPrice: Number(objContract.markPrice || 0),
+            markPrice: Number(objContract.markPrice || 0),
+            charges: 0,
+            pnl: 0,
+            margin: 0,
+            liquidationPrice: 0,
+            metadata: optionMetadataToRecord({
+                baseDelta: vAbsoluteDelta,
+                baseTheta: Math.abs(Number(objContract.theta || 0)),
+                takeProfitDelta: Math.max(0, Number(pMetadata.takeProfitDelta || objUiState.tpD1 || 0.25)),
+                stopLossDelta: Math.max(0, Number(pMetadata.stopLossDelta || objUiState.slD1 || 0.65)),
+                reEntryDelta: vTargetDelta,
+                reEnterEnabled: Boolean(pMetadata.reEnterEnabled),
+                openedReason: pReason === "sl" ? "sl_reentry" : "tp_reentry"
+            }),
+            openedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        },
+        orderPayload: objReEntryPayload,
+        placedAt: vPlacedAtIso
     };
 }
 
@@ -3447,6 +3457,7 @@ async function applyTriggeredOptionRule(
     pProfile: RollingFuturesLtProfileRecord,
     pPosition: RollingFuturesLtImportedPositionRecord,
     pCurrentDelta: number,
+    pCurrentMarkPrice: number | null,
     pReason: "sl" | "tp",
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
 ): Promise<RollingFuturesLtImportedPositionRecord[]> {
@@ -3471,7 +3482,9 @@ async function applyTriggeredOptionRule(
         ? Number(objCloseResult.realizedPnl)
         : estimateTrackedPositionPnl(
             pPosition,
-            Number(pPosition.markPrice || pPosition.entryPrice || 0)
+            Number.isFinite(Number(pCurrentMarkPrice))
+                ? Number(pCurrentMarkPrice)
+                : Number(pPosition.markPrice || pPosition.entryPrice || 0)
         );
     let arrNextPositions = pTrackedPositions.filter((objRow) => objRow.importId !== pPosition.importId);
 
@@ -3501,8 +3514,18 @@ async function applyTriggeredOptionRule(
             pReason
         );
         if (objReEntry) {
-            arrNextPositions = [...arrNextPositions, objReEntry];
-            const vReEntryCharge = await estimateTrackedPositionCharge(objReEntry);
+            arrNextPositions = [...arrNextPositions, objReEntry.position];
+            const vResolvedReEntryCharge = await resolveOrderChargeFromDelta(
+                client,
+                objReEntry.position.contractName,
+                objReEntry.orderPayload,
+                objReEntry.position.side,
+                Number(objReEntry.position.qty || 0),
+                objReEntry.placedAt
+            );
+            const vReEntryCharge = vResolvedReEntryCharge !== null
+                ? vResolvedReEntryCharge
+                : await estimateTrackedPositionCharge(objReEntry.position);
             await incrementBrokerageRecoveryTotal(
                 pUserId,
                 pStrategyCode,
@@ -3516,10 +3539,10 @@ async function applyTriggeredOptionRule(
                 "reentry_opened",
                 "success",
                 "Option Re-Entry Opened",
-                `Opened replacement option ${objReEntry.contractName} after ${pReason.toUpperCase()} using Re D ${Number(objMetadata.reEntryDelta || 0).toFixed(2)}.`,
+                `Opened replacement option ${objReEntry.position.contractName} after ${pReason.toUpperCase()} using Re D ${Number(objMetadata.reEntryDelta || 0).toFixed(2)}.`,
                 {
-                    contractName: objReEntry.contractName,
-                    qty: objReEntry.qty,
+                    contractName: objReEntry.position.contractName,
+                    qty: objReEntry.position.qty,
                     reason: pReason
                 }
             );
@@ -3543,6 +3566,7 @@ async function findTriggeredTrackedOption(
 ): Promise<{
     position: RollingFuturesLtImportedPositionRecord;
     currentDelta: number;
+    currentMarkPrice: number | null;
     reason: "sl" | "tp";
 } | null> {
     for (const objPosition of pTrackedPositions) {
@@ -3565,6 +3589,7 @@ async function findTriggeredTrackedOption(
             return {
                 position: objPosition,
                 currentDelta: vCurrentDelta,
+                currentMarkPrice: Number.isFinite(Number(objTicker?.markPrice)) ? Number(objTicker?.markPrice) : null,
                 reason: objDecision.reason
             };
         }
@@ -3875,6 +3900,7 @@ async function runAutoTraderCycle(
                 objProfile,
                 objTriggeredOption.position,
                 objTriggeredOption.currentDelta,
+                objTriggeredOption.currentMarkPrice,
                 objTriggeredOption.reason,
                 arrSavedPositions
             );
