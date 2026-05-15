@@ -1032,10 +1032,10 @@
                     <div class="rolling-futures-neutral-item">
                         <label class="rolling-futures-neutral-mode" for="chkRollingFuturesGammaAwareNeutral">
                             <input type="checkbox" id="chkRollingFuturesGammaAwareNeutral" />
-                            <span>Gamma-Aware Delta Neutral</span>
+                            <span>Scaled Delta Neutral</span>
                         </label>
                         <div class="rolling-futures-neutral-help">
-                            Uses combined-book drift % and tightens faster as portfolio gamma rises. Safe monthly start: <code>-10</code> / <code>+10</code>.
+                            Uses combined-book drift % with a stable floor from the original CE+PE entry size, so the same % settings scale better across expiries and lot sizes.
                         </div>
                     </div>
                 </div>

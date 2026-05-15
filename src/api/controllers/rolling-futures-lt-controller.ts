@@ -97,6 +97,7 @@ const gOptionReentryPendingMs = 5000;
 const gProfitCloseReEntryCooldownMs = 5 * 60 * 1000;
 const gRestartCloseProtectionMs = 5 * 60 * 1000;
 const gNeutralityHedgeCooldownMs = 2 * 60 * 1000;
+const gDualScaledBaselineFloorRatio = 0.25;
 const gDeltaUiTimezoneOffsetMinutes = 5.5 * 60;
 const gManualFutureOrderLocks = new Set<string>();
 const gManualOptionOrderLocks = new Set<string>();
@@ -168,6 +169,8 @@ interface RollingFuturesLtNeutralStatus {
     maxDelta: number | null;
     deltaDriftPct: number | null;
     baseOptionDeltaAbs: number | null;
+    effectiveBaseOptionDeltaAbs: number | null;
+    baselineFloorDeltaAbs: number | null;
     gammaFactor: number | null;
     deltaBalanceTone: "secondary" | "success" | "danger";
     deltaBalanceText: string;
@@ -207,6 +210,17 @@ interface RollingFuturesLtAccountSummarySnapshot {
 
 function getAccountId(req: Request): string {
     return String(req.authAccount?.accountId || "").trim();
+}
+
+function isDualRollingFuturesStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
+    return pStrategyCode === "rolling-futures-lt-dual";
+}
+
+function isDualScaledNeutralMode(
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pMode: "none" | "delta" | "range" | "gamma"
+): boolean {
+    return isDualRollingFuturesStrategy(pStrategyCode) && pMode === "gamma";
 }
 
 async function readLiveProfile(
@@ -1754,6 +1768,7 @@ async function enrichTrackedOpenPositions(
 }
 
 function buildNeutralStatus(
+    pStrategyCode: RollingFuturesLtStrategyCode,
     pUiState: Record<string, unknown>,
     pTotals: RollingFuturesLtOpenPositionTotals,
     pAutoTraderEnabled: boolean,
@@ -1769,6 +1784,8 @@ function buildNeutralStatus(
             maxDelta: null,
             deltaDriftPct: null,
             baseOptionDeltaAbs: null,
+            effectiveBaseOptionDeltaAbs: null,
+            baselineFloorDeltaAbs: null,
             gammaFactor: null,
             deltaBalanceTone: "secondary",
             deltaBalanceText: "Balance: Mode OFF"
@@ -1782,45 +1799,58 @@ function buildNeutralStatus(
     const vTotalGamma = Number(pTotals.totalGamma || 0);
     const objDeltaBaseline = getDeltaNeutralBaselineState(pRuntime);
     const vBaseOptionDeltaAbs = objDeltaBaseline.baseOptionDeltaAbs;
-    const bPctDriftMode = vMode === "delta" || vMode === "gamma";
-    const vDeltaDriftPct = bPctDriftMode && vBaseOptionDeltaAbs > 0
-        ? Number(((vTotalDelta / vBaseOptionDeltaAbs) * 100).toFixed(6))
+    const bDualScaledMode = isDualScaledNeutralMode(pStrategyCode, vMode);
+    const vBaselineFloorDeltaAbs = bDualScaledMode && objDeltaBaseline.entryOptionDeltaAbs > 0
+        ? Number((objDeltaBaseline.entryOptionDeltaAbs * gDualScaledBaselineFloorRatio).toFixed(6))
         : null;
-    const vGammaFactorValue = vMode === "gamma"
+    const vEffectiveBaseOptionDeltaAbs = bDualScaledMode
+        ? Number(Math.max(vBaseOptionDeltaAbs, Number(vBaselineFloorDeltaAbs || 0)).toFixed(6))
+        : vBaseOptionDeltaAbs;
+    const bPctDriftMode = vMode === "delta" || vMode === "gamma";
+    const vDeltaDriftPct = bPctDriftMode && vEffectiveBaseOptionDeltaAbs > 0
+        ? Number(((vTotalDelta / vEffectiveBaseOptionDeltaAbs) * 100).toFixed(6))
+        : null;
+    const vGammaFactorValue = vMode === "gamma" && !bDualScaledMode
         ? getGammaAwareCompressionFactor(vTotalGamma)
         : 0;
-    const vGammaFactor = vMode === "gamma" ? vGammaFactorValue : null;
-    const vGammaMinDelta = vMode === "gamma" && vGammaFactorValue > 0
+    const vGammaFactor = vMode === "gamma" && !bDualScaledMode ? vGammaFactorValue : null;
+    const vGammaMinDelta = vMode === "gamma" && !bDualScaledMode && vGammaFactorValue > 0
         ? Number((vMinDelta / vGammaFactorValue).toFixed(6))
         : null;
-    const vGammaMaxDelta = vMode === "gamma" && vGammaFactorValue > 0
+    const vGammaMaxDelta = vMode === "gamma" && !bDualScaledMode && vGammaFactorValue > 0
         ? Number((vMaxDelta / vGammaFactorValue).toFixed(6))
         : null;
 
     let vDeltaBalanceTone: RollingFuturesLtNeutralStatus["deltaBalanceTone"] = "secondary";
     let vDeltaBalanceText = "Balance: Mode OFF";
     if (vMode === "delta" || vMode === "gamma") {
-        if (!(vBaseOptionDeltaAbs > 0) || !Number.isFinite(Number(vDeltaDriftPct))) {
+        if (!(vEffectiveBaseOptionDeltaAbs > 0) || !Number.isFinite(Number(vDeltaDriftPct))) {
             vDeltaBalanceTone = "secondary";
-            vDeltaBalanceText = "Balance: Waiting for hedge baseline";
+            vDeltaBalanceText = bDualScaledMode
+                ? "Balance: Waiting for scaled baseline"
+                : "Balance: Waiting for hedge baseline";
         }
         else {
             const vSafeDriftPct = Number(vDeltaDriftPct);
-            const vActiveMin = vMode === "gamma" && Number.isFinite(vGammaMinDelta) ? Number(vGammaMinDelta) : vMinDelta;
-            const vActiveMax = vMode === "gamma" && Number.isFinite(vGammaMaxDelta) ? Number(vGammaMaxDelta) : vMaxDelta;
+            const vActiveMin = vMode === "gamma" && !bDualScaledMode && Number.isFinite(vGammaMinDelta) ? Number(vGammaMinDelta) : vMinDelta;
+            const vActiveMax = vMode === "gamma" && !bDualScaledMode && Number.isFinite(vGammaMaxDelta) ? Number(vGammaMaxDelta) : vMaxDelta;
             if (vSafeDriftPct >= vActiveMin && vSafeDriftPct <= vActiveMax) {
                 const vHeadroom = Math.min(vSafeDriftPct - vActiveMin, vActiveMax - vSafeDriftPct);
                 vDeltaBalanceTone = "success";
-                vDeltaBalanceText = vMode === "gamma"
+                vDeltaBalanceText = bDualScaledMode
+                    ? `Balance: Scaled-safe (${vHeadroom.toFixed(2)}% left)`
+                    : (vMode === "gamma"
                     ? `Balance: Gamma-safe (${vHeadroom.toFixed(2)}% left)`
-                    : `Balance: Balanced (${vHeadroom.toFixed(2)}% left)`;
+                    : `Balance: Balanced (${vHeadroom.toFixed(2)}% left)`);
             }
             else {
                 const vOverBy = vSafeDriftPct < vActiveMin ? (vActiveMin - vSafeDriftPct) : (vSafeDriftPct - vActiveMax);
                 vDeltaBalanceTone = "danger";
-                vDeltaBalanceText = vMode === "gamma"
+                vDeltaBalanceText = bDualScaledMode
+                    ? `Balance: Scaled hedge (${Math.abs(vOverBy).toFixed(2)}% over)`
+                    : (vMode === "gamma"
                     ? `Balance: Gamma hedge (${Math.abs(vOverBy).toFixed(2)}% over)`
-                    : `Balance: Hedge Trigger (${Math.abs(vOverBy).toFixed(2)}% over)`;
+                    : `Balance: Hedge Trigger (${Math.abs(vOverBy).toFixed(2)}% over)`);
             }
         }
     }
@@ -1846,15 +1876,17 @@ function buildNeutralStatus(
             ? vMinDelta
             : (vMode === "range"
                 ? vMinDelta
-                : (vMode === "gamma" && Number.isFinite(vGammaMinDelta) ? Number(vGammaMinDelta) : null)),
+                : (vMode === "gamma" && !bDualScaledMode && Number.isFinite(vGammaMinDelta) ? Number(vGammaMinDelta) : vMinDelta)),
         maxDelta: vMode === "delta"
             ? vMaxDelta
             : (vMode === "range"
                 ? vMaxDelta
-                : (vMode === "gamma" && Number.isFinite(vGammaMaxDelta) ? Number(vGammaMaxDelta) : null)),
+                : (vMode === "gamma" && !bDualScaledMode && Number.isFinite(vGammaMaxDelta) ? Number(vGammaMaxDelta) : vMaxDelta)),
         deltaDriftPct: bPctDriftMode && Number.isFinite(Number(vDeltaDriftPct)) ? Number(vDeltaDriftPct) : null,
         baseOptionDeltaAbs: bPctDriftMode && vBaseOptionDeltaAbs > 0 ? Number(vBaseOptionDeltaAbs.toFixed(6)) : null,
-        gammaFactor: vMode === "gamma" && Number.isFinite(Number(vGammaFactor)) ? Number(vGammaFactor) : null,
+        effectiveBaseOptionDeltaAbs: bPctDriftMode && vEffectiveBaseOptionDeltaAbs > 0 ? Number(vEffectiveBaseOptionDeltaAbs.toFixed(6)) : null,
+        baselineFloorDeltaAbs: bDualScaledMode && Number(vBaselineFloorDeltaAbs || 0) > 0 ? Number(vBaselineFloorDeltaAbs) : null,
+        gammaFactor: vMode === "gamma" && !bDualScaledMode && Number.isFinite(Number(vGammaFactor)) ? Number(vGammaFactor) : null,
         deltaBalanceTone: vDeltaBalanceTone,
         deltaBalanceText: vDeltaBalanceText
     };
@@ -1890,7 +1922,7 @@ async function buildOpenPositionsPayload(
     return {
         positions: objEnriched.positions,
         totals: objEnriched.totals,
-        neutralStatus: buildNeutralStatus(objUiState, objEnriched.totals, bAutoTraderActive, objRuntime),
+        neutralStatus: buildNeutralStatus(pStrategyCode, objUiState, objEnriched.totals, bAutoTraderActive, objRuntime),
         recoveryMetrics: {
             totalBrokerageToRecover: Number(vEffectiveBrokerageTotal.toFixed(4)),
             totalPnl: Number(vRecoveredTotalPnl.toFixed(4)),
@@ -2367,6 +2399,7 @@ function getGammaAwareCompressionFactor(pTotalGamma: number): number {
 
 function getDeltaNeutralBaselineState(pRuntime: RollingFuturesLtRuntimeRecord | null): {
     baseOptionDeltaAbs: number;
+    entryOptionDeltaAbs: number;
     lastHedgeAt: string;
 } {
     const objState = (pRuntime?.state || {}) as Record<string, unknown>;
@@ -2374,9 +2407,11 @@ function getDeltaNeutralBaselineState(pRuntime: RollingFuturesLtRuntimeRecord | 
         ? objState.deltaNeutralBaseline as Record<string, unknown>
         : {};
     const vBaseOptionDeltaAbs = Math.abs(Number(objBaseline.baseOptionDeltaAbs || 0));
+    const vEntryOptionDeltaAbs = Math.abs(Number(objBaseline.entryOptionDeltaAbs || 0));
     const vLastHedgeAt = String(objBaseline.lastHedgeAt || "").trim();
     return {
         baseOptionDeltaAbs: Number.isFinite(vBaseOptionDeltaAbs) ? vBaseOptionDeltaAbs : 0,
+        entryOptionDeltaAbs: Number.isFinite(vEntryOptionDeltaAbs) ? vEntryOptionDeltaAbs : 0,
         lastHedgeAt: vLastHedgeAt
     };
 }
@@ -2384,12 +2419,19 @@ function getDeltaNeutralBaselineState(pRuntime: RollingFuturesLtRuntimeRecord | 
 function buildRuntimeStateWithDeltaNeutralBaseline(
     pRuntime: RollingFuturesLtRuntimeRecord | null,
     pBaseOptionDeltaAbs: number | null,
-    pLastHedgeAt = ""
+    pLastHedgeAt = "",
+    pEntryOptionDeltaAbs: number | null = null
 ): Record<string, unknown> {
     const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    const objExistingBaseline = getDeltaNeutralBaselineState(pRuntime);
     const vBaseOptionDeltaAbs = Math.abs(Number(pBaseOptionDeltaAbs || 0));
+    const vEntryOptionDeltaAbs = Math.abs(Number(
+        pEntryOptionDeltaAbs === null
+            ? objExistingBaseline.entryOptionDeltaAbs
+            : pEntryOptionDeltaAbs || 0
+    ));
     const vLastHedgeAt = String(pLastHedgeAt || "").trim();
-    if (!(vBaseOptionDeltaAbs > 0)) {
+    if (!(vBaseOptionDeltaAbs > 0) && !(vEntryOptionDeltaAbs > 0)) {
         if (!vLastHedgeAt) {
             delete objState.deltaNeutralBaseline;
             return objState;
@@ -2400,7 +2442,12 @@ function buildRuntimeStateWithDeltaNeutralBaseline(
         return objState;
     }
     objState.deltaNeutralBaseline = {
-        baseOptionDeltaAbs: Number(vBaseOptionDeltaAbs.toFixed(6)),
+        ...(vBaseOptionDeltaAbs > 0
+            ? { baseOptionDeltaAbs: Number(vBaseOptionDeltaAbs.toFixed(6)) }
+            : {}),
+        ...(vEntryOptionDeltaAbs > 0
+            ? { entryOptionDeltaAbs: Number(vEntryOptionDeltaAbs.toFixed(6)) }
+            : {}),
         lastHedgeAt: vLastHedgeAt
     };
     return objState;
@@ -2898,9 +2945,19 @@ async function applyServerSideNeutralityCheck(
         || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const objTotals = await calculateTrackedNeutralTotals(pTrackedPositions);
     const objDeltaBaseline = getDeltaNeutralBaselineState(objRuntimeBase);
+    const bDualScaledMode = isDualScaledNeutralMode(pStrategyCode, vMode);
     const vBaselineOptionDeltaAbs = objDeltaBaseline.baseOptionDeltaAbs > 0
         ? objDeltaBaseline.baseOptionDeltaAbs
         : objTotals.optionDeltaAbs;
+    const vEntryOptionDeltaAbs = objDeltaBaseline.entryOptionDeltaAbs > 0
+        ? objDeltaBaseline.entryOptionDeltaAbs
+        : objTotals.optionDeltaAbs;
+    const vScaledBaselineFloorAbs = bDualScaledMode && vEntryOptionDeltaAbs > 0
+        ? Number((vEntryOptionDeltaAbs * gDualScaledBaselineFloorRatio).toFixed(6))
+        : 0;
+    const vEffectiveBaselineOptionDeltaAbs = bDualScaledMode
+        ? Number(Math.max(vBaselineOptionDeltaAbs, vScaledBaselineFloorAbs).toFixed(6))
+        : vBaselineOptionDeltaAbs;
     const vLastHedgeAtMs = Number.isFinite(new Date(objDeltaBaseline.lastHedgeAt).getTime())
         ? new Date(objDeltaBaseline.lastHedgeAt).getTime()
         : 0;
@@ -2918,15 +2975,15 @@ async function applyServerSideNeutralityCheck(
     if (vMode === "none") {
         return {
             trackedOpenPositions: pTrackedPositions,
-            hedgePlaced: false,
-            totalDelta: objTotals.totalDelta,
-            totalTheta: objTotals.totalTheta,
-            mode: vMode,
-            threshold: null,
-            nextRuntimeState: buildRuntimeStateWithNeutralityHedgePending({
-                ...objRuntimeBase,
-                state: buildRuntimeStateWithDeltaNeutralBaseline(objRuntimeBase, null)
-            }, "")
+                hedgePlaced: false,
+                totalDelta: objTotals.totalDelta,
+                totalTheta: objTotals.totalTheta,
+                mode: vMode,
+                threshold: null,
+                nextRuntimeState: buildRuntimeStateWithNeutralityHedgePending({
+                    ...objRuntimeBase,
+                    state: buildRuntimeStateWithDeltaNeutralBaseline(objRuntimeBase, null)
+                }, "")
         };
     }
 
@@ -2936,13 +2993,18 @@ async function applyServerSideNeutralityCheck(
     if (vMode === "delta") {
         const vNegThresholdPct = Number.isFinite(Number(pUiState.minusDelta)) ? Number(pUiState.minusDelta) : -25;
         const vPosThresholdPct = Number.isFinite(Number(pUiState.plusDelta)) ? Number(pUiState.plusDelta) : 25;
-        const vDriftPct = vBaselineOptionDeltaAbs > 0
-            ? Number(((objTotals.totalDelta / vBaselineOptionDeltaAbs) * 100).toFixed(6))
+        const vDriftPct = vEffectiveBaselineOptionDeltaAbs > 0
+            ? Number(((objTotals.totalDelta / vEffectiveBaselineOptionDeltaAbs) * 100).toFixed(6))
             : 0;
         vThreshold = null;
-        bShouldHedge = vBaselineOptionDeltaAbs > 0
+        bShouldHedge = vEffectiveBaselineOptionDeltaAbs > 0
             && (vDriftPct < vNegThresholdPct || vDriftPct > vPosThresholdPct);
-        objNextRuntimeState = buildRuntimeStateWithDeltaNeutralBaseline(objRuntimeBase, vBaselineOptionDeltaAbs, objDeltaBaseline.lastHedgeAt);
+        objNextRuntimeState = buildRuntimeStateWithDeltaNeutralBaseline(
+            objRuntimeBase,
+            vBaselineOptionDeltaAbs,
+            objDeltaBaseline.lastHedgeAt,
+            vEntryOptionDeltaAbs
+        );
     }
     else if (vMode === "range") {
         const vMinDelta = Number.isFinite(Number(pUiState.minusDelta)) ? Number(pUiState.minusDelta) : -25;
@@ -2954,16 +3016,21 @@ async function applyServerSideNeutralityCheck(
     else {
         const vNegThresholdPct = Number.isFinite(Number(pUiState.minusDelta)) ? Number(pUiState.minusDelta) : -25;
         const vPosThresholdPct = Number.isFinite(Number(pUiState.plusDelta)) ? Number(pUiState.plusDelta) : 25;
-        const vGammaFactor = getGammaAwareCompressionFactor(objTotals.totalGamma);
+        const vGammaFactor = bDualScaledMode ? 1 : getGammaAwareCompressionFactor(objTotals.totalGamma);
         const vGammaNegThresholdPct = Number((vNegThresholdPct / vGammaFactor).toFixed(6));
         const vGammaPosThresholdPct = Number((vPosThresholdPct / vGammaFactor).toFixed(6));
-        const vDriftPct = vBaselineOptionDeltaAbs > 0
-            ? Number(((objTotals.totalDelta / vBaselineOptionDeltaAbs) * 100).toFixed(6))
+        const vDriftPct = vEffectiveBaselineOptionDeltaAbs > 0
+            ? Number(((objTotals.totalDelta / vEffectiveBaselineOptionDeltaAbs) * 100).toFixed(6))
             : 0;
         vThreshold = null;
-        bShouldHedge = vBaselineOptionDeltaAbs > 0
+        bShouldHedge = vEffectiveBaselineOptionDeltaAbs > 0
             && (vDriftPct < vGammaNegThresholdPct || vDriftPct > vGammaPosThresholdPct);
-        objNextRuntimeState = buildRuntimeStateWithDeltaNeutralBaseline(objRuntimeBase, vBaselineOptionDeltaAbs, objDeltaBaseline.lastHedgeAt);
+        objNextRuntimeState = buildRuntimeStateWithDeltaNeutralBaseline(
+            objRuntimeBase,
+            vBaselineOptionDeltaAbs,
+            objDeltaBaseline.lastHedgeAt,
+            vEntryOptionDeltaAbs
+        );
     }
 
     const vHedgeQty = Math.round(Math.abs(objTotals.totalDelta));
@@ -3228,8 +3295,16 @@ async function applyServerSideNeutralityCheck(
         const objPostHedgeTotals = await calculateTrackedNeutralTotals(arrSaved);
         const objRuntimeAfterHedge = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
             || objLatestRuntime;
+        const objRuntimeBaselineAfterHedge = getDeltaNeutralBaselineState(objRuntimeAfterHedge);
         const objBaselineState = vMode === "delta" || vMode === "gamma"
-            ? buildRuntimeStateWithDeltaNeutralBaseline(objRuntimeAfterHedge, objPostHedgeTotals.optionDeltaAbs, vHedgePlacedAt)
+            ? buildRuntimeStateWithDeltaNeutralBaseline(
+                objRuntimeAfterHedge,
+                objPostHedgeTotals.optionDeltaAbs,
+                vHedgePlacedAt,
+                objRuntimeBaselineAfterHedge.entryOptionDeltaAbs > 0
+                    ? objRuntimeBaselineAfterHedge.entryOptionDeltaAbs
+                    : objPostHedgeTotals.optionDeltaAbs
+            )
             : buildRuntimeStateWithDeltaNeutralBaseline(objRuntimeAfterHedge, null, vHedgePlacedAt);
         const objNextState = buildRuntimeStateWithNeutralityHedgePending({
             ...objRuntimeAfterHedge,
@@ -3441,6 +3516,21 @@ async function executeStrategyPlacement(
             arrInitialSaved,
             null
         );
+    if (objNeutralCheck.nextRuntimeState) {
+        const objRuntimeAfterExec = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+            || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+        await saveRollingFuturesLtRuntime({
+            ...objRuntimeAfterExec,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            selectedApiProfileId: pSelectedApiProfileId,
+            currentSymbol: pInput.symbol,
+            state: {
+                ...((objRuntimeAfterExec.state || {}) as Record<string, unknown>),
+                ...objNeutralCheck.nextRuntimeState
+            }
+        });
+    }
 
     return {
         profileLabel: profile.referenceName || profile.apiKey || "",

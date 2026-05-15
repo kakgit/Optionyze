@@ -428,12 +428,25 @@
         const driftPct = Number(status.deltaDriftPct);
         const gammaFactor = Number(status.gammaFactor);
         const totalGamma = Number(status.totalGamma || 0);
+        const baseDelta = Number(status.baseOptionDeltaAbs);
+        const effectiveBaseDelta = Number(status.effectiveBaseOptionDeltaAbs);
+        const baselineFloorDelta = Number(status.baselineFloorDeltaAbs);
         if (status.mode === "range") {
             return Number.isFinite(minDelta) && Number.isFinite(maxDelta)
                 ? `Range: ${fmt(minDelta, 3)} to ${fmt(maxDelta, 3)}`
                 : "Range: 0.000 to 0.000";
         }
         if (status.mode === "gamma") {
+            if (mode === "dual") {
+                const bandText = Number.isFinite(minDelta) && Number.isFinite(maxDelta)
+                    ? `${fmt(minDelta, 2)}% to ${fmt(maxDelta, 2)}%`
+                    : "0.00% to 0.00%";
+                const driftText = Number.isFinite(driftPct) ? fmt(driftPct, 2) : "0.00";
+                const baseText = Number.isFinite(baseDelta) ? fmt(baseDelta, 3) : "0.000";
+                const floorText = Number.isFinite(baselineFloorDelta) ? fmt(baselineFloorDelta, 3) : "0.000";
+                const effectiveText = Number.isFinite(effectiveBaseDelta) ? fmt(effectiveBaseDelta, 3) : "0.000";
+                return `Scaled Drift: ${driftText}% | Trigger: ${bandText} | Base: ${baseText} | Floor: ${floorText} | Eff: ${effectiveText}`;
+            }
             const bandText = Number.isFinite(minDelta) && Number.isFinite(maxDelta)
                 ? `${fmt(minDelta, 2)}% to ${fmt(maxDelta, 2)}%`
                 : "0.00% to 0.00%";
