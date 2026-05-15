@@ -1682,13 +1682,13 @@ async function enrichTrackedOpenPositions(
         const vDisplayDeltaSigned = vDisplayDeltaMagnitude * vDisplayDeltaDirection;
         const vDisplayThetaCurrentTotal = bIsFuture
             ? 0
-            : Math.abs(Number.isFinite(vThetaRaw) ? (vThetaRaw * vLotSize) * vQty : 0);
+            : Math.abs(Number.isFinite(vThetaRaw) ? vThetaRaw : 0);
         const vBaseThetaRaw = Math.abs(Number.isFinite(Number(objMetadata.baseTheta))
             ? Number(objMetadata.baseTheta)
             : (Number.isFinite(vThetaRaw) ? vThetaRaw : 0));
         const vDisplayThetaBaseTotal = bIsFuture
             ? 0
-            : Math.abs((vBaseThetaRaw * vLotSize) * vQty);
+            : Math.abs(vBaseThetaRaw);
         const vCharges = estimateLivePositionCharges(
             vContractName,
             vQty,
@@ -1920,6 +1920,53 @@ async function buildOpenPositionsPayload(
         ? Math.max(vRuntimeBrokerageTotal, vOpenPositionCharges)
         : vRuntimeBrokerageTotal;
     const vRecoveredTotalPnl = getRecoveredTotalPnl(objRuntime);
+    const objOpenPnlSnapshot = getOpenPnlSnapshotState(objRuntime);
+    const arrCurrentPositionKeys = arrPositions.map((pPosition) => getTrackedPositionIdentityKey(pPosition));
+    const vCurrentOpenPnl = Number(objEnriched.totals.totalPnl || 0);
+    const bAllOpenPositionPnlsZero = objEnriched.positions.length > 0
+        && objEnriched.positions.every((pPosition) => Math.abs(Number(pPosition.pnl || 0)) < 0.000001);
+    const bSameSnapshotPositions = areSameTrackedPositionKeys(arrCurrentPositionKeys, objOpenPnlSnapshot.positionKeys);
+    const vSnapshotAgeMs = Number.isFinite(new Date(objOpenPnlSnapshot.capturedAt).getTime())
+        ? (Date.now() - new Date(objOpenPnlSnapshot.capturedAt).getTime())
+        : Number.POSITIVE_INFINITY;
+    const bRecentNonZeroSnapshot = Math.abs(Number(objOpenPnlSnapshot.totalPnl || 0)) >= 0.0001
+        && vSnapshotAgeMs >= 0
+        && vSnapshotAgeMs <= 2 * 60 * 1000;
+    const bSuspiciousOpenPnlZero = objEnriched.positions.length > 0
+        && bAllOpenPositionPnlsZero
+        && bSameSnapshotPositions
+        && bRecentNonZeroSnapshot;
+    const vEffectiveOpenPnl = bSuspiciousOpenPnlZero
+        ? Number(objOpenPnlSnapshot.totalPnl || 0)
+        : vCurrentOpenPnl;
+    if (!arrCurrentPositionKeys.length) {
+        if (objOpenPnlSnapshot.positionKeys.length) {
+            await saveRollingFuturesLtRuntime({
+                ...(objRuntime || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                state: buildRuntimeStateWithOpenPnlSnapshot(objRuntime, null)
+            });
+        }
+    }
+    else if (Number.isFinite(vCurrentOpenPnl) && !bSuspiciousOpenPnlZero) {
+        const vRoundedCurrentOpenPnl = Number(vCurrentOpenPnl.toFixed(4));
+        const bSnapshotChanged = Number(objOpenPnlSnapshot.totalPnl || 0) !== vRoundedCurrentOpenPnl
+            || !bSameSnapshotPositions;
+        if (bSnapshotChanged) {
+            await saveRollingFuturesLtRuntime({
+                ...(objRuntime || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                state: buildRuntimeStateWithOpenPnlSnapshot(
+                    objRuntime,
+                    vRoundedCurrentOpenPnl,
+                    arrCurrentPositionKeys,
+                    new Date().toISOString()
+                )
+            });
+        }
+    }
     return {
         positions: objEnriched.positions,
         totals: objEnriched.totals,
@@ -1927,7 +1974,7 @@ async function buildOpenPositionsPayload(
         recoveryMetrics: {
             totalBrokerageToRecover: Number(vEffectiveBrokerageTotal.toFixed(4)),
             totalPnl: Number(vRecoveredTotalPnl.toFixed(4)),
-            netPnl: Number((vRecoveredTotalPnl + Number(objEnriched.totals.totalPnl || 0) - vEffectiveBrokerageTotal).toFixed(4))
+            netPnl: Number((vRecoveredTotalPnl + vEffectiveOpenPnl - vEffectiveBrokerageTotal).toFixed(4))
         }
     };
 }
@@ -2626,6 +2673,61 @@ function buildRuntimeStateWithRecoveredTotalPnl(
     const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
     objState.recoveredTotalPnl = Number(Number(pTotal || 0).toFixed(4));
     return objState;
+}
+
+function getOpenPnlSnapshotState(pRuntime: RollingFuturesLtRuntimeRecord | null): {
+    totalPnl: number;
+    capturedAt: string;
+    positionKeys: string[];
+} {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    const vTotalPnl = Number(objState.lastOpenPnlSnapshotTotal || 0);
+    const vCapturedAt = String(objState.lastOpenPnlSnapshotAt || "").trim();
+    const arrPositionKeys = Array.isArray(objState.lastOpenPnlSnapshotKeys)
+        ? objState.lastOpenPnlSnapshotKeys
+            .map((pValue) => String(pValue || "").trim())
+            .filter((pValue) => Boolean(pValue))
+        : [];
+    return {
+        totalPnl: Number.isFinite(vTotalPnl) ? Number(vTotalPnl.toFixed(4)) : 0,
+        capturedAt: vCapturedAt,
+        positionKeys: arrPositionKeys
+    };
+}
+
+function buildRuntimeStateWithOpenPnlSnapshot(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pTotalPnl: number | null,
+    pPositionKeys: string[] = [],
+    pCapturedAt = ""
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    const vTotalPnl = Number(pTotalPnl || 0);
+    const arrPositionKeys = Array.isArray(pPositionKeys)
+        ? pPositionKeys
+            .map((pValue) => String(pValue || "").trim())
+            .filter((pValue) => Boolean(pValue))
+        : [];
+    const vCapturedAt = String(pCapturedAt || "").trim();
+    if (!Number.isFinite(vTotalPnl) || !arrPositionKeys.length || !vCapturedAt) {
+        delete objState.lastOpenPnlSnapshotTotal;
+        delete objState.lastOpenPnlSnapshotAt;
+        delete objState.lastOpenPnlSnapshotKeys;
+        return objState;
+    }
+    objState.lastOpenPnlSnapshotTotal = Number(vTotalPnl.toFixed(4));
+    objState.lastOpenPnlSnapshotAt = vCapturedAt;
+    objState.lastOpenPnlSnapshotKeys = arrPositionKeys;
+    return objState;
+}
+
+function areSameTrackedPositionKeys(pLeft: string[], pRight: string[]): boolean {
+    if (pLeft.length !== pRight.length) {
+        return false;
+    }
+    const arrLeft = [...pLeft].sort();
+    const arrRight = [...pRight].sort();
+    return arrLeft.every((pValue, pIndex) => pValue === arrRight[pIndex]);
 }
 
 function normalizeRollingFuturesSelectedTelegramEventTypes(pValue: unknown): string[] {
