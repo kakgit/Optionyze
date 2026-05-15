@@ -539,11 +539,24 @@ function normalizeRollingFuturesLegSelection(pValue: unknown, pFallback: string)
     return vValue === "pe" ? "pe" : "ce";
 }
 
+function getCurrentDeltaUiDateTimeLocalString(): string {
+    const vNowUtcMs = Date.now();
+    const vUiMs = vNowUtcMs + (gDeltaUiTimezoneOffsetMinutes * 60 * 1000);
+    const objUiDate = new Date(vUiMs);
+    const vYear = objUiDate.getUTCFullYear();
+    const vMonth = String(objUiDate.getUTCMonth() + 1).padStart(2, "0");
+    const vDay = String(objUiDate.getUTCDate()).padStart(2, "0");
+    const vHour = String(objUiDate.getUTCHours()).padStart(2, "0");
+    const vMinute = String(objUiDate.getUTCMinutes()).padStart(2, "0");
+    return `${vYear}-${vMonth}-${vDay}T${vHour}:${vMinute}`;
+}
+
 function getDefaultManualTraderUiState(
     pStrategyCode: RollingFuturesLtStrategyCode
 ): Record<string, unknown> {
     const bIsShort = pStrategyCode === "rolling-futures-lt-short";
     const bIsDual = pStrategyCode === "rolling-futures-lt-dual";
+    const vClosedFromDate = getCurrentDeltaUiDateTimeLocalString();
     return {
         startQty: "1",
         symbol: "BTC",
@@ -571,7 +584,7 @@ function getDefaultManualTraderUiState(
         blockedMarginPct: bIsDual ? "10" : "20",
         reEnterBlock: bIsDual,
         telegramAlertTypes: [],
-        closedFromDate: "",
+        closedFromDate: vClosedFromDate,
         closedToDate: ""
     };
 }
@@ -614,6 +627,15 @@ function getTrackedOptionMetadata(pPosition: RollingFuturesLtImportedPositionRec
         : {};
 }
 
+function getSignedOptionBaseDelta(pContractName: unknown, pDeltaValue: unknown): number {
+    const vMagnitude = Math.abs(Number(pDeltaValue || 0));
+    if (!Number.isFinite(vMagnitude) || !(vMagnitude > 0)) {
+        return 0;
+    }
+    const vContractName = String(pContractName || "").trim().toUpperCase();
+    return vContractName.startsWith("P-") ? -vMagnitude : vMagnitude;
+}
+
 function optionMetadataToRecord(pMetadata: RollingFuturesLtOptionMetadata): Record<string, unknown> {
     return {
         baseDelta: pMetadata.baseDelta,
@@ -631,14 +653,48 @@ function hasMissingTrackedOptionBaseGreeks(pPosition: RollingFuturesLtImportedPo
         return false;
     }
     const objMetadata = getTrackedOptionMetadata(pPosition);
-    return !(Number(objMetadata.baseDelta) > 0) || !Number.isFinite(Number(objMetadata.baseTheta));
+    return !(Math.abs(Number(objMetadata.baseDelta)) > 0) || !Number.isFinite(Number(objMetadata.baseTheta));
+}
+
+function normalizeTrackedOptionBaseDeltaSigns(
+    pPositions: RollingFuturesLtImportedPositionRecord[]
+): {
+    positions: RollingFuturesLtImportedPositionRecord[];
+    changed: boolean;
+} {
+    let bChanged = false;
+    const arrNormalized = pPositions.map((objPosition) => {
+        if (!isOptionContractSymbol(objPosition.contractName)) {
+            return objPosition;
+        }
+        const objMetadata = getTrackedOptionMetadata(objPosition);
+        const vCurrentBaseDelta = Number(objMetadata.baseDelta || 0);
+        if (!Number.isFinite(vCurrentBaseDelta) || !(Math.abs(vCurrentBaseDelta) > 0)) {
+            return objPosition;
+        }
+        const vSignedBaseDelta = getSignedOptionBaseDelta(objPosition.contractName, vCurrentBaseDelta);
+        if (vSignedBaseDelta === vCurrentBaseDelta) {
+            return objPosition;
+        }
+        bChanged = true;
+        return {
+            ...objPosition,
+            metadata: optionMetadataToRecord({
+                ...objMetadata,
+                baseDelta: vSignedBaseDelta
+            })
+        };
+    });
+    return {
+        positions: arrNormalized,
+        changed: bChanged
+    };
 }
 
 function applyImportedBaseDelta(
     pPositions: RollingFuturesLtImportedPositionRecord[],
     pBaseDelta: number
 ): RollingFuturesLtImportedPositionRecord[] {
-    const vBaseDelta = Math.max(0, Number(pBaseDelta || 0));
     return pPositions.map((objPosition) => {
         if (!isOptionContractSymbol(objPosition.contractName)) {
             return objPosition;
@@ -648,7 +704,7 @@ function applyImportedBaseDelta(
             ...objPosition,
             metadata: optionMetadataToRecord({
                 ...objMetadata,
-                baseDelta: vBaseDelta
+                baseDelta: getSignedOptionBaseDelta(objPosition.contractName, pBaseDelta)
             })
         };
     });
@@ -681,7 +737,10 @@ async function applyImportedOptionBaseGreeks(
         const vContractName = String(objPosition.contractName || "").trim();
         const objTicker = objTickerByContract.get(vContractName);
         const objMetadata = getTrackedOptionMetadata(objPosition);
-        const vBaseDelta = Math.abs(Number.isFinite(Number(objTicker?.delta)) ? Number(objTicker?.delta) : vFallbackDelta);
+        const vBaseDelta = getSignedOptionBaseDelta(
+            vContractName,
+            Number.isFinite(Number(objTicker?.delta)) ? Number(objTicker?.delta) : vFallbackDelta
+        );
         const vBaseTheta = Math.abs(Number.isFinite(Number(objTicker?.theta)) ? Number(objTicker?.theta) : 0);
         return {
             ...objPosition,
@@ -1582,7 +1641,9 @@ async function enrichTrackedOpenPositions(
         const bIsFuture = isFutureContractSymbol(vContractName);
         const objTicker = bIsFuture ? null : (objTickerByContract.get(vContractName) || null);
         const objMetadata = getTrackedOptionMetadata(objPosition);
-        const vDeltaRaw = bIsFuture ? 1 : Number(objTicker?.delta || 0);
+        const vDeltaRaw = bIsFuture
+            ? 1
+            : getSignedOptionBaseDelta(vContractName, Number(objTicker?.delta || 0));
         const vGammaRaw = bIsFuture ? 0 : Number(objTicker?.gamma || 0);
         const vThetaRaw = bIsFuture ? 0 : Number(objTicker?.theta || 0);
         const vVegaRaw = bIsFuture ? 0 : Number(objTicker?.vega || 0);
@@ -1593,13 +1654,17 @@ async function enrichTrackedOpenPositions(
         const vLotSize = getLotSizeForSymbol(vPositionSymbol);
         const vUnderlyingPrice = Number(objUnderlyingPriceBySymbol.get(vPositionSymbol) || 0);
         const vThetaPerContractScaled = Number.isFinite(vThetaRaw) ? (vThetaRaw * (bIsFuture ? 1 : vLotSize)) : 0;
-        const vDisplayDelta = bIsFuture
+        const vDisplayDeltaMagnitude = bIsFuture
             ? 1
             : Math.max(0, Number(
                 Number.isFinite(Number(objMetadata.baseDelta))
-                    ? objMetadata.baseDelta
-                    : (Number.isFinite(vDeltaRaw) ? vDeltaRaw : 0)
+                    ? Math.abs(Number(objMetadata.baseDelta))
+                    : (Number.isFinite(vDeltaRaw) ? Math.abs(vDeltaRaw) : 0)
             ));
+        const vDisplayDeltaDirection = bIsFuture
+            ? 1
+            : (vContractName.startsWith("P-") ? -1 : 1);
+        const vDisplayDeltaSigned = vDisplayDeltaMagnitude * vDisplayDeltaDirection;
         const vDisplayThetaCurrentTotal = bIsFuture
             ? 0
             : Math.abs(Number.isFinite(vThetaRaw) ? (vThetaRaw * vLotSize) * vQty : 0);
@@ -1626,8 +1691,8 @@ async function enrichTrackedOpenPositions(
         const objGreeks: RollingFuturesLtPositionGreeks = {
             deltaPerContract: Number((vSideMultiplier * (Number.isFinite(vDeltaRaw) ? vDeltaRaw : 0)).toFixed(6)),
             deltaTotal: Number((vSideMultiplier * (Number.isFinite(vDeltaRaw) ? vDeltaRaw : 0) * vQty).toFixed(6)),
-            deltaDisplayPerContract: Number((vSideMultiplier * vDisplayDelta).toFixed(6)),
-            deltaDisplayTotal: Number((vSideMultiplier * vDisplayDelta * vQty).toFixed(6)),
+            deltaDisplayPerContract: Number((vSideMultiplier * vDisplayDeltaSigned).toFixed(6)),
+            deltaDisplayTotal: Number((vSideMultiplier * vDisplayDeltaSigned * vQty).toFixed(6)),
             gammaPerContract: Number((vSideMultiplier * (Number.isFinite(vGammaRaw) ? vGammaRaw : 0)).toFixed(6)),
             gammaTotal: Number((vSideMultiplier * (Number.isFinite(vGammaRaw) ? vGammaRaw : 0)).toFixed(6)),
             thetaPerContract: Number((vSideMultiplier * vThetaPerContractScaled).toFixed(6)),
@@ -1804,6 +1869,11 @@ async function buildOpenPositionsPayload(
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const objUiState = getMergedUiState(objProfile);
     let arrPositions = pPositions || await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    const objNormalizedBaseDeltaSigns = normalizeTrackedOptionBaseDeltaSigns(arrPositions);
+    if (objNormalizedBaseDeltaSigns.changed) {
+        arrPositions = objNormalizedBaseDeltaSigns.positions;
+        await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrPositions);
+    }
     if (arrPositions.some(hasMissingTrackedOptionBaseGreeks)) {
         arrPositions = await applyImportedOptionBaseGreeks(arrPositions, Number(objUiState.newD1 || 0));
         await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrPositions);
@@ -3327,7 +3397,7 @@ async function executeStrategyPlacement(
             liquidationPrice: 0,
             metadata: optionMetadataToRecord({
                 ...objOptionMetadata,
-                baseDelta: Math.abs(Number(objContract.delta || 0)),
+                baseDelta: getSignedOptionBaseDelta(String(objContract.contractSymbol || "").trim(), Number(objContract.delta || 0)),
                 baseTheta: Math.abs(Number(objContract.theta || 0))
             }),
             openedAt: new Date().toISOString(),
@@ -3514,7 +3584,7 @@ async function openTrackedOptionReEntry(
             margin: 0,
             liquidationPrice: 0,
             metadata: optionMetadataToRecord({
-                baseDelta: vAbsoluteDelta,
+                baseDelta: getSignedOptionBaseDelta(String(objContract.contractSymbol || "").trim(), vAbsoluteDelta),
                 baseTheta: Math.abs(Number(objContract.theta || 0)),
                 takeProfitDelta: Math.max(0, Number(pMetadata.takeProfitDelta || objUiState.tpD1 || 0.25)),
                 stopLossDelta: Math.max(0, Number(pMetadata.stopLossDelta || objUiState.slD1 || 0.65)),
@@ -5030,7 +5100,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
                 liquidationPrice: 0,
                 metadata: optionMetadataToRecord({
                     ...objOptionMetadata,
-                    baseDelta: vAbsoluteDelta,
+                    baseDelta: getSignedOptionBaseDelta(String(objContract.contractSymbol || "").trim(), vAbsoluteDelta),
                     baseTheta: Math.abs(Number(objContract.theta || 0))
                 }),
                 openedAt: new Date().toISOString(),

@@ -202,9 +202,20 @@
         }
     }
 
+    function formatCurrentDateTimeLocalValue() {
+        const dateValue = new Date();
+        const yearValue = dateValue.getFullYear();
+        const monthValue = String(dateValue.getMonth() + 1).padStart(2, "0");
+        const dayValue = String(dateValue.getDate()).padStart(2, "0");
+        const hourValue = String(dateValue.getHours()).padStart(2, "0");
+        const minuteValue = String(dateValue.getMinutes()).padStart(2, "0");
+        return `${yearValue}-${monthValue}-${dayValue}T${hourValue}:${minuteValue}`;
+    }
+
     function getDefaultUiState() {
         const isLong = mode === "long";
         const isDual = mode === "dual";
+        const closedFromDate = formatCurrentDateTimeLocalValue();
         return {
             startQty: "1",
             symbol: "BTC",
@@ -235,7 +246,7 @@
             rangeDeltaNeutral: false,
             gammaAwareNeutral: false,
             telegramAlertTypes: [],
-            closedFromDate: "",
+            closedFromDate: closedFromDate,
             closedToDate: ""
         };
     }
