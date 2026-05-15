@@ -94,6 +94,7 @@ const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
 const gFutureLimitRetryDelayMs = 5000;
 const gFutureLimitRetryCount = 5;
 const gOptionReentryPendingMs = 5000;
+const gProfitClosePauseAfterOptionRuleMs = 15000;
 const gProfitCloseReEntryCooldownMs = 5 * 60 * 1000;
 const gRestartCloseProtectionMs = 5 * 60 * 1000;
 const gNeutralityHedgeCooldownMs = 2 * 60 * 1000;
@@ -2491,6 +2492,25 @@ function buildRuntimeStateWithOptionReentryPending(
     return objState;
 }
 
+function getProfitClosePauseUntil(pRuntime: RollingFuturesLtRuntimeRecord | null): string {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    return String(objState.profitClosePauseUntil || "").trim();
+}
+
+function buildRuntimeStateWithProfitClosePause(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pPauseUntil = ""
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    const vPauseUntil = String(pPauseUntil || "").trim();
+    if (!vPauseUntil) {
+        delete objState.profitClosePauseUntil;
+        return objState;
+    }
+    objState.profitClosePauseUntil = vPauseUntil;
+    return objState;
+}
+
 function getNeutralityHedgeSkipAuditState(pRuntime: RollingFuturesLtRuntimeRecord | null): {
     reason: string;
     loggedAt: string;
@@ -3743,6 +3763,19 @@ async function applyTriggeredOptionRule(
         }
     );
 
+    const vProfitClosePauseUntil = new Date(Date.now() + gProfitClosePauseAfterOptionRuleMs).toISOString();
+    const objRuntimeBeforeProfitPause = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    await saveRollingFuturesLtRuntime({
+        ...objRuntimeBeforeProfitPause,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        state: buildRuntimeStateWithProfitClosePause(
+            objRuntimeBeforeProfitPause,
+            vProfitClosePauseUntil
+        )
+    });
+
     if (Boolean(objMetadata.reEnterEnabled)) {
         const vOptionReentryPendingUntil = new Date(Date.now() + gOptionReentryPendingMs).toISOString();
         const objRuntimeBeforeReEntry = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
@@ -4180,6 +4213,22 @@ async function runAutoTraderCycle(
             );
         }
 
+        const objRuntimeBeforeProfitRule = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+            || objRuntime;
+        const vProfitClosePauseUntil = getProfitClosePauseUntil(objRuntimeBeforeProfitRule);
+        const bProfitClosePauseActive = Boolean(arrSavedPositions.length)
+            && !!vProfitClosePauseUntil
+            && Number.isFinite(new Date(vProfitClosePauseUntil).getTime())
+            && new Date(vProfitClosePauseUntil).getTime() > Date.now();
+        if (!arrSavedPositions.length && vProfitClosePauseUntil) {
+            await saveRollingFuturesLtRuntime({
+                ...objRuntimeBeforeProfitRule,
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                state: buildRuntimeStateWithProfitClosePause(objRuntimeBeforeProfitRule, "")
+            });
+        }
+
         const objOpenPositionsBeforeNeutrality = await buildOpenPositionsPayload(
             pUserId,
             pStrategyCode,
@@ -4187,7 +4236,7 @@ async function runAutoTraderCycle(
         );
         const objSummary = await fetchAccountSummarySnapshot(pUserId, vSelectedApiProfileId, vSymbol);
         const objProfitRule = getProfitCloseRule(objUiState, objOpenPositionsBeforeNeutrality, objSummary);
-        if (!bRestartCloseProtectionActive && objProfitRule.triggered && arrSavedPositions.length) {
+        if (!bRestartCloseProtectionActive && !bProfitClosePauseActive && objProfitRule.triggered && arrSavedPositions.length) {
             const objClosed = await closeTrackedPositionsOnDelta(
                 pUserId,
                 pStrategyCode,
