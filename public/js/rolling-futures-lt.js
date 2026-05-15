@@ -221,29 +221,29 @@
             symbol: "BTC",
             manualFutOrderType: "market_order",
             bsFutQty: "1",
-            minusDelta: isDual ? "-10" : "-15",
-            plusDelta: isDual ? "10" : "20",
+            minusDelta: isDual ? "-25" : "-15",
+            plusDelta: isDual ? "25" : "20",
             action1: "sell",
             legs1: mode === "dual" ? "both" : (mode === "short" ? "pe" : "ce"),
             onlyDeltaNeutral: false,
             rangeDeltaNeutral: false,
             gammaAwareNeutral: false,
-            expiryMode1: isDual ? "6" : "5",
+            expiryMode1: isDual ? "5" : "5",
             expiryDate1: "",
             qty1: "1",
-            newD1: isDual ? "0.25" : (isLong ? "0.65" : "0.65"),
-            reD1: isDual ? "0.25" : (isLong ? "0.65" : "0.65"),
-            tpD1: isDual ? "0.12" : (isLong ? "0.30" : "0.30"),
-            slD1: isDual ? "0.50" : (isLong ? "0.80" : "0.80"),
+            newD1: isDual ? "0.65" : (isLong ? "0.65" : "0.65"),
+            reD1: isDual ? "0.65" : (isLong ? "0.65" : "0.65"),
+            tpD1: isDual ? "0.30" : (isLong ? "0.30" : "0.30"),
+            slD1: isDual ? "0.80" : (isLong ? "0.80" : "0.80"),
             reEnter1: true,
             closeNetProfitBrokerage: true,
-            brokerageMultiplier: isDual ? "10" : "10",
+            brokerageMultiplier: isDual ? "3" : "10",
             reEnterBrok: true,
             closeBlockedMargin: true,
             blockedMarginPct: "10",
             reEnterBlock: true,
-            onlyDeltaNeutral: true,
-            rangeDeltaNeutral: false,
+            onlyDeltaNeutral: !isDual,
+            rangeDeltaNeutral: isDual,
             gammaAwareNeutral: false,
             telegramAlertTypes: [],
             closedFromDate: closedFromDate,
@@ -401,7 +401,7 @@
             return "gamma";
         }
         if (ids.rangeDeltaNeutral instanceof HTMLInputElement && ids.rangeDeltaNeutral.checked) {
-            return "range";
+            return "theta";
         }
         if (ids.onlyDeltaNeutral instanceof HTMLInputElement && ids.onlyDeltaNeutral.checked) {
             return "only";
@@ -414,7 +414,7 @@
             return "gamma";
         }
         if (ids.rangeDeltaNeutral instanceof HTMLInputElement && ids.rangeDeltaNeutral.checked) {
-            return "range";
+            return "theta";
         }
         if (ids.onlyDeltaNeutral instanceof HTMLInputElement && ids.onlyDeltaNeutral.checked) {
             return "delta";
@@ -431,10 +431,10 @@
         const baseDelta = Number(status.baseOptionDeltaAbs);
         const effectiveBaseDelta = Number(status.effectiveBaseOptionDeltaAbs);
         const baselineFloorDelta = Number(status.baselineFloorDeltaAbs);
-        if (status.mode === "range") {
+        if (status.mode === "theta") {
             return Number.isFinite(minDelta) && Number.isFinite(maxDelta)
-                ? `Range: ${fmt(minDelta, 3)} to ${fmt(maxDelta, 3)}`
-                : "Range: 0.000 to 0.000";
+                ? `Theta: ${fmt(Number(status.totalTheta || 0), 3)} | Trigger: ${fmt(minDelta, 3)} to ${fmt(maxDelta, 3)}`
+                : `Theta: ${fmt(Number(status.totalTheta || 0), 3)} | Trigger: 0.000 to 0.000`;
         }
         if (status.mode === "gamma") {
             if (mode === "dual") {
@@ -532,7 +532,7 @@
         const totalDelta = Number(objStatus.totalDelta || 0);
         const bRulesActive = autoTraderEnabled;
         const currentNeutralMode = getCurrentNeutralModeFromCheckboxes();
-        const bShowDeltaGroup = bRulesActive && ["delta", "range", "gamma"].includes(currentNeutralMode);
+        const bShowDeltaGroup = bRulesActive && ["delta", "theta", "gamma"].includes(currentNeutralMode);
         if (ids.deltaBadgesGroup) {
             ids.deltaBadgesGroup.hidden = !bShowDeltaGroup;
         }
