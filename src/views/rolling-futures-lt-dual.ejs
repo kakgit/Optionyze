@@ -14,7 +14,7 @@
         }
 
         .rolling-futures-demo-grid.top {
-            grid-template-columns: 1.2fr 1fr 1fr 1.3fr 1fr 1fr;
+            grid-template-columns: 1fr 1fr 1.3fr 1fr 1fr;
         }
 
         .rolling-futures-demo-grid.row {
@@ -391,22 +391,101 @@
             gap: 18px;
         }
 
+        .rolling-futures-hero-badges {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            align-items: stretch;
+            gap: 12px;
+            margin: 8px 0 18px;
+        }
+
+        .rolling-futures-hero-badge {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 10px;
+            min-height: 84px;
+            padding: 16px;
+            border-radius: 16px;
+            border: 1px solid rgba(255,255,255,.08);
+            background: rgba(255,255,255,.03);
+            color: var(--app-text);
+            font-size: .85rem;
+            font-weight: 700;
+            box-sizing: border-box;
+        }
+
+        .rolling-futures-hero-badge.action {
+            align-items: center;
+            justify-content: center;
+        }
+
+        .rolling-futures-hero-badge label {
+            margin: 0;
+            color: var(--app-muted);
+            font-size: .76rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            white-space: nowrap;
+            line-height: 1.1;
+        }
+
+        .rolling-futures-hero-badge select,
+        .rolling-futures-hero-badge input {
+            min-height: 32px;
+            width: 100%;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,.08);
+            background: rgba(255,255,255,.03);
+            color: var(--app-text);
+            padding: 0 12px;
+            font: inherit;
+            box-sizing: border-box;
+        }
+
+        .rolling-futures-hero-badge .rolling-demo-btn {
+            min-height: 44px;
+            width: 100%;
+            padding: 0 14px;
+            border-radius: 12px;
+        }
+
+        .rolling-futures-hero-action {
+            margin-top: 12px;
+        }
+
+        .rolling-futures-hero-action .rolling-demo-btn {
+            min-height: 48px;
+        }
+
         .rolling-futures-inline-tools {
             display: flex;
             align-items: center;
             gap: 12px;
-            flex-wrap: wrap;
+            flex: 1 1 auto;
+            min-width: 0;
+            flex-wrap: nowrap;
         }
 
         .rolling-futures-inline-status {
-            flex: 1 1 280px;
-            min-width: 240px;
+            flex: 1 1 auto;
+            min-width: 0;
+            width: auto;
             margin: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .rolling-futures-manual-tools {
             flex-wrap: nowrap;
             white-space: nowrap;
+        }
+
+        .rolling-demo-manual-title {
+            white-space: nowrap;
+            flex: 0 0 auto;
         }
 
         .rolling-futures-start-qty {
@@ -626,6 +705,25 @@
                 align-items: flex-start;
             }
 
+            .rolling-futures-hero-badges {
+                grid-template-columns: 1fr;
+            }
+
+            .rolling-futures-hero-badge {
+                width: 100%;
+                justify-content: flex-start;
+            }
+
+            .rolling-futures-inline-tools {
+                flex-wrap: wrap;
+            }
+
+            .rolling-futures-inline-status {
+                min-width: 100%;
+                width: 100%;
+                white-space: normal;
+            }
+
             .rolling-live-open-head {
                 grid-template-columns: 1fr;
             }
@@ -666,6 +764,26 @@
                         <div class="rolling-demo-metric-label">Available Balance</div>
                         <div class="rolling-demo-metric-value" id="rollingDualFuturesAvailableBalanceValue">-</div>
                     </div>
+                </div>
+                <div class="rolling-futures-hero-badges">
+                    <div class="rolling-futures-hero-badge">
+                        <label for="ddlRollingFuturesSymbol">Symbols List</label>
+                        <select id="ddlRollingFuturesSymbol">
+                            <option value="">Select Symbol</option>
+                            <option value="BTC" selected>BTCUSD</option>
+                            <option value="ETH">ETHUSD</option>
+                        </select>
+                    </div>
+                    <div class="rolling-futures-hero-badge">
+                        <label for="txtRollingFuturesStartQty">Start Qty</label>
+                        <input class="rolling-futures-start-qty" type="number" min="1" step="1" id="txtRollingFuturesStartQty" value="1" />
+                    </div>
+                    <div class="rolling-futures-hero-badge action">
+                        <button class="rolling-demo-btn warn" type="button" id="btnRollingFuturesDemoAutoTrader">Auto Trader - OFF</button>
+                    </div>
+                </div>
+                <div class="rolling-futures-hero-action">
+                    <button class="rolling-demo-btn primary" type="button" id="btnRollingFuturesExecAllLegs">Exec Strategy</button>
                 </div>
             </div>
             <div class="app-panel rolling-demo-card">
@@ -729,10 +847,6 @@
                 <div class="rolling-demo-card-head">
                     <div class="rolling-futures-inline-tools">
                         <span class="rolling-demo-manual-title">Manual Trader</span>
-                        <div class="rolling-futures-start-qty-row">
-                            <label for="txtRollingFuturesStartQty">Start Qty</label>
-                            <input class="rolling-futures-start-qty" type="number" min="1" step="1" id="txtRollingFuturesStartQty" value="1" />
-                        </div>
                         <div class="rolling-live-status rolling-live-status-inline rolling-futures-inline-status" id="rollingDualFuturesPageStatus"></div>
                     </div>
                     <div class="rolling-demo-card-tools rolling-futures-manual-tools">
@@ -742,19 +856,10 @@
                                 <path d="M3 3v6h6" />
                             </svg>
                         </button>
-                        <button class="rolling-demo-btn warn" type="button" id="btnRollingFuturesDemoAutoTrader">Auto Trader - OFF</button>
                     </div>
                 </div>
 
                 <div class="rolling-futures-demo-grid top">
-                    <div class="rolling-demo-field">
-                        <label for="ddlRollingFuturesSymbol">Symbols List</label>
-                        <select id="ddlRollingFuturesSymbol">
-                            <option value="">Select Symbol</option>
-                            <option value="BTC" selected>BTCUSD</option>
-                            <option value="ETH">ETHUSD</option>
-                        </select>
-                    </div>
                     <div class="rolling-demo-field">
                         <label for="txtRollingFuturesLotSize">Lot Size</label>
                         <input type="text" id="txtRollingFuturesLotSize" value="0.001" />
@@ -936,10 +1041,6 @@
                 </div>
 
                 <div class="rolling-futures-demo-grid actions-row">
-                    <div class="rolling-demo-field">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn primary" type="button" id="btnRollingFuturesExecAllLegs">Exec Strategy</button>
-                    </div>
                     <div class="rolling-demo-field">
                         <label>&nbsp;</label>
                     </div>
@@ -1202,4 +1303,5 @@
     <script src="/js/rolling-futures-lt.js"></script>
 </body>
 </html>
+
 

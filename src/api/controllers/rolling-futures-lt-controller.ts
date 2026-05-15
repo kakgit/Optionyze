@@ -93,6 +93,7 @@ const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
 };
 const gFutureLimitRetryDelayMs = 5000;
 const gFutureLimitRetryCount = 5;
+const gOptionReentryPendingMs = 5000;
 const gProfitCloseReEntryCooldownMs = 5 * 60 * 1000;
 const gRestartCloseProtectionMs = 5 * 60 * 1000;
 const gNeutralityHedgeCooldownMs = 2 * 60 * 1000;
@@ -1219,7 +1220,7 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         minusDelta: normalizeStringValue(objUiState.minusDelta, String(objDefaults.minusDelta)),
         plusDelta: normalizeStringValue(objUiState.plusDelta, String(objDefaults.plusDelta)),
         action1: String(objUiState.action1 || objDefaults.action1).trim().toLowerCase() === "buy" ? "buy" : "sell",
-        legs1: String(objUiState.legs1 || objDefaults.legs1).trim().toLowerCase() === "pe" ? "pe" : "ce",
+        legs1: normalizeRollingFuturesLegSelection(objUiState.legs1, String(objDefaults.legs1 || "ce")),
         onlyDeltaNeutral: normalizeBooleanValue(objUiState.onlyDeltaNeutral, Boolean(objDefaults.onlyDeltaNeutral)),
         rangeDeltaNeutral: normalizeBooleanValue(objUiState.rangeDeltaNeutral, Boolean(objDefaults.rangeDeltaNeutral)),
         gammaAwareNeutral: normalizeBooleanValue(objUiState.gammaAwareNeutral, Boolean(objDefaults.gammaAwareNeutral)),
@@ -2354,6 +2355,25 @@ function buildRuntimeStateWithNeutralityHedgePending(
     return objState;
 }
 
+function getOptionReentryPendingUntil(pRuntime: RollingFuturesLtRuntimeRecord | null): string {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    return String(objState.optionReentryPendingUntil || "").trim();
+}
+
+function buildRuntimeStateWithOptionReentryPending(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pPendingUntil = ""
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    const vPendingUntil = String(pPendingUntil || "").trim();
+    if (!vPendingUntil) {
+        delete objState.optionReentryPendingUntil;
+        return objState;
+    }
+    objState.optionReentryPendingUntil = vPendingUntil;
+    return objState;
+}
+
 function getNeutralityHedgeSkipAuditState(pRuntime: RollingFuturesLtRuntimeRecord | null): {
     reason: string;
     loggedAt: string;
@@ -2391,7 +2411,7 @@ async function logNeutralityHedgeSkippedOnce(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
     pRuntime: RollingFuturesLtRuntimeRecord | null,
-    pReason: "cooldown" | "pending" | "lock",
+    pReason: "cooldown" | "pending" | "lock" | "option_reentry",
     pContext: {
         symbol: "BTC" | "ETH";
         qty: number;
@@ -2430,7 +2450,9 @@ async function logNeutralityHedgeSkippedOnce(
             ? "Delta-neutral hedge was skipped because the hedge cooldown is still active."
             : (pReason === "pending"
                 ? "Delta-neutral hedge was skipped because another hedge is still being processed."
-                : "Delta-neutral hedge was skipped because another hedge path already owns the hedge lock."),
+                : (pReason === "option_reentry"
+                    ? "Delta-neutral hedge was skipped because an option re-entry grace window is active."
+                    : "Delta-neutral hedge was skipped because another hedge path already owns the hedge lock.")),
         {
             ...pContext,
             reason: `delta_neutral_skip_${pReason}`
@@ -2815,9 +2837,13 @@ async function applyServerSideNeutralityCheck(
     const vPendingUntilMs = Number.isFinite(new Date(getNeutralityHedgePendingUntil(objRuntimeBase)).getTime())
         ? new Date(getNeutralityHedgePendingUntil(objRuntimeBase)).getTime()
         : 0;
+    const vOptionReentryPendingUntilMs = Number.isFinite(new Date(getOptionReentryPendingUntil(objRuntimeBase)).getTime())
+        ? new Date(getOptionReentryPendingUntil(objRuntimeBase)).getTime()
+        : 0;
     const vNowMs = Date.now();
     const bHedgeCooldownActive = vLastHedgeAtMs > 0 && (vNowMs - vLastHedgeAtMs) < gNeutralityHedgeCooldownMs;
     const bHedgePendingActive = vPendingUntilMs > vNowMs;
+    const bOptionReentryPendingActive = vOptionReentryPendingUntilMs > vNowMs;
 
     if (vMode === "none") {
         return {
@@ -2935,6 +2961,32 @@ async function applyServerSideNeutralityCheck(
         };
     }
 
+    if (bOptionReentryPendingActive) {
+        const objSkipState = await logNeutralityHedgeSkippedOnce(
+            pUserId,
+            pStrategyCode,
+            objRuntimeBase,
+            "option_reentry",
+            {
+                symbol: pSymbol,
+                qty: vHedgeQty,
+                totalDelta: objTotals.totalDelta,
+                totalTheta: objTotals.totalTheta,
+                mode: vMode,
+                threshold: vThreshold
+            }
+        );
+        return {
+            trackedOpenPositions: pTrackedPositions,
+            hedgePlaced: false,
+            totalDelta: objTotals.totalDelta,
+            totalTheta: objTotals.totalTheta,
+            mode: vMode,
+            threshold: vThreshold,
+            nextRuntimeState: objSkipState || objNextRuntimeState
+        };
+    }
+
     const vHedgeLockKey = getNeutralityHedgeLockKey(pUserId, pStrategyCode);
     if (gNeutralityHedgeLocks.has(vHedgeLockKey)) {
         const objSkipState = await logNeutralityHedgeSkippedOnce(
@@ -2970,10 +3022,38 @@ async function applyServerSideNeutralityCheck(
         const vLatestPendingUntilMs = Number.isFinite(new Date(getNeutralityHedgePendingUntil(objLatestRuntime)).getTime())
             ? new Date(getNeutralityHedgePendingUntil(objLatestRuntime)).getTime()
             : 0;
+        const vLatestOptionReentryPendingUntilMs = Number.isFinite(new Date(getOptionReentryPendingUntil(objLatestRuntime)).getTime())
+            ? new Date(getOptionReentryPendingUntil(objLatestRuntime)).getTime()
+            : 0;
         const objLatestBaseline = getDeltaNeutralBaselineState(objLatestRuntime);
         const vLatestLastHedgeAtMs = Number.isFinite(new Date(objLatestBaseline.lastHedgeAt).getTime())
             ? new Date(objLatestBaseline.lastHedgeAt).getTime()
             : 0;
+        if (vLatestOptionReentryPendingUntilMs > Date.now()) {
+            const objSkipState = await logNeutralityHedgeSkippedOnce(
+                pUserId,
+                pStrategyCode,
+                objLatestRuntime,
+                "option_reentry",
+                {
+                    symbol: pSymbol,
+                    qty: vHedgeQty,
+                    totalDelta: objTotals.totalDelta,
+                    totalTheta: objTotals.totalTheta,
+                    mode: vMode,
+                    threshold: vThreshold
+                }
+            );
+            return {
+                trackedOpenPositions: pTrackedPositions,
+                hedgePlaced: false,
+                totalDelta: objTotals.totalDelta,
+                totalTheta: objTotals.totalTheta,
+                mode: vMode,
+                threshold: vThreshold,
+                nextRuntimeState: objSkipState || objNextRuntimeState
+            };
+        }
         if (vLatestPendingUntilMs > Date.now() || (vLatestLastHedgeAtMs > 0 && (Date.now() - vLatestLastHedgeAtMs) < gNeutralityHedgeCooldownMs)) {
             const vSkipReason: "pending" | "cooldown" = vLatestPendingUntilMs > Date.now() ? "pending" : "cooldown";
             const objSkipState = await logNeutralityHedgeSkippedOnce(
@@ -3504,6 +3584,18 @@ async function applyTriggeredOptionRule(
     );
 
     if (Boolean(objMetadata.reEnterEnabled)) {
+        const vOptionReentryPendingUntil = new Date(Date.now() + gOptionReentryPendingMs).toISOString();
+        const objRuntimeBeforeReEntry = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+            || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+        await saveRollingFuturesLtRuntime({
+            ...objRuntimeBeforeReEntry,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithOptionReentryPending(
+                objRuntimeBeforeReEntry,
+                vOptionReentryPendingUntil
+            )
+        });
         const objReEntry = await openTrackedOptionReEntry(
             pUserId,
             pStrategyCode,
@@ -3513,43 +3605,55 @@ async function applyTriggeredOptionRule(
             objMetadata,
             pReason
         );
-        if (objReEntry) {
-            arrNextPositions = [...arrNextPositions, objReEntry.position];
-            const vResolvedReEntryCharge = await resolveOrderChargeFromDelta(
-                client,
-                objReEntry.position.contractName,
-                objReEntry.orderPayload,
-                objReEntry.position.side,
-                Number(objReEntry.position.qty || 0),
-                objReEntry.placedAt
-            );
-            const vReEntryCharge = vResolvedReEntryCharge !== null
-                ? vResolvedReEntryCharge
-                : await estimateTrackedPositionCharge(objReEntry.position);
-            await incrementBrokerageRecoveryTotal(
-                pUserId,
-                pStrategyCode,
-                vCloseCharge + vReEntryCharge,
-                arrNextPositions.length
-            );
-            await incrementRecoveredTotalPnl(pUserId, pStrategyCode, vClosePnl, arrNextPositions.length);
-            await logFuturesEvent(
-                pUserId,
-                pStrategyCode,
-                "reentry_opened",
-                "success",
-                "Option Re-Entry Opened",
-                `Opened replacement option ${objReEntry.position.contractName} after ${pReason.toUpperCase()} using Re D ${Number(objMetadata.reEntryDelta || 0).toFixed(2)}.`,
-                {
-                    contractName: objReEntry.position.contractName,
-                    qty: objReEntry.position.qty,
-                    reason: pReason
-                }
-            );
+        try {
+            if (objReEntry) {
+                arrNextPositions = [...arrNextPositions, objReEntry.position];
+                const vResolvedReEntryCharge = await resolveOrderChargeFromDelta(
+                    client,
+                    objReEntry.position.contractName,
+                    objReEntry.orderPayload,
+                    objReEntry.position.side,
+                    Number(objReEntry.position.qty || 0),
+                    objReEntry.placedAt
+                );
+                const vReEntryCharge = vResolvedReEntryCharge !== null
+                    ? vResolvedReEntryCharge
+                    : await estimateTrackedPositionCharge(objReEntry.position);
+                await incrementBrokerageRecoveryTotal(
+                    pUserId,
+                    pStrategyCode,
+                    vCloseCharge + vReEntryCharge,
+                    arrNextPositions.length
+                );
+                await incrementRecoveredTotalPnl(pUserId, pStrategyCode, vClosePnl, arrNextPositions.length);
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "reentry_opened",
+                    "success",
+                    "Option Re-Entry Opened",
+                    `Opened replacement option ${objReEntry.position.contractName} after ${pReason.toUpperCase()} using Re D ${Number(objMetadata.reEntryDelta || 0).toFixed(2)}.`,
+                    {
+                        contractName: objReEntry.position.contractName,
+                        qty: objReEntry.position.qty,
+                        reason: pReason
+                    }
+                );
+            }
+            else {
+                await incrementBrokerageRecoveryTotal(pUserId, pStrategyCode, vCloseCharge, arrNextPositions.length);
+                await incrementRecoveredTotalPnl(pUserId, pStrategyCode, vClosePnl, arrNextPositions.length);
+            }
         }
-        else {
-            await incrementBrokerageRecoveryTotal(pUserId, pStrategyCode, vCloseCharge, arrNextPositions.length);
-            await incrementRecoveredTotalPnl(pUserId, pStrategyCode, vClosePnl, arrNextPositions.length);
+        finally {
+            const objRuntimeAfterReEntry = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+                || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+            await saveRollingFuturesLtRuntime({
+                ...objRuntimeAfterReEntry,
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                state: buildRuntimeStateWithOptionReentryPending(objRuntimeAfterReEntry, "")
+            });
         }
     }
     else {
@@ -3560,15 +3664,21 @@ async function applyTriggeredOptionRule(
     return replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrNextPositions);
 }
 
-async function findTriggeredTrackedOption(
+async function findTriggeredTrackedOptions(
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
     pUiState: Record<string, unknown>
-): Promise<{
+): Promise<Array<{
     position: RollingFuturesLtImportedPositionRecord;
     currentDelta: number;
     currentMarkPrice: number | null;
     reason: "sl" | "tp";
-} | null> {
+}>> {
+    const arrTriggered: Array<{
+        position: RollingFuturesLtImportedPositionRecord;
+        currentDelta: number;
+        currentMarkPrice: number | null;
+        reason: "sl" | "tp";
+    }> = [];
     for (const objPosition of pTrackedPositions) {
         if (!isOptionContractSymbol(objPosition.contractName)) {
             continue;
@@ -3586,15 +3696,15 @@ async function findTriggeredTrackedOption(
             Number(objMetadata.stopLossDelta || pUiState.slD1 || 0.65)
         );
         if (objDecision.shouldAct && objDecision.reason) {
-            return {
+            arrTriggered.push({
                 position: objPosition,
                 currentDelta: vCurrentDelta,
                 currentMarkPrice: Number.isFinite(Number(objTicker?.markPrice)) ? Number(objTicker?.markPrice) : null,
                 reason: objDecision.reason
-            };
+            });
         }
     }
-    return null;
+    return arrTriggered;
 }
 
 async function closeTrackedPositionsOnDelta(
@@ -3889,16 +3999,20 @@ async function runAutoTraderCycle(
             }
         }
 
-        const objTriggeredOption = bRestartCloseProtectionActive
-            ? null
-            : await findTriggeredTrackedOption(arrSavedPositions, objUiState);
-        if (objTriggeredOption) {
+        const arrTriggeredOptions = bRestartCloseProtectionActive
+            ? []
+            : await findTriggeredTrackedOptions(arrSavedPositions, objUiState);
+        for (const objTriggeredOption of arrTriggeredOptions) {
+            const objCurrentTrackedPosition = arrSavedPositions.find((objRow) => objRow.importId === objTriggeredOption.position.importId);
+            if (!objCurrentTrackedPosition) {
+                continue;
+            }
             arrSavedPositions = await applyTriggeredOptionRule(
                 pUserId,
                 pStrategyCode,
                 vSelectedApiProfileId,
                 objProfile,
-                objTriggeredOption.position,
+                objCurrentTrackedPosition,
                 objTriggeredOption.currentDelta,
                 objTriggeredOption.currentMarkPrice,
                 objTriggeredOption.reason,
