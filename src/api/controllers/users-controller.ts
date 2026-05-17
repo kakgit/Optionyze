@@ -12,7 +12,10 @@ import {
     loadManagedUsers,
     upsertManagedUserProfile
 } from "../../storage/users-store";
-import { listPendingStrategyExecutionRequests } from "../../storage/strategy-execution-request-store";
+import {
+    deletePendingStrategyExecutionRequest,
+    listPendingStrategyExecutionRequests
+} from "../../storage/strategy-execution-request-store";
 import { executePendingRollingFuturesLtDualStrategyRequest } from "./rolling-futures-lt-controller";
 import type { RunnerManager } from "../../runners/runner-manager";
 
@@ -49,6 +52,22 @@ export async function listPendingStrategyExecutionRequestsController(_req: Reque
 
 export async function executePendingStrategyExecutionRequestController(req: Request, res: Response): Promise<void> {
     await executePendingRollingFuturesLtDualStrategyRequest(req, res);
+}
+
+export async function cancelPendingStrategyExecutionRequestController(req: Request, res: Response): Promise<void> {
+    const vRequestId = String(req.params.requestId || "").trim();
+    if (!vRequestId) {
+        res.status(400).json({ status: "warning", message: "Execution request id is required." });
+        return;
+    }
+
+    try {
+        await deletePendingStrategyExecutionRequest(vRequestId);
+        res.json({ status: "success", message: "Pending strategy execution request cancelled successfully." });
+    }
+    catch (objError) {
+        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to cancel pending strategy execution request.") });
+    }
 }
 
 export async function createManagedUserController(req: Request, res: Response): Promise<void> {

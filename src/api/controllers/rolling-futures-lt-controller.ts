@@ -360,7 +360,8 @@ async function queueDualPendingExecStrategyRequest(
     pSelectedApiProfileId: string,
     pUiState: Record<string, unknown>,
     pTriggerSource: string,
-    pReason: string
+    pReason: string,
+    pAvailableBalance: number | null = null
 ): Promise<{ created: boolean; message: string; }> {
     const objAccount = await getAccountById(pUserId);
     if (!isDualExecStrategyAllowed("rolling-futures-lt-dual", objAccount?.execStrategy)) {
@@ -402,7 +403,9 @@ async function queueDualPendingExecStrategyRequest(
                 expiryMode: objExecInput.expiryMode,
                 expiryDate: objExecInput.expiryDate,
                 qty: objExecInput.qty,
-                targetDelta: objExecInput.targetDelta
+                targetDelta: objExecInput.targetDelta,
+                startQty: objExecInput.qty,
+                availableBalance: pAvailableBalance
             }
         });
 
@@ -4473,7 +4476,8 @@ async function runAutoTraderCycle(
                         : "blocked_margin_profit_reentry",
                     objScheduledReEntry.reason === "brokerage"
                         ? "brokerage_reentry_request"
-                        : "blockmargin_reentry_request"
+                        : "blockmargin_reentry_request",
+                    null
                 );
                 await saveRollingFuturesLtRuntime({
                     ...objRuntime,
@@ -4644,6 +4648,7 @@ async function runAutoTraderCycle(
             const bQueueDualReEntry = isDualRollingFuturesStrategy(pStrategyCode) && objProfitRule.reEnterEnabled;
             let vQueuedReEntryMessage = "";
             if (bQueueDualReEntry) {
+                const objPostCloseSummary = await fetchAccountSummarySnapshot(pUserId, vSelectedApiProfileId, vSymbol);
                 const objQueueResult = await queueDualPendingExecStrategyRequest(
                     pUserId,
                     vSelectedApiProfileId,
@@ -4653,7 +4658,8 @@ async function runAutoTraderCycle(
                         : "blocked_margin_profit_reentry",
                     objProfitRule.reason === "brokerage"
                         ? "brokerage_profit_trigger_request"
-                        : "blockmargin_profit_trigger_request"
+                        : "blockmargin_profit_trigger_request",
+                    objPostCloseSummary.availableBalance
                 );
                 vQueuedReEntryMessage = objQueueResult.message;
             }
@@ -5811,6 +5817,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
 
     try {
         if (isDualRollingFuturesStrategy(pStrategyCode)) {
+            const objSummary = await fetchAccountSummarySnapshot(vUserId, vSelectedApiProfileId, objExecInput.symbol);
             await createPendingStrategyExecutionRequest({
                 accountId: vUserId,
                 strategyCode: pStrategyCode,
@@ -5823,7 +5830,9 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
                     expiryMode: objExecInput.expiryMode,
                     expiryDate: objExecInput.expiryDate,
                     qty: objExecInput.qty,
-                    targetDelta: objExecInput.targetDelta
+                    targetDelta: objExecInput.targetDelta,
+                    startQty: objExecInput.qty,
+                    availableBalance: objSummary.availableBalance
                 }
             });
             await logFuturesEvent(

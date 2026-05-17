@@ -23,6 +23,9 @@ document.addEventListener("DOMContentLoaded", () => {
     els.refreshButton?.addEventListener("click", () => {
         void loadAdminData({ showSuccess: true });
     });
+    els.refreshExecRequestsButton?.addEventListener("click", () => {
+        void refreshExecutionRequests();
+    });
     els.addUserButton?.addEventListener("click", () => openUserModal());
     els.cancelModalButton?.addEventListener("click", closeActiveModal);
     els.closeModalButton?.addEventListener("click", closeActiveModal);
@@ -44,6 +47,7 @@ function cacheElements() {
     els.app = document.getElementById("mngUsersApp");
     els.searchInput = document.getElementById("searchInput");
     els.refreshButton = document.getElementById("btnRefresh");
+    els.refreshExecRequestsButton = document.getElementById("btnRefreshExecRequests");
     els.addUserButton = document.getElementById("btnAddUser");
     els.pageStatus = document.getElementById("pageStatus");
     els.resultCount = document.getElementById("resultCount");
@@ -125,6 +129,17 @@ async function loadExecutionRequests() {
     }
     finally {
         gState.isLoadingExecutionRequests = false;
+    }
+}
+
+async function refreshExecutionRequests() {
+    setButtonBusy(els.refreshExecRequestsButton, true, "");
+    try {
+        await loadExecutionRequests();
+        setPageStatus(`Loaded ${gState.pendingExecutionRequests.length} pending strategy request${gState.pendingExecutionRequests.length === 1 ? "" : "s"}.`, "success");
+    }
+    finally {
+        restoreIconButton(els.refreshExecRequestsButton);
     }
 }
 
@@ -235,22 +250,33 @@ function renderExecutionRequests() {
     }
 
     if (!arrRequests.length) {
-        els.execRequestTableBody.innerHTML = `<tr><td colspan="6" class="mngusers-empty">No pending strategy execution requests.</td></tr>`;
+        els.execRequestTableBody.innerHTML = `<tr><td colspan="8" class="mngusers-empty">No pending strategy execution requests.</td></tr>`;
         return;
     }
 
     els.execRequestTableBody.innerHTML = arrRequests.map((objRequest) => {
         const bExecuting = gState.executingRequestId === objRequest.requestId;
+        const vStartQty = Number(objRequest.requestPayload?.startQty ?? objRequest.requestPayload?.qty);
+        const vAvailableBalance = Number(objRequest.requestPayload?.availableBalance);
         return `
             <tr>
-                <td>${escapeHtml(formatDateTime(objRequest.createdAt))}</td>
-                <td>${escapeHtml(objRequest.fullName)}</td>
-                <td>${escapeHtml(objRequest.email)}</td>
+                <td class="mngusers-nowrap">${escapeHtml(formatDateTime(objRequest.createdAt))}</td>
+                <td class="mngusers-nowrap">${escapeHtml(objRequest.fullName)}</td>
+                <td class="mngusers-nowrap">${escapeHtml(objRequest.email)}</td>
                 <td>${escapeHtml(getExecutionTriggerLabel(objRequest.triggerSource))}</td>
+                <td>${Number.isFinite(vStartQty) ? escapeHtml(String(vStartQty)) : "-"}</td>
+                <td>${Number.isFinite(vAvailableBalance) ? escapeHtml(`${vAvailableBalance.toFixed(2)} USD`) : "-"}</td>
                 <td>${objRequest.execStrategy ? `<span class="mngusers-chip mngusers-chip-info">Enabled</span>` : `<span class="mngusers-chip mngusers-chip-muted">Disabled</span>`}</td>
-                <td>
-                    <button class="app-solid-btn" type="button" data-request-action="execute" data-request-id="${escapeHtml(objRequest.requestId)}" ${bExecuting ? "disabled" : ""}>
-                        ${bExecuting ? "Executing..." : "EXECUTE"}
+                <td class="mngusers-nowrap">
+                    <button class="mngusers-icon-btn execute" type="button" data-request-action="execute" data-request-id="${escapeHtml(objRequest.requestId)}" title="${bExecuting ? "Executing..." : "Execute"}" aria-label="${bExecuting ? "Executing..." : "Execute"}" ${bExecuting ? "disabled" : ""}>
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M8 5v14l11-7z" fill="currentColor"></path>
+                        </svg>
+                    </button>
+                    <button class="mngusers-icon-btn cancel" type="button" data-request-action="cancel" data-request-id="${escapeHtml(objRequest.requestId)}" title="Cancel" aria-label="Cancel" ${bExecuting ? "disabled" : ""}>
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                        </svg>
                     </button>
                 </td>
             </tr>
@@ -296,6 +322,10 @@ function handleExecRequestAction(objEvent) {
     const vRequestId = String(objButton.dataset.requestId || "").trim();
     if (vAction === "execute" && vRequestId) {
         void executePendingRequest(vRequestId);
+        return;
+    }
+    if (vAction === "cancel" && vRequestId) {
+        void cancelPendingRequest(vRequestId);
     }
 }
 
@@ -546,6 +576,39 @@ async function executePendingRequest(pRequestId) {
     }
 }
 
+async function cancelPendingRequest(pRequestId) {
+    if (!pRequestId || gState.executingRequestId) {
+        return;
+    }
+
+    const objRequest = gState.pendingExecutionRequests.find((objRow) => objRow.requestId === pRequestId);
+    const vConfirmed = window.confirm(`Cancel the pending strategy execution request for ${objRequest?.fullName || "this user"}?`);
+    if (!vConfirmed) {
+        return;
+    }
+
+    gState.executingRequestId = pRequestId;
+    renderExecutionRequests();
+
+    try {
+        const objResult = await requestJson(`/api/admin/strategy-execution-requests/${encodeURIComponent(pRequestId)}`, {
+            method: "DELETE",
+            credentials: "same-origin"
+        }, "Unable to cancel the pending strategy request.");
+
+        setPageStatus(objResult.message || "Pending strategy request cancelled successfully.", "success");
+        await loadAdminData();
+    }
+    catch (objError) {
+        setPageStatus(getErrorMessage(objError, "Unable to cancel the pending strategy request."), "error");
+        await loadExecutionRequests().catch(() => undefined);
+    }
+    finally {
+        gState.executingRequestId = "";
+        renderExecutionRequests();
+    }
+}
+
 async function requestJson(pUrl, pOptions, pFallbackMessage) {
     const objResponse = await fetch(pUrl, pOptions);
     const objResult = await objResponse.json().catch(() => ({
@@ -588,11 +651,24 @@ function setButtonBusy(pButton, pBusy, pBusyText) {
     }
 
     if (!pButton.dataset.defaultLabel) {
-        pButton.dataset.defaultLabel = pButton.textContent || "";
+        pButton.dataset.defaultLabel = pButton.innerHTML || "";
     }
 
     pButton.disabled = pBusy;
+    if (pButton.classList.contains("mngusers-icon-btn")) {
+        return;
+    }
     pButton.textContent = pBusy ? pBusyText : String(pButton.dataset.defaultLabel || "");
+}
+
+function restoreIconButton(pButton) {
+    if (!(pButton instanceof HTMLButtonElement)) {
+        return;
+    }
+    pButton.disabled = false;
+    if (pButton.dataset.defaultLabel) {
+        pButton.innerHTML = pButton.dataset.defaultLabel;
+    }
 }
 
 function setText(pId, pValue) {

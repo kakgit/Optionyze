@@ -6,6 +6,7 @@ import {
     listManagedUsersController,
     listPendingStrategyExecutionRequestsController,
     listRunnerStates,
+    cancelPendingStrategyExecutionRequestController,
     executePendingStrategyExecutionRequestController,
     resetManagedUserPasswordController,
     updateManagedUserController
@@ -170,6 +171,9 @@ export function createApiRouter(
     });
     objRouter.post("/admin/strategy-execution-requests/:requestId/execute", requireAdminApi, async (req, res) => {
         await executePendingStrategyExecutionRequestController(req, res);
+    });
+    objRouter.delete("/admin/strategy-execution-requests/:requestId", requireAdminApi, async (req, res) => {
+        await cancelPendingStrategyExecutionRequestController(req, res);
     });
     objRouter.post("/admin/accounts", requireAdminApi, async (req, res) => {
         await createManagedUserController(req, res);

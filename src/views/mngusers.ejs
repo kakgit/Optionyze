@@ -56,27 +56,35 @@
         </section>
 
         <section class="app-panel">
-            <div class="mngusers-toolbar">
+            <div class="mngusers-section-head">
                 <div>
                     <h2>Pending Strategy Executions</h2>
                     <p class="app-copy">Dual live Exec Strategy requests wait here for admin approval and execution.</p>
                 </div>
+                <button id="btnRefreshExecRequests" class="mngusers-icon-btn" type="button" title="Refresh pending executions" aria-label="Refresh pending executions">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                        <path d="M20 4v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                    </svg>
+                </button>
             </div>
             <p id="execRequestCount" class="app-copy">0 pending</p>
             <div class="mngusers-table-wrap">
                 <table class="mngusers-table">
                     <thead>
                         <tr>
-                            <th>Date Time</th>
-                            <th>User Name</th>
-                            <th>Email ID</th>
+                            <th class="mngusers-nowrap">Date Time</th>
+                            <th class="mngusers-nowrap">User Name</th>
+                            <th class="mngusers-nowrap">Email ID</th>
                             <th>Triggered By</th>
-                            <th>Exec Strategy</th>
-                            <th>Actions</th>
+                            <th>Qty</th>
+                            <th>Balance</th>
+                            <th>Strategy</th>
+                            <th class="mngusers-nowrap">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="execRequestTableBody">
-                        <tr><td colspan="6" class="mngusers-empty">Loading pending strategy executions...</td></tr>
+                        <tr><td colspan="8" class="mngusers-empty">Loading pending strategy executions...</td></tr>
                     </tbody>
                 </table>
             </div>

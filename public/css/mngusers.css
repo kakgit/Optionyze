@@ -42,6 +42,18 @@
     margin-bottom:14px;
 }
 
+.mngusers-section-head {
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    margin:-8px 0 10px;
+}
+
+.mngusers-section-head h2 {
+    margin:0 0 4px;
+}
+
 .mngusers-toolbar input,
 .mngusers-modal input {
     width:100%;
@@ -100,6 +112,10 @@
     letter-spacing:.08em;
 }
 
+.mngusers-nowrap {
+    white-space:nowrap;
+}
+
 .mngusers-actions {
     display:flex;
     flex-wrap:wrap;
@@ -109,6 +125,46 @@
 .mngusers-actions .app-link-btn[disabled] {
     opacity:.45;
     cursor:not-allowed;
+}
+
+.mngusers-icon-btn {
+    width:36px;
+    height:36px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:10px;
+    border:1px solid rgba(255,255,255,.10);
+    background:rgba(255,255,255,.04);
+    color:#dce5ff;
+    cursor:pointer;
+    transition:background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
+}
+
+.mngusers-icon-btn:hover:not([disabled]) {
+    transform:translateY(-1px);
+}
+
+.mngusers-icon-btn.execute:hover:not([disabled]) {
+    background:rgba(80,227,194,.12);
+    border-color:rgba(80,227,194,.28);
+    color:#9cf4df;
+}
+
+.mngusers-icon-btn.cancel:hover:not([disabled]) {
+    background:rgba(248,113,113,.12);
+    border-color:rgba(248,113,113,.28);
+    color:#ffc0c0;
+}
+
+.mngusers-icon-btn[disabled] {
+    opacity:.45;
+    cursor:not-allowed;
+}
+
+.mngusers-icon-btn svg {
+    width:18px;
+    height:18px;
 }
 
 .mngusers-empty { text-align:center; color:var(--app-muted); padding:28px 14px; }
