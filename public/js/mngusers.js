@@ -8,6 +8,7 @@ const gState = {
     activeModal: "",
     isLoadingUsers: false,
     isLoadingExecutionRequests: false,
+    isSavingExecutionSettings: false,
     isSavingUser: false,
     isResettingPassword: false,
     executingRequestId: ""
@@ -25,6 +26,12 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     els.refreshExecRequestsButton?.addEventListener("click", () => {
         void refreshExecutionRequests();
+    });
+    els.autoExecSl?.addEventListener("change", () => {
+        void saveExecutionSettings();
+    });
+    els.autoExecTp?.addEventListener("change", () => {
+        void saveExecutionSettings();
     });
     els.addUserButton?.addEventListener("click", () => openUserModal());
     els.cancelModalButton?.addEventListener("click", closeActiveModal);
@@ -54,6 +61,8 @@ function cacheElements() {
     els.userTableBody = document.getElementById("userTableBody");
     els.execRequestCount = document.getElementById("execRequestCount");
     els.execRequestTableBody = document.getElementById("execRequestTableBody");
+    els.autoExecSl = document.getElementById("autoExecSl");
+    els.autoExecTp = document.getElementById("autoExecTp");
     els.overlay = document.getElementById("overlay");
 
     els.userModal = document.getElementById("userModal");
@@ -149,13 +158,48 @@ async function loadAdminData(pOptions) {
     setButtonBusy(els.refreshButton, true, "Refreshing...");
 
     try {
-        await Promise.all([loadUsers(), loadExecutionRequests()]);
+        await Promise.all([loadUsers(), loadExecutionRequests(), loadExecutionSettings()]);
         if (bShowSuccess) {
             setPageStatus(`Loaded ${gState.users.length} user account${gState.users.length === 1 ? "" : "s"} and ${gState.pendingExecutionRequests.length} pending strategy request${gState.pendingExecutionRequests.length === 1 ? "" : "s"}.`, "success");
         }
     }
     finally {
         setButtonBusy(els.refreshButton, false, "Refresh");
+    }
+}
+
+async function loadExecutionSettings() {
+    const objResult = await requestJson("/api/admin/strategy-execution-requests/settings", {
+        credentials: "same-origin"
+    }, "Unable to load auto execution settings.");
+    setCheckedNode(els.autoExecSl, objResult.data?.slEnabled !== false);
+    setCheckedNode(els.autoExecTp, Boolean(objResult.data?.tpEnabled));
+}
+
+async function saveExecutionSettings() {
+    if (gState.isSavingExecutionSettings) {
+        return;
+    }
+
+    gState.isSavingExecutionSettings = true;
+    try {
+        const objResult = await requestJson("/api/admin/strategy-execution-requests/settings", {
+            method: "PUT",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                slEnabled: getCheckedNode(els.autoExecSl),
+                tpEnabled: getCheckedNode(els.autoExecTp)
+            })
+        }, "Unable to save auto execution settings.");
+        setPageStatus(objResult.message || "Auto execution settings saved successfully.", "success");
+    }
+    catch (objError) {
+        setPageStatus(getErrorMessage(objError, "Unable to save auto execution settings."), "error");
+        await loadExecutionSettings().catch(() => undefined);
+    }
+    finally {
+        gState.isSavingExecutionSettings = false;
     }
 }
 

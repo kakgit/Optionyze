@@ -61,12 +61,19 @@
                     <h2>Pending Strategy Executions</h2>
                     <p class="app-copy">Dual live Exec Strategy requests wait here for admin approval and execution.</p>
                 </div>
-                <button id="btnRefreshExecRequests" class="mngusers-icon-btn" type="button" title="Refresh pending executions" aria-label="Refresh pending executions">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-                        <path d="M20 4v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                    </svg>
-                </button>
+                <div class="mngusers-inline-tools">
+                    <div class="mngusers-inline-checks mngusers-auto-exec-row">
+                        <span class="mngusers-inline-label">Auto Exec</span>
+                        <label class="mngusers-check"><input id="autoExecSl" type="checkbox" checked /> SL</label>
+                        <label class="mngusers-check"><input id="autoExecTp" type="checkbox" /> TP</label>
+                    </div>
+                    <button id="btnRefreshExecRequests" class="mngusers-icon-btn" type="button" title="Refresh pending executions" aria-label="Refresh pending executions">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                            <path d="M20 4v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
             <p id="execRequestCount" class="app-copy">0 pending</p>
             <div class="mngusers-table-wrap">

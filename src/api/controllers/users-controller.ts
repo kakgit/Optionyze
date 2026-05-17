@@ -16,6 +16,10 @@ import {
     deletePendingStrategyExecutionRequest,
     listPendingStrategyExecutionRequests
 } from "../../storage/strategy-execution-request-store";
+import {
+    getPendingStrategyAutoExecSettings,
+    savePendingStrategyAutoExecSettings
+} from "../../storage/admin-settings-store";
 import { executePendingRollingFuturesLtDualStrategyRequest } from "./rolling-futures-lt-controller";
 import type { RunnerManager } from "../../runners/runner-manager";
 
@@ -67,6 +71,29 @@ export async function cancelPendingStrategyExecutionRequestController(req: Reque
     }
     catch (objError) {
         res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to cancel pending strategy execution request.") });
+    }
+}
+
+export async function getPendingStrategyAutoExecSettingsController(_req: Request, res: Response): Promise<void> {
+    try {
+        const objSettings = await getPendingStrategyAutoExecSettings();
+        res.json({ status: "success", data: objSettings });
+    }
+    catch (objError) {
+        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to load pending strategy auto-exec settings.") });
+    }
+}
+
+export async function savePendingStrategyAutoExecSettingsController(req: Request, res: Response): Promise<void> {
+    try {
+        const objSettings = await savePendingStrategyAutoExecSettings({
+            slEnabled: req.body?.slEnabled !== false,
+            tpEnabled: Boolean(req.body?.tpEnabled)
+        });
+        res.json({ status: "success", message: "Auto execution settings saved successfully.", data: objSettings });
+    }
+    catch (objError) {
+        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to save pending strategy auto-exec settings.") });
     }
 }
 

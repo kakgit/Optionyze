@@ -101,6 +101,11 @@ export interface PendingStrategyExecutionRecord {
     updatedAt: string;
 }
 
+export interface PendingStrategyAutoExecSettings {
+    slEnabled: boolean;
+    tpEnabled: boolean;
+}
+
 export interface SessionRecord {
     sessionId: string;
     accountId: string;

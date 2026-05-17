@@ -296,6 +296,13 @@ export async function ensurePostgresSchema(): Promise<void> {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_optionyze_strategy_execution_requests_account_unique
         ON optionyze_strategy_execution_requests(account_id);
     `);
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_admin_settings (
+            setting_key TEXT PRIMARY KEY,
+            setting_value_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
 
     await objPool.query(`
         CREATE TABLE IF NOT EXISTS optionyze_rolling_options_lt_de_positions (
@@ -472,6 +479,13 @@ export async function ensurePostgresSchema(): Promise<void> {
     await objPool.query(`
         CREATE UNIQUE INDEX IF NOT EXISTS idx_optionyze_strategy_execution_requests_account_unique
         ON optionyze_strategy_execution_requests(account_id);
+    `);
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_admin_settings (
+            setting_key TEXT PRIMARY KEY,
+            setting_value_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
     `);
 
     await objPool.query(`

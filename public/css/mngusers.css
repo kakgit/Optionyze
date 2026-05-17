@@ -54,6 +54,31 @@
     margin:0 0 4px;
 }
 
+.mngusers-inline-tools {
+    display:flex;
+    align-items:center;
+    gap:12px;
+    white-space:nowrap;
+}
+
+.mngusers-inline-checks {
+    display:flex;
+    align-items:center;
+    gap:12px;
+    white-space:nowrap;
+}
+
+.mngusers-inline-label {
+    color:#dce5ff;
+    font-size:.82rem;
+    font-weight:600;
+}
+
+.mngusers-auto-exec-row .mngusers-check {
+    gap:8px;
+    white-space:nowrap;
+}
+
 .mngusers-toolbar input,
 .mngusers-modal input {
     width:100%;

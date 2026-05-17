@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getHealth } from "../controllers/health-controller";
 import {
+    getPendingStrategyAutoExecSettingsController,
     createManagedUserController,
     deleteManagedUserController,
     listManagedUsersController,
@@ -9,6 +10,7 @@ import {
     cancelPendingStrategyExecutionRequestController,
     executePendingStrategyExecutionRequestController,
     resetManagedUserPasswordController,
+    savePendingStrategyAutoExecSettingsController,
     updateManagedUserController
 } from "../controllers/users-controller";
 import {
@@ -168,6 +170,12 @@ export function createApiRouter(
     });
     objRouter.get("/admin/strategy-execution-requests", requireAdminApi, async (req, res) => {
         await listPendingStrategyExecutionRequestsController(req, res);
+    });
+    objRouter.get("/admin/strategy-execution-requests/settings", requireAdminApi, async (req, res) => {
+        await getPendingStrategyAutoExecSettingsController(req, res);
+    });
+    objRouter.put("/admin/strategy-execution-requests/settings", requireAdminApi, async (req, res) => {
+        await savePendingStrategyAutoExecSettingsController(req, res);
     });
     objRouter.post("/admin/strategy-execution-requests/:requestId/execute", requireAdminApi, async (req, res) => {
         await executePendingStrategyExecutionRequestController(req, res);

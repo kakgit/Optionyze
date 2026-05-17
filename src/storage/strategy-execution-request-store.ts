@@ -49,6 +49,35 @@ export async function listPendingStrategyExecutionRequests(): Promise<PendingStr
     return objResult.rows.map(mapPendingStrategyExecutionRow);
 }
 
+export async function getNextAutoExecutablePendingStrategyRequest(): Promise<PendingStrategyExecutionRecord | null> {
+    if (!isPostgresConfigured()) {
+        throw new Error("PostgreSQL is required for pending strategy execution requests.");
+    }
+
+    const objPool = getPostgresPool();
+    const objResult = await objPool.query<PendingStrategyExecutionRow>(`
+        SELECT
+            r.request_id,
+            r.account_id,
+            a.full_name,
+            a.email,
+            a.exec_strategy,
+            r.strategy_code,
+            r.trigger_source,
+            r.request_payload_json,
+            r.created_at,
+            r.updated_at
+        FROM optionyze_strategy_execution_requests r
+        INNER JOIN optionyze_accounts a
+            ON a.account_id = r.account_id
+        WHERE a.exec_strategy = true
+        ORDER BY r.created_at ASC, a.full_name ASC
+        LIMIT 1
+    `);
+
+    return objResult.rows[0] ? mapPendingStrategyExecutionRow(objResult.rows[0]) : null;
+}
+
 export async function getPendingStrategyExecutionRequestById(pRequestId: string): Promise<PendingStrategyExecutionRecord | null> {
     if (!isPostgresConfigured()) {
         throw new Error("PostgreSQL is required for pending strategy execution requests.");
