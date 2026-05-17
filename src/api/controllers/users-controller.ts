@@ -12,7 +12,8 @@ import {
     loadManagedUsers,
     upsertManagedUserProfile
 } from "../../storage/users-store";
-import { loadUsers } from "../../storage/users-store";
+import { listPendingStrategyExecutionRequests } from "../../storage/strategy-execution-request-store";
+import { executePendingRollingFuturesLtDualStrategyRequest } from "./rolling-futures-lt-controller";
 import type { RunnerManager } from "../../runners/runner-manager";
 
 export function renderMngUsersPage(req: Request, res: Response): void {
@@ -20,11 +21,6 @@ export function renderMngUsersPage(req: Request, res: Response): void {
         pageTitle: "MngUsers | Optionyze",
         currentAccount: req.authAccount
     });
-}
-
-export async function listUsers(_req: Request, res: Response): Promise<void> {
-    const objUsers = await loadUsers();
-    res.json({ status: "success", data: objUsers });
 }
 
 export async function listRunnerStates(_req: Request, res: Response, pRunnerManager: RunnerManager): Promise<void> {
@@ -39,6 +35,20 @@ export async function listManagedUsersController(_req: Request, res: Response): 
     catch (objError) {
         res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to load managed users.") });
     }
+}
+
+export async function listPendingStrategyExecutionRequestsController(_req: Request, res: Response): Promise<void> {
+    try {
+        const arrRequests = await listPendingStrategyExecutionRequests();
+        res.json({ status: "success", data: arrRequests });
+    }
+    catch (objError) {
+        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to load pending strategy execution requests.") });
+    }
+}
+
+export async function executePendingStrategyExecutionRequestController(req: Request, res: Response): Promise<void> {
+    await executePendingRollingFuturesLtDualStrategyRequest(req, res);
 }
 
 export async function createManagedUserController(req: Request, res: Response): Promise<void> {
@@ -75,6 +85,7 @@ export async function updateManagedUserController(req: Request, res: Response): 
 
     try {
         const objAccountInput = readUpdateAccountInput(req);
+        validateManagedUserUpdate(objAccountInput);
         assertAdminSelfProtection(req, vAccountId, objAccountInput.isAdmin, objAccountInput.isActive);
 
         const objAccount = await updateAccount(vAccountId, objAccountInput);
@@ -100,6 +111,7 @@ export async function updateManagedUserController(req: Request, res: Response): 
 export async function resetManagedUserPasswordController(req: Request, res: Response): Promise<void> {
     const vAccountId = String(req.params.accountId || "").trim();
     const vTemporaryPassword = String(req.body?.temporaryPassword || "");
+    const bMustChangePassword = req.body?.mustChangePassword !== false;
 
     if (!vAccountId) {
         res.status(400).json({ status: "warning", message: "Account id is required." });
@@ -111,8 +123,13 @@ export async function resetManagedUserPasswordController(req: Request, res: Resp
             throw new Error("Temporary password must be at least 3 characters long.");
         }
 
-        await updateAccountPassword(vAccountId, vTemporaryPassword, true);
-        res.json({ status: "success", message: "Temporary password set. User must change it on next login." });
+        await updateAccountPassword(vAccountId, vTemporaryPassword, bMustChangePassword);
+        res.json({
+            status: "success",
+            message: bMustChangePassword
+                ? "Temporary password set. User must change it on next login."
+                : "Temporary password updated successfully."
+        });
     }
     catch (objError) {
         res.status(400).json({ status: "warning", message: getErrorMessage(objError, "Unable to reset password.") });
@@ -148,6 +165,7 @@ function readCreateAccountInput(req: Request): CreateAccountInput {
         telegramChatId: String(req.body?.telegramChatId || "").trim(),
         password: String(req.body?.password || ""),
         isAdmin: Boolean(req.body?.isAdmin),
+        execStrategy: Boolean(req.body?.execStrategy),
         isActive: req.body?.isActive !== false,
         mustChangePassword: Boolean(req.body?.mustChangePassword)
     };
@@ -161,26 +179,13 @@ function readUpdateAccountInput(req: Request): UpdateAccountInput {
         telegramChatId: String(req.body?.telegramChatId || "").trim(),
         isActive: Boolean(req.body?.isActive),
         isAdmin: Boolean(req.body?.isAdmin),
+        execStrategy: Boolean(req.body?.execStrategy),
         mustChangePassword: Boolean(req.body?.mustChangePassword)
     };
 }
 
 function validateCreateManagedUser(pInput: CreateAccountInput, pConfirmPassword: string): void {
-    if (!pInput.fullName || !pInput.email || !pInput.mobileNo || !pInput.telegramChatId || !pInput.password) {
-        throw new Error("Full name, email, mobile number, Telegram Chat ID, and password are required.");
-    }
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pInput.email)) {
-        throw new Error("Please enter a valid email address.");
-    }
-
-    if (!/^\d{10,15}$/.test(pInput.mobileNo)) {
-        throw new Error("Please enter a valid mobile number using 10 to 15 digits.");
-    }
-
-    if (!/^-?\d{5,20}$/.test(String(pInput.telegramChatId || ""))) {
-        throw new Error("Please enter a valid Telegram Chat ID.");
-    }
+    validateManagedUserBasics(pInput.fullName, pInput.email, pInput.mobileNo, pInput.telegramChatId);
 
     if (pInput.password.length < 3) {
         throw new Error("Password must be at least 3 characters long.");
@@ -188,6 +193,33 @@ function validateCreateManagedUser(pInput: CreateAccountInput, pConfirmPassword:
 
     if (pInput.password !== pConfirmPassword) {
         throw new Error("Password and confirm password do not match.");
+    }
+}
+
+function validateManagedUserUpdate(pInput: UpdateAccountInput): void {
+    validateManagedUserBasics(pInput.fullName, pInput.email, pInput.mobileNo, pInput.telegramChatId);
+}
+
+function validateManagedUserBasics(
+    pFullName: string,
+    pEmail: string,
+    pMobileNo: string,
+    pTelegramChatId?: string
+): void {
+    if (!pFullName || !pEmail || !pMobileNo) {
+        throw new Error("Full name, email, and mobile number are required.");
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pEmail)) {
+        throw new Error("Please enter a valid email address.");
+    }
+
+    if (!/^\d{10,15}$/.test(pMobileNo)) {
+        throw new Error("Please enter a valid mobile number using 10 to 15 digits.");
+    }
+
+    if (String(pTelegramChatId || "").trim() && !/^-?\d{5,20}$/.test(String(pTelegramChatId || ""))) {
+        throw new Error("Please enter a valid Telegram Chat ID.");
     }
 }
 

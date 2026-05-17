@@ -28,6 +28,11 @@ import {
     listRollingOptionsEventsByStrategy,
     saveRollingOptionsEvent
 } from "../../storage/rolling-options-pt-de-event-store";
+import {
+    createPendingStrategyExecutionRequest,
+    deletePendingStrategyExecutionRequest,
+    getPendingStrategyExecutionRequestById
+} from "../../storage/strategy-execution-request-store";
 import { findBestLiveOptionContract, getLiveMarketSnapshot, getLiveOptionTicker } from "../../strategies/rolling-options-pt-de/market-data";
 
 interface DeltaWalletBalanceRow {
@@ -98,6 +103,7 @@ const gProfitClosePauseAfterOptionRuleMs = 15000;
 const gProfitCloseReEntryCooldownMs = 5 * 60 * 1000;
 const gRestartCloseProtectionMs = 5 * 60 * 1000;
 const gNeutralityHedgeCooldownMs = 2 * 60 * 1000;
+const gExecStrategyUnauthorizedMessage = "Not Authorised to Execute, Please Contact Admin";
 const gDualScaledBaselineFloorRatio = 0.25;
 const gDeltaUiTimezoneOffsetMinutes = 5.5 * 60;
 const gManualFutureOrderLocks = new Set<string>();
@@ -215,6 +221,232 @@ function getAccountId(req: Request): string {
 
 function isDualRollingFuturesStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
     return pStrategyCode === "rolling-futures-lt-dual";
+}
+
+function isDualExecStrategyAllowed(pStrategyCode: RollingFuturesLtStrategyCode, pExecStrategy: boolean | null | undefined): boolean {
+    if (!isDualRollingFuturesStrategy(pStrategyCode)) {
+        return true;
+    }
+    return Boolean(pExecStrategy);
+}
+
+function normalizeExecStrategyInput(
+    pAction: string,
+    pSymbol: unknown,
+    pLegSide: string,
+    pExpiryMode: string,
+    pExpiryDate: unknown,
+    pQty: unknown,
+    pTargetDelta: unknown
+): {
+    action: "buy" | "sell";
+    symbol: "BTC" | "ETH";
+    legSide: "ce" | "pe" | "both";
+    expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
+    expiryDate: string;
+    qty: number;
+    targetDelta: number;
+} {
+    const vAction = String(pAction || "").trim().toLowerCase();
+    const vSymbol = normalizeSymbolValue(pSymbol);
+    const vLegSide = String(pLegSide || "").trim().toLowerCase();
+    const vExpiryMode = String(pExpiryMode || "5").trim() as "1" | "2" | "4" | "5" | "6" | "7";
+    const vExpiryDate = normalizeRollingFuturesExpiryDate(vExpiryMode, pExpiryDate);
+    const vQty = Math.max(1, Math.floor(Number(pQty || 1)));
+    const vTargetDelta = Math.max(0, Number(pTargetDelta || 0.53));
+
+    return {
+        action: vAction === "buy" ? "buy" : "sell",
+        symbol: vSymbol,
+        legSide: vLegSide === "both" ? "both" : (vLegSide === "pe" ? "pe" : "ce"),
+        expiryMode: ["1", "2", "4", "5", "6", "7"].includes(vExpiryMode) ? vExpiryMode : "5",
+        expiryDate: vExpiryDate,
+        qty: vQty,
+        targetDelta: vTargetDelta
+    };
+}
+
+async function runExecStrategyPlacement(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pSelectedApiProfileId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pInput: {
+        action: "buy" | "sell";
+        symbol: "BTC" | "ETH";
+        legSide: "ce" | "pe" | "both";
+        expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
+        expiryDate: string;
+        qty: number;
+        targetDelta: number;
+    },
+    pReason: "exec_strategy" | "admin_exec_strategy"
+): Promise<{
+    profileLabel: string;
+    trackedOpenPositions: RollingFuturesLtImportedPositionRecord[];
+    contracts: Array<Record<string, unknown>>;
+    orders: Array<Record<string, unknown>>;
+    neutralCheck: {
+        mode: "none" | "delta" | "theta" | "gamma";
+        hedgePlaced: boolean;
+        totalDelta: number;
+        totalTheta: number;
+        threshold: number | null;
+    };
+}> {
+    const vLockKey = getManualFutureOrderLockKey(pUserId, pStrategyCode);
+    if (gAutoTraderCycleLocks.has(vLockKey)) {
+        throw new Error("The live auto trader is in the middle of a server cycle. Please wait a few seconds and try Exec Strategy again.");
+    }
+    if (gExecStrategyLocks.has(vLockKey)) {
+        throw new Error("Exec Strategy is already running for this page. Please wait for it to finish.");
+    }
+
+    gExecStrategyLocks.add(vLockKey);
+    try {
+        const objExecResult = await executeStrategyPlacement(
+            pUserId,
+            pStrategyCode,
+            pSelectedApiProfileId,
+            pProfile,
+            pInput
+        );
+
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "option_opened",
+            "success",
+            pReason === "admin_exec_strategy" ? "Admin Exec Strategy Started" : "Exec Strategy Started",
+            `Exec Strategy placed ${objExecResult.orders.length} option order${objExecResult.orders.length === 1 ? "" : "s"} using ${objExecResult.profileLabel}.`,
+            {
+                symbol: pInput.symbol,
+                action: pInput.action,
+                legs: pInput.legSide,
+                qty: pInput.qty,
+                targetDelta: pInput.targetDelta,
+                neutralMode: objExecResult.neutralCheck.mode,
+                hedgePlaced: objExecResult.neutralCheck.hedgePlaced,
+                reason: pReason
+            }
+        );
+
+        return objExecResult;
+    }
+    catch (objError) {
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "engine_error",
+            "error",
+            pReason === "admin_exec_strategy" ? "Admin Exec Strategy Failed" : "Exec Strategy Failed",
+            getErrorMessage(objError, "Unable to execute the live strategy."),
+            {
+                symbol: pInput.symbol,
+                qty: pInput.qty,
+                targetDelta: pInput.targetDelta,
+                reason: pReason === "admin_exec_strategy" ? "admin_exec_strategy_error" : "exec_strategy_error"
+            }
+        );
+        throw objError;
+    }
+    finally {
+        gExecStrategyLocks.delete(vLockKey);
+    }
+}
+
+async function queueDualPendingExecStrategyRequest(
+    pUserId: string,
+    pSelectedApiProfileId: string,
+    pUiState: Record<string, unknown>,
+    pTriggerSource: string,
+    pReason: string
+): Promise<{ created: boolean; message: string; }> {
+    const objAccount = await getAccountById(pUserId);
+    if (!isDualExecStrategyAllowed("rolling-futures-lt-dual", objAccount?.execStrategy)) {
+        await logFuturesEvent(
+            pUserId,
+            "rolling-futures-lt-dual",
+            "manual_action",
+            "warning",
+            "Exec Strategy Not Authorised",
+            gExecStrategyUnauthorizedMessage,
+            { reason: pReason }
+        );
+        return {
+            created: false,
+            message: gExecStrategyUnauthorizedMessage
+        };
+    }
+
+    const objExecInput = normalizeExecStrategyInput(
+        String(pUiState.action1 || "sell"),
+        pUiState.symbol,
+        String(pUiState.legs1 || "ce"),
+        String(pUiState.expiryMode1 || "5"),
+        pUiState.expiryDate1,
+        pUiState.qty1 || 1,
+        pUiState.newD1 || 0.53
+    );
+
+    try {
+        await createPendingStrategyExecutionRequest({
+            accountId: pUserId,
+            strategyCode: "rolling-futures-lt-dual",
+            triggerSource: pTriggerSource,
+            requestPayload: {
+                selectedApiProfileId: pSelectedApiProfileId,
+                action: objExecInput.action,
+                symbol: objExecInput.symbol,
+                legSide: objExecInput.legSide,
+                expiryMode: objExecInput.expiryMode,
+                expiryDate: objExecInput.expiryDate,
+                qty: objExecInput.qty,
+                targetDelta: objExecInput.targetDelta
+            }
+        });
+
+        await logFuturesEvent(
+            pUserId,
+            "rolling-futures-lt-dual",
+            "manual_action",
+            "success",
+            "Exec Strategy Request Submitted",
+            "Exec Strategy request was saved successfully and is waiting for admin execution.",
+            {
+                symbol: objExecInput.symbol,
+                action: objExecInput.action,
+                legs: objExecInput.legSide,
+                qty: objExecInput.qty,
+                targetDelta: objExecInput.targetDelta,
+                reason: pReason
+            }
+        );
+
+        return {
+            created: true,
+            message: "Exec Strategy request submitted successfully. Waiting for admin execution."
+        };
+    }
+    catch (objError) {
+        const vMessage = getErrorMessage(objError, "Unable to queue the live strategy request.");
+        if (vMessage === "Strategy Execution is already active.") {
+            await logFuturesEvent(
+                pUserId,
+                "rolling-futures-lt-dual",
+                "manual_action",
+                "warning",
+                "Exec Strategy Request Already Active",
+                vMessage,
+                { reason: pReason }
+            );
+            return {
+                created: false,
+                message: vMessage
+            };
+        }
+        throw objError;
+    }
 }
 
 function isDualScaledNeutralMode(
@@ -4231,7 +4463,61 @@ async function runAutoTraderCycle(
         }
         if (objScheduledReEntry.reason && objScheduledReEntry.runAt) {
             const vRunAtMs = new Date(objScheduledReEntry.runAt).getTime();
+            if (isDualRollingFuturesStrategy(pStrategyCode) && !arrSavedPositions.length) {
+                const objQueueResult = await queueDualPendingExecStrategyRequest(
+                    pUserId,
+                    vSelectedApiProfileId,
+                    objUiState as Record<string, unknown>,
+                    objScheduledReEntry.reason === "brokerage"
+                        ? "brokerage_profit_reentry"
+                        : "blocked_margin_profit_reentry",
+                    objScheduledReEntry.reason === "brokerage"
+                        ? "brokerage_reentry_request"
+                        : "blockmargin_reentry_request"
+                );
+                await saveRollingFuturesLtRuntime({
+                    ...objRuntime,
+                    userId: pUserId,
+                    strategyCode: pStrategyCode,
+                    lastError: objQueueResult.created ? "" : objQueueResult.message,
+                    state: buildRuntimeStateWithPendingReEntry(objRuntime, "", "")
+                });
+                return;
+            }
             if (!arrSavedPositions.length && Number.isFinite(vRunAtMs) && vRunAtMs <= vNowMs) {
+                const objAccount = isDualRollingFuturesStrategy(pStrategyCode)
+                    ? await getAccountById(pUserId)
+                    : null;
+                if (!isDualExecStrategyAllowed(pStrategyCode, objAccount?.execStrategy)) {
+                    const vNextRunAt = new Date(Date.now() + gProfitCloseReEntryCooldownMs).toISOString();
+                    await logFuturesEvent(
+                        pUserId,
+                        pStrategyCode,
+                        "engine_error",
+                        "warning",
+                        "Exec Strategy Not Authorised",
+                        gExecStrategyUnauthorizedMessage,
+                        {
+                            symbol: vSymbol,
+                            reason: objScheduledReEntry.reason === "brokerage"
+                                ? "brokerage_reentry_blocked"
+                                : "blockmargin_reentry_blocked",
+                            retryAt: vNextRunAt
+                        }
+                    );
+                    await saveRollingFuturesLtRuntime({
+                        ...objRuntime,
+                        userId: pUserId,
+                        strategyCode: pStrategyCode,
+                        lastError: gExecStrategyUnauthorizedMessage,
+                        state: buildRuntimeStateWithPendingReEntry(
+                            objRuntime,
+                            objScheduledReEntry.reason,
+                            vNextRunAt
+                        )
+                    });
+                    return;
+                }
                 const objExecResult = await executeStrategyPlacement(
                     pUserId,
                     pStrategyCode,
@@ -4355,7 +4641,23 @@ async function runAutoTraderCycle(
                 vSelectedApiProfileId,
                 arrSavedPositions
             );
-            const vRunAt = objProfitRule.reEnterEnabled
+            const bQueueDualReEntry = isDualRollingFuturesStrategy(pStrategyCode) && objProfitRule.reEnterEnabled;
+            let vQueuedReEntryMessage = "";
+            if (bQueueDualReEntry) {
+                const objQueueResult = await queueDualPendingExecStrategyRequest(
+                    pUserId,
+                    vSelectedApiProfileId,
+                    objUiState as Record<string, unknown>,
+                    objProfitRule.reason === "brokerage"
+                        ? "brokerage_profit_reentry"
+                        : "blocked_margin_profit_reentry",
+                    objProfitRule.reason === "brokerage"
+                        ? "brokerage_profit_trigger_request"
+                        : "blockmargin_profit_trigger_request"
+                );
+                vQueuedReEntryMessage = objQueueResult.message;
+            }
+            const vRunAt = objProfitRule.reEnterEnabled && !isDualRollingFuturesStrategy(pStrategyCode)
                 ? new Date(Date.now() + gProfitCloseReEntryCooldownMs).toISOString()
                 : "";
             await logFuturesEvent(
@@ -4366,9 +4668,11 @@ async function runAutoTraderCycle(
                 objProfitRule.reason === "brokerage"
                     ? "Brokerage Profit Target Closed All Positions"
                     : "Blocked Margin Profit Target Closed All Positions",
-                objProfitRule.reEnterEnabled
-                    ? `${objProfitRule.message} Re-entry scheduled after 5 minutes.`
-                    : objProfitRule.message,
+                bQueueDualReEntry
+                    ? `${objProfitRule.message} ${vQueuedReEntryMessage}`
+                    : (objProfitRule.reEnterEnabled
+                        ? `${objProfitRule.message} Re-entry scheduled after 5 minutes.`
+                        : objProfitRule.message),
                 {
                     qty: objClosed.closedPositions.length,
                     thresholdValue: objProfitRule.thresholdValue,
@@ -4392,7 +4696,7 @@ async function runAutoTraderCycle(
                     lastError: "",
                     state: buildRuntimeStateWithPendingReEntry(
                         objLatestRuntimeAfterClose,
-                        objProfitRule.reEnterEnabled ? objProfitRule.reason : "",
+                        objProfitRule.reEnterEnabled && !isDualRollingFuturesStrategy(pStrategyCode) ? objProfitRule.reason : "",
                         vRunAt
                     )
                 });
@@ -4705,6 +5009,7 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
         res.json({
             status: "success",
             data: {
+                execStrategy: isDualExecStrategyAllowed(pStrategyCode, req.authAccount?.execStrategy),
                 symbol: vSelectedSymbol,
                 oneLotValue: Number.isFinite(vOneLotValue) ? Number(vOneLotValue.toFixed(2)) : null,
                 totalBalance: Number.isFinite(vTotalBalance) ? Number(vTotalBalance.toFixed(2)) : null,
@@ -5442,6 +5747,13 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
 
 async function executeStrategyInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
+    if (!isDualExecStrategyAllowed(pStrategyCode, req.authAccount?.execStrategy)) {
+        res.status(403).json({
+            status: "warning",
+            message: gExecStrategyUnauthorizedMessage
+        });
+        return;
+    }
     const objProfile = await readLiveProfile(vUserId, pStrategyCode);
     const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
     if (!vSelectedApiProfileId) {
@@ -5469,12 +5781,16 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
     }
 
     const vAction = String(req.body?.action || "").trim().toLowerCase();
-    const vSymbol = normalizeSymbolValue(req.body?.symbol || getMergedUiState(objProfile).symbol);
     const vLegSide = String(req.body?.legSide || "").trim().toLowerCase();
-    const vExpiryMode = String(req.body?.expiryMode || "5").trim() as "1" | "2" | "4" | "5" | "6" | "7";
-    const vExpiryDate = normalizeRollingFuturesExpiryDate(vExpiryMode, req.body?.expiryDate);
-    const vQty = Math.max(1, Math.floor(Number(req.body?.qty || 1)));
-    const vTargetDelta = Math.max(0, Number(req.body?.targetDelta || 0.53));
+    const objExecInput = normalizeExecStrategyInput(
+        vAction,
+        req.body?.symbol || getMergedUiState(objProfile).symbol,
+        vLegSide,
+        req.body?.expiryMode || "5",
+        req.body?.expiryDate,
+        req.body?.qty || 1,
+        req.body?.targetDelta || 0.53
+    );
 
     if (vAction !== "buy" && vAction !== "sell") {
         res.status(400).json({ status: "warning", message: "Select a valid Action before executing the live strategy." });
@@ -5488,72 +5804,68 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
         res.status(400).json({ status: "warning", message: "Select either CE or PE for this live strategy page." });
         return;
     }
-    if (!(vTargetDelta > 0)) {
+    if (!(objExecInput.targetDelta > 0)) {
         res.status(400).json({ status: "warning", message: "Enter a valid New D before executing the live strategy." });
         return;
     }
 
-    const vLockKey = getManualFutureOrderLockKey(vUserId, pStrategyCode);
-    if (gAutoTraderCycleLocks.has(vLockKey)) {
-        res.status(409).json({
-            status: "warning",
-            message: "The live auto trader is in the middle of a server cycle. Please wait a few seconds and try Exec Strategy again."
-        });
-        return;
-    }
-    if (gExecStrategyLocks.has(vLockKey)) {
-        res.status(409).json({
-            status: "warning",
-            message: "Exec Strategy is already running for this page. Please wait for it to finish."
-        });
-        return;
-    }
-
-    gExecStrategyLocks.add(vLockKey);
     try {
-        const objExecResult = await executeStrategyPlacement(
+        if (isDualRollingFuturesStrategy(pStrategyCode)) {
+            await createPendingStrategyExecutionRequest({
+                accountId: vUserId,
+                strategyCode: pStrategyCode,
+                triggerSource: "manual_exec_strategy",
+                requestPayload: {
+                    selectedApiProfileId: vSelectedApiProfileId,
+                    action: objExecInput.action,
+                    symbol: objExecInput.symbol,
+                    legSide: objExecInput.legSide,
+                    expiryMode: objExecInput.expiryMode,
+                    expiryDate: objExecInput.expiryDate,
+                    qty: objExecInput.qty,
+                    targetDelta: objExecInput.targetDelta
+                }
+            });
+            await logFuturesEvent(
+                vUserId,
+                pStrategyCode,
+                "manual_action",
+                "success",
+                "Exec Strategy Request Submitted",
+                "Exec Strategy request was saved successfully and is waiting for admin execution.",
+                {
+                    symbol: objExecInput.symbol,
+                    action: objExecInput.action,
+                    legs: objExecInput.legSide,
+                    qty: objExecInput.qty,
+                    targetDelta: objExecInput.targetDelta,
+                    reason: "manual_exec_strategy_request"
+                }
+            );
+            res.json({
+                status: "success",
+                message: "Exec Strategy request submitted successfully. Waiting for admin execution."
+            });
+            return;
+        }
+
+        const objExecResult = await runExecStrategyPlacement(
             vUserId,
             pStrategyCode,
             vSelectedApiProfileId,
             objProfile,
-            {
-                action: vAction === "buy" ? "buy" : "sell",
-                symbol: vSymbol,
-                legSide: vLegSide === "both" ? "both" : (vLegSide === "pe" ? "pe" : "ce"),
-                expiryMode: ["1", "2", "4", "5", "6", "7"].includes(vExpiryMode) ? vExpiryMode : "5",
-                expiryDate: vExpiryDate,
-                qty: vQty,
-                targetDelta: vTargetDelta
-            }
-        );
-
-        await logFuturesEvent(
-            vUserId,
-            pStrategyCode,
-            "option_opened",
-            "success",
-            "Exec Strategy Started",
-            `Exec Strategy placed ${objExecResult.orders.length} option order${objExecResult.orders.length === 1 ? "" : "s"} using ${objExecResult.profileLabel}.`,
-            {
-                symbol: vSymbol,
-                action: vAction,
-                legs: vLegSide,
-                qty: vQty,
-                targetDelta: vTargetDelta,
-                neutralMode: objExecResult.neutralCheck.mode,
-                hedgePlaced: objExecResult.neutralCheck.hedgePlaced,
-                reason: "exec_strategy"
-            }
+            objExecInput,
+            "exec_strategy"
         );
 
         res.json({
             status: "success",
             message: `Exec Strategy placed ${objExecResult.orders.length} option order${objExecResult.orders.length === 1 ? "" : "s"} using ${objExecResult.profileLabel}.`,
             data: {
-                action: vAction,
-                legs: vLegSide,
-                qty: vQty,
-                targetDelta: vTargetDelta,
+                action: objExecInput.action,
+                legs: objExecInput.legSide,
+                qty: objExecInput.qty,
+                targetDelta: objExecInput.targetDelta,
                 orders: objExecResult.orders,
                 contracts: objExecResult.contracts,
                 trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, objExecResult.trackedOpenPositions),
@@ -5562,27 +5874,14 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
         });
     }
     catch (objError) {
-        await logFuturesEvent(
-            vUserId,
-            pStrategyCode,
-            "engine_error",
-            "error",
-            "Exec Strategy Failed",
-            getErrorMessage(objError, "Unable to execute the live strategy."),
-            {
-                symbol: vSymbol,
-                qty: vQty,
-                targetDelta: vTargetDelta,
-                reason: "exec_strategy_error"
-            }
-        );
-        res.status(500).json({
-            status: "danger",
-            message: getErrorMessage(objError, "Unable to execute the live strategy.")
+        const vMessage = getErrorMessage(objError, "Unable to execute the live strategy.");
+        const vStatusCode = vMessage.includes("already active")
+            ? 409
+            : 500;
+        res.status(vStatusCode).json({
+            status: vStatusCode === 409 ? "warning" : "danger",
+            message: vMessage
         });
-    }
-    finally {
-        gExecStrategyLocks.delete(vLockKey);
     }
 }
 
@@ -6011,6 +6310,94 @@ export async function executeRollingFuturesLtDualManualOption(req: Request, res:
 }
 export async function executeRollingFuturesLtDualStrategy(req: Request, res: Response): Promise<void> {
     await executeStrategyInternal(req, res, "rolling-futures-lt-dual");
+}
+
+export async function executePendingRollingFuturesLtDualStrategyRequest(req: Request, res: Response): Promise<void> {
+    const vRequestId = String(req.params.requestId || "").trim();
+    if (!vRequestId) {
+        res.status(400).json({ status: "warning", message: "Execution request id is required." });
+        return;
+    }
+
+    try {
+        const objRequest = await getPendingStrategyExecutionRequestById(vRequestId);
+        if (!objRequest) {
+            res.status(404).json({ status: "warning", message: "Execution request was not found." });
+            return;
+        }
+
+        if (objRequest.strategyCode !== "rolling-futures-lt-dual") {
+            res.status(400).json({ status: "warning", message: "Only Dual live strategy requests can be executed here." });
+            return;
+        }
+
+        if (!isDualExecStrategyAllowed("rolling-futures-lt-dual", objRequest.execStrategy)) {
+            res.status(403).json({ status: "warning", message: gExecStrategyUnauthorizedMessage });
+            return;
+        }
+
+        const objProfile = await readLiveProfile(objRequest.accountId, "rolling-futures-lt-dual");
+        const vSelectedApiProfileId = String(objRequest.requestPayload.selectedApiProfileId || objProfile.selectedApiProfileId || "").trim();
+        if (!vSelectedApiProfileId) {
+            res.status(400).json({ status: "warning", message: "Select an API profile before executing the live strategy." });
+            return;
+        }
+
+        const objRuntime = await loadRollingFuturesLtRuntime(objRequest.accountId, "rolling-futures-lt-dual");
+        if (!objRuntime?.autoTraderEnabled || String(objRuntime.status || "").trim().toLowerCase() !== "running") {
+            res.status(400).json({
+                status: "warning",
+                message: "Turn Auto Trader ON before executing the live strategy."
+            });
+            return;
+        }
+
+        const objCheck = await performRollingFuturesLtConnectionCheck(objRequest.accountId, "rolling-futures-lt-dual", vSelectedApiProfileId);
+        if (objCheck.profile.connectionStatus.state !== "connected") {
+            res.status(400).json({
+                status: "warning",
+                message: objCheck.profile.connectionStatus.message || "Delta connection is not healthy.",
+                data: objCheck.profile
+            });
+            return;
+        }
+
+        const objExecInput = normalizeExecStrategyInput(
+            String(objRequest.requestPayload.action || ""),
+            objRequest.requestPayload.symbol,
+            String(objRequest.requestPayload.legSide || ""),
+            String(objRequest.requestPayload.expiryMode || "5"),
+            objRequest.requestPayload.expiryDate,
+            objRequest.requestPayload.qty,
+            objRequest.requestPayload.targetDelta
+        );
+        const objExecResult = await runExecStrategyPlacement(
+            objRequest.accountId,
+            "rolling-futures-lt-dual",
+            vSelectedApiProfileId,
+            objProfile,
+            objExecInput,
+            "admin_exec_strategy"
+        );
+
+        await deletePendingStrategyExecutionRequest(vRequestId);
+        res.json({
+            status: "success",
+            message: `Exec Strategy placed ${objExecResult.orders.length} option order${objExecResult.orders.length === 1 ? "" : "s"} using ${objExecResult.profileLabel}.`,
+            data: {
+                requestId: vRequestId,
+                accountId: objRequest.accountId,
+                fullName: objRequest.fullName,
+                email: objRequest.email
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to execute the pending live strategy request.")
+        });
+    }
 }
 export async function getRollingFuturesLtDualImportableOpenPositions(req: Request, res: Response): Promise<void> {
     await getImportableOpenPositionsInternal(req, res, "rolling-futures-lt-dual");

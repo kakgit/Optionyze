@@ -32,6 +32,7 @@ interface ManagedUserRow {
     telegram_chat_id: string;
     account_active: boolean;
     is_admin: boolean;
+    exec_strategy: boolean;
     must_change_password: boolean;
     created_at: string | Date;
     updated_at: string | Date;
@@ -113,6 +114,7 @@ export async function loadManagedUsers(): Promise<ManagedUserRecord[]> {
             a.telegram_chat_id,
             a.is_active AS account_active,
             a.is_admin,
+            a.exec_strategy,
             a.must_change_password,
             a.created_at,
             a.updated_at,
@@ -135,6 +137,7 @@ export async function loadManagedUsers(): Promise<ManagedUserRecord[]> {
         telegramChatId: String(objRow.telegram_chat_id || ""),
         isActive: Boolean(objRow.account_active),
         isAdmin: Boolean(objRow.is_admin),
+        execStrategy: Boolean(objRow.exec_strategy),
         mustChangePassword: Boolean(objRow.must_change_password),
         createdAt: new Date(objRow.created_at).toISOString(),
         updatedAt: new Date(objRow.updated_at).toISOString(),

@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="/css/rolling-futures-lt-common.css" />
     <link rel="stylesheet" href="/css/rolling-futures-lt-dual.css" />
   </head>
-  <body class="app-page" data-rolling-futures-live="dual">
+  <body class="app-page" data-rolling-futures-live="dual" data-exec-strategy-enabled="<%= currentAccount?.execStrategy ? 'true' : 'false' %>">
     <div class="app-layout rolling-demo-layout">
         <%- include('partials/app-header', { currentAccount }) %>
 

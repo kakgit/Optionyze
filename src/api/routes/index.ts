@@ -4,8 +4,9 @@ import {
     createManagedUserController,
     deleteManagedUserController,
     listManagedUsersController,
+    listPendingStrategyExecutionRequestsController,
     listRunnerStates,
-    listUsers,
+    executePendingStrategyExecutionRequestController,
     resetManagedUserPasswordController,
     updateManagedUserController
 } from "../controllers/users-controller";
@@ -158,14 +159,17 @@ export function createApiRouter(
     const objRouter = Router();
 
     objRouter.get("/health", getHealth);
-    objRouter.get("/users", requireAdminApi, async (req, res) => {
-        await listUsers(req, res);
-    });
     objRouter.get("/runners", requireAdminApi, async (req, res) => {
         await listRunnerStates(req, res, pRunnerManager);
     });
     objRouter.get("/admin/accounts", requireAdminApi, async (req, res) => {
         await listManagedUsersController(req, res);
+    });
+    objRouter.get("/admin/strategy-execution-requests", requireAdminApi, async (req, res) => {
+        await listPendingStrategyExecutionRequestsController(req, res);
+    });
+    objRouter.post("/admin/strategy-execution-requests/:requestId/execute", requireAdminApi, async (req, res) => {
+        await executePendingStrategyExecutionRequestController(req, res);
     });
     objRouter.post("/admin/accounts", requireAdminApi, async (req, res) => {
         await createManagedUserController(req, res);

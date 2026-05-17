@@ -1,6 +1,7 @@
 (function () {
     const rawMode = String(document.body?.dataset?.rollingFuturesLive || "").trim().toLowerCase();
     const mode = rawMode === "short" || rawMode === "dual" ? rawMode : "long";
+    const initialExecStrategyEnabled = String(document.body?.dataset?.execStrategyEnabled || "").trim().toLowerCase() === "true";
     const prefix = mode === "short"
         ? "rollingShortFutures"
         : (mode === "dual" ? "rollingDualFutures" : "rollingLongFutures");
@@ -117,6 +118,7 @@
     let manualFutureOrderInFlight = false;
     let manualOptionOrderInFlight = false;
     let execStrategyInFlight = false;
+    let execStrategyEnabled = mode === "dual" ? initialExecStrategyEnabled : true;
     let lastNeutralStatus = null;
     const closedPositionsPageSize = 10;
 
@@ -464,6 +466,10 @@
         return selectedApiProfileId && connectionState === "connected";
     }
 
+    function canUseExecStrategy() {
+        return mode !== "dual" || execStrategyEnabled;
+    }
+
     function setButtonsEnabled() {
         [
             ids.importButton,
@@ -492,7 +498,10 @@
             }
         });
         if (ids.execStrategyButton instanceof HTMLButtonElement) {
-            ids.execStrategyButton.disabled = execStrategyInFlight || !canUseLiveActions();
+            ids.execStrategyButton.disabled = execStrategyInFlight || !canUseLiveActions() || !canUseExecStrategy();
+            ids.execStrategyButton.title = canUseExecStrategy()
+                ? "Execute the live strategy"
+                : "Not Authorised to Execute, Please Contact Admin";
         }
     }
 
@@ -857,6 +866,9 @@
         if (execStrategyInFlight) {
             throw new Error("Exec Strategy is already running. Please wait for it to finish.");
         }
+        if (!canUseExecStrategy()) {
+            throw new Error("Not Authorised to Execute, Please Contact Admin");
+        }
 
         await checkConnection();
         if (!canUseLiveActions()) {
@@ -956,6 +968,7 @@
         query.set("symbol", String(ids.symbol?.value || "BTC").trim().toUpperCase());
         const objResult = await getJson(`${endpointBase}/account-summary?${query.toString()}`);
         const objData = objResult?.data || {};
+        execStrategyEnabled = mode === "dual" ? Boolean(objData.execStrategy) : true;
         if (ids.oneLotValue) {
             ids.oneLotValue.textContent = fmtUsd(objData.oneLotValue);
         }
@@ -974,6 +987,7 @@
         if (ids.profileLabel) {
             ids.profileLabel.textContent = String(objData.profileLabel || "").trim() || "-";
         }
+        setButtonsEnabled();
     }
 
     function getLtpBlinkClass(positionId, markPrice) {

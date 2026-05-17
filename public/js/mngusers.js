@@ -1,56 +1,160 @@
 const gState = {
     users: [],
     filteredUsers: [],
+    pendingExecutionRequests: [],
     editingAccountId: "",
-    currentAccountId: ""
+    resettingAccountId: "",
+    currentAccountId: "",
+    activeModal: "",
+    isLoadingUsers: false,
+    isLoadingExecutionRequests: false,
+    isSavingUser: false,
+    isResettingPassword: false,
+    executingRequestId: ""
 };
 
+const els = {};
+
 document.addEventListener("DOMContentLoaded", () => {
-    const objApp = document.getElementById("mngUsersApp");
-    gState.currentAccountId = String(objApp?.dataset.currentAccountId || "");
+    cacheElements();
+    gState.currentAccountId = String(els.app?.dataset.currentAccountId || "");
 
-    document.getElementById("searchInput")?.addEventListener("input", applyFilters);
-    document.getElementById("btnRefresh")?.addEventListener("click", loadUsers);
-    document.getElementById("btnAddUser")?.addEventListener("click", () => openModal());
-    document.getElementById("btnCancelModal")?.addEventListener("click", closeModal);
-    document.getElementById("btnCloseModal")?.addEventListener("click", closeModal);
-    document.getElementById("userForm")?.addEventListener("submit", submitForm);
-    document.getElementById("overlay")?.addEventListener("click", closeModal);
+    els.searchInput?.addEventListener("input", applyFilters);
+    els.refreshButton?.addEventListener("click", () => {
+        void loadAdminData({ showSuccess: true });
+    });
+    els.addUserButton?.addEventListener("click", () => openUserModal());
+    els.cancelModalButton?.addEventListener("click", closeActiveModal);
+    els.closeModalButton?.addEventListener("click", closeActiveModal);
+    els.userForm?.addEventListener("submit", submitUserForm);
 
-    loadUsers();
+    els.closeResetPasswordModalButton?.addEventListener("click", closeActiveModal);
+    els.cancelResetPasswordModalButton?.addEventListener("click", closeActiveModal);
+    els.resetPasswordForm?.addEventListener("submit", submitResetPasswordForm);
+
+    els.overlay?.addEventListener("click", closeActiveModal);
+    els.userTableBody?.addEventListener("click", handleTableAction);
+    els.execRequestTableBody?.addEventListener("click", handleExecRequestAction);
+    document.addEventListener("keydown", handleDocumentKeydown);
+
+    void loadAdminData({ showSuccess: true });
 });
 
+function cacheElements() {
+    els.app = document.getElementById("mngUsersApp");
+    els.searchInput = document.getElementById("searchInput");
+    els.refreshButton = document.getElementById("btnRefresh");
+    els.addUserButton = document.getElementById("btnAddUser");
+    els.pageStatus = document.getElementById("pageStatus");
+    els.resultCount = document.getElementById("resultCount");
+    els.userTableBody = document.getElementById("userTableBody");
+    els.execRequestCount = document.getElementById("execRequestCount");
+    els.execRequestTableBody = document.getElementById("execRequestTableBody");
+    els.overlay = document.getElementById("overlay");
+
+    els.userModal = document.getElementById("userModal");
+    els.userForm = document.getElementById("userForm");
+    els.modalTitle = document.getElementById("modalTitle");
+    els.modalHint = document.getElementById("modalHint");
+    els.modalMessage = document.getElementById("modalMessage");
+    els.closeModalButton = document.getElementById("btnCloseModal");
+    els.cancelModalButton = document.getElementById("btnCancelModal");
+    els.saveUserButton = document.getElementById("btnSaveUser");
+    els.passwordFields = document.getElementById("passwordFields");
+    els.fullName = document.getElementById("fullName");
+    els.email = document.getElementById("email");
+    els.mobileNo = document.getElementById("mobileNo");
+    els.telegramChatId = document.getElementById("telegramChatId");
+    els.password = document.getElementById("password");
+    els.confirmPassword = document.getElementById("confirmPassword");
+    els.isActive = document.getElementById("isActive");
+    els.execStrategy = document.getElementById("execStrategy");
+    els.isAdmin = document.getElementById("isAdmin");
+    els.mustChangePassword = document.getElementById("mustChangePassword");
+
+    els.resetPasswordModal = document.getElementById("resetPasswordModal");
+    els.resetPasswordForm = document.getElementById("resetPasswordForm");
+    els.resetPasswordHint = document.getElementById("resetPasswordHint");
+    els.resetPasswordMessage = document.getElementById("resetPasswordMessage");
+    els.closeResetPasswordModalButton = document.getElementById("btnCloseResetPasswordModal");
+    els.cancelResetPasswordModalButton = document.getElementById("btnCancelResetPasswordModal");
+    els.applyResetPasswordButton = document.getElementById("btnApplyResetPassword");
+    els.resetTemporaryPassword = document.getElementById("resetTemporaryPassword");
+    els.resetConfirmPassword = document.getElementById("resetConfirmPassword");
+    els.resetMustChangePassword = document.getElementById("resetMustChangePassword");
+}
+
 async function loadUsers() {
-    setStatus("Loading users...", "info");
+    if (gState.isLoadingUsers) {
+        return;
+    }
+
+    gState.isLoadingUsers = true;
+
     try {
-        const objResponse = await fetch("/api/admin/accounts", { credentials: "same-origin" });
-        const objResult = await objResponse.json();
-        if (!objResponse.ok || objResult.status !== "success") {
-            throw new Error(objResult.message || "Unable to load users.");
-        }
+        const objResult = await requestJson("/api/admin/accounts", {
+            credentials: "same-origin"
+        }, "Unable to load users.");
 
         gState.users = Array.isArray(objResult.data) ? objResult.data : [];
         applyFilters();
-        setStatus(`Loaded ${gState.users.length} user accounts.`, "success");
     }
     catch (objError) {
-        setStatus(getErrorMessage(objError, "Unable to load users."), "error");
+        setPageStatus(getErrorMessage(objError, "Unable to load users."), "error");
+    }
+    finally {
+        gState.isLoadingUsers = false;
+    }
+}
+
+async function loadExecutionRequests() {
+    if (gState.isLoadingExecutionRequests) {
+        return;
+    }
+
+    gState.isLoadingExecutionRequests = true;
+    try {
+        const objResult = await requestJson("/api/admin/strategy-execution-requests", {
+            credentials: "same-origin"
+        }, "Unable to load pending strategy execution requests.");
+        gState.pendingExecutionRequests = Array.isArray(objResult.data) ? objResult.data : [];
+        renderExecutionRequests();
+    }
+    catch (objError) {
+        setPageStatus(getErrorMessage(objError, "Unable to load pending strategy execution requests."), "error");
+    }
+    finally {
+        gState.isLoadingExecutionRequests = false;
+    }
+}
+
+async function loadAdminData(pOptions) {
+    const bShowSuccess = Boolean(pOptions?.showSuccess);
+    setPageStatus("Loading admin data...", "info");
+    setButtonBusy(els.refreshButton, true, "Refreshing...");
+
+    try {
+        await Promise.all([loadUsers(), loadExecutionRequests()]);
+        if (bShowSuccess) {
+            setPageStatus(`Loaded ${gState.users.length} user account${gState.users.length === 1 ? "" : "s"} and ${gState.pendingExecutionRequests.length} pending strategy request${gState.pendingExecutionRequests.length === 1 ? "" : "s"}.`, "success");
+        }
+    }
+    finally {
+        setButtonBusy(els.refreshButton, false, "Refresh");
     }
 }
 
 function applyFilters() {
-    const vSearch = String(document.getElementById("searchInput")?.value || "").trim().toLowerCase();
-
-    gState.filteredUsers = gState.users.filter((objUser) => {
-        return !vSearch || [
-            objUser.fullName,
-            objUser.email,
-            objUser.mobileNo
-        ].join(" ").toLowerCase().includes(vSearch);
-    });
-
+    const vSearch = String(els.searchInput?.value || "").trim().toLowerCase();
+    gState.filteredUsers = gState.users.filter((objUser) => !vSearch || [
+        objUser.fullName,
+        objUser.email,
+        objUser.mobileNo,
+        objUser.telegramChatId
+    ].join(" ").toLowerCase().includes(vSearch));
     renderStats();
     renderTable();
+    renderExecutionRequests();
 }
 
 function renderStats() {
@@ -67,23 +171,22 @@ function renderStats() {
 }
 
 function renderTable() {
-    const objTableBody = document.getElementById("userTableBody");
-    if (!objTableBody) {
+    if (!els.userTableBody) {
         return;
     }
 
     if (!gState.filteredUsers.length) {
-        objTableBody.innerHTML = `<tr><td colspan="5" class="mngusers-empty">No users match the current search.</td></tr>`;
+        els.userTableBody.innerHTML = `<tr><td colspan="6" class="mngusers-empty">No users match the current search.</td></tr>`;
         return;
     }
 
-    objTableBody.innerHTML = gState.filteredUsers.map((objUser) => {
-        const vCreated = new Date(objUser.createdAt).toLocaleString("en-IN");
+    els.userTableBody.innerHTML = gState.filteredUsers.map((objUser) => {
+        const vCreated = formatDateTime(objUser.createdAt);
         const vBadges = [
             objUser.isAdmin ? `<span class="mngusers-chip mngusers-chip-admin">Admin</span>` : `<span class="mngusers-chip mngusers-chip-muted">User</span>`,
             objUser.isActive ? `<span class="mngusers-chip mngusers-chip-live">Active</span>` : `<span class="mngusers-chip mngusers-chip-off">Inactive</span>`,
-            objUser.mustChangePassword ? `<span class="mngusers-chip mngusers-chip-warn">Pwd Reset</span>` : ``
-        ].join(" ");
+            objUser.mustChangePassword ? `<span class="mngusers-chip mngusers-chip-warn">Pwd Reset</span>` : ""
+        ].filter(Boolean).join(" ");
 
         return `
             <tr>
@@ -96,43 +199,85 @@ function renderTable() {
                     <div class="mngusers-cell-sub">Created ${escapeHtml(vCreated)}</div>
                 </td>
                 <td>${vBadges}</td>
+                <td>${objUser.execStrategy ? `<span class="mngusers-chip mngusers-chip-info">Enabled</span>` : `<span class="mngusers-chip mngusers-chip-muted">Disabled</span>`}</td>
                 <td>${objUser.mustChangePassword ? "Temporary password pending" : "Ready"}</td>
                 <td>
-                    <button class="app-link-btn" type="button" data-action="edit" data-id="${objUser.accountId}" title="Edit user" aria-label="Edit user">
-                        Edit
-                    </button>
-                    <button class="app-link-btn" type="button" data-action="reset" data-id="${objUser.accountId}" title="Reset password" aria-label="Reset password">
-                        Reset Password
-                    </button>
-                    <button class="app-link-btn" type="button" data-action="delete" data-id="${objUser.accountId}" title="Delete user" aria-label="Delete user" ${objUser.accountId === gState.currentAccountId ? "disabled" : ""}>
-                        Delete
+                    <div class="mngusers-actions">
+                        <button class="app-link-btn" type="button" data-action="edit" data-id="${escapeHtml(objUser.accountId)}" title="Edit user" aria-label="Edit user">
+                            Edit
+                        </button>
+                        <button class="app-link-btn" type="button" data-action="reset" data-id="${escapeHtml(objUser.accountId)}" title="Reset password" aria-label="Reset password">
+                            Reset Password
+                        </button>
+                        <button class="app-link-btn" type="button" data-action="delete" data-id="${escapeHtml(objUser.accountId)}" title="Delete user" aria-label="Delete user" ${objUser.accountId === gState.currentAccountId ? "disabled" : ""}>
+                            Delete
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join("");
+}
+
+function renderExecutionRequests() {
+    if (!els.execRequestTableBody) {
+        return;
+    }
+
+    const vSearch = String(els.searchInput?.value || "").trim().toLowerCase();
+    const arrRequests = gState.pendingExecutionRequests.filter((objRequest) => !vSearch || [
+        objRequest.fullName,
+        objRequest.email
+    ].join(" ").toLowerCase().includes(vSearch));
+
+    if (els.execRequestCount) {
+        els.execRequestCount.textContent = `${arrRequests.length} pending`;
+    }
+
+    if (!arrRequests.length) {
+        els.execRequestTableBody.innerHTML = `<tr><td colspan="6" class="mngusers-empty">No pending strategy execution requests.</td></tr>`;
+        return;
+    }
+
+    els.execRequestTableBody.innerHTML = arrRequests.map((objRequest) => {
+        const bExecuting = gState.executingRequestId === objRequest.requestId;
+        return `
+            <tr>
+                <td>${escapeHtml(formatDateTime(objRequest.createdAt))}</td>
+                <td>${escapeHtml(objRequest.fullName)}</td>
+                <td>${escapeHtml(objRequest.email)}</td>
+                <td>${escapeHtml(getExecutionTriggerLabel(objRequest.triggerSource))}</td>
+                <td>${objRequest.execStrategy ? `<span class="mngusers-chip mngusers-chip-info">Enabled</span>` : `<span class="mngusers-chip mngusers-chip-muted">Disabled</span>`}</td>
+                <td>
+                    <button class="app-solid-btn" type="button" data-request-action="execute" data-request-id="${escapeHtml(objRequest.requestId)}" ${bExecuting ? "disabled" : ""}>
+                        ${bExecuting ? "Executing..." : "EXECUTE"}
                     </button>
                 </td>
             </tr>
         `;
     }).join("");
-
-    objTableBody.querySelectorAll("button[data-action]").forEach((objButton) => {
-        objButton.addEventListener("click", handleTableAction);
-    });
 }
 
 function handleTableAction(objEvent) {
-    const objButton = objEvent.currentTarget;
-    const vAction = String(objButton.dataset.action || "");
-    const vAccountId = String(objButton.dataset.id || "");
+    const objButton = objEvent.target instanceof Element ? objEvent.target.closest("button[data-action]") : null;
+    if (!(objButton instanceof HTMLButtonElement)) {
+        return;
+    }
+
+    const vAction = String(objButton.dataset.action || "").trim();
+    const vAccountId = String(objButton.dataset.id || "").trim();
     const objUser = gState.users.find((objRow) => objRow.accountId === vAccountId);
     if (!objUser) {
         return;
     }
 
     if (vAction === "edit") {
-        openModal(objUser);
+        openUserModal(objUser);
         return;
     }
 
     if (vAction === "reset") {
-        void resetPassword(objUser);
+        openResetPasswordModal(objUser);
         return;
     }
 
@@ -141,121 +286,217 @@ function handleTableAction(objEvent) {
     }
 }
 
-function openModal(pUser) {
-    gState.editingAccountId = pUser?.accountId || "";
-    setText("modalTitle", gState.editingAccountId ? "Edit User" : "Add User");
-    setText("modalHint", gState.editingAccountId
-        ? "Update account access settings here."
-        : "Create a new account with only the essential login details.");
-
-    setValue("fullName", pUser?.fullName || "");
-    setValue("email", pUser?.email || "");
-    setValue("mobileNo", pUser?.mobileNo || "");
-    setValue("telegramChatId", pUser?.telegramChatId || "");
-    setValue("password", "");
-    setValue("confirmPassword", "");
-    setChecked("isActive", pUser ? Boolean(pUser.isActive) : true);
-    setChecked("isAdmin", pUser ? Boolean(pUser.isAdmin) : false);
-    setChecked("mustChangePassword", pUser ? Boolean(pUser.mustChangePassword) : false);
-
-    const objPasswordWrap = document.getElementById("passwordFields");
-    if (objPasswordWrap) {
-        objPasswordWrap.style.display = gState.editingAccountId ? "none" : "grid";
-    }
-
-    document.getElementById("modalMessage")?.classList.remove("show", "error", "success");
-    document.getElementById("overlay")?.classList.add("show");
-    document.getElementById("userModal")?.classList.add("show");
-}
-
-function closeModal() {
-    document.getElementById("overlay")?.classList.remove("show");
-    document.getElementById("userModal")?.classList.remove("show");
-}
-
-async function submitForm(objEvent) {
-    objEvent.preventDefault();
-
-    const objPayload = {
-        fullName: getValue("fullName"),
-        email: getValue("email"),
-        mobileNo: getValue("mobileNo"),
-        telegramChatId: getValue("telegramChatId"),
-        password: getValue("password"),
-        confirmPassword: getValue("confirmPassword"),
-        isActive: getChecked("isActive"),
-        isAdmin: getChecked("isAdmin"),
-        mustChangePassword: getChecked("mustChangePassword")
-    };
-
-    if (!objPayload.fullName || !objPayload.email || !objPayload.mobileNo || !objPayload.telegramChatId) {
-        setModalMessage("Full name, email, mobile number, and Telegram Chat ID are required.", "error");
+function handleExecRequestAction(objEvent) {
+    const objButton = objEvent.target instanceof Element ? objEvent.target.closest("button[data-request-action]") : null;
+    if (!(objButton instanceof HTMLButtonElement)) {
         return;
     }
 
-    if (!/^-?\d{5,20}$/.test(objPayload.telegramChatId)) {
-        setModalMessage("Please enter a valid Telegram Chat ID.", "error");
+    const vAction = String(objButton.dataset.requestAction || "").trim();
+    const vRequestId = String(objButton.dataset.requestId || "").trim();
+    if (vAction === "execute" && vRequestId) {
+        void executePendingRequest(vRequestId);
+    }
+}
+
+function openUserModal(pUser) {
+    gState.editingAccountId = String(pUser?.accountId || "");
+    setTextNode(els.modalTitle, gState.editingAccountId ? "Edit User" : "Add User");
+    setTextNode(
+        els.modalHint,
+        gState.editingAccountId
+            ? "Update account access settings here."
+            : "Create a new account with only the essential login details."
+    );
+
+    setInputValue(els.fullName, pUser?.fullName || "");
+    setInputValue(els.email, pUser?.email || "");
+    setInputValue(els.mobileNo, pUser?.mobileNo || "");
+    setInputValue(els.telegramChatId, pUser?.telegramChatId || "");
+    setInputValue(els.password, "");
+    setInputValue(els.confirmPassword, "");
+    setCheckedNode(els.isActive, pUser ? Boolean(pUser.isActive) : true);
+    setCheckedNode(els.execStrategy, pUser ? Boolean(pUser.execStrategy) : false);
+    setCheckedNode(els.isAdmin, pUser ? Boolean(pUser.isAdmin) : false);
+    setCheckedNode(els.mustChangePassword, pUser ? Boolean(pUser.mustChangePassword) : false);
+
+    if (els.passwordFields instanceof HTMLElement) {
+        els.passwordFields.hidden = Boolean(gState.editingAccountId);
+    }
+
+    setFormMessage(els.modalMessage, "", "");
+    openModal("user");
+    els.fullName?.focus();
+}
+
+function openResetPasswordModal(pUser) {
+    gState.resettingAccountId = String(pUser?.accountId || "");
+    setTextNode(els.resetPasswordHint, `Set a temporary password for ${pUser?.fullName || "the selected account"}.`);
+    setInputValue(els.resetTemporaryPassword, "");
+    setInputValue(els.resetConfirmPassword, "");
+    setCheckedNode(els.resetMustChangePassword, true);
+    setFormMessage(els.resetPasswordMessage, "", "");
+    openModal("resetPassword");
+    els.resetTemporaryPassword?.focus();
+}
+
+function openModal(pModalKey) {
+    gState.activeModal = pModalKey;
+    els.overlay?.classList.add("show");
+
+    if (pModalKey === "user") {
+        els.userModal?.classList.add("show");
+        els.userModal?.setAttribute("aria-hidden", "false");
+        els.resetPasswordModal?.classList.remove("show");
+        els.resetPasswordModal?.setAttribute("aria-hidden", "true");
+        return;
+    }
+
+    if (pModalKey === "resetPassword") {
+        els.resetPasswordModal?.classList.add("show");
+        els.resetPasswordModal?.setAttribute("aria-hidden", "false");
+        els.userModal?.classList.remove("show");
+        els.userModal?.setAttribute("aria-hidden", "true");
+    }
+}
+
+function closeActiveModal() {
+    gState.activeModal = "";
+    els.overlay?.classList.remove("show");
+    els.userModal?.classList.remove("show");
+    els.userModal?.setAttribute("aria-hidden", "true");
+    els.resetPasswordModal?.classList.remove("show");
+    els.resetPasswordModal?.setAttribute("aria-hidden", "true");
+    gState.editingAccountId = "";
+    gState.resettingAccountId = "";
+}
+
+function handleDocumentKeydown(objEvent) {
+    if (objEvent.key === "Escape" && gState.activeModal) {
+        closeActiveModal();
+    }
+}
+
+async function submitUserForm(objEvent) {
+    objEvent.preventDefault();
+    if (gState.isSavingUser) {
+        return;
+    }
+
+    const objPayload = {
+        fullName: getInputValue(els.fullName),
+        email: getInputValue(els.email),
+        mobileNo: getInputValue(els.mobileNo),
+        telegramChatId: getInputValue(els.telegramChatId),
+        password: getInputValue(els.password),
+        confirmPassword: getInputValue(els.confirmPassword),
+        isActive: getCheckedNode(els.isActive),
+        execStrategy: getCheckedNode(els.execStrategy),
+        isAdmin: getCheckedNode(els.isAdmin),
+        mustChangePassword: getCheckedNode(els.mustChangePassword)
+    };
+
+    if (!objPayload.fullName || !objPayload.email || !objPayload.mobileNo) {
+        setFormMessage(els.modalMessage, "Full name, email, and mobile number are required.", "error");
         return;
     }
 
     if (!gState.editingAccountId && (!objPayload.password || objPayload.password !== objPayload.confirmPassword)) {
-        setModalMessage("Password and confirm password are required and must match.", "error");
+        setFormMessage(els.modalMessage, "Password and confirm password are required and must match.", "error");
+        return;
+    }
+
+    const vNormalizedEmail = objPayload.email.toLowerCase();
+    const bEmailExists = gState.users.some((objUser) => {
+        const vUserEmail = String(objUser.email || "").trim().toLowerCase();
+        if (!vUserEmail || vUserEmail !== vNormalizedEmail) {
+            return false;
+        }
+
+        return !gState.editingAccountId || objUser.accountId !== gState.editingAccountId;
+    });
+    if (bEmailExists) {
+        setFormMessage(els.modalMessage, "An account with this email already exists.", "error");
+        els.email?.focus();
         return;
     }
 
     const vUrl = gState.editingAccountId ? `/api/admin/accounts/${gState.editingAccountId}` : "/api/admin/accounts";
     const vMethod = gState.editingAccountId ? "PUT" : "POST";
+    gState.isSavingUser = true;
+    setButtonBusy(els.saveUserButton, true, "Saving...");
 
     try {
-        const objResponse = await fetch(vUrl, {
+        const objResult = await requestJson(vUrl, {
             method: vMethod,
             credentials: "same-origin",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(objPayload)
-        });
-        const objResult = await objResponse.json();
-        if (!objResponse.ok || objResult.status !== "success") {
-            throw new Error(objResult.message || "Unable to save user.");
-        }
+        }, "Unable to save user.");
 
-        setStatus(objResult.message || "User saved successfully.", "success");
-        closeModal();
-        await loadUsers();
+        setPageStatus(objResult.message || "User saved successfully.", "success");
+        closeActiveModal();
+        await loadAdminData();
     }
     catch (objError) {
-        setModalMessage(getErrorMessage(objError, "Unable to save user."), "error");
+        setFormMessage(els.modalMessage, getErrorMessage(objError, "Unable to save user."), "error");
+    }
+    finally {
+        gState.isSavingUser = false;
+        setButtonBusy(els.saveUserButton, false, "Save User");
     }
 }
 
-async function resetPassword(pUser) {
-    const vTempPassword = window.prompt(`Set a temporary password for ${pUser.fullName}:`, "asd");
-    if (!vTempPassword) {
+async function submitResetPasswordForm(objEvent) {
+    objEvent.preventDefault();
+    if (gState.isResettingPassword || !gState.resettingAccountId) {
         return;
     }
 
+    const vTemporaryPassword = getInputValue(els.resetTemporaryPassword);
+    const vConfirmPassword = getInputValue(els.resetConfirmPassword);
+    const bMustChangePassword = getCheckedNode(els.resetMustChangePassword);
+
+    if (!vTemporaryPassword || vTemporaryPassword.length < 3) {
+        setFormMessage(els.resetPasswordMessage, "Temporary password must be at least 3 characters long.", "error");
+        return;
+    }
+
+    if (vTemporaryPassword !== vConfirmPassword) {
+        setFormMessage(els.resetPasswordMessage, "Temporary password and confirm password must match.", "error");
+        return;
+    }
+
+    gState.isResettingPassword = true;
+    setButtonBusy(els.applyResetPasswordButton, true, "Applying...");
+
     try {
-        const objResponse = await fetch(`/api/admin/accounts/${pUser.accountId}/reset-password`, {
+        const objResult = await requestJson(`/api/admin/accounts/${gState.resettingAccountId}/reset-password`, {
             method: "POST",
             credentials: "same-origin",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ temporaryPassword: vTempPassword })
-        });
-        const objResult = await objResponse.json();
-        if (!objResponse.ok || objResult.status !== "success") {
-            throw new Error(objResult.message || "Unable to reset password.");
-        }
+            body: JSON.stringify({
+                temporaryPassword: vTemporaryPassword,
+                mustChangePassword: bMustChangePassword
+            })
+        }, "Unable to reset password.");
 
-        setStatus(objResult.message, "success");
-        await loadUsers();
+        setPageStatus(objResult.message || "Temporary password updated.", "success");
+        closeActiveModal();
+        await loadAdminData();
     }
     catch (objError) {
-        setStatus(getErrorMessage(objError, "Unable to reset password."), "error");
+        setFormMessage(els.resetPasswordMessage, getErrorMessage(objError, "Unable to reset password."), "error");
+    }
+    finally {
+        gState.isResettingPassword = false;
+        setButtonBusy(els.applyResetPasswordButton, false, "Apply Reset");
     }
 }
 
 async function deleteUser(pUser) {
     if (pUser.accountId === gState.currentAccountId) {
-        setStatus("You cannot delete your own admin account.", "error");
+        setPageStatus("You cannot delete your own admin account.", "error");
         return;
     }
 
@@ -265,41 +506,93 @@ async function deleteUser(pUser) {
     }
 
     try {
-        const objResponse = await fetch(`/api/admin/accounts/${pUser.accountId}`, {
+        const objResult = await requestJson(`/api/admin/accounts/${pUser.accountId}`, {
             method: "DELETE",
             credentials: "same-origin"
-        });
-        const objResult = await objResponse.json();
-        if (!objResponse.ok || objResult.status !== "success") {
-            throw new Error(objResult.message || "Unable to delete user.");
-        }
+        }, "Unable to delete user.");
 
-        setStatus(objResult.message, "success");
-        await loadUsers();
+        setPageStatus(objResult.message || "User account deleted successfully.", "success");
+        await loadAdminData();
     }
     catch (objError) {
-        setStatus(getErrorMessage(objError, "Unable to delete user."), "error");
+        setPageStatus(getErrorMessage(objError, "Unable to delete user."), "error");
     }
 }
 
-function setStatus(pMessage, pTone) {
-    const objStatus = document.getElementById("pageStatus");
-    if (!objStatus) {
+async function executePendingRequest(pRequestId) {
+    if (!pRequestId || gState.executingRequestId) {
         return;
     }
 
-    objStatus.textContent = pMessage;
-    objStatus.className = `mngusers-page-status show ${pTone}`;
+    gState.executingRequestId = pRequestId;
+    renderExecutionRequests();
+
+    try {
+        const objResult = await requestJson(`/api/admin/strategy-execution-requests/${encodeURIComponent(pRequestId)}/execute`, {
+            method: "POST",
+            credentials: "same-origin"
+        }, "Unable to execute the pending strategy request.");
+
+        setPageStatus(objResult.message || "Strategy executed successfully.", "success");
+        await loadAdminData();
+    }
+    catch (objError) {
+        setPageStatus(getErrorMessage(objError, "Unable to execute the pending strategy request."), "error");
+        await loadExecutionRequests().catch(() => undefined);
+    }
+    finally {
+        gState.executingRequestId = "";
+        renderExecutionRequests();
+    }
 }
 
-function setModalMessage(pMessage, pTone) {
-    const objMessage = document.getElementById("modalMessage");
-    if (!objMessage) {
+async function requestJson(pUrl, pOptions, pFallbackMessage) {
+    const objResponse = await fetch(pUrl, pOptions);
+    const objResult = await objResponse.json().catch(() => ({
+        status: "error",
+        message: pFallbackMessage
+    }));
+
+    if (!objResponse.ok || objResult.status !== "success") {
+        throw new Error(String(objResult.message || pFallbackMessage));
+    }
+
+    return objResult;
+}
+
+function setPageStatus(pMessage, pTone) {
+    setFormMessage(els.pageStatus, pMessage, pTone);
+}
+
+function setFormMessage(pNode, pMessage, pTone) {
+    if (!(pNode instanceof HTMLElement)) {
         return;
     }
 
-    objMessage.textContent = pMessage;
-    objMessage.className = `mngusers-form-message show ${pTone}`;
+    const vMessage = String(pMessage || "").trim();
+    pNode.textContent = vMessage;
+    pNode.className = pNode.id === "pageStatus" ? "mngusers-page-status" : "mngusers-form-message";
+    if (!vMessage) {
+        return;
+    }
+
+    pNode.classList.add("show");
+    if (pTone) {
+        pNode.classList.add(pTone);
+    }
+}
+
+function setButtonBusy(pButton, pBusy, pBusyText) {
+    if (!(pButton instanceof HTMLButtonElement)) {
+        return;
+    }
+
+    if (!pButton.dataset.defaultLabel) {
+        pButton.dataset.defaultLabel = pButton.textContent || "";
+    }
+
+    pButton.disabled = pBusy;
+    pButton.textContent = pBusy ? pBusyText : String(pButton.dataset.defaultLabel || "");
 }
 
 function setText(pId, pValue) {
@@ -309,26 +602,49 @@ function setText(pId, pValue) {
     }
 }
 
-function setValue(pId, pValue) {
-    const objNode = document.getElementById(pId);
-    if (objNode) {
-        objNode.value = pValue;
+function setTextNode(pNode, pValue) {
+    if (pNode) {
+        pNode.textContent = String(pValue || "");
     }
 }
 
-function getValue(pId) {
-    return String(document.getElementById(pId)?.value || "").trim();
-}
-
-function setChecked(pId, pValue) {
-    const objNode = document.getElementById(pId);
-    if (objNode) {
-        objNode.checked = Boolean(pValue);
+function setInputValue(pNode, pValue) {
+    if (pNode instanceof HTMLInputElement) {
+        pNode.value = String(pValue || "");
     }
 }
 
-function getChecked(pId) {
-    return Boolean(document.getElementById(pId)?.checked);
+function getInputValue(pNode) {
+    return pNode instanceof HTMLInputElement ? String(pNode.value || "").trim() : "";
+}
+
+function setCheckedNode(pNode, pValue) {
+    if (pNode instanceof HTMLInputElement) {
+        pNode.checked = Boolean(pValue);
+    }
+}
+
+function getCheckedNode(pNode) {
+    return pNode instanceof HTMLInputElement ? Boolean(pNode.checked) : false;
+}
+
+function formatDateTime(pValue) {
+    const objDate = new Date(pValue);
+    return Number.isNaN(objDate.getTime()) ? "-" : objDate.toLocaleString("en-IN");
+}
+
+function getExecutionTriggerLabel(pTriggerSource) {
+    const vTriggerSource = String(pTriggerSource || "").trim().toLowerCase();
+    if (vTriggerSource === "manual_exec_strategy") {
+        return "Manual Exec Strategy";
+    }
+    if (vTriggerSource === "brokerage_profit_reentry") {
+        return "Brokerage Profit Trigger";
+    }
+    if (vTriggerSource === "blocked_margin_profit_reentry") {
+        return "Blocked Margin Trigger";
+    }
+    return vTriggerSource ? vTriggerSource.replaceAll("_", " ") : "-";
 }
 
 function escapeHtml(pValue) {
@@ -341,9 +657,5 @@ function escapeHtml(pValue) {
 }
 
 function getErrorMessage(pError, pFallback) {
-    if (pError instanceof Error && pError.message) {
-        return pError.message;
-    }
-
-    return pFallback;
+    return pError instanceof Error && pError.message ? pError.message : pFallback;
 }

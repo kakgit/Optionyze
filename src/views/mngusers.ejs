@@ -43,12 +43,40 @@
                             <th>Name</th>
                             <th>Login</th>
                             <th>Access</th>
+                            <th>Exec Strategy</th>
                             <th>Password State</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="userTableBody">
-                        <tr><td colspan="5" class="mngusers-empty">Loading users...</td></tr>
+                        <tr><td colspan="6" class="mngusers-empty">Loading users...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="app-panel">
+            <div class="mngusers-toolbar">
+                <div>
+                    <h2>Pending Strategy Executions</h2>
+                    <p class="app-copy">Dual live Exec Strategy requests wait here for admin approval and execution.</p>
+                </div>
+            </div>
+            <p id="execRequestCount" class="app-copy">0 pending</p>
+            <div class="mngusers-table-wrap">
+                <table class="mngusers-table">
+                    <thead>
+                        <tr>
+                            <th>Date Time</th>
+                            <th>User Name</th>
+                            <th>Email ID</th>
+                            <th>Triggered By</th>
+                            <th>Exec Strategy</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="execRequestTableBody">
+                        <tr><td colspan="6" class="mngusers-empty">Loading pending strategy executions...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -70,22 +98,53 @@
                 <div><label for="fullName">Full Name</label><input id="fullName" name="fullName" type="text" required /></div>
                 <div><label for="email">Email</label><input id="email" name="email" type="email" required /></div>
                 <div class="mngusers-span-2"><label for="mobileNo">Mobile No</label><input id="mobileNo" name="mobileNo" type="tel" required /></div>
-                <div class="mngusers-span-2"><label for="telegramChatId">Telegram Chat ID</label><input id="telegramChatId" name="telegramChatId" type="text" inputmode="numeric" required /></div>
+                <div class="mngusers-span-2"><label for="telegramChatId">Telegram Chat ID</label><input id="telegramChatId" name="telegramChatId" type="text" inputmode="numeric" /></div>
                 <div class="mngusers-span-2" id="passwordFields">
                     <div class="mngusers-modal-grid">
                         <div><label for="password">Password</label><input id="password" name="password" type="password" /></div>
                         <div><label for="confirmPassword">Confirm Password</label><input id="confirmPassword" name="confirmPassword" type="password" /></div>
                     </div>
                 </div>
-                <div class="mngusers-span-2 mngusers-inline-checks">
+                <div class="mngusers-span-2 mngusers-check-grid">
                     <label class="mngusers-check"><input id="isActive" type="checkbox" checked /> Active</label>
+                    <label class="mngusers-check"><input id="execStrategy" type="checkbox" /> Exec Strategy</label>
                     <label class="mngusers-check"><input id="isAdmin" type="checkbox" /> Admin</label>
                     <label class="mngusers-check"><input id="mustChangePassword" type="checkbox" /> Force password change</label>
                 </div>
             </div>
             <div class="mngusers-modal-actions">
                 <button id="btnCancelModal" class="app-link-btn" type="button">Cancel</button>
-                <button class="app-solid-btn" type="submit">Save User</button>
+                <button id="btnSaveUser" class="app-solid-btn" type="submit">Save User</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="app-panel mngusers-modal" id="resetPasswordModal" aria-hidden="true">
+        <div class="mngusers-modal-head">
+            <div>
+                <h2 class="mngusers-modal-title">Reset Password</h2>
+                <p id="resetPasswordHint" class="app-copy">Set a temporary password for the selected account.</p>
+            </div>
+            <button id="btnCloseResetPasswordModal" class="app-link-btn" type="button">Close</button>
+        </div>
+        <div id="resetPasswordMessage" class="mngusers-form-message"></div>
+        <form id="resetPasswordForm">
+            <div class="mngusers-modal-grid">
+                <div class="mngusers-span-2">
+                    <label for="resetTemporaryPassword">Temporary Password</label>
+                    <input id="resetTemporaryPassword" name="resetTemporaryPassword" type="password" required />
+                </div>
+                <div class="mngusers-span-2">
+                    <label for="resetConfirmPassword">Confirm Password</label>
+                    <input id="resetConfirmPassword" name="resetConfirmPassword" type="password" required />
+                </div>
+                <div class="mngusers-span-2 mngusers-inline-checks">
+                    <label class="mngusers-check"><input id="resetMustChangePassword" type="checkbox" checked /> Force password change on next login</label>
+                </div>
+            </div>
+            <div class="mngusers-modal-actions">
+                <button id="btnCancelResetPasswordModal" class="app-link-btn" type="button">Cancel</button>
+                <button id="btnApplyResetPassword" class="app-solid-btn" type="submit">Apply Reset</button>
             </div>
         </form>
     </section>

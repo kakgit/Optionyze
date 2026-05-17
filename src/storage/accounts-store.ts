@@ -19,6 +19,7 @@ interface AccountRow {
     password_hash: string;
     is_active: boolean;
     is_admin: boolean;
+    exec_strategy: boolean;
     must_change_password: boolean;
     created_at: string | Date;
     updated_at: string | Date;
@@ -31,6 +32,7 @@ export interface CreateAccountInput {
     telegramChatId?: string;
     password: string;
     isAdmin?: boolean;
+    execStrategy?: boolean;
     isActive?: boolean;
     mustChangePassword?: boolean;
 }
@@ -42,6 +44,7 @@ export interface UpdateAccountInput {
     telegramChatId?: string;
     isActive: boolean;
     isAdmin: boolean;
+    execStrategy: boolean;
     mustChangePassword: boolean;
 }
 
@@ -78,7 +81,7 @@ export async function createAccount(pInput: CreateAccountInput): Promise<Account
     const vEmail = normalizeEmail(pInput.email);
     const objPool = getPostgresPool();
     const objExisting = await objPool.query<AccountRow>(`
-        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, must_change_password, created_at, updated_at
+        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, exec_strategy, must_change_password, created_at, updated_at
         FROM optionyze_accounts
         WHERE email = $1
     `, [vEmail]);
@@ -101,10 +104,11 @@ export async function createAccount(pInput: CreateAccountInput): Promise<Account
             password_hash,
             is_active,
             is_admin,
+            exec_strategy,
             must_change_password,
             created_at,
             updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
     `, [
         vAccountId,
         String(pInput.fullName || "").trim(),
@@ -114,6 +118,7 @@ export async function createAccount(pInput: CreateAccountInput): Promise<Account
         vPasswordHash,
         pInput.isActive !== false,
         Boolean(pInput.isAdmin),
+        Boolean(pInput.execStrategy),
         Boolean(pInput.mustChangePassword),
         vNow,
         vNow
@@ -134,7 +139,7 @@ export async function getAccountByEmail(pEmail: string): Promise<AccountRecord |
 
     const objPool = getPostgresPool();
     const objResult = await objPool.query<AccountRow>(`
-        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, must_change_password, created_at, updated_at
+        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, exec_strategy, must_change_password, created_at, updated_at
         FROM optionyze_accounts
         WHERE email = $1
     `, [normalizeEmail(pEmail)]);
@@ -148,7 +153,7 @@ export async function getAccountById(pAccountId: string): Promise<AccountRecord 
     }
 
     const objResult = await runPostgresQueryWithReconnect((pPool) => pPool.query<AccountRow>(`
-        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, must_change_password, created_at, updated_at
+        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, exec_strategy, must_change_password, created_at, updated_at
         FROM optionyze_accounts
         WHERE account_id = $1
     `, [pAccountId]));
@@ -182,8 +187,9 @@ export async function updateAccount(pAccountId: string, pInput: UpdateAccountInp
             telegram_chat_id = $5,
             is_active = $6,
             is_admin = $7,
-            must_change_password = $8,
-            updated_at = $9
+            exec_strategy = $8,
+            must_change_password = $9,
+            updated_at = $10
         WHERE account_id = $1
     `, [
         pAccountId,
@@ -193,6 +199,7 @@ export async function updateAccount(pAccountId: string, pInput: UpdateAccountInp
         String(pInput.telegramChatId || "").trim(),
         Boolean(pInput.isActive),
         Boolean(pInput.isAdmin),
+        Boolean(pInput.execStrategy),
         Boolean(pInput.mustChangePassword),
         new Date().toISOString()
     ]);
@@ -237,7 +244,7 @@ export async function deleteAccount(pAccountId: string): Promise<void> {
 async function getAnyAdminAccount(): Promise<AccountRecord | null> {
     const objPool = getPostgresPool();
     const objResult = await objPool.query<AccountRow>(`
-        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, must_change_password, created_at, updated_at
+        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, exec_strategy, must_change_password, created_at, updated_at
         FROM optionyze_accounts
         WHERE is_admin = true
         ORDER BY created_at ASC
@@ -261,6 +268,7 @@ function mapAccountRow(pRow?: AccountRow | null): AccountRecord | null {
         passwordHash: String(pRow.password_hash || ""),
         isActive: Boolean(pRow.is_active),
         isAdmin: Boolean(pRow.is_admin),
+        execStrategy: Boolean(pRow.exec_strategy),
         mustChangePassword: Boolean(pRow.must_change_password),
         createdAt: new Date(pRow.created_at).toISOString(),
         updatedAt: new Date(pRow.updated_at).toISOString()

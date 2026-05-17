@@ -63,6 +63,7 @@ export interface AccountRecord {
     passwordHash: string;
     isActive: boolean;
     isAdmin: boolean;
+    execStrategy: boolean;
     mustChangePassword: boolean;
     createdAt: string;
     updatedAt: string;
@@ -76,6 +77,7 @@ export interface ManagedUserRecord {
     telegramChatId: string;
     isActive: boolean;
     isAdmin: boolean;
+    execStrategy: boolean;
     mustChangePassword: boolean;
     createdAt: string;
     updatedAt: string;
@@ -84,6 +86,19 @@ export interface ManagedUserRecord {
     exchange: BrokerType | string;
     preferredSymbol: string;
     notes: string;
+}
+
+export interface PendingStrategyExecutionRecord {
+    requestId: string;
+    accountId: string;
+    fullName: string;
+    email: string;
+    execStrategy: boolean;
+    strategyCode: string;
+    triggerSource: string;
+    requestPayload: Record<string, unknown>;
+    createdAt: string;
+    updatedAt: string;
 }
 
 export interface SessionRecord {

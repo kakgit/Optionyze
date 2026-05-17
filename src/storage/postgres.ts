@@ -265,6 +265,7 @@ export async function ensurePostgresSchema(): Promise<void> {
             password_hash TEXT NOT NULL,
             is_active BOOLEAN NOT NULL DEFAULT true,
             is_admin BOOLEAN NOT NULL DEFAULT false,
+            exec_strategy BOOLEAN NOT NULL DEFAULT false,
             must_change_password BOOLEAN NOT NULL DEFAULT false,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -274,6 +275,26 @@ export async function ensurePostgresSchema(): Promise<void> {
     await objPool.query(`
         ALTER TABLE optionyze_accounts
         ADD COLUMN IF NOT EXISTS telegram_chat_id TEXT NOT NULL DEFAULT '';
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_accounts
+        ADD COLUMN IF NOT EXISTS exec_strategy BOOLEAN NOT NULL DEFAULT false;
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_strategy_execution_requests (
+            request_id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            strategy_code TEXT NOT NULL,
+            trigger_source TEXT NOT NULL,
+            request_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+    await objPool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_optionyze_strategy_execution_requests_account_unique
+        ON optionyze_strategy_execution_requests(account_id);
     `);
 
     await objPool.query(`
@@ -421,6 +442,7 @@ export async function ensurePostgresSchema(): Promise<void> {
             password_hash TEXT NOT NULL,
             is_active BOOLEAN NOT NULL DEFAULT true,
             is_admin BOOLEAN NOT NULL DEFAULT false,
+            exec_strategy BOOLEAN NOT NULL DEFAULT false,
             must_change_password BOOLEAN NOT NULL DEFAULT false,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -430,6 +452,26 @@ export async function ensurePostgresSchema(): Promise<void> {
     await objPool.query(`
         ALTER TABLE optionyze_accounts
         ADD COLUMN IF NOT EXISTS telegram_chat_id TEXT NOT NULL DEFAULT '';
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_accounts
+        ADD COLUMN IF NOT EXISTS exec_strategy BOOLEAN NOT NULL DEFAULT false;
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_strategy_execution_requests (
+            request_id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            strategy_code TEXT NOT NULL,
+            trigger_source TEXT NOT NULL,
+            request_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+    await objPool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_optionyze_strategy_execution_requests_account_unique
+        ON optionyze_strategy_execution_requests(account_id);
     `);
 
     await objPool.query(`
