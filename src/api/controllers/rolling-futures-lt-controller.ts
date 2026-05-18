@@ -383,6 +383,8 @@ async function executePendingDualStrategyRequestByRecord(
         throw new Error(gExecStrategyUnauthorizedMessage);
     }
 
+    await clearRollingOptionsEventsByStrategy(pRequest.accountId, "rolling-futures-lt-dual");
+
     const objProfile = await readLiveProfile(pRequest.accountId, "rolling-futures-lt-dual");
     const vSelectedApiProfileId = String(pRequest.requestPayload.selectedApiProfileId || objProfile.selectedApiProfileId || "").trim();
     if (!vSelectedApiProfileId) {
@@ -409,7 +411,7 @@ async function executePendingDualStrategyRequestByRecord(
         pRequest.requestPayload.targetDelta
     );
 
-    return runExecStrategyPlacement(
+    const objExecResult = await runExecStrategyPlacement(
         pRequest.accountId,
         "rolling-futures-lt-dual",
         vSelectedApiProfileId,
@@ -417,6 +419,22 @@ async function executePendingDualStrategyRequestByRecord(
         objExecInput,
         "admin_exec_strategy"
     );
+    const objFirstOpenedOption = objExecResult.trackedOpenPositions
+        .filter((objPosition) => isOptionContractSymbol(objPosition.contractName))
+        .sort((pLeft, pRight) => new Date(String(pLeft.openedAt || "")).getTime() - new Date(String(pRight.openedAt || "")).getTime())[0];
+    if (objFirstOpenedOption?.openedAt) {
+        await saveRollingFuturesLtProfile({
+            ...objProfile,
+            userId: pRequest.accountId,
+            strategyCode: "rolling-futures-lt-dual",
+            selectedApiProfileId: vSelectedApiProfileId,
+            uiState: {
+                ...getMergedUiState(objProfile),
+                closedFromDate: formatDeltaUiDateTimeLocalString(objFirstOpenedOption.openedAt)
+            }
+        });
+    }
+    return objExecResult;
 }
 
 async function attemptAutoExecuteNextPendingDualStrategyRequest(
@@ -904,8 +922,21 @@ function normalizeRollingFuturesLegSelection(pValue: unknown, pFallback: string)
 
 function getCurrentDeltaUiDateTimeLocalString(): string {
     const vNowUtcMs = Date.now();
-    const vUiMs = vNowUtcMs + (gDeltaUiTimezoneOffsetMinutes * 60 * 1000);
-    const objUiDate = new Date(vUiMs);
+    const objUiDate = new Date(vNowUtcMs + (gDeltaUiTimezoneOffsetMinutes * 60 * 1000));
+    const vYear = objUiDate.getUTCFullYear();
+    const vMonth = String(objUiDate.getUTCMonth() + 1).padStart(2, "0");
+    const vDay = String(objUiDate.getUTCDate()).padStart(2, "0");
+    const vHour = String(objUiDate.getUTCHours()).padStart(2, "0");
+    const vMinute = String(objUiDate.getUTCMinutes()).padStart(2, "0");
+    return `${vYear}-${vMonth}-${vDay}T${vHour}:${vMinute}`;
+}
+
+function formatDeltaUiDateTimeLocalString(pValue: string): string {
+    const vEpochMs = new Date(String(pValue || "")).getTime();
+    if (!Number.isFinite(vEpochMs)) {
+        return getCurrentDeltaUiDateTimeLocalString();
+    }
+    const objUiDate = new Date(vEpochMs + (gDeltaUiTimezoneOffsetMinutes * 60 * 1000));
     const vYear = objUiDate.getUTCFullYear();
     const vMonth = String(objUiDate.getUTCMonth() + 1).padStart(2, "0");
     const vDay = String(objUiDate.getUTCDate()).padStart(2, "0");
