@@ -120,6 +120,7 @@
     let execStrategyInFlight = false;
     let execStrategyEnabled = mode === "dual" ? initialExecStrategyEnabled : true;
     let lastNeutralStatus = null;
+    let lastRecoveryMetrics = null;
     const closedPositionsPageSize = 10;
 
     function escapeHtml(value) {
@@ -525,6 +526,7 @@
 
     function applyRecoveryMetrics(recoveryMetrics) {
         const objMetrics = recoveryMetrics || {};
+        lastRecoveryMetrics = objMetrics;
         if (ids.brok2Rec instanceof HTMLInputElement) {
             ids.brok2Rec.value = fmt(objMetrics.totalBrokerageToRecover, 4) === "-" ? "0" : fmt(objMetrics.totalBrokerageToRecover, 4);
         }
@@ -599,11 +601,13 @@
             ids.autoTraderButton.classList.toggle("success", autoTraderEnabled);
             ids.autoTraderButton.classList.toggle("warn", !autoTraderEnabled);
         }
-        applyRecoveryMetrics({
-            totalBrokerageToRecover: Number(objRuntime.state?.brokerageRecoveryTotal || 0),
-            totalPnl: Number(objRuntime.state?.recoveredTotalPnl || 0),
-            netPnl: Number(objRuntime.state?.recoveredTotalPnl || 0) - Number(objRuntime.state?.brokerageRecoveryTotal || 0)
-        });
+        if (!lastRecoveryMetrics) {
+            applyRecoveryMetrics({
+                totalBrokerageToRecover: Number(objRuntime.state?.brokerageRecoveryTotal || 0),
+                totalPnl: Number(objRuntime.state?.recoveredTotalPnl || 0),
+                netPnl: Number(objRuntime.state?.recoveredTotalPnl || 0) - Number(objRuntime.state?.brokerageRecoveryTotal || 0)
+            });
+        }
         updateNeutralBadges(lastNeutralStatus);
         setButtonsEnabled();
     }

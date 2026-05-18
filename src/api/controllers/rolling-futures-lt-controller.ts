@@ -103,6 +103,7 @@ const gFutureLimitRetryCount = 5;
 const gOptionReentryPendingMs = 5000;
 const gProfitClosePauseAfterOptionRuleMs = 15000;
 const gProfitCloseReEntryCooldownMs = 5 * 60 * 1000;
+const gProfitCloseConfirmationMs = 5 * 60 * 1000;
 const gRestartCloseProtectionMs = 5 * 60 * 1000;
 const gNeutralityHedgeCooldownMs = 2 * 60 * 1000;
 const gExecStrategyUnauthorizedMessage = "Not Authorised to Execute, Please Contact Admin";
@@ -1021,6 +1022,28 @@ function getTrackedOptionMetadata(pPosition: RollingFuturesLtImportedPositionRec
         : {};
 }
 
+function getTrackedFutureRealizedPnl(pPosition: RollingFuturesLtImportedPositionRecord): number {
+    if (!isFutureContractSymbol(pPosition.contractName)) {
+        return 0;
+    }
+    const objMetadata = pPosition.metadata && typeof pPosition.metadata === "object"
+        ? pPosition.metadata as Record<string, unknown>
+        : {};
+    const vRealizedPnl = Number(objMetadata.realizedPnl || 0);
+    return Number.isFinite(vRealizedPnl) ? Number(vRealizedPnl.toFixed(4)) : 0;
+}
+
+function getTrackedFutureUnrealizedPnl(pPosition: RollingFuturesLtImportedPositionRecord): number {
+    if (!isFutureContractSymbol(pPosition.contractName)) {
+        return 0;
+    }
+    const objMetadata = pPosition.metadata && typeof pPosition.metadata === "object"
+        ? pPosition.metadata as Record<string, unknown>
+        : {};
+    const vUnrealizedPnl = Number(objMetadata.unrealizedPnl || 0);
+    return Number.isFinite(vUnrealizedPnl) ? Number(vUnrealizedPnl.toFixed(4)) : 0;
+}
+
 function getSignedOptionBaseDelta(pContractName: unknown, pDeltaValue: unknown): number {
     const vMagnitude = Math.abs(Number(pDeltaValue || 0));
     if (!Number.isFinite(vMagnitude) || !(vMagnitude > 0)) {
@@ -1296,6 +1319,10 @@ function mapLivePosition(
         pnl: Number((toFiniteNumber(pRow.realized_pnl, 0) + toFiniteNumber(pRow.unrealized_pnl, 0)).toFixed(2)),
         margin: toFiniteNumber(pRow.margin, 0),
         liquidationPrice: toFiniteNumber(pRow.liquidation_price, 0),
+        metadata: {
+            realizedPnl: Number(toFiniteNumber(pRow.realized_pnl, 0).toFixed(4)),
+            unrealizedPnl: Number(toFiniteNumber(pRow.unrealized_pnl, 0).toFixed(4))
+        },
         openedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
     };
@@ -1463,6 +1490,35 @@ async function resolveOrderChargeFromDelta(
     return Number.isFinite(vHistoryCommission) ? vHistoryCommission : null;
 }
 
+async function resolveOrderRealizedPnlFromDelta(
+    pClient: any,
+    pContractName: string,
+    pOrderPayload: Record<string, unknown>,
+    pSide: string,
+    pQty: number,
+    pPlacedAtIso: string
+): Promise<number | null> {
+    const vPayloadPnl = getOrderLikeRealizedPnl(pOrderPayload);
+    if (Number.isFinite(vPayloadPnl)) {
+        return Number(vPayloadPnl);
+    }
+
+    const objHistoryRow = await findRecentOrderHistoryRow(
+        pClient,
+        pContractName,
+        getOrderId(pOrderPayload),
+        pSide,
+        pQty,
+        pPlacedAtIso
+    );
+    if (!objHistoryRow) {
+        return null;
+    }
+
+    const vHistoryPnl = toFiniteNumber(objHistoryRow.meta_data?.pnl, Number.NaN);
+    return Number.isFinite(vHistoryPnl) ? Number(vHistoryPnl) : null;
+}
+
 async function resolveTrackedPositionClosePnl(
     pClient: any,
     pPosition: RollingFuturesLtImportedPositionRecord,
@@ -1474,8 +1530,10 @@ async function resolveTrackedPositionClosePnl(
         return Number(vPayloadPnl);
     }
 
+    const bFutureContract = isFutureContractSymbol(pPosition.contractName);
+
     const vPayloadFillPrice = getOrderLikeAverageFillPrice(pClosePayload);
-    if (Number.isFinite(vPayloadFillPrice)) {
+    if (!bFutureContract && Number.isFinite(vPayloadFillPrice)) {
         return estimateTrackedPositionPnl(pPosition, Number(vPayloadFillPrice));
     }
 
@@ -1497,7 +1555,7 @@ async function resolveTrackedPositionClosePnl(
     }
 
     const vHistoryFillPrice = toFiniteNumber(objHistoryRow.average_fill_price, Number.NaN);
-    if (Number.isFinite(vHistoryFillPrice)) {
+    if (!bFutureContract && Number.isFinite(vHistoryFillPrice)) {
         return estimateTrackedPositionPnl(pPosition, Number(vHistoryFillPrice));
     }
 
@@ -2306,6 +2364,18 @@ async function buildOpenPositionsPayload(
         ? Math.max(vRuntimeBrokerageTotal, vOpenPositionCharges)
         : vRuntimeBrokerageTotal;
     const vRecoveredTotalPnl = getRecoveredTotalPnl(objRuntime);
+    const vOpenFuturesRealizedPnl = Number(arrPositions.reduce((pSum, objPosition) => {
+        return pSum + getTrackedFutureRealizedPnl(objPosition);
+    }, 0).toFixed(4));
+    const vOpenFuturesUnrealizedPnl = Number(arrPositions.reduce((pSum, objPosition) => {
+        return pSum + getTrackedFutureUnrealizedPnl(objPosition);
+    }, 0).toFixed(4));
+    const vOpenOptionsAndOtherPnl = Number(objEnriched.positions.reduce((pSum, objPosition) => {
+        if (objPosition.contractKind === "future") {
+            return pSum;
+        }
+        return pSum + Number(objPosition.pnl || 0);
+    }, 0).toFixed(4));
     const objOpenPnlSnapshot = getOpenPnlSnapshotState(objRuntime);
     const arrCurrentPositionKeys = arrPositions.map((pPosition) => getTrackedPositionIdentityKey(pPosition));
     const vCurrentOpenPnl = Number(objEnriched.totals.totalPnl || 0);
@@ -2359,8 +2429,8 @@ async function buildOpenPositionsPayload(
         neutralStatus: buildNeutralStatus(pStrategyCode, objUiState, objEnriched.totals, bAutoTraderActive, objRuntime),
         recoveryMetrics: {
             totalBrokerageToRecover: Number(vEffectiveBrokerageTotal.toFixed(4)),
-            totalPnl: Number(vRecoveredTotalPnl.toFixed(4)),
-            netPnl: Number((vRecoveredTotalPnl + vEffectiveOpenPnl - vEffectiveBrokerageTotal).toFixed(4))
+            totalPnl: Number((vRecoveredTotalPnl + vOpenFuturesRealizedPnl).toFixed(4)),
+            netPnl: Number((vRecoveredTotalPnl + vOpenFuturesRealizedPnl + vOpenFuturesUnrealizedPnl + vOpenOptionsAndOtherPnl - vEffectiveBrokerageTotal).toFixed(4))
         }
     };
 }
@@ -2944,6 +3014,46 @@ function buildRuntimeStateWithProfitClosePause(
     return objState;
 }
 
+function getProfitClosePendingState(pRuntime: RollingFuturesLtRuntimeRecord | null): {
+    reason: "brokerage" | "blockmargin" | "";
+    thresholdValue: number;
+    startedAt: string;
+} {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    const objPending = objState.profitClosePending && typeof objState.profitClosePending === "object"
+        ? objState.profitClosePending as Record<string, unknown>
+        : {};
+    const vReason = String(objPending.reason || "").trim();
+    const vThresholdValue = Number(objPending.thresholdValue || 0);
+    return {
+        reason: vReason === "brokerage" || vReason === "blockmargin" ? vReason : "",
+        thresholdValue: Number.isFinite(vThresholdValue) ? Number(vThresholdValue.toFixed(6)) : 0,
+        startedAt: String(objPending.startedAt || "").trim()
+    };
+}
+
+function buildRuntimeStateWithProfitClosePending(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pReason: "brokerage" | "blockmargin" | "" = "",
+    pThresholdValue = 0,
+    pStartedAt = ""
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    const vReason = String(pReason || "").trim();
+    const vStartedAt = String(pStartedAt || "").trim();
+    const vThresholdValue = Number(pThresholdValue || 0);
+    if (!(vReason === "brokerage" || vReason === "blockmargin") || !vStartedAt || !(vThresholdValue > 0)) {
+        delete objState.profitClosePending;
+        return objState;
+    }
+    objState.profitClosePending = {
+        reason: vReason,
+        thresholdValue: Number(vThresholdValue.toFixed(6)),
+        startedAt: vStartedAt
+    };
+    return objState;
+}
+
 function getNeutralityHedgeSkipAuditState(pRuntime: RollingFuturesLtRuntimeRecord | null): {
     reason: string;
     loggedAt: string;
@@ -3323,7 +3433,8 @@ async function reconcileRemovedTrackedPositionsPnl(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pSavedPositions: RollingFuturesLtImportedPositionRecord[],
     pLivePositions: RollingFuturesLtImportedPositionRecord[],
-    pReason: string
+    pReason: string,
+    pRealizedPnlOverride?: number | null
 ): Promise<number> {
     const arrSaved = Array.isArray(pSavedPositions) ? pSavedPositions : [];
     const arrLive = Array.isArray(pLivePositions) ? pLivePositions : [];
@@ -3337,32 +3448,62 @@ async function reconcileRemovedTrackedPositionsPnl(
     arrLive.forEach((objPosition) => {
         objLiveByIdentity.set(getTrackedPositionIdentityKey(objPosition), objPosition);
     });
-    const arrReduced = arrSaved.flatMap((objPosition) => {
+    const arrRealizedSlices: Array<{
+        position: RollingFuturesLtImportedPositionRecord;
+        originalQty: number;
+    }> = [];
+    arrRemoved.forEach((objPosition) => {
+        arrRealizedSlices.push({
+            position: objPosition,
+            originalQty: Math.max(0, Number(objPosition.qty || 0))
+        });
+    });
+    arrSaved.forEach((objPosition) => {
         const objLiveMatch = objLiveByIdentity.get(getTrackedPositionIdentityKey(objPosition));
         if (!objLiveMatch) {
-            return [];
+            return;
         }
         const vSavedQty = Math.max(0, Number(objPosition.qty || 0));
         const vLiveQty = Math.max(0, Number(objLiveMatch.qty || 0));
         if (!(vSavedQty > vLiveQty)) {
-            return [];
+            return;
         }
-        return [{
-            ...objPosition,
-            qty: Number((vSavedQty - vLiveQty).toFixed(8)),
-            markPrice: Number(objLiveMatch.markPrice || objPosition.markPrice || objPosition.entryPrice || 0)
-        } satisfies RollingFuturesLtImportedPositionRecord];
+        arrRealizedSlices.push({
+            position: {
+                ...objPosition,
+                qty: Number((vSavedQty - vLiveQty).toFixed(8)),
+                markPrice: Number(objLiveMatch.markPrice || objPosition.markPrice || objPosition.entryPrice || 0)
+            } satisfies RollingFuturesLtImportedPositionRecord,
+            originalQty: vSavedQty
+        });
     });
-    const arrRealizedSlices = [...arrRemoved, ...arrReduced];
     if (!arrRealizedSlices.length) {
         return 0;
     }
 
-    const arrRemovedContracts = arrRealizedSlices.map((objPosition) => String(objPosition.contractName || "").trim()).filter(Boolean);
-    const vRecoveredPnlDelta = Number(arrRealizedSlices.reduce((pSum, objPosition) => pSum + estimateTrackedPositionPnl(
-        objPosition,
-        Number(objPosition.markPrice || objPosition.entryPrice || 0)
-    ), 0).toFixed(4));
+    const arrRemovedContracts = arrRealizedSlices.map((objSlice) => String(objSlice.position.contractName || "").trim()).filter(Boolean);
+        const vEstimatedRecoveredPnlDelta = Number(arrRealizedSlices.reduce((pSum, objSlice) => {
+        const objPosition = objSlice.position;
+        const vOriginalQty = Math.max(0, Number(objSlice.originalQty || 0));
+        const vSliceQty = Math.max(0, Number(objPosition.qty || 0));
+        const vDeltaReportedPnl = Number(objPosition.pnl || 0);
+        const vCanUseDeltaPositionPnl = isFutureContractSymbol(objPosition.contractName)
+            && Number.isFinite(vDeltaReportedPnl)
+            && vOriginalQty > 0
+            && vSliceQty > 0;
+        const vFallbackPnl = isFutureContractSymbol(objPosition.contractName)
+            ? 0
+            : estimateTrackedPositionPnl(
+                objPosition,
+                Number(objPosition.markPrice || objPosition.entryPrice || 0)
+            );
+        return pSum + (vCanUseDeltaPositionPnl
+            ? Number((vDeltaReportedPnl * (vSliceQty / vOriginalQty)).toFixed(4))
+            : vFallbackPnl);
+    }, 0).toFixed(4));
+    const vRecoveredPnlDelta = Number.isFinite(Number(pRealizedPnlOverride))
+        ? Number(Number(pRealizedPnlOverride || 0).toFixed(4))
+        : vEstimatedRecoveredPnlDelta;
 
     if (vRecoveredPnlDelta !== 0) {
         await incrementRecoveredTotalPnl(pUserId, pStrategyCode, vRecoveredPnlDelta, arrLive.length);
@@ -3374,13 +3515,14 @@ async function reconcileRemovedTrackedPositionsPnl(
         "future_closed",
         "info",
         "Tracked Futures Realized During Reconciliation",
-        `Captured realized PnL ${vRecoveredPnlDelta.toFixed(2)} for ${arrRealizedSlices.length} tracked futures slice${arrRealizedSlices.length === 1 ? "" : "s"} removed or reduced during live reconciliation.`,
+        `Captured realized PnL ${vRecoveredPnlDelta.toFixed(2)} for ${arrRealizedSlices.length} tracked futures slice${arrRealizedSlices.length === 1 ? "" : "s"} removed or reduced during live reconciliation.${Number.isFinite(Number(pRealizedPnlOverride)) ? " Used Delta realized PnL from the hedge/close order." : ""}`,
         {
             qty: arrRealizedSlices.length,
             removedCount: arrRemoved.length,
-            reducedCount: arrReduced.length,
+            reducedCount: arrRealizedSlices.length - arrRemoved.length,
             contractName: arrRemovedContracts.join(", "),
             pnlDelta: vRecoveredPnlDelta,
+            estimatedPnlDelta: vEstimatedRecoveredPnlDelta,
             reason: pReason
         }
     );
@@ -3747,6 +3889,15 @@ async function applyServerSideNeutralityCheck(
             vHedgeQty,
             "market_order"
         );
+        const { client: objOrderHistoryClient } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
+        const vResolvedHedgeRealizedPnl = await resolveOrderRealizedPnlFromDelta(
+            objOrderHistoryClient,
+            objPlacedHedge.contractName,
+            objPlacedHedge.order,
+            vHedgeAction,
+            vHedgeQty,
+            String(objPlacedHedge.entryTs || new Date().toISOString())
+        );
         const arrLiveAfterHedge = await fetchLiveFuturePositions(
             pUserId,
             pStrategyCode,
@@ -3758,16 +3909,16 @@ async function applyServerSideNeutralityCheck(
             pStrategyCode,
             pTrackedPositions,
             arrLiveAfterHedge,
-            "neutrality_hedge"
+            "neutrality_hedge",
+            vResolvedHedgeRealizedPnl
         );
         const arrSaved = await replaceRollingFuturesLtImportedPositions(
             pUserId,
             pStrategyCode,
             arrLiveAfterHedge
         );
-        const { client: objChargeClient } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
         const vResolvedHedgeCharge = await resolveOrderChargeFromDelta(
-            objChargeClient,
+            objOrderHistoryClient,
             objPlacedHedge.contractName,
             objPlacedHedge.order,
             vHedgeAction,
@@ -3883,6 +4034,15 @@ async function executeStrategyPlacement(
 }> {
     const { client, profile } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     await resetRecoveryMetrics(pUserId, pStrategyCode);
+    const objRuntimeBeforeExec = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    if (getProfitClosePendingState(objRuntimeBeforeExec).reason) {
+        await saveRollingFuturesLtRuntime({
+            ...(objRuntimeBeforeExec || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithProfitClosePending(objRuntimeBeforeExec, "", 0, "")
+        });
+    }
     const objUiState = getMergedUiState(pProfile);
     const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
     const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
@@ -4250,6 +4410,21 @@ async function applyTriggeredOptionRule(
             contractName: pPosition.contractName,
             qty: pPosition.qty,
             currentDelta: Math.abs(Number(pCurrentDelta || 0)),
+            reason: pReason
+        }
+    );
+    await logFuturesEvent(
+        pUserId,
+        pStrategyCode,
+        "future_closed",
+        vClosePnl < 0 ? "warning" : "info",
+        pReason === "sl" ? "Option SL Realized PnL" : "Option TP Realized PnL",
+        `Captured realized PnL ${vClosePnl.toFixed(2)} and close charge ${vCloseCharge.toFixed(2)} for ${pPosition.contractName}.`,
+        {
+            contractName: pPosition.contractName,
+            qty: pPosition.qty,
+            pnlDelta: Number(vClosePnl.toFixed(4)),
+            closeCharge: Number(vCloseCharge.toFixed(4)),
             reason: pReason
         }
     );
@@ -4778,6 +4953,15 @@ async function runAutoTraderCycle(
                 state: buildRuntimeStateWithProfitClosePause(objRuntimeBeforeProfitRule, "")
             });
         }
+        const objProfitClosePending = getProfitClosePendingState(objRuntimeBeforeProfitRule);
+        if (!arrSavedPositions.length && objProfitClosePending.reason) {
+            await saveRollingFuturesLtRuntime({
+                ...objRuntimeBeforeProfitRule,
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                state: buildRuntimeStateWithProfitClosePending(objRuntimeBeforeProfitRule, "", 0, "")
+            });
+        }
 
         const objOpenPositionsBeforeNeutrality = await buildOpenPositionsPayload(
             pUserId,
@@ -4786,7 +4970,78 @@ async function runAutoTraderCycle(
         );
         const objSummary = await fetchAccountSummarySnapshot(pUserId, vSelectedApiProfileId, vSymbol);
         const objProfitRule = getProfitCloseRule(objUiState, objOpenPositionsBeforeNeutrality, objSummary);
-        if (!bRestartCloseProtectionActive && !bProfitClosePauseActive && objProfitRule.triggered && arrSavedPositions.length) {
+        const bProfitCloseRuleEnabled = Boolean(objUiState.closeNetProfitBrokerage) || Boolean(objUiState.closeBlockedMargin);
+        if (!bProfitCloseRuleEnabled && objProfitClosePending.reason) {
+            await saveRollingFuturesLtRuntime({
+                ...objRuntimeBeforeProfitRule,
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                state: buildRuntimeStateWithProfitClosePending(objRuntimeBeforeProfitRule, "", 0, "")
+            });
+        }
+
+        let bProfitCloseConfirmed = false;
+        if (!bRestartCloseProtectionActive && !bProfitClosePauseActive && arrSavedPositions.length && bProfitCloseRuleEnabled) {
+            if (objProfitRule.triggered) {
+                const vPendingStartedAtMs = Number.isFinite(new Date(objProfitClosePending.startedAt).getTime())
+                    ? new Date(objProfitClosePending.startedAt).getTime()
+                    : 0;
+                const bSamePendingRule = objProfitClosePending.reason === objProfitRule.reason
+                    && Math.abs(Number(objProfitClosePending.thresholdValue || 0) - Number(objProfitRule.thresholdValue || 0)) < 0.000001;
+                if (bSamePendingRule && vPendingStartedAtMs > 0) {
+                    bProfitCloseConfirmed = (Date.now() - vPendingStartedAtMs) >= gProfitCloseConfirmationMs;
+                }
+                else {
+                    const vStartedAtIso = new Date().toISOString();
+                    await saveRollingFuturesLtRuntime({
+                        ...objRuntimeBeforeProfitRule,
+                        userId: pUserId,
+                        strategyCode: pStrategyCode,
+                        state: buildRuntimeStateWithProfitClosePending(
+                            objRuntimeBeforeProfitRule,
+                            objProfitRule.reason,
+                            objProfitRule.thresholdValue,
+                            vStartedAtIso
+                        )
+                    });
+                    await logFuturesEvent(
+                        pUserId,
+                        pStrategyCode,
+                        "manual_action",
+                        "info",
+                        objProfitRule.reason === "brokerage"
+                            ? "Brokerage Profit Close Timer Started"
+                            : "Blocked Margin Profit Close Timer Started",
+                        `${objProfitRule.message} Closing all positions will only happen if this Net PnL stays above the target for 5 minutes continuously.`,
+                        {
+                            thresholdValue: objProfitRule.thresholdValue,
+                            reason: objProfitRule.reason === "brokerage"
+                                ? "brokerage_profit_close_timer_started"
+                                : "blockmargin_profit_close_timer_started"
+                        }
+                    );
+                }
+            }
+            else if (objProfitClosePending.reason) {
+                await saveRollingFuturesLtRuntime({
+                    ...objRuntimeBeforeProfitRule,
+                    userId: pUserId,
+                    strategyCode: pStrategyCode,
+                    state: buildRuntimeStateWithProfitClosePending(objRuntimeBeforeProfitRule, "", 0, "")
+                });
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "manual_action",
+                    "info",
+                    "Profit Close Timer Reset",
+                    "Net PnL slipped below the active profit-close target, so the 5-minute close timer was reset.",
+                    { reason: "profit_close_timer_reset" }
+                );
+            }
+        }
+
+        if (!bRestartCloseProtectionActive && !bProfitClosePauseActive && bProfitCloseConfirmed && objProfitRule.triggered && arrSavedPositions.length) {
             const objClosed = await closeTrackedPositionsOnDelta(
                 pUserId,
                 pStrategyCode,
@@ -4849,7 +5104,10 @@ async function runAutoTraderCycle(
                     lastCycleAt: new Date().toISOString(),
                     lastError: "",
                     state: buildRuntimeStateWithPendingReEntry(
-                        objLatestRuntimeAfterClose,
+                        {
+                            ...objLatestRuntimeAfterClose,
+                            state: buildRuntimeStateWithProfitClosePending(objLatestRuntimeAfterClose, "", 0, "")
+                        },
                         objProfitRule.reEnterEnabled && !isDualRollingFuturesStrategy(pStrategyCode) ? objProfitRule.reason : "",
                         vRunAt
                     )
@@ -5448,10 +5706,10 @@ async function closeImportedOpenPositionInternal(req: Request, res: Response, pS
         const vResolvedClosePnl = await resolveTrackedPositionClosePnl(client, objLivePosition, objPayload, vPlacedAtIso);
         const vClosePnl = Number.isFinite(Number(vResolvedClosePnl))
             ? Number(vResolvedClosePnl)
-            : estimateTrackedPositionPnl(
+            : (isFutureContractSymbol(objLivePosition.contractName) ? 0 : estimateTrackedPositionPnl(
                 objLivePosition,
                 Number(objLivePosition.markPrice || objLivePosition.entryPrice || 0)
-            );
+            ));
         await incrementBrokerageRecoveryTotal(vUserId, pStrategyCode, vCloseCharge, arrRemainingSaved.length);
         await incrementRecoveredTotalPnl(vUserId, pStrategyCode, vClosePnl, arrRemainingSaved.length);
         await logFuturesEvent(
@@ -6213,10 +6471,10 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
             const vResolvedPnl = await resolveTrackedPositionClosePnl(client, objPosition, objPayload, vPlacedAtIso);
             arrClosePnls.push(Number.isFinite(Number(vResolvedPnl))
                 ? Number(vResolvedPnl)
-                : estimateTrackedPositionPnl(
+                : (isFutureContractSymbol(objPosition.contractName) ? 0 : estimateTrackedPositionPnl(
                     objPosition,
                     Number(objPosition.markPrice || objPosition.entryPrice || 0)
-                ));
+                )));
             arrClosed.push({
                 importId: objPosition.importId,
                 contractName: objPosition.contractName,
