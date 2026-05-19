@@ -953,6 +953,16 @@ function formatDeltaUiDateTimeLocalString(pValue: string): string {
     return `${vYear}-${vMonth}-${vDay}T${vHour}:${vMinute}`;
 }
 
+function parseDeltaUiDateTimeLocalToIsoString(pValue: string): string {
+    const vEpochMicros = toEpochMicros(String(pValue || "").trim());
+    if (!vEpochMicros) {
+        return "";
+    }
+    const vEpochMs = Math.floor(vEpochMicros / 1000);
+    const objDate = new Date(vEpochMs);
+    return Number.isFinite(objDate.getTime()) ? objDate.toISOString() : "";
+}
+
 function getDefaultManualTraderUiState(
     pStrategyCode: RollingFuturesLtStrategyCode
 ): Record<string, unknown> {
@@ -5044,13 +5054,27 @@ async function runAutoTraderCycle(
                 );
             }
             catch (objError) {
+                const vErrorMessage = getErrorMessage(objError, "Unable to recalculate Total PnL from Delta history.");
+                const bMissingStrategyStartDate = vErrorMessage.includes("Strategy start date was not found");
+                if (bMissingStrategyStartDate) {
+                    const objRuntimeAfterRecalcFailure = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+                        || objRuntimeBeforeProfitRule;
+                    await saveRollingFuturesLtRuntime({
+                        ...objRuntimeAfterRecalcFailure,
+                        userId: pUserId,
+                        strategyCode: pStrategyCode,
+                        state: buildRuntimeStateWithPendingTotalPnlRecalcAt(objRuntimeAfterRecalcFailure, "")
+                    });
+                }
                 await logFuturesEvent(
                     pUserId,
                     pStrategyCode,
                     "engine_error",
                     "warning",
                     "Total PnL Recalculation Failed",
-                    getErrorMessage(objError, "Unable to recalculate Total PnL from Delta history."),
+                    bMissingStrategyStartDate
+                        ? "Total PnL recalculation was skipped because the strategy start date is not available for this older running cycle. The pending recalc was cleared."
+                        : vErrorMessage,
                     { reason: "scheduled_total_pnl_recalc_error" }
                 );
             }
@@ -6545,7 +6569,21 @@ async function recalculateAndPersistTotalPnl(
 }> {
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
         || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
-    const vStrategyStartedAt = getStrategyStartedAtState(objRuntime);
+    let vStrategyStartedAt = getStrategyStartedAtState(objRuntime);
+    if (!vStrategyStartedAt) {
+        const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+        const vClosedFromDate = String(getMergedUiState(objProfile).closedFromDate || "").trim();
+        const vBackfilledStartedAt = parseDeltaUiDateTimeLocalToIsoString(vClosedFromDate);
+        if (vBackfilledStartedAt) {
+            await saveRollingFuturesLtRuntime({
+                ...objRuntime,
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                state: buildRuntimeStateWithStrategyStartedAt(objRuntime, vBackfilledStartedAt)
+            });
+            vStrategyStartedAt = vBackfilledStartedAt;
+        }
+    }
     if (!vStrategyStartedAt) {
         throw new Error("Strategy start date was not found. Start the strategy first, then recalculate Total PnL.");
     }
