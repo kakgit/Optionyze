@@ -3052,25 +3052,6 @@ function buildRuntimeStateWithStrategyStartedAt(
     return objState;
 }
 
-function getPendingTotalPnlRecalcAtState(pRuntime: RollingFuturesLtRuntimeRecord | null): string {
-    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
-    return String(objState.pendingTotalPnlRecalcAt || "").trim();
-}
-
-function buildRuntimeStateWithPendingTotalPnlRecalcAt(
-    pRuntime: RollingFuturesLtRuntimeRecord | null,
-    pRunAt = ""
-): Record<string, unknown> {
-    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
-    const vRunAt = String(pRunAt || "").trim();
-    if (!vRunAt) {
-        delete objState.pendingTotalPnlRecalcAt;
-        return objState;
-    }
-    objState.pendingTotalPnlRecalcAt = vRunAt;
-    return objState;
-}
-
 function getProfitClosePendingState(pRuntime: RollingFuturesLtRuntimeRecord | null): {
     reason: "brokerage" | "blockmargin" | "";
     thresholdValue: number;
@@ -4033,13 +4014,7 @@ async function applyServerSideNeutralityCheck(
             ...objRuntimeAfterHedge,
             userId: pUserId,
             strategyCode: pStrategyCode,
-            state: buildRuntimeStateWithPendingTotalPnlRecalcAt(
-                {
-                    ...objRuntimeAfterHedge,
-                    state: objNextState
-                },
-                new Date(Date.now() + 60_000).toISOString()
-            )
+            state: objNextState
         });
 
         return {
@@ -4106,13 +4081,7 @@ async function executeStrategyPlacement(
         state: buildRuntimeStateWithStrategyStartedAt(
             {
                 ...(objRuntimeBeforeExec || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
-                state: buildRuntimeStateWithPendingTotalPnlRecalcAt(
-                    {
-                        ...(objRuntimeBeforeExec || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
-                        state: buildRuntimeStateWithProfitClosePending(objRuntimeBeforeExec, "", 0, "")
-                    },
-                    ""
-                )
+                state: buildRuntimeStateWithProfitClosePending(objRuntimeBeforeExec, "", 0, "")
             },
             vStrategyStartedAt
         )
@@ -5026,58 +4995,6 @@ async function runAutoTraderCycle(
                 strategyCode: pStrategyCode,
                 state: buildRuntimeStateWithProfitClosePause(objRuntimeBeforeProfitRule, "")
             });
-        }
-        const vPendingTotalPnlRecalcAt = getPendingTotalPnlRecalcAtState(objRuntimeBeforeProfitRule);
-        const vPendingTotalPnlRecalcAtMs = Number.isFinite(new Date(vPendingTotalPnlRecalcAt).getTime())
-            ? new Date(vPendingTotalPnlRecalcAt).getTime()
-            : 0;
-        if (vPendingTotalPnlRecalcAtMs > 0 && vPendingTotalPnlRecalcAtMs <= Date.now()) {
-            try {
-                const objRecalculated = await recalculateAndPersistTotalPnl(
-                    pUserId,
-                    pStrategyCode,
-                    vSelectedApiProfileId
-                );
-                await logFuturesEvent(
-                    pUserId,
-                    pStrategyCode,
-                    "manual_action",
-                    "info",
-                    "Total PnL Recalculated",
-                    `Updated Total PnL to ${objRecalculated.recalculated.totalPnl.toFixed(2)} from Delta history since ${formatDeltaUiDateTimeLocalString(objRecalculated.recalculated.strategyStartedAt)}.`,
-                    {
-                        totalPnl: objRecalculated.recalculated.totalPnl,
-                        closedRealizedPnl: objRecalculated.recalculated.closedRealizedPnl,
-                        openFuturesRealizedPnl: objRecalculated.recalculated.openFuturesRealizedPnl,
-                        reason: "scheduled_total_pnl_recalc"
-                    }
-                );
-            }
-            catch (objError) {
-                const vErrorMessage = getErrorMessage(objError, "Unable to recalculate Total PnL from Delta history.");
-                const bMissingStrategyStartDate = vErrorMessage.includes("Strategy start date was not found");
-                if (bMissingStrategyStartDate) {
-                    const objRuntimeAfterRecalcFailure = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-                        || objRuntimeBeforeProfitRule;
-                    await saveRollingFuturesLtRuntime({
-                        ...objRuntimeAfterRecalcFailure,
-                        userId: pUserId,
-                        strategyCode: pStrategyCode,
-                        state: buildRuntimeStateWithPendingTotalPnlRecalcAt(objRuntimeAfterRecalcFailure, "")
-                    });
-                }
-                await logFuturesEvent(
-                    pUserId,
-                    pStrategyCode,
-                    "engine_error",
-                    "warning",
-                    "Total PnL Recalculation Failed",
-                    bMissingStrategyStartDate
-                        ? "Total PnL recalculation was skipped because the strategy start date is not available for this older running cycle. The pending recalc was cleared."
-                        : vErrorMessage,
-                    { reason: "scheduled_total_pnl_recalc_error" }
-                );
-            }
         }
         const objProfitClosePending = getProfitClosePendingState(objRuntimeBeforeProfitRule);
         if (!arrSavedPositions.length && objProfitClosePending.reason) {
@@ -6595,14 +6512,6 @@ async function recalculateAndPersistTotalPnl(
         vStrategyStartedAt
     );
     await saveRecoveredTotalPnl(pUserId, pStrategyCode, objRecalculated.totalPnl);
-    const objRuntimeAfterSave = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-        || objRuntime;
-    await saveRollingFuturesLtRuntime({
-        ...objRuntimeAfterSave,
-        userId: pUserId,
-        strategyCode: pStrategyCode,
-        state: buildRuntimeStateWithPendingTotalPnlRecalcAt(objRuntimeAfterSave, "")
-    });
     const objOpenPositions = await buildOpenPositionsPayload(pUserId, pStrategyCode);
     return {
         openPositions: objOpenPositions,
