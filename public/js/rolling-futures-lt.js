@@ -79,6 +79,7 @@
         closeBlockedMargin: document.getElementById("chkRollingFuturesCloseBlockedMargin"),
         blockedMarginPct: document.getElementById("txtRollingFuturesBlockedMarginPct"),
         reEnterBlock: document.getElementById("chkRollingFuturesReEnterBlock"),
+        recalculateTotalPnlButton: document.getElementById(`btn${idPrefix}RecalculateTotalPnl`),
         importButton: document.getElementById(`btn${idPrefix}ImportPositions`),
         refreshOpenPositionsButton: document.getElementById(`btn${idPrefix}RefreshOpenPositions`),
         killSwitchButton: document.getElementById(`btn${idPrefix}KillSwitch`),
@@ -809,6 +810,12 @@
         return objResult;
     }
 
+    async function recalculateTotalPnlFromHistory() {
+        const objResult = await postJson(`${endpointBase}/metrics/recalculate-total-pnl`, {});
+        renderOpenPositions(objResult?.data);
+        return objResult;
+    }
+
     async function checkConnection() {
         const profileId = String(ids.apiProfile?.value || "").trim();
         selectedApiProfileId = profileId;
@@ -1506,6 +1513,18 @@
             }).catch(function (error) {
                 setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to update recovery metrics.", "danger");
             });
+        });
+    });
+    ids.recalculateTotalPnlButton?.addEventListener("click", function () {
+        void recalculateTotalPnlFromHistory().then(function (objResult) {
+            setStatus(ids.pageStatus, String(objResult?.message || "Total PnL recalculated from Delta history."), "success");
+            return Promise.all([
+                loadRuntimeStatus().catch(function () { return undefined; }),
+                loadEvents().catch(function () { return undefined; }),
+                loadClosedPositions().catch(function () { return undefined; })
+            ]);
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to recalculate Total PnL from Delta history.", "danger");
         });
     });
     ids.apiProfile?.addEventListener("change", function () {

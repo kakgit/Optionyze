@@ -197,6 +197,13 @@ interface RollingFuturesLtOpenPositionsPayload {
     };
 }
 
+interface RollingFuturesLtRecalculatedTotalPnl {
+    strategyStartedAt: string;
+    closedRealizedPnl: number;
+    openFuturesRealizedPnl: number;
+    totalPnl: number;
+}
+
 interface RollingFuturesLtOptionMetadata {
     baseDelta?: number;
     baseTheta?: number;
@@ -2364,9 +2371,6 @@ async function buildOpenPositionsPayload(
         ? Math.max(vRuntimeBrokerageTotal, vOpenPositionCharges)
         : vRuntimeBrokerageTotal;
     const vRecoveredTotalPnl = getRecoveredTotalPnl(objRuntime);
-    const vOpenFuturesRealizedPnl = Number(arrPositions.reduce((pSum, objPosition) => {
-        return pSum + getTrackedFutureRealizedPnl(objPosition);
-    }, 0).toFixed(4));
     const vOpenFuturesUnrealizedPnl = Number(arrPositions.reduce((pSum, objPosition) => {
         return pSum + getTrackedFutureUnrealizedPnl(objPosition);
     }, 0).toFixed(4));
@@ -2378,9 +2382,14 @@ async function buildOpenPositionsPayload(
     }, 0).toFixed(4));
     const objOpenPnlSnapshot = getOpenPnlSnapshotState(objRuntime);
     const arrCurrentPositionKeys = arrPositions.map((pPosition) => getTrackedPositionIdentityKey(pPosition));
-    const vCurrentOpenPnl = Number(objEnriched.totals.totalPnl || 0);
+    const vCurrentOpenPnl = Number((vOpenFuturesUnrealizedPnl + vOpenOptionsAndOtherPnl).toFixed(4));
     const bAllOpenPositionPnlsZero = objEnriched.positions.length > 0
-        && objEnriched.positions.every((pPosition) => Math.abs(Number(pPosition.pnl || 0)) < 0.000001);
+        && objEnriched.positions.every((pPosition) => {
+            const vDynamicPnl = pPosition.contractKind === "future"
+                ? getTrackedFutureUnrealizedPnl(pPosition)
+                : Number(pPosition.pnl || 0);
+            return Math.abs(Number(vDynamicPnl || 0)) < 0.000001;
+        });
     const bSameSnapshotPositions = areSameTrackedPositionKeys(arrCurrentPositionKeys, objOpenPnlSnapshot.positionKeys);
     const vSnapshotAgeMs = Number.isFinite(new Date(objOpenPnlSnapshot.capturedAt).getTime())
         ? (Date.now() - new Date(objOpenPnlSnapshot.capturedAt).getTime())
@@ -2429,8 +2438,8 @@ async function buildOpenPositionsPayload(
         neutralStatus: buildNeutralStatus(pStrategyCode, objUiState, objEnriched.totals, bAutoTraderActive, objRuntime),
         recoveryMetrics: {
             totalBrokerageToRecover: Number(vEffectiveBrokerageTotal.toFixed(4)),
-            totalPnl: Number((vRecoveredTotalPnl + vOpenFuturesRealizedPnl).toFixed(4)),
-            netPnl: Number((vRecoveredTotalPnl + vOpenFuturesRealizedPnl + vOpenFuturesUnrealizedPnl + vOpenOptionsAndOtherPnl - vEffectiveBrokerageTotal).toFixed(4))
+            totalPnl: Number(vRecoveredTotalPnl.toFixed(4)),
+            netPnl: Number((vRecoveredTotalPnl + vEffectiveOpenPnl - vEffectiveBrokerageTotal).toFixed(4))
         }
     };
 }
@@ -3011,6 +3020,44 @@ function buildRuntimeStateWithProfitClosePause(
         return objState;
     }
     objState.profitClosePauseUntil = vPauseUntil;
+    return objState;
+}
+
+function getStrategyStartedAtState(pRuntime: RollingFuturesLtRuntimeRecord | null): string {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    return String(objState.strategyStartedAt || "").trim();
+}
+
+function buildRuntimeStateWithStrategyStartedAt(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pStartedAt = ""
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    const vStartedAt = String(pStartedAt || "").trim();
+    if (!vStartedAt) {
+        delete objState.strategyStartedAt;
+        return objState;
+    }
+    objState.strategyStartedAt = vStartedAt;
+    return objState;
+}
+
+function getPendingTotalPnlRecalcAtState(pRuntime: RollingFuturesLtRuntimeRecord | null): string {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    return String(objState.pendingTotalPnlRecalcAt || "").trim();
+}
+
+function buildRuntimeStateWithPendingTotalPnlRecalcAt(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pRunAt = ""
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    const vRunAt = String(pRunAt || "").trim();
+    if (!vRunAt) {
+        delete objState.pendingTotalPnlRecalcAt;
+        return objState;
+    }
+    objState.pendingTotalPnlRecalcAt = vRunAt;
     return objState;
 }
 
@@ -3976,7 +4023,13 @@ async function applyServerSideNeutralityCheck(
             ...objRuntimeAfterHedge,
             userId: pUserId,
             strategyCode: pStrategyCode,
-            state: objNextState
+            state: buildRuntimeStateWithPendingTotalPnlRecalcAt(
+                {
+                    ...objRuntimeAfterHedge,
+                    state: objNextState
+                },
+                new Date(Date.now() + 60_000).toISOString()
+            )
         });
 
         return {
@@ -4033,16 +4086,27 @@ async function executeStrategyPlacement(
     };
 }> {
     const { client, profile } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
+    const vStrategyStartedAt = new Date().toISOString();
     await resetRecoveryMetrics(pUserId, pStrategyCode);
     const objRuntimeBeforeExec = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
-    if (getProfitClosePendingState(objRuntimeBeforeExec).reason) {
-        await saveRollingFuturesLtRuntime({
-            ...(objRuntimeBeforeExec || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
-            userId: pUserId,
-            strategyCode: pStrategyCode,
-            state: buildRuntimeStateWithProfitClosePending(objRuntimeBeforeExec, "", 0, "")
-        });
-    }
+    await saveRollingFuturesLtRuntime({
+        ...(objRuntimeBeforeExec || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        state: buildRuntimeStateWithStrategyStartedAt(
+            {
+                ...(objRuntimeBeforeExec || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
+                state: buildRuntimeStateWithPendingTotalPnlRecalcAt(
+                    {
+                        ...(objRuntimeBeforeExec || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
+                        state: buildRuntimeStateWithProfitClosePending(objRuntimeBeforeExec, "", 0, "")
+                    },
+                    ""
+                )
+            },
+            vStrategyStartedAt
+        )
+    });
     const objUiState = getMergedUiState(pProfile);
     const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
     const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
@@ -4952,6 +5016,44 @@ async function runAutoTraderCycle(
                 strategyCode: pStrategyCode,
                 state: buildRuntimeStateWithProfitClosePause(objRuntimeBeforeProfitRule, "")
             });
+        }
+        const vPendingTotalPnlRecalcAt = getPendingTotalPnlRecalcAtState(objRuntimeBeforeProfitRule);
+        const vPendingTotalPnlRecalcAtMs = Number.isFinite(new Date(vPendingTotalPnlRecalcAt).getTime())
+            ? new Date(vPendingTotalPnlRecalcAt).getTime()
+            : 0;
+        if (vPendingTotalPnlRecalcAtMs > 0 && vPendingTotalPnlRecalcAtMs <= Date.now()) {
+            try {
+                const objRecalculated = await recalculateAndPersistTotalPnl(
+                    pUserId,
+                    pStrategyCode,
+                    vSelectedApiProfileId
+                );
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "manual_action",
+                    "info",
+                    "Total PnL Recalculated",
+                    `Updated Total PnL to ${objRecalculated.recalculated.totalPnl.toFixed(2)} from Delta history since ${formatDeltaUiDateTimeLocalString(objRecalculated.recalculated.strategyStartedAt)}.`,
+                    {
+                        totalPnl: objRecalculated.recalculated.totalPnl,
+                        closedRealizedPnl: objRecalculated.recalculated.closedRealizedPnl,
+                        openFuturesRealizedPnl: objRecalculated.recalculated.openFuturesRealizedPnl,
+                        reason: "scheduled_total_pnl_recalc"
+                    }
+                );
+            }
+            catch (objError) {
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "engine_error",
+                    "warning",
+                    "Total PnL Recalculation Failed",
+                    getErrorMessage(objError, "Unable to recalculate Total PnL from Delta history."),
+                    { reason: "scheduled_total_pnl_recalc_error" }
+                );
+            }
         }
         const objProfitClosePending = getProfitClosePendingState(objRuntimeBeforeProfitRule);
         if (!arrSavedPositions.length && objProfitClosePending.reason) {
@@ -6377,6 +6479,99 @@ async function getClosedPositionsInternal(req: Request, res: Response, pStrategy
     }
 }
 
+async function calculateRecalculatedTotalPnl(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pSelectedApiProfileId: string,
+    pStrategyStartedAt: string
+): Promise<RollingFuturesLtRecalculatedTotalPnl> {
+    const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+    const objUiState = getMergedUiState(objProfile);
+    const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
+    const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
+    const vPageSize = 100;
+    const arrRows: DeltaOrderHistoryRow[] = [];
+    let vAfterCursor = "";
+    let vSafetyCounter = 0;
+    const vStartTime = toEpochMicros(pStrategyStartedAt);
+    while (vSafetyCounter < 100) {
+        const objParams: Record<string, string | number> = { page_size: vPageSize };
+        if (vStartTime) {
+            objParams.start_time = vStartTime;
+        }
+        if (vAfterCursor) {
+            objParams.after = vAfterCursor;
+        }
+        const objResponse = await client.apis.TradeHistory.getOrderHistory(objParams);
+        const objPayload = readResponsePayload(objResponse);
+        const arrPageRows = Array.isArray(objPayload.result) ? objPayload.result as DeltaOrderHistoryRow[] : [];
+        arrRows.push(...arrPageRows);
+        const vNextAfter = String((objPayload.meta as { after?: unknown } | undefined)?.after || "").trim();
+        vSafetyCounter += 1;
+        if (!vNextAfter || vNextAfter === vAfterCursor || arrPageRows.length < vPageSize) {
+            break;
+        }
+        vAfterCursor = vNextAfter;
+    }
+
+    const vClosedRealizedPnl = Number(arrRows
+        .filter((objRow) => String(objRow.state || "").trim().toLowerCase() === "closed")
+        .filter((objRow) => {
+            const vContract = String(objRow.product_symbol || objRow.symbol || "").trim().toUpperCase();
+            return isTrackedContractForSymbol(vContract, vSelectedSymbol);
+        })
+        .reduce((pSum, objRow) => pSum + toFiniteNumber(objRow.meta_data?.pnl, 0), 0).toFixed(4));
+
+    const arrLivePositions = await fetchLiveFuturePositions(pUserId, pStrategyCode, pSelectedApiProfileId, vSelectedSymbol);
+    const vOpenFuturesRealizedPnl = Number(arrLivePositions.reduce((pSum, objPosition) => {
+        return pSum + getTrackedFutureRealizedPnl(objPosition);
+    }, 0).toFixed(4));
+
+    return {
+        strategyStartedAt: pStrategyStartedAt,
+        closedRealizedPnl: vClosedRealizedPnl,
+        openFuturesRealizedPnl: vOpenFuturesRealizedPnl,
+        totalPnl: Number((vClosedRealizedPnl + vOpenFuturesRealizedPnl).toFixed(4))
+    };
+}
+
+async function recalculateAndPersistTotalPnl(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pSelectedApiProfileId: string
+): Promise<{
+    openPositions: RollingFuturesLtOpenPositionsPayload;
+    recalculated: RollingFuturesLtRecalculatedTotalPnl;
+}> {
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const vStrategyStartedAt = getStrategyStartedAtState(objRuntime);
+    if (!vStrategyStartedAt) {
+        throw new Error("Strategy start date was not found. Start the strategy first, then recalculate Total PnL.");
+    }
+
+    const objRecalculated = await calculateRecalculatedTotalPnl(
+        pUserId,
+        pStrategyCode,
+        pSelectedApiProfileId,
+        vStrategyStartedAt
+    );
+    await saveRecoveredTotalPnl(pUserId, pStrategyCode, objRecalculated.totalPnl);
+    const objRuntimeAfterSave = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || objRuntime;
+    await saveRollingFuturesLtRuntime({
+        ...objRuntimeAfterSave,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        state: buildRuntimeStateWithPendingTotalPnlRecalcAt(objRuntimeAfterSave, "")
+    });
+    const objOpenPositions = await buildOpenPositionsPayload(pUserId, pStrategyCode);
+    return {
+        openPositions: objOpenPositions,
+        recalculated: objRecalculated
+    };
+}
+
 async function getEventsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const arrEvents = await listRollingOptionsEventsByStrategy(getAccountId(req), pStrategyCode, 100);
     res.json({
@@ -6566,6 +6761,48 @@ async function updateRecoveryMetricsInternal(req: Request, res: Response, pStrat
     });
 }
 
+async function recalculateRecoveryTotalPnlInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
+    const vUserId = getAccountId(req);
+    const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        res.status(400).json({
+            status: "warning",
+            message: "Select an API profile before recalculating Total PnL."
+        });
+        return;
+    }
+
+    try {
+        const objResult = await recalculateAndPersistTotalPnl(vUserId, pStrategyCode, vSelectedApiProfileId);
+        await logFuturesEvent(
+            vUserId,
+            pStrategyCode,
+            "manual_action",
+            "success",
+            "Total PnL Recalculated",
+            `Recalculated Total PnL to ${objResult.recalculated.totalPnl.toFixed(4)} from Delta history since ${formatDeltaUiDateTimeLocalString(objResult.recalculated.strategyStartedAt)}.`,
+            {
+                reason: "manual_total_pnl_recalc",
+                totalPnl: objResult.recalculated.totalPnl,
+                closedRealizedPnl: objResult.recalculated.closedRealizedPnl,
+                openFuturesRealizedPnl: objResult.recalculated.openFuturesRealizedPnl
+            }
+        );
+        res.json({
+            status: "success",
+            message: "Total PnL recalculated from Delta history.",
+            data: objResult.openPositions
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to recalculate Total PnL from Delta history.")
+        });
+    }
+}
+
 export async function getRollingFuturesLtLongProfile(req: Request, res: Response): Promise<void> {
     await getProfileInternal(req, res, "rolling-futures-lt-long");
 }
@@ -6634,6 +6871,9 @@ export async function executeRollingFuturesLtLongKillSwitch(req: Request, res: R
 }
 export async function updateRollingFuturesLtLongRecoveryMetrics(req: Request, res: Response): Promise<void> {
     await updateRecoveryMetricsInternal(req, res, "rolling-futures-lt-long");
+}
+export async function recalculateRollingFuturesLtLongRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
+    await recalculateRecoveryTotalPnlInternal(req, res, "rolling-futures-lt-long");
 }
 
 export async function getRollingFuturesLtShortProfile(req: Request, res: Response): Promise<void> {
@@ -6704,6 +6944,9 @@ export async function executeRollingFuturesLtShortKillSwitch(req: Request, res: 
 }
 export async function updateRollingFuturesLtShortRecoveryMetrics(req: Request, res: Response): Promise<void> {
     await updateRecoveryMetricsInternal(req, res, "rolling-futures-lt-short");
+}
+export async function recalculateRollingFuturesLtShortRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
+    await recalculateRecoveryTotalPnlInternal(req, res, "rolling-futures-lt-short");
 }
 
 export async function getRollingFuturesLtDualProfile(req: Request, res: Response): Promise<void> {
@@ -6814,4 +7057,7 @@ export async function executeRollingFuturesLtDualKillSwitch(req: Request, res: R
 }
 export async function updateRollingFuturesLtDualRecoveryMetrics(req: Request, res: Response): Promise<void> {
     await updateRecoveryMetricsInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function recalculateRollingFuturesLtDualRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
+    await recalculateRecoveryTotalPnlInternal(req, res, "rolling-futures-lt-dual");
 }

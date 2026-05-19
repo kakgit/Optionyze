@@ -111,6 +111,7 @@ import {
     getRollingFuturesLtLongOpenPositions,
     getRollingFuturesLtLongProfile,
     getRollingFuturesLtLongRuntimeStatus,
+    recalculateRollingFuturesLtLongRecoveryTotalPnl,
     updateRollingFuturesLtLongRecoveryMetrics,
     getRollingFuturesLtShortAccountSummary,
     getRollingFuturesLtShortClosedPositions,
@@ -120,6 +121,7 @@ import {
     getRollingFuturesLtShortOpenPositions,
     getRollingFuturesLtShortProfile,
     getRollingFuturesLtShortRuntimeStatus,
+    recalculateRollingFuturesLtShortRecoveryTotalPnl,
     updateRollingFuturesLtShortRecoveryMetrics,
     getRollingFuturesLtDualAccountSummary,
     getRollingFuturesLtDualClosedPositions,
@@ -129,6 +131,7 @@ import {
     getRollingFuturesLtDualOpenPositions,
     getRollingFuturesLtDualProfile,
     getRollingFuturesLtDualRuntimeStatus,
+    recalculateRollingFuturesLtDualRecoveryTotalPnl,
     updateRollingFuturesLtDualRecoveryMetrics,
     reconcileRollingFuturesLtLongOpenPositions,
     reconcileRollingFuturesLtShortOpenPositions,
@@ -418,6 +421,9 @@ export function createApiRouter(
     objRouter.post("/rollingfutures-lt-long/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await updateRollingFuturesLtLongRecoveryMetrics(req, res);
     });
+    objRouter.post("/rollingfutures-lt-long/metrics/recalculate-total-pnl", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await recalculateRollingFuturesLtLongRecoveryTotalPnl(req, res);
+    });
     objRouter.get("/rollingfutures-lt-long/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getRollingFuturesLtLongClosedPositions(req, res);
     });
@@ -488,6 +494,9 @@ export function createApiRouter(
     objRouter.post("/rollingfutures-lt-short/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await updateRollingFuturesLtShortRecoveryMetrics(req, res);
     });
+    objRouter.post("/rollingfutures-lt-short/metrics/recalculate-total-pnl", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await recalculateRollingFuturesLtShortRecoveryTotalPnl(req, res);
+    });
     objRouter.get("/rollingfutures-lt-short/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getRollingFuturesLtShortClosedPositions(req, res);
     });
@@ -557,6 +566,9 @@ export function createApiRouter(
     });
     objRouter.post("/rollingfutures-lt-dual/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await updateRollingFuturesLtDualRecoveryMetrics(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/metrics/recalculate-total-pnl", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await recalculateRollingFuturesLtDualRecoveryTotalPnl(req, res);
     });
     objRouter.get("/rollingfutures-lt-dual/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getRollingFuturesLtDualClosedPositions(req, res);
