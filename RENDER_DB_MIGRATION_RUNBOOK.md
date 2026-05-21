@@ -7,6 +7,7 @@ Use this together with:
 - `RENDER_PHASE1_MIGRATION_CHECKLIST.md`
 - `RENDER_ENV_VAR_INVENTORY.md`
 - `RENDER_PRIMARY_RAILWAY_STANDBY_PLAN.md`
+- `RENDER_SCHEMA_INVENTORY.md`
 
 ## Goal
 
@@ -40,6 +41,10 @@ Verify these survive migration:
 - pending strategy execution rows
 - activity/event logs
 - admin settings
+
+Use exact schema names from:
+
+- `RENDER_SCHEMA_INVENTORY.md`
 
 ## Phase A: Pre-Migration Preparation
 
@@ -115,7 +120,7 @@ Minimum validation:
 - known user accounts exist
 - Delta API profile rows exist
 - strategy profile rows exist
-- runtime rows exist
+- futures runtime rows exist
 - event/activity rows exist
 - pending strategy execution rows exist
 
@@ -127,7 +132,7 @@ Examples:
 
 - account count
 - API profile count
-- runtime row count
+- futures runtime row count
 - activity log row count
 - pending request count
 
@@ -234,7 +239,7 @@ After migration, compare these between source and target:
 - total accounts
 - total Delta API profiles
 - total strategy profile rows
-- total runtime rows
+- total futures runtime rows
 - total tracked position rows
 - total pending execution rows
 - total event rows

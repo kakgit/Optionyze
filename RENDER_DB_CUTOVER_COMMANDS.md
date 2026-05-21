@@ -7,6 +7,7 @@ Use this with:
 - `RENDER_DB_MIGRATION_RUNBOOK.md`
 - `RENDER_ENV_VAR_INVENTORY.md`
 - `RENDER_PHASE1_MIGRATION_CHECKLIST.md`
+- `RENDER_SCHEMA_INVENTORY.md`
 
 ## Important
 
@@ -148,7 +149,7 @@ psql `
   -p <RENDER_PORT> `
   -U <RENDER_USER> `
   -d <RENDER_DB> `
-  -c "select count(*) from optionyze_strategy_exec_requests;"
+  -c "select count(*) from optionyze_strategy_execution_requests;"
 ```
 
 ### Count Activity/Event Rows
@@ -161,6 +162,30 @@ psql `
   -U <RENDER_USER> `
   -d <RENDER_DB> `
   -c "select count(*) from optionyze_rolling_options_pt_de_events;"
+```
+
+### Count Futures LT Profiles
+
+```powershell
+$env:PGPASSWORD="<RENDER_PASSWORD>"
+psql `
+  -h <RENDER_HOST> `
+  -p <RENDER_PORT> `
+  -U <RENDER_USER> `
+  -d <RENDER_DB> `
+  -c "select count(*) from optionyze_rolling_futures_lt_profiles;"
+```
+
+### Count Futures LT Positions
+
+```powershell
+$env:PGPASSWORD="<RENDER_PASSWORD>"
+psql `
+  -h <RENDER_HOST> `
+  -p <RENDER_PORT> `
+  -U <RENDER_USER> `
+  -d <RENDER_DB> `
+  -c "select count(*) from optionyze_rolling_futures_lt_positions;"
 ```
 
 ## Spot-Check Commands
@@ -224,3 +249,7 @@ Before the real migration window, prepare a local copy of:
 - exact dump file path
 
 Then do one rehearsal on non-critical data if possible.
+
+For exact current table names, see:
+
+- `RENDER_SCHEMA_INVENTORY.md`
