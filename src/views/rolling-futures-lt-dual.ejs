@@ -10,27 +10,20 @@
     <link rel="stylesheet" href="/css/rolling-futures-lt-common.css" />
     <link rel="stylesheet" href="/css/rolling-futures-lt-dual.css" />
   </head>
-  <body class="app-page" data-rolling-futures-live="dual" data-exec-strategy-enabled="<%= currentAccount?.execStrategy ? 'true' : 'false' %>">
+  <body class="app-page"
+        data-rolling-futures-live="dual"
+        data-exec-strategy-enabled="<%= currentAccount?.execStrategy ? 'true' : 'false' %>"
+        data-current-account-id="<%= currentAccount?.accountId || '' %>"
+        data-current-account-admin="<%= currentAccount?.isAdmin ? 'true' : 'false' %>"
+        data-current-account-full-name="<%= currentAccount?.fullName || '' %>"
+        data-current-account-email="<%= currentAccount?.email || '' %>"
+        data-current-account-telegram-chat-id="<%= currentAccount?.telegramChatId || '' %>">
     <div class="app-layout rolling-demo-layout">
         <%- include('partials/app-header', { currentAccount }) %>
 
         <section class="rolling-demo-hero">
             <div class="app-panel rolling-demo-card">
                 <h1 class="rolling-demo-title">Dual Rolling Futures - Live</h1>
-                <div class="rolling-demo-grid metrics rolling-demo-section">
-                    <div class="rolling-demo-metric">
-                        <div class="rolling-demo-metric-label">Total Balance</div>
-                        <div class="rolling-demo-metric-value" id="rollingDualFuturesTotalBalanceValue">-</div>
-                    </div>
-                    <div class="rolling-demo-metric">
-                        <div class="rolling-demo-metric-label">Blocked Margin</div>
-                        <div class="rolling-demo-metric-value" id="rollingDualFuturesBlockedMarginValue">-</div>
-                    </div>
-                    <div class="rolling-demo-metric">
-                        <div class="rolling-demo-metric-label">Available Balance</div>
-                        <div class="rolling-demo-metric-value" id="rollingDualFuturesAvailableBalanceValue">-</div>
-                    </div>
-                </div>
                 <div class="rolling-futures-hero-badges">
                     <div class="rolling-futures-hero-badge">
                         <label for="ddlRollingFuturesSymbol">Symbols List</label>
@@ -48,14 +41,96 @@
                         <button class="rolling-demo-btn warn" type="button" id="btnRollingFuturesDemoAutoTrader">Auto Trader - OFF</button>
                     </div>
                 </div>
+                <div class="rolling-futures-help-sample-inline rolling-futures-hero-rules">
+                    <div class="rolling-futures-help-inline-row">
+                        <div class="rolling-futures-help-inline-main">
+                            <div class="rolling-futures-help-inline-top">
+                                <label class="rolling-futures-neutral-mode rolling-futures-help-mode" for="chkRollingFuturesCloseNetProfitBrokerage">
+                                    <input type="checkbox" id="chkRollingFuturesCloseNetProfitBrokerage" checked />
+                                    <span>Exit All if Net PnL is &gt; X of Brokerage</span>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show brokerage help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            Monitors <code>Net PnL</code> against <code>Total Brokerage to Recvr x multiplier</code>. When the rule stays valid long enough, it can close all positions.
+                                        </span>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="rolling-futures-help-inline-bottom">
+                                <div class="rolling-demo-field rolling-futures-help-input-field">
+                                    <input type="number" id="txtRollingFuturesBrokerageMultiplier" value="10" />
+                                </div>
+                                <label class="rolling-futures-neutral-mode rolling-futures-help-mode rolling-futures-help-side-check" for="chkRollingFuturesReEnterBrok">
+                                    <input type="checkbox" id="chkRollingFuturesReEnterBrok" checked />
+                                    <span class="rolling-futures-help-side-label">Re Enter</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="rolling-futures-help-inline-row">
+                        <div class="rolling-futures-help-inline-main">
+                            <div class="rolling-futures-help-inline-top">
+                                <label class="rolling-futures-neutral-mode rolling-futures-help-mode" for="chkRollingFuturesCloseBlockedMargin">
+                                    <input type="checkbox" id="chkRollingFuturesCloseBlockedMargin" checked />
+                                    <span>Exit All if Net PnL is X% of Blocked Margin</span>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show blocked margin help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            Monitors <code>Net PnL</code> against the configured percentage of current blocked margin before allowing a close-all.
+                                        </span>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="rolling-futures-help-inline-bottom">
+                                <div class="rolling-demo-field rolling-futures-help-input-field">
+                                    <input type="number" id="txtRollingFuturesBlockedMarginPct" value="10" />
+                                </div>
+                                <label class="rolling-futures-neutral-mode rolling-futures-help-mode rolling-futures-help-side-check" for="chkRollingFuturesReEnterBlock">
+                                    <input type="checkbox" id="chkRollingFuturesReEnterBlock" checked />
+                                    <span class="rolling-futures-help-side-label">Re Enter</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <div class="rolling-futures-hero-action">
                     <button class="rolling-demo-btn primary" type="button" id="btnRollingFuturesExecAllLegs">Exec Strategy</button>
+                </div>
+                <div class="rolling-futures-hero-metrics rolling-futures-help-sample-inline">
+                    <div class="rolling-futures-hero-metric">
+                        <label for="txtRollingFuturesBrok2Rec">Total Brokerage</label>
+                        <input class="rolling-demo-metric-input" type="number" id="txtRollingFuturesBrok2Rec" value="0" />
+                    </div>
+                    <div class="rolling-futures-hero-metric">
+                        <button type="button" id="btnRollingDualFuturesRecalculateTotalPnl" class="rolling-futures-hero-metric-button" title="Recalculate Total PnL from Delta history since strategy start">
+                            Total PnL
+                        </button>
+                        <input class="rolling-demo-metric-input" type="number" id="txtRollingFuturesYet2Recover" value="0" />
+                    </div>
+                    <div class="rolling-futures-hero-metric">
+                        <label for="divRollingFuturesNetPl">Net PnL</label>
+                        <div class="rolling-demo-metric-value rolling-futures-hero-metric-value" id="divRollingFuturesNetPl">0.00</div>
+                    </div>
                 </div>
             </div>
             <div class="app-panel rolling-demo-card">
                 <div class="rolling-demo-card-head">
                     <h2>Exchange Connection</h2>
                     <div class="rolling-demo-card-tools">
+                        <% if (currentAccount?.isAdmin) { %>
+                            <div class="rolling-live-admin-target-head">
+                                <div class="rolling-demo-field rolling-live-admin-target-field">
+                                    <select id="ddlRollingDualAdminTargetUser">
+                                        <option value="<%= currentAccount?.accountId || '' %>">Loading running users...</option>
+                                    </select>
+                                </div>
+                                <div class="rolling-live-admin-target-meta" id="rollingDualAdminTargetMeta">Choose a running Dual strategy user to view or control.</div>
+                            </div>
+                        <% } %>
                         <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesCheckConnection" title="Check Delta connection" aria-label="Check Delta connection">
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M21 12a9 9 0 1 1-2.64-6.36" />
@@ -104,7 +179,22 @@
                         <div class="rolling-demo-stat-value" id="rollingDualFuturesOpenCount">0</div>
                     </div>
                 </div>
+                <div class="rolling-demo-grid metrics rolling-demo-section rolling-live-balance-metrics">
+                    <div class="rolling-demo-metric">
+                        <div class="rolling-demo-metric-label">Total Balance</div>
+                        <div class="rolling-demo-metric-value" id="rollingDualFuturesTotalBalanceValue">-</div>
+                    </div>
+                    <div class="rolling-demo-metric">
+                        <div class="rolling-demo-metric-label">Blocked Margin</div>
+                        <div class="rolling-demo-metric-value" id="rollingDualFuturesBlockedMarginValue">-</div>
+                    </div>
+                    <div class="rolling-demo-metric">
+                        <div class="rolling-demo-metric-label">Available Balance</div>
+                        <div class="rolling-demo-metric-value" id="rollingDualFuturesAvailableBalanceValue">-</div>
+                    </div>
+                </div>
                 <div class="rolling-live-status" id="rollingDualFuturesConnectionStatus"></div>
+                <div class="rolling-live-status" id="rollingDualFuturesPageStatus"></div>
             </div>
         </section>
 
@@ -113,7 +203,6 @@
                 <div class="rolling-demo-card-head">
                     <div class="rolling-futures-inline-tools">
                         <span class="rolling-demo-manual-title">Manual Trader</span>
-                        <div class="rolling-live-status rolling-live-status-inline rolling-futures-inline-status" id="rollingDualFuturesPageStatus"></div>
                     </div>
                     <div class="rolling-demo-card-tools rolling-futures-manual-tools">
                         <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingFuturesResetDefaults" title="Reset manual trader defaults" aria-label="Reset manual trader defaults">
@@ -215,69 +304,6 @@
                     </div>
                 </div>
 
-                <div class="rolling-futures-demo-grid profit-summary-labels">
-                    <div class="rolling-demo-field rolling-futures-rule-label">
-                        <label for="chkRollingFuturesCloseNetProfitBrokerage">Close All when Net Profit is &gt; X of Brokerage</label>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="chkRollingFuturesReEnterBrok">Re Enter</label>
-                    </div>
-                    <div class="rolling-demo-field rolling-futures-rule-label">
-                        <label for="chkRollingFuturesCloseBlockedMargin">Close All if Net Profit is X % of Blocked Margin</label>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="chkRollingFuturesReEnterBlock">Re Enter</label>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="txtRollingFuturesBrok2Rec">Total Brokerage to Recvr</label>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <button type="button" id="btnRollingDualFuturesRecalculateTotalPnl" class="rolling-futures-link-button" title="Recalculate Total PnL from Delta history since strategy start">
-                            Total PnL
-                        </button>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="divRollingFuturesNetPl">Net PnL</label>
-                    </div>
-                </div>
-
-                <div class="rolling-futures-demo-grid profit-summary-values">
-                    <div class="rolling-demo-field">
-                        <div class="rolling-futures-rule-controls">
-                            <div class="rolling-futures-toggle">
-                                <input type="checkbox" id="chkRollingFuturesCloseNetProfitBrokerage" checked />
-                            </div>
-                            <input type="number" id="txtRollingFuturesBrokerageMultiplier" value="10" />
-                        </div>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <div class="rolling-futures-compact-check">
-                            <input type="checkbox" id="chkRollingFuturesReEnterBrok" checked />
-                        </div>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <div class="rolling-futures-rule-controls">
-                            <div class="rolling-futures-toggle">
-                                <input type="checkbox" id="chkRollingFuturesCloseBlockedMargin" checked />
-                            </div>
-                            <input type="number" id="txtRollingFuturesBlockedMarginPct" value="10" />
-                        </div>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <div class="rolling-futures-compact-check">
-                            <input type="checkbox" id="chkRollingFuturesReEnterBlock" checked />
-                        </div>
-                    </div>
-                    <div class="rolling-futures-metric">
-                        <input class="rolling-demo-metric-input" type="number" id="txtRollingFuturesBrok2Rec" value="0" />
-                    </div>
-                    <div class="rolling-futures-metric">
-                        <input class="rolling-demo-metric-input" type="number" id="txtRollingFuturesYet2Recover" value="0" />
-                    </div>
-                    <div class="rolling-futures-metric">
-                        <div class="rolling-demo-metric-value" id="divRollingFuturesNetPl">0.00</div>
-                    </div>
-                </div>
                 <div class="rolling-futures-neutral-modes rolling-futures-neutral-modes-row">
                     <div class="rolling-futures-neutral-item">
                         <label class="rolling-futures-neutral-mode" for="chkRollingFuturesRangeDeltaNeutral">
@@ -501,7 +527,7 @@
                         <h2>Telegram Alerts</h2>
                     </div>
                     <p class="app-copy">Alert preferences can follow the same strategy-level model as the paper page while live execution wiring is added server-side.</p>
-                    <div class="rolling-demo-notice">
+                    <div class="rolling-demo-notice" id="rollingDualFuturesTelegramNotice">
                         <% if (currentAccount?.telegramChatId) { %>
                             Telegram Chat ID configured: <strong><%= currentAccount.telegramChatId %></strong>
                         <% } else { %>

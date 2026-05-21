@@ -4,8 +4,20 @@ This note is the short execution-order version of the two detailed documents:
 
 - `FAILOVER_AND_TRADING_SAFETY_DESIGN.md`
 - `RAILWAY_PRO_HA_ROLLOUT_CHECKLIST.md`
+- `RENDER_PRIMARY_RAILWAY_STANDBY_PLAN.md`
 
 Use this as the practical rollout sequence.
+
+## Alternate Track
+
+If Railway should no longer remain the primary production home after the outage, use this alternate infrastructure track instead:
+
+- `RENDER_PRIMARY_RAILWAY_STANDBY_PLAN.md`
+
+That note covers the phased move to:
+
+- Render as primary app + DB
+- Railway as standby worker provider
 
 ## Current Phase
 

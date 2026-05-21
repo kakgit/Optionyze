@@ -136,7 +136,14 @@ export async function testDeltaApiProfileLoginController(req: Request, res: Resp
 }
 
 function getAccountId(req: Request): string {
-    return String(req.authAccount?.accountId || "").trim();
+    const vOwnAccountId = String(req.authAccount?.accountId || "").trim();
+    const vBodyTarget = typeof req.body?.targetUserId === "string" ? req.body.targetUserId : "";
+    const vQueryTarget = typeof req.query?.targetUserId === "string" ? req.query.targetUserId : "";
+    const vTargetAccountId = String(vBodyTarget || vQueryTarget || "").trim();
+    if (req.authAccount?.isAdmin && vTargetAccountId) {
+        return vTargetAccountId;
+    }
+    return vOwnAccountId;
 }
 
 function readCreateInput(req: Request, pAccountId: string) {

@@ -24,6 +24,7 @@ import {
 } from "../../storage/rolling-futures-lt-runtime-store";
 import {
     clearRollingOptionsEventsByStrategy,
+    hasRecentRollingOptionsEventMatch,
     deleteRollingOptionsEventByStrategy,
     listRollingOptionsEventsByStrategy,
     saveRollingOptionsEvent
@@ -116,6 +117,7 @@ const gNeutralityHedgeLocks = new Set<string>();
 const gAutoTraderIntervals = new Map<string, NodeJS.Timeout>();
 const gAutoTraderCycleLocks = new Set<string>();
 const gNeutralityHedgePendingMs = 45 * 1000;
+const gDuplicateLiveEventCooldownMs = 60 * 1000;
 const gRollingFuturesTelegramEventTypes = new Set([
     "engine_started",
     "engine_stopped",
@@ -226,7 +228,14 @@ interface RollingFuturesLtAccountSummarySnapshot {
 }
 
 function getAccountId(req: Request): string {
-    return String(req.authAccount?.accountId || "").trim();
+    const vOwnAccountId = String(req.authAccount?.accountId || "").trim();
+    const vBodyTarget = typeof req.body?.targetUserId === "string" ? req.body.targetUserId : "";
+    const vQueryTarget = typeof req.query?.targetUserId === "string" ? req.query.targetUserId : "";
+    const vTargetAccountId = String(vBodyTarget || vQueryTarget || "").trim();
+    if (req.authAccount?.isAdmin && vTargetAccountId) {
+        return vTargetAccountId;
+    }
+    return vOwnAccountId;
 }
 
 function isDualRollingFuturesStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
@@ -2381,18 +2390,9 @@ async function buildOpenPositionsPayload(
         ? Math.max(vRuntimeBrokerageTotal, vOpenPositionCharges)
         : vRuntimeBrokerageTotal;
     const vRecoveredTotalPnl = getRecoveredTotalPnl(objRuntime);
-    const vOpenFuturesUnrealizedPnl = Number(arrPositions.reduce((pSum, objPosition) => {
-        return pSum + getTrackedFutureUnrealizedPnl(objPosition);
-    }, 0).toFixed(4));
-    const vOpenOptionsAndOtherPnl = Number(objEnriched.positions.reduce((pSum, objPosition) => {
-        if (objPosition.contractKind === "future") {
-            return pSum;
-        }
-        return pSum + Number(objPosition.pnl || 0);
-    }, 0).toFixed(4));
     const objOpenPnlSnapshot = getOpenPnlSnapshotState(objRuntime);
     const arrCurrentPositionKeys = arrPositions.map((pPosition) => getTrackedPositionIdentityKey(pPosition));
-    const vCurrentOpenPnl = Number((vOpenFuturesUnrealizedPnl + vOpenOptionsAndOtherPnl).toFixed(4));
+    const vCurrentOpenPnl = Number(Number(objEnriched.totals.totalPnl || 0).toFixed(4));
     const bAllOpenPositionPnlsZero = objEnriched.positions.length > 0
         && objEnriched.positions.every((pPosition) => {
             const vDynamicPnl = pPosition.contractKind === "future"
@@ -2877,6 +2877,18 @@ async function logFuturesEvent(
         message: pMessage,
         payload: pPayload
     };
+
+    const bDuplicateWithinCooldown = await hasRecentRollingOptionsEventMatch(
+        pUserId,
+        pStrategyCode,
+        pEventType,
+        pTitle,
+        pMessage,
+        gDuplicateLiveEventCooldownMs
+    );
+    if (bDuplicateWithinCooldown) {
+        return;
+    }
 
     await saveRollingOptionsEvent(objEvent);
     await sendFuturesTelegramForEvent(pUserId, objEvent);
@@ -4689,11 +4701,23 @@ async function closeTrackedPositionsOnDelta(
 async function getProfileInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
     const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+    const objTargetAccount = await getAccountById(vUserId);
     res.json({
         status: "success",
         data: {
             ...objProfile,
-            uiState: getMergedUiState(objProfile)
+            uiState: getMergedUiState(objProfile),
+            targetAccount: objTargetAccount
+                ? {
+                    accountId: objTargetAccount.accountId,
+                    fullName: objTargetAccount.fullName,
+                    email: objTargetAccount.email,
+                    telegramChatId: objTargetAccount.telegramChatId,
+                    execStrategy: objTargetAccount.execStrategy,
+                    isAdmin: objTargetAccount.isAdmin,
+                    isActive: objTargetAccount.isActive
+                }
+                : null
         }
     });
 }
@@ -5399,6 +5423,7 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
     }
     try {
         const vUserId = getAccountId(req);
+        const objTargetAccount = await getAccountById(vUserId);
         const objProfile = await readLiveProfile(vUserId, pStrategyCode);
         const objUiState = getMergedUiState(objProfile);
         const vSelectedSymbol = normalizeSymbolValue(req.query?.symbol || req.body?.symbol || objUiState.symbol);
@@ -5464,7 +5489,7 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
         res.json({
             status: "success",
             data: {
-                execStrategy: isDualExecStrategyAllowed(pStrategyCode, req.authAccount?.execStrategy),
+                execStrategy: isDualExecStrategyAllowed(pStrategyCode, objTargetAccount?.execStrategy),
                 symbol: vSelectedSymbol,
                 oneLotValue: Number.isFinite(vOneLotValue) ? Number(vOneLotValue.toFixed(2)) : null,
                 totalBalance: Number.isFinite(vTotalBalance) ? Number(vTotalBalance.toFixed(2)) : null,
@@ -6202,7 +6227,8 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
 
 async function executeStrategyInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
-    if (!isDualExecStrategyAllowed(pStrategyCode, req.authAccount?.execStrategy)) {
+    const objTargetAccount = await getAccountById(vUserId);
+    if (!isDualExecStrategyAllowed(pStrategyCode, objTargetAccount?.execStrategy)) {
         res.status(403).json({
             status: "warning",
             message: gExecStrategyUnauthorizedMessage
@@ -6894,6 +6920,49 @@ export async function updateRollingFuturesLtShortRecoveryMetrics(req: Request, r
 }
 export async function recalculateRollingFuturesLtShortRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "rolling-futures-lt-short");
+}
+
+export async function listRollingFuturesLtDualRunningUsers(req: Request, res: Response): Promise<void> {
+    try {
+        const arrRuntimeRows = await listRollingFuturesLtRuntime();
+        const arrDualRunning = arrRuntimeRows.filter((objRuntime) => {
+            return objRuntime.strategyCode === "rolling-futures-lt-dual"
+                && objRuntime.autoTraderEnabled
+                && String(objRuntime.status || "").trim().toLowerCase() === "running";
+        });
+
+        const arrUsers = [];
+        for (const objRuntime of arrDualRunning) {
+            const objAccount = await getAccountById(objRuntime.userId);
+            if (!objAccount) {
+                continue;
+            }
+            arrUsers.push({
+                accountId: objAccount.accountId,
+                fullName: objAccount.fullName,
+                email: objAccount.email,
+                telegramChatId: objAccount.telegramChatId,
+                execStrategy: objAccount.execStrategy,
+                isActive: objAccount.isActive,
+                status: objRuntime.status,
+                autoTraderEnabled: objRuntime.autoTraderEnabled,
+                lastCycleAt: objRuntime.lastCycleAt,
+                updatedAt: objRuntime.updatedAt
+            });
+        }
+
+        res.json({
+            status: "success",
+            data: arrUsers
+                .sort((pLeft, pRight) => String(pLeft.fullName || "").localeCompare(String(pRight.fullName || "")))
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to load running Dual users.")
+        });
+    }
 }
 
 export async function getRollingFuturesLtDualProfile(req: Request, res: Response): Promise<void> {

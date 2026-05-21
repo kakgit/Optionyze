@@ -94,6 +94,52 @@ export async function listRollingOptionsPtDeEvents(
     return listRollingOptionsEventsByStrategy(pUserId, gDefaultStrategyCode, pLimit);
 }
 
+export async function hasRecentRollingOptionsEventMatch(
+    pUserId: string,
+    pStrategyCode: string,
+    pEventType: string,
+    pTitle: string,
+    pMessage: string,
+    pWithinMs: number
+): Promise<boolean> {
+    const vStrategyCode = String(pStrategyCode || gDefaultStrategyCode).trim() || gDefaultStrategyCode;
+    const vEventType = String(pEventType || "").trim();
+    const vTitle = String(pTitle || "").trim();
+    const vMessage = String(pMessage || "").trim();
+    const vCutoffIso = new Date(Date.now() - Math.max(0, Number(pWithinMs || 0))).toISOString();
+
+    if (!pUserId || !vEventType || !vTitle || !vMessage || !vCutoffIso) {
+        return false;
+    }
+
+    if (isPostgresConfigured()) {
+        const objPool = getPostgresPool();
+        const objResult = await objPool.query<{ event_id: string }>(`
+            SELECT event_id
+            FROM optionyze_rolling_options_pt_de_events
+            WHERE user_id = $1
+              AND strategy_code = $2
+              AND event_type = $3
+              AND title = $4
+              AND message = $5
+              AND created_at >= $6::timestamptz
+            ORDER BY created_at DESC
+            LIMIT 1
+        `, [pUserId, vStrategyCode, vEventType, vTitle, vMessage, vCutoffIso]);
+        return Boolean(objResult.rows[0]);
+    }
+
+    const arrRows = await loadAllEventsJson();
+    return arrRows.some((objRow) => {
+        return objRow.userId === pUserId
+            && objRow.strategyCode === vStrategyCode
+            && String(objRow.eventType || "").trim() === vEventType
+            && String(objRow.title || "").trim() === vTitle
+            && String(objRow.message || "").trim() === vMessage
+            && new Date(String(objRow.createdAt || "")).getTime() >= new Date(vCutoffIso).getTime();
+    });
+}
+
 async function prunePostgresEvents(pUserId: string, pStrategyCode: string): Promise<void> {
     const objPool = getPostgresPool();
     const vCutoff = new Date(Date.now() - gMaxAgeMs).toISOString();

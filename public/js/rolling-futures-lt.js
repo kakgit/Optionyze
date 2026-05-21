@@ -12,6 +12,11 @@
         ? "/api/rollingfutures-lt-short"
         : (mode === "dual" ? "/api/rollingfutures-lt-dual" : "/api/rollingfutures-lt-long");
     const modeLabel = mode === "short" ? "Short Mode" : (mode === "dual" ? "Dual Mode" : "Long Mode");
+    const currentAccountId = String(document.body?.dataset?.currentAccountId || "").trim();
+    const currentAccountIsAdmin = String(document.body?.dataset?.currentAccountAdmin || "").trim().toLowerCase() === "true";
+    const currentAccountFullName = String(document.body?.dataset?.currentAccountFullName || "").trim();
+    const currentAccountEmail = String(document.body?.dataset?.currentAccountEmail || "").trim();
+    const currentAccountTelegramChatId = String(document.body?.dataset?.currentAccountTelegramChatId || "").trim();
     const symbolConfig = {
         BTC: { contractName: "BTCUSD", lotSize: 0.001 },
         ETH: { contractName: "ETHUSD", lotSize: 0.01 }
@@ -25,6 +30,8 @@
         lastCheckedValue: document.getElementById(`${prefix}LastCheckedValue`),
         whitelistIpValue: document.getElementById(`${prefix}WhitelistIpValue`),
         copyWhitelistIpButton: document.getElementById(`btn${idPrefix}CopyWhitelistIp`),
+        adminTargetUser: document.getElementById("ddlRollingDualAdminTargetUser"),
+        adminTargetMeta: document.getElementById("rollingDualAdminTargetMeta"),
         oneLotValue: document.getElementById(`${prefix}OneLotValue`),
         totalBalanceValue: document.getElementById(`${prefix}TotalBalanceValue`),
         blockedMarginValue: document.getElementById(`${prefix}BlockedMarginValue`),
@@ -96,6 +103,7 @@
         refreshEventsButton: document.getElementById(`btn${idPrefix}RefreshEvents`),
         clearEventsButton: document.getElementById(`btn${idPrefix}ClearEvents`),
         eventLog: document.getElementById(`${prefix}EventLog`),
+        telegramNotice: document.getElementById("rollingDualFuturesTelegramNotice"),
         telegramEventCheckboxes: Array.from(document.querySelectorAll(".rolling-demo-telegram-event")),
         importOverlay: document.getElementById(`${prefix}ImportOverlay`),
         importModal: document.getElementById(`${prefix}ImportModal`),
@@ -120,6 +128,15 @@
     let manualOptionOrderInFlight = false;
     let execStrategyInFlight = false;
     let execStrategyEnabled = mode === "dual" ? initialExecStrategyEnabled : true;
+    let adminRunningUsers = [];
+    let targetUserId = currentAccountId;
+    let currentTargetAccount = {
+        accountId: currentAccountId,
+        fullName: currentAccountFullName,
+        email: currentAccountEmail,
+        telegramChatId: currentAccountTelegramChatId,
+        execStrategy: initialExecStrategyEnabled
+    };
     let lastNeutralStatus = null;
     let lastRecoveryMetrics = null;
     const closedPositionsPageSize = 10;
@@ -325,8 +342,74 @@
         }
     }
 
+    function isAdminTargetModeActive() {
+        return mode === "dual" && currentAccountIsAdmin;
+    }
+
+    function getEffectiveTargetUserId() {
+        if (!isAdminTargetModeActive()) {
+            return "";
+        }
+        const vTargetUserId = String(targetUserId || currentAccountId || "").trim();
+        return vTargetUserId || currentAccountId;
+    }
+
+    function withTargetUrl(url) {
+        if (!isAdminTargetModeActive()) {
+            return url;
+        }
+        const vTargetUserId = getEffectiveTargetUserId();
+        if (!vTargetUserId) {
+            return url;
+        }
+        const objUrl = new URL(url, window.location.origin);
+        objUrl.searchParams.set("targetUserId", vTargetUserId);
+        return `${objUrl.pathname}${objUrl.search}`;
+    }
+
+    function withTargetPayload(payload) {
+        if (!isAdminTargetModeActive()) {
+            return payload || {};
+        }
+        const vTargetUserId = getEffectiveTargetUserId();
+        return {
+            ...(payload || {}),
+            targetUserId: vTargetUserId
+        };
+    }
+
+    function updateAdminTargetMeta() {
+        if (!ids.adminTargetMeta) {
+            return;
+        }
+        const objTarget = currentTargetAccount || {};
+        const vFullName = String(objTarget.fullName || "").trim();
+        const vEmail = String(objTarget.email || "").trim();
+        ids.adminTargetMeta.textContent = vFullName
+            ? `Viewing ${vFullName}${vEmail ? ` (${vEmail})` : ""}.`
+            : "Choose a running Dual strategy user to view or control.";
+    }
+
+    function updateTelegramNotice() {
+        if (!ids.telegramNotice) {
+            return;
+        }
+        const objTarget = currentTargetAccount || {};
+        const vChatId = String(objTarget.telegramChatId || "").trim();
+        const vFullName = String(objTarget.fullName || "").trim();
+        if (vChatId) {
+            ids.telegramNotice.innerHTML = isAdminTargetModeActive() && vFullName
+                ? `Telegram Chat ID for <strong>${escapeHtml(vFullName)}</strong>: <strong>${escapeHtml(vChatId)}</strong>`
+                : `Telegram Chat ID configured: <strong>${escapeHtml(vChatId)}</strong>`;
+            return;
+        }
+        ids.telegramNotice.innerHTML = isAdminTargetModeActive() && vFullName
+            ? `Telegram Chat ID is not set for <strong>${escapeHtml(vFullName)}</strong> yet.`
+            : 'Telegram Chat ID is not set on your profile yet. Add it in <a href="/account/profile">My Profile</a> to receive alerts.';
+    }
+
     async function getJson(url) {
-        const objResponse = await fetch(url, { credentials: "same-origin" });
+        const objResponse = await fetch(withTargetUrl(url), { credentials: "same-origin" });
         const objPayload = await objResponse.json().catch(function () { return {}; });
         if (!objResponse.ok) {
             throw new Error(String(objPayload?.message || `Request failed with status ${objResponse.status}`));
@@ -335,11 +418,11 @@
     }
 
     async function postJson(url, payload) {
-        const objResponse = await fetch(url, {
+        const objResponse = await fetch(withTargetUrl(url), {
             method: "POST",
             credentials: "same-origin",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload || {})
+            body: JSON.stringify(withTargetPayload(payload))
         });
         const objPayload = await objResponse.json().catch(function () { return {}; });
         if (!objResponse.ok) {
@@ -581,9 +664,6 @@
             ? "success"
             : (connectionState === "not_selected" || connectionState === "checking" ? "warning" : "danger");
         setStatus(ids.connectionStatus, objStatus.message || "", tone);
-        if ((connectionState === "auth_failed" || connectionState === "disconnected" || connectionState === "rate_limited") && ids.pageStatus) {
-            setStatus(ids.pageStatus, objStatus.message || "", tone);
-        }
         setButtonsEnabled();
     }
 
@@ -759,6 +839,83 @@
         });
     }
 
+    function renderAdminRunningUsers(users) {
+        if (!(ids.adminTargetUser instanceof HTMLSelectElement)) {
+            return;
+        }
+        const arrUsers = Array.isArray(users) ? users : [];
+        const arrOtherRunningUsers = arrUsers.filter(function (user) {
+            return String(user.accountId || "").trim() !== currentAccountId;
+        });
+        const vCurrentUserLabel = currentAccountEmail
+            ? `${currentAccountFullName || "Current User"} (${currentAccountEmail})`
+            : (currentAccountFullName || "Current User");
+        ids.adminTargetUser.innerHTML = [
+            `<option value="${escapeHtml(currentAccountId)}">${escapeHtml(vCurrentUserLabel)}</option>`,
+            ...arrOtherRunningUsers.map(function (user) {
+                const vAccountId = String(user.accountId || "").trim();
+                const vFullName = String(user.fullName || "User").trim();
+                const vEmail = String(user.email || "").trim();
+                const vLabel = vEmail ? `${vFullName} (${vEmail})` : vFullName;
+                return `<option value="${escapeHtml(vAccountId)}">${escapeHtml(vLabel)}</option>`;
+            })
+        ].join("");
+        ids.adminTargetUser.disabled = false;
+        ids.adminTargetUser.value = targetUserId || currentAccountId;
+    }
+
+    async function loadAdminRunningUsers() {
+        if (!isAdminTargetModeActive()) {
+            return;
+        }
+        const objResult = await getJson(`${endpointBase}/admin/running-users`);
+        adminRunningUsers = Array.isArray(objResult?.data) ? objResult.data : [];
+        if (!adminRunningUsers.length) {
+            targetUserId = currentAccountId;
+            currentTargetAccount = {
+                accountId: currentAccountId,
+                fullName: currentAccountFullName,
+                email: currentAccountEmail,
+                telegramChatId: currentAccountTelegramChatId,
+                execStrategy: initialExecStrategyEnabled
+            };
+            renderAdminRunningUsers([]);
+            updateAdminTargetMeta();
+            updateTelegramNotice();
+            return;
+        }
+        const bCurrentSelectionValid = targetUserId === currentAccountId || adminRunningUsers.some(function (user) {
+            return String(user.accountId || "").trim() === targetUserId;
+        });
+        if (!bCurrentSelectionValid) {
+            targetUserId = currentAccountId;
+        }
+        renderAdminRunningUsers(adminRunningUsers);
+        const objSelectedUser = targetUserId === currentAccountId ? null : adminRunningUsers.find(function (user) {
+            return String(user.accountId || "").trim() === targetUserId;
+        });
+        if (objSelectedUser) {
+            currentTargetAccount = {
+                accountId: String(objSelectedUser.accountId || "").trim(),
+                fullName: String(objSelectedUser.fullName || "").trim(),
+                email: String(objSelectedUser.email || "").trim(),
+                telegramChatId: String(objSelectedUser.telegramChatId || "").trim(),
+                execStrategy: Boolean(objSelectedUser.execStrategy)
+            };
+        }
+        else {
+            currentTargetAccount = {
+                accountId: currentAccountId,
+                fullName: currentAccountFullName,
+                email: currentAccountEmail,
+                telegramChatId: currentAccountTelegramChatId,
+                execStrategy: initialExecStrategyEnabled
+            };
+        }
+        updateAdminTargetMeta();
+        updateTelegramNotice();
+    }
+
     async function loadApiProfiles() {
         const objResult = await getJson("/api/account/delta-api-profiles");
         const arrProfiles = Array.isArray(objResult?.data) ? objResult.data : [];
@@ -777,6 +934,23 @@
         const objResult = await getJson(`${endpointBase}/profile`);
         const objData = objResult?.data || {};
         selectedApiProfileId = String(objData.selectedApiProfileId || "").trim();
+        if (objData.targetAccount && typeof objData.targetAccount === "object") {
+            currentTargetAccount = {
+                accountId: String(objData.targetAccount.accountId || getEffectiveTargetUserId() || currentAccountId).trim(),
+                fullName: String(objData.targetAccount.fullName || "").trim(),
+                email: String(objData.targetAccount.email || "").trim(),
+                telegramChatId: String(objData.targetAccount.telegramChatId || "").trim(),
+                execStrategy: Boolean(objData.targetAccount.execStrategy)
+            };
+            if (isAdminTargetModeActive() && ids.adminTargetUser instanceof HTMLSelectElement && currentTargetAccount.accountId) {
+                targetUserId = currentTargetAccount.accountId;
+                if (Array.from(ids.adminTargetUser.options).some(function (option) { return option.value === targetUserId; })) {
+                    ids.adminTargetUser.value = targetUserId;
+                }
+            }
+            updateAdminTargetMeta();
+            updateTelegramNotice();
+        }
         if (ids.apiProfile instanceof HTMLSelectElement) {
             ids.apiProfile.value = selectedApiProfileId;
         }
@@ -1902,24 +2076,70 @@
         }
     });
 
-    void loadApiProfiles().then(function () {
-        return loadProfile();
-    }).then(function () {
-        return Promise.all([
+    async function loadPageForCurrentTarget() {
+        displayedPositions = [];
+        importablePositions = [];
+        closedPositions = [];
+        closedPositionsPage = 1;
+        selectedApiProfileId = "";
+        renderEvents([]);
+        renderOpenPositions([]);
+        renderClosedPositions([]);
+        await loadApiProfiles();
+        await loadProfile();
+        await Promise.all([
             loadRuntimeStatus().catch(function () { return undefined; }),
             loadSavedOpenPositions().catch(function () { return []; }),
             loadEvents().catch(function () { return []; })
         ]);
-    }).then(function () {
         if (!selectedApiProfileId) {
             return;
         }
-        return checkConnection().then(function () {
-            return Promise.all([
-                loadAccountSummary().catch(function () { return undefined; }),
-                loadClosedPositions().catch(function () { return undefined; })
-            ]);
+        await checkConnection();
+        await Promise.all([
+            loadAccountSummary().catch(function () { return undefined; }),
+            loadClosedPositions().catch(function () { return undefined; })
+        ]);
+    }
+
+    ids.adminTargetUser?.addEventListener("change", function () {
+        const vNextTargetUserId = String(ids.adminTargetUser instanceof HTMLSelectElement ? ids.adminTargetUser.value : "").trim();
+        if (!vNextTargetUserId || vNextTargetUserId === targetUserId) {
+            return;
+        }
+        targetUserId = vNextTargetUserId;
+        if (saveTimer) {
+            clearTimeout(saveTimer);
+            saveTimer = null;
+        }
+        const objSelectedUser = adminRunningUsers.find(function (user) {
+            return String(user.accountId || "").trim() === targetUserId;
         });
+        if (objSelectedUser) {
+            currentTargetAccount = {
+                accountId: String(objSelectedUser.accountId || "").trim(),
+                fullName: String(objSelectedUser.fullName || "").trim(),
+                email: String(objSelectedUser.email || "").trim(),
+                telegramChatId: String(objSelectedUser.telegramChatId || "").trim(),
+                execStrategy: Boolean(objSelectedUser.execStrategy)
+            };
+        }
+        updateAdminTargetMeta();
+        updateTelegramNotice();
+        void loadPageForCurrentTarget().then(function () {
+            setStatus(ids.pageStatus, `Loaded Dual strategy view for ${currentTargetAccount.fullName || "selected user"}.`, "success");
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to load the selected Dual strategy user.", "danger");
+        });
+    });
+
+    void Promise.resolve().then(function () {
+        if (!isAdminTargetModeActive()) {
+            return undefined;
+        }
+        return loadAdminRunningUsers();
+    }).then(function () {
+        return loadPageForCurrentTarget();
     }).catch(function (error) {
         setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to load live futures page.", "danger");
     });
