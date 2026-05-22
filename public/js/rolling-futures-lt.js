@@ -128,6 +128,7 @@
     let manualOptionOrderInFlight = false;
     let execStrategyInFlight = false;
     let execStrategyEnabled = mode === "dual" ? initialExecStrategyEnabled : true;
+    let closedFiltersRefreshTimer = null;
     let adminRunningUsers = [];
     let targetUserId = currentAccountId;
     let currentTargetAccount = {
@@ -752,6 +753,9 @@
     }
 
     function applyUiState(uiState) {
+        const previousClosedFromDate = String(ids.closedFromDate?.value || "").trim();
+        const previousClosedToDate = String(ids.closedToDate?.value || "").trim();
+        let closedFiltersChanged = false;
         isApplyingState = true;
         try {
             const objUiState = { ...getDefaultUiState(), ...(uiState || {}) };
@@ -787,6 +791,8 @@
             setCheckboxValue(ids.reEnterBlock, objUiState.reEnterBlock);
             setInputValue(ids.closedFromDate, String(objUiState.closedFromDate || "").trim());
             setInputValue(ids.closedToDate, String(objUiState.closedToDate || "").trim());
+            closedFiltersChanged = previousClosedFromDate !== String(ids.closedFromDate?.value || "").trim()
+                || previousClosedToDate !== String(ids.closedToDate?.value || "").trim();
             const selectedTypes = new Set(Array.isArray(objUiState.telegramAlertTypes) ? objUiState.telegramAlertTypes.map(String) : []);
             ids.telegramEventCheckboxes.forEach(function (checkbox) {
                 if (checkbox instanceof HTMLInputElement) {
@@ -800,6 +806,9 @@
         }
         finally {
             isApplyingState = false;
+        }
+        if (closedFiltersChanged && selectedApiProfileId && connectionState === "connected") {
+            queueClosedPositionsRefresh();
         }
     }
 
@@ -830,6 +839,18 @@
             void saveProfile().catch(function (_error) {
             });
         }, 300);
+    }
+
+    function queueClosedPositionsRefresh() {
+        if (closedFiltersRefreshTimer) {
+            clearTimeout(closedFiltersRefreshTimer);
+        }
+        closedFiltersRefreshTimer = setTimeout(function () {
+            closedFiltersRefreshTimer = null;
+            void loadClosedPositions().catch(function (error) {
+                setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to refresh closed positions.", "danger");
+            });
+        }, 150);
     }
 
     async function saveProfile() {
@@ -1566,6 +1587,7 @@
                 return;
             }
             void Promise.all([
+                loadProfile().catch(function () { return undefined; }),
                 loadConnectionStatus(),
                 loadRuntimeStatus(),
                 loadAccountSummary().catch(function () { return undefined; }),
@@ -1874,6 +1896,7 @@
             const vMessage = String(objResult?.message || "Exec Strategy placed live option order(s).").trim();
             setStatus(ids.pageStatus, bHedgePlaced ? `${vMessage} Server-side neutrality hedge also executed.` : vMessage, "success");
             return Promise.all([
+                loadProfile().catch(function () { return undefined; }),
                 loadAccountSummary(),
                 loadConnectionStatus(),
                 loadEvents().catch(function () { return undefined; })
