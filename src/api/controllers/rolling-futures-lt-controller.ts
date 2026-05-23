@@ -118,6 +118,20 @@ const gProfitCloseReEntryCooldownMs = 5 * 60 * 1000;
 const gProfitCloseConfirmationMs = 5 * 60 * 1000;
 const gRestartCloseProtectionMs = 5 * 60 * 1000;
 const gNeutralityHedgeCooldownMs = 2 * 60 * 1000;
+const gSurvivalDebugPrefix = "[dual-survival]";
+
+function logDualSurvivalDebug(
+    pStage: string,
+    pDetails: Record<string, unknown> = {}
+): void {
+    const objPayload = {
+        stage: pStage,
+        serverId: gServerId,
+        serverInstanceId: gServerInstanceId,
+        ...pDetails
+    };
+    console.warn(`${gSurvivalDebugPrefix} ${JSON.stringify(objPayload)}`);
+}
 const gExecStrategyUnauthorizedMessage = "Not Authorised to Execute, Please Contact Admin";
 const gDualScaledBaselineFloorRatio = 0.25;
 const gDeltaUiTimezoneOffsetMinutes = 5.5 * 60;
@@ -1639,14 +1653,41 @@ async function getDeltaClientForAccountId(pAccountId: string, pProfileId: string
             throw objError;
         }
 
+        logDualSurvivalDebug("delta_client_primary_db_unavailable", {
+            userId: vAccountId,
+            strategyCode: "rolling-futures-lt-dual",
+            profileId: String(pProfileId || "").trim(),
+            error: getErrorMessage(objError, "Primary DB unavailable while loading Delta client.")
+        });
+
         const objSurvival = await getSurvivalState(vAccountId, "rolling-futures-lt-dual");
         if (!objSurvival || objSurvival.selectedApiProfileId !== String(pProfileId || "").trim()) {
+            logDualSurvivalDebug("delta_client_survival_state_missing", {
+                userId: vAccountId,
+                strategyCode: "rolling-futures-lt-dual",
+                requestedProfileId: String(pProfileId || "").trim(),
+                hasSurvivalState: Boolean(objSurvival),
+                survivalProfileId: String(objSurvival?.selectedApiProfileId || "").trim()
+            });
             throw objError;
         }
         if (!objSurvival.apiKey || !objSurvival.apiSecret) {
+            logDualSurvivalDebug("delta_client_survival_credentials_missing", {
+                userId: vAccountId,
+                strategyCode: "rolling-futures-lt-dual",
+                requestedProfileId: String(pProfileId || "").trim(),
+                hasApiKey: Boolean(objSurvival.apiKey),
+                hasApiSecret: Boolean(objSurvival.apiSecret)
+            });
             throw objError;
         }
 
+        logDualSurvivalDebug("delta_client_survival_fallback_ready", {
+            userId: vAccountId,
+            strategyCode: "rolling-futures-lt-dual",
+            requestedProfileId: String(pProfileId || "").trim(),
+            profileReferenceName: String(objSurvival.profileReferenceName || "").trim()
+        });
         const objClient = await new DeltaRestClient(objSurvival.apiKey, objSurvival.apiSecret);
         return {
             account: {
@@ -5345,6 +5386,11 @@ async function syncSurvivalStateDuringPrimaryOutage(
     }
     const objSurvival = await getSurvivalState(pUserId, pStrategyCode);
     if (!objSurvival) {
+        logDualSurvivalDebug("outage_sync_skipped_missing_state", {
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            positionCount: pPositions.length
+        });
         return;
     }
     await upsertSurvivalState({
@@ -5389,6 +5435,13 @@ async function syncSurvivalStateDuringPrimaryOutage(
         riskState: objSurvival.riskState,
         recoveryMetrics: objSurvival.recoveryMetrics,
         lastOrderRefs: objSurvival.lastOrderRefs
+    });
+    logDualSurvivalDebug("outage_sync_saved", {
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        runStatus: pPositions.length ? "active" : "ended",
+        positionCount: pPositions.length,
+        lastError: pLastError ? "present" : ""
     });
 }
 
@@ -5511,19 +5564,66 @@ async function runDualSurvivalOnlyCycle(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode
 ): Promise<void> {
+    logDualSurvivalDebug("cycle_enter", {
+        userId: pUserId,
+        strategyCode: pStrategyCode
+    });
     const objSurvival = await getSurvivalState(pUserId, pStrategyCode);
     if (!objSurvival || objSurvival.runStatus !== "active" || !objSurvival.selectedApiProfileId) {
+        logDualSurvivalDebug("cycle_exit_invalid_state", {
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            hasSurvivalState: Boolean(objSurvival),
+            runStatus: String(objSurvival?.runStatus || "").trim(),
+            hasSelectedApiProfileId: Boolean(objSurvival?.selectedApiProfileId)
+        });
         return;
     }
+    logDualSurvivalDebug("cycle_state_loaded", {
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        runTag: String(objSurvival.runTag || "").trim(),
+        selectedApiProfileId: String(objSurvival.selectedApiProfileId || "").trim(),
+        symbol: String(objSurvival.symbol || objSurvival.uiState?.symbol || "").trim(),
+        trackedPositionCount: Array.isArray(objSurvival.openPositions) ? objSurvival.openPositions.length : 0
+    });
     const vSymbol = normalizeSymbolValue(objSurvival.symbol || objSurvival.uiState?.symbol);
     const objProfile = buildSyntheticProfileFromSurvival(pUserId, pStrategyCode, objSurvival);
+    logDualSurvivalDebug("cycle_profile_built", {
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        symbol: vSymbol,
+        selectedApiProfileId: String(objProfile.selectedApiProfileId || "").trim()
+    });
     let arrPositions = await fetchLiveFuturePositions(pUserId, pStrategyCode, objSurvival.selectedApiProfileId, vSymbol);
+    logDualSurvivalDebug("cycle_live_positions_loaded", {
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        positionCount: arrPositions.length
+    });
     const arrTriggeredOptions = await findTriggeredTrackedOptions(arrPositions, objSurvival.uiState || {});
+    logDualSurvivalDebug("cycle_trigger_scan_complete", {
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        triggeredCount: arrTriggeredOptions.length
+    });
     for (const objTriggeredOption of arrTriggeredOptions) {
         const objCurrentTrackedPosition = arrPositions.find((objRow) => objRow.importId === objTriggeredOption.position.importId);
         if (!objCurrentTrackedPosition) {
+            logDualSurvivalDebug("cycle_trigger_position_missing", {
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                importId: String(objTriggeredOption.position.importId || "").trim(),
+                reason: objTriggeredOption.reason
+            });
             continue;
         }
+        logDualSurvivalDebug("cycle_trigger_apply_start", {
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            importId: String(objCurrentTrackedPosition.importId || "").trim(),
+            reason: objTriggeredOption.reason
+        });
         arrPositions = await applyTriggeredOptionRuleSurvivalOnly(
             pUserId,
             pStrategyCode,
@@ -5533,6 +5633,13 @@ async function runDualSurvivalOnlyCycle(
             objTriggeredOption.reason,
             arrPositions
         );
+        logDualSurvivalDebug("cycle_trigger_apply_done", {
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            importId: String(objCurrentTrackedPosition.importId || "").trim(),
+            reason: objTriggeredOption.reason,
+            positionCount: arrPositions.length
+        });
     }
     const objHedgeResult = await applySurvivalOnlyNeutralityHedge(
         pUserId,
@@ -5543,12 +5650,23 @@ async function runDualSurvivalOnlyCycle(
         arrPositions,
         objSurvival.runtimeState || {}
     );
+    logDualSurvivalDebug("cycle_hedge_complete", {
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        hedgePlaced: objHedgeResult.hedgePlaced,
+        positionCount: objHedgeResult.positions.length
+    });
     await syncSurvivalStateDuringPrimaryOutage(
         pUserId,
         pStrategyCode,
         objHedgeResult.positions,
         objHedgeResult.hedgePlaced ? "Primary DB unavailable; survival-only hedge cycle applied." : ""
     );
+    logDualSurvivalDebug("cycle_complete", {
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        positionCount: objHedgeResult.positions.length
+    });
 }
 
 function stopAutoTraderCycle(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): void {
@@ -6021,10 +6139,20 @@ async function runAutoTraderCycle(
     }
     catch (objError) {
         if (isPrimaryDatabaseUnavailableError(objError)) {
+            logDualSurvivalDebug("primary_db_outage_detected", {
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                error: getErrorMessage(objError, "Primary DB unavailable during live cycle.")
+            });
             try {
                 await runDualSurvivalOnlyCycle(pUserId, pStrategyCode);
             }
-            catch (_survivalError) {
+            catch (objSurvivalError) {
+                logDualSurvivalDebug("cycle_failed", {
+                    userId: pUserId,
+                    strategyCode: pStrategyCode,
+                    error: getErrorMessage(objSurvivalError, "Survival-only cycle failed.")
+                });
                 try {
                     const objSurvival = await getSurvivalState(pUserId, pStrategyCode);
                     if (objSurvival?.selectedApiProfileId) {
@@ -6041,9 +6169,19 @@ async function runAutoTraderCycle(
                             arrLivePositions,
                             getErrorMessage(objError, "Primary DB unavailable during live cycle.")
                         );
+                        logDualSurvivalDebug("snapshot_refresh_after_failure_saved", {
+                            userId: pUserId,
+                            strategyCode: pStrategyCode,
+                            positionCount: arrLivePositions.length
+                        });
                     }
                 }
-                catch (_snapshotError) {
+                catch (objSnapshotError) {
+                    logDualSurvivalDebug("snapshot_refresh_after_failure_failed", {
+                        userId: pUserId,
+                        strategyCode: pStrategyCode,
+                        error: getErrorMessage(objSnapshotError, "Survival snapshot refresh failed.")
+                    });
                 }
             }
             return;
