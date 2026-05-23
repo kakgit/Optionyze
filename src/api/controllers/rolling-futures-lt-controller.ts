@@ -5029,11 +5029,17 @@ async function findTriggeredTrackedOptions(
             continue;
         }
         const objMetadata = getTrackedOptionMetadata(objPosition);
+        const vLiveTakeProfitDelta = Number(pUiState.tpD1);
+        const vLiveStopLossDelta = Number(pUiState.slD1);
         const objDecision = shouldTriggerTrackedOption(
             objPosition.side,
             vCurrentDelta,
-            Number(objMetadata.takeProfitDelta || pUiState.tpD1 || 0.25),
-            Number(objMetadata.stopLossDelta || pUiState.slD1 || 0.65)
+            Number.isFinite(vLiveTakeProfitDelta) && vLiveTakeProfitDelta > 0
+                ? vLiveTakeProfitDelta
+                : Number(objMetadata.takeProfitDelta || 0.25),
+            Number.isFinite(vLiveStopLossDelta) && vLiveStopLossDelta > 0
+                ? vLiveStopLossDelta
+                : Number(objMetadata.stopLossDelta || 0.65)
         );
         if (objDecision.shouldAct && objDecision.reason) {
             arrTriggered.push({
