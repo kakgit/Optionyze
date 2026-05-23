@@ -46,7 +46,13 @@ import {
     renewStrategyLease,
     type StrategyLeaseRecord
 } from "../../storage/strategy-lease-store";
-import { getSurvivalState, listSurvivalStates, upsertSurvivalState } from "../../storage/survival-store";
+import {
+    acquireSurvivalStateLease,
+    getSurvivalState,
+    listSurvivalStates,
+    renewSurvivalStateLease,
+    upsertSurvivalState
+} from "../../storage/survival-store";
 import { isPrimaryDatabaseUnavailableError } from "../../storage/postgres";
 
 interface DeltaWalletBalanceRow {
@@ -119,6 +125,8 @@ const gProfitCloseConfirmationMs = 5 * 60 * 1000;
 const gRestartCloseProtectionMs = 5 * 60 * 1000;
 const gNeutralityHedgeCooldownMs = 2 * 60 * 1000;
 const gSurvivalDebugPrefix = "[dual-survival]";
+const gLocalSurvivalLeaseTokens = new Map<string, string>();
+let gSurvivalTakeoverInterval: NodeJS.Timeout | null = null;
 const gSimulatedPrimaryOutageUsers = new Map<string, {
     strategyCode: RollingFuturesLtStrategyCode;
     enabledAt: string;
@@ -5221,6 +5229,20 @@ function getAutoTraderRuntimeKey(pUserId: string, pStrategyCode: RollingFuturesL
     return `${String(pUserId || "").trim()}::${pStrategyCode}`;
 }
 
+function getLocalSurvivalLeaseToken(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): string {
+    return String(gLocalSurvivalLeaseTokens.get(getAutoTraderRuntimeKey(pUserId, pStrategyCode)) || "").trim();
+}
+
+function setLocalSurvivalLeaseToken(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode, pLeaseToken: string): void {
+    const vRuntimeKey = getAutoTraderRuntimeKey(pUserId, pStrategyCode);
+    const vLeaseToken = String(pLeaseToken || "").trim();
+    if (!vLeaseToken) {
+        gLocalSurvivalLeaseTokens.delete(vRuntimeKey);
+        return;
+    }
+    gLocalSurvivalLeaseTokens.set(vRuntimeKey, vLeaseToken);
+}
+
 function isDualLeaseManagedStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
     return pStrategyCode === "rolling-futures-lt-dual";
 }
@@ -5244,6 +5266,14 @@ function isLeaseActive(pLease: StrategyLeaseRecord | null): boolean {
         return false;
     }
     const vExpiresAtMs = new Date(pLease.leaseExpiresAt).getTime();
+    return Number.isFinite(vExpiresAtMs) && vExpiresAtMs > Date.now();
+}
+
+function isSurvivalLeaseActive(pState: Awaited<ReturnType<typeof getSurvivalState>> | null): boolean {
+    if (!pState?.leaseExpiresAt) {
+        return false;
+    }
+    const vExpiresAtMs = new Date(pState.leaseExpiresAt).getTime();
     return Number.isFinite(vExpiresAtMs) && vExpiresAtMs > Date.now();
 }
 
@@ -5446,12 +5476,13 @@ async function syncSurvivalStateDuringPrimaryOutage(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
     pPositions: RollingFuturesLtImportedPositionRecord[],
-    pLastError = ""
+    pLastError = "",
+    pOwnedSurvival: Awaited<ReturnType<typeof getSurvivalState>> | null = null
 ): Promise<void> {
     if (!isDualRollingFuturesStrategy(pStrategyCode)) {
         return;
     }
-    const objSurvival = await getSurvivalState(pUserId, pStrategyCode);
+    const objSurvival = pOwnedSurvival || await getSurvivalState(pUserId, pStrategyCode);
     if (!objSurvival) {
         logDualSurvivalDebug("outage_sync_skipped_missing_state", {
             userId: pUserId,
@@ -5466,10 +5497,10 @@ async function syncSurvivalStateDuringPrimaryOutage(
         strategyRunId: objSurvival.strategyRunId,
         runTag: objSurvival.runTag,
         runStatus: pPositions.length ? "active" : "ended",
-        ownerServerId: objSurvival.ownerServerId || gServerId,
-        ownerInstanceId: objSurvival.ownerInstanceId || gServerInstanceId,
-        leaseToken: objSurvival.leaseToken,
-        leaseExpiresAt: objSurvival.leaseExpiresAt,
+        ownerServerId: gServerId,
+        ownerInstanceId: gServerInstanceId,
+        leaseToken: getLocalSurvivalLeaseToken(pUserId, pStrategyCode) || objSurvival.leaseToken,
+        leaseExpiresAt: new Date(Date.now() + getStrategyLeaseDurationMs()).toISOString(),
         lastHeartbeatAt: new Date().toISOString(),
         selectedApiProfileId: objSurvival.selectedApiProfileId,
         profileReferenceName: objSurvival.profileReferenceName,
@@ -5525,6 +5556,54 @@ function buildSyntheticProfileFromSurvival(
         uiState: pSurvival?.uiState && typeof pSurvival.uiState === "object" ? pSurvival.uiState : {},
         updatedAt: String(pSurvival?.updatedAt || "").trim()
     };
+}
+
+async function ensureSurvivalOwnershipForOutage(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pSurvival: Awaited<ReturnType<typeof getSurvivalState>>
+): Promise<Awaited<ReturnType<typeof getSurvivalState>> | null> {
+    if (!pSurvival) {
+        return null;
+    }
+
+    const vLocalLeaseToken = getLocalSurvivalLeaseToken(pUserId, pStrategyCode);
+    if (vLocalLeaseToken) {
+        const objRenewed = await renewSurvivalStateLease({
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            ownerServerId: gServerId,
+            ownerInstanceId: gServerInstanceId,
+            leaseToken: vLocalLeaseToken,
+            leaseDurationMs: getStrategyLeaseDurationMs()
+        });
+        if (objRenewed) {
+            return objRenewed;
+        }
+        setLocalSurvivalLeaseToken(pUserId, pStrategyCode, "");
+    }
+
+    const objAcquire = await acquireSurvivalStateLease({
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        ownerServerId: gServerId,
+        ownerInstanceId: gServerInstanceId,
+        leaseDurationMs: getStrategyLeaseDurationMs()
+    });
+    if (!objAcquire.acquired || !objAcquire.state) {
+        logDualSurvivalDebug("cycle_exit_survival_owned_by_other", {
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            currentOwnerServerId: String(objAcquire.state?.ownerServerId || pSurvival.ownerServerId || "").trim(),
+            currentOwnerInstanceId: String(objAcquire.state?.ownerInstanceId || pSurvival.ownerInstanceId || "").trim(),
+            leaseExpiresAt: String(objAcquire.state?.leaseExpiresAt || pSurvival.leaseExpiresAt || "").trim(),
+            reason: objAcquire.reason
+        });
+        return null;
+    }
+
+    setLocalSurvivalLeaseToken(pUserId, pStrategyCode, objAcquire.state.leaseToken);
+    return objAcquire.state;
 }
 
 async function applyTriggeredOptionRuleSurvivalOnly(
@@ -5646,37 +5725,41 @@ async function runDualSurvivalOnlyCycle(
         });
         return;
     }
+    const objOwnedSurvival = await ensureSurvivalOwnershipForOutage(pUserId, pStrategyCode, objSurvival);
+    if (!objOwnedSurvival) {
+        return;
+    }
     const vSymbol = normalizeSymbolValue(objSurvival.symbol || objSurvival.uiState?.symbol);
-    let arrPositions = await fetchLiveFuturePositions(pUserId, pStrategyCode, objSurvival.selectedApiProfileId, vSymbol);
-    if (objSurvival.runStatus !== "active" && !arrPositions.length) {
+    let arrPositions = await fetchLiveFuturePositions(pUserId, pStrategyCode, objOwnedSurvival.selectedApiProfileId, vSymbol);
+    if (objOwnedSurvival.runStatus !== "active" && !arrPositions.length) {
         logDualSurvivalDebug("cycle_exit_invalid_state", {
             userId: pUserId,
             strategyCode: pStrategyCode,
             hasSurvivalState: true,
-            runStatus: String(objSurvival.runStatus || "").trim(),
+            runStatus: String(objOwnedSurvival.runStatus || "").trim(),
             hasSelectedApiProfileId: true,
             livePositionCount: 0
         });
         return;
     }
-    if (objSurvival.runStatus !== "active" && arrPositions.length) {
+    if (objOwnedSurvival.runStatus !== "active" && arrPositions.length) {
         logDualSurvivalDebug("cycle_reactivating_from_live_positions", {
             userId: pUserId,
             strategyCode: pStrategyCode,
-            previousRunStatus: String(objSurvival.runStatus || "").trim(),
+            previousRunStatus: String(objOwnedSurvival.runStatus || "").trim(),
             livePositionCount: arrPositions.length
         });
     }
     logDualSurvivalDebug("cycle_state_loaded", {
         userId: pUserId,
         strategyCode: pStrategyCode,
-        runTag: String(objSurvival.runTag || "").trim(),
-        selectedApiProfileId: String(objSurvival.selectedApiProfileId || "").trim(),
-        symbol: String(objSurvival.symbol || objSurvival.uiState?.symbol || "").trim(),
-        trackedPositionCount: Array.isArray(objSurvival.openPositions) ? objSurvival.openPositions.length : 0,
+        runTag: String(objOwnedSurvival.runTag || "").trim(),
+        selectedApiProfileId: String(objOwnedSurvival.selectedApiProfileId || "").trim(),
+        symbol: String(objOwnedSurvival.symbol || objOwnedSurvival.uiState?.symbol || "").trim(),
+        trackedPositionCount: Array.isArray(objOwnedSurvival.openPositions) ? objOwnedSurvival.openPositions.length : 0,
         livePositionCount: arrPositions.length
     });
-    const objProfile = buildSyntheticProfileFromSurvival(pUserId, pStrategyCode, objSurvival);
+    const objProfile = buildSyntheticProfileFromSurvival(pUserId, pStrategyCode, objOwnedSurvival);
     logDualSurvivalDebug("cycle_profile_built", {
         userId: pUserId,
         strategyCode: pStrategyCode,
@@ -5688,7 +5771,7 @@ async function runDualSurvivalOnlyCycle(
         strategyCode: pStrategyCode,
         positionCount: arrPositions.length
     });
-    const arrTriggeredOptions = await findTriggeredTrackedOptions(arrPositions, objSurvival.uiState || {});
+    const arrTriggeredOptions = await findTriggeredTrackedOptions(arrPositions, objOwnedSurvival.uiState || {});
     logDualSurvivalDebug("cycle_trigger_scan_complete", {
         userId: pUserId,
         strategyCode: pStrategyCode,
@@ -5714,7 +5797,7 @@ async function runDualSurvivalOnlyCycle(
         arrPositions = await applyTriggeredOptionRuleSurvivalOnly(
             pUserId,
             pStrategyCode,
-            objSurvival.selectedApiProfileId,
+            objOwnedSurvival.selectedApiProfileId,
             objProfile,
             objCurrentTrackedPosition,
             objTriggeredOption.reason,
@@ -5731,11 +5814,11 @@ async function runDualSurvivalOnlyCycle(
     const objHedgeResult = await applySurvivalOnlyNeutralityHedge(
         pUserId,
         pStrategyCode,
-        objSurvival.selectedApiProfileId,
+        objOwnedSurvival.selectedApiProfileId,
         vSymbol,
-        objSurvival.uiState || {},
+        objOwnedSurvival.uiState || {},
         arrPositions,
-        objSurvival.runtimeState || {}
+        objOwnedSurvival.runtimeState || {}
     );
     logDualSurvivalDebug("cycle_hedge_complete", {
         userId: pUserId,
@@ -5747,7 +5830,8 @@ async function runDualSurvivalOnlyCycle(
         pUserId,
         pStrategyCode,
         objHedgeResult.positions,
-        objHedgeResult.hedgePlaced ? "Primary DB unavailable; survival-only hedge cycle applied." : ""
+        objHedgeResult.hedgePlaced ? "Primary DB unavailable; survival-only hedge cycle applied." : "",
+        objOwnedSurvival
     );
     logDualSurvivalDebug("cycle_complete", {
         userId: pUserId,
@@ -5764,6 +5848,7 @@ function stopAutoTraderCycle(pUserId: string, pStrategyCode: RollingFuturesLtStr
         gAutoTraderIntervals.delete(vRuntimeKey);
     }
     gAutoTraderCycleLocks.delete(vRuntimeKey);
+    setLocalSurvivalLeaseToken(pUserId, pStrategyCode, "");
 }
 
 async function runAutoTraderCycle(
@@ -6352,7 +6437,76 @@ function startAutoTraderCycle(
     }, 8000));
 }
 
+async function recoverDualSurvivalTakeoverCandidates(): Promise<void> {
+    const arrSurvivalRows = await listSurvivalStates("rolling-futures-lt-dual");
+    for (const objSurvival of arrSurvivalRows) {
+        const vUserId = String(objSurvival.userId || "").trim();
+        if (!vUserId || !objSurvival.selectedApiProfileId) {
+            continue;
+        }
+        const bHasOpenState = objSurvival.runStatus === "active"
+            || (Array.isArray(objSurvival.openPositions) && objSurvival.openPositions.length > 0);
+        if (!bHasOpenState) {
+            continue;
+        }
+
+        const vRuntimeKey = getAutoTraderRuntimeKey(vUserId, "rolling-futures-lt-dual");
+        if (gAutoTraderIntervals.has(vRuntimeKey) || gAutoTraderCycleLocks.has(vRuntimeKey)) {
+            continue;
+        }
+
+        const bOwnedLocally = objSurvival.ownerServerId === gServerId
+            && objSurvival.ownerInstanceId === gServerInstanceId
+            && isSurvivalLeaseActive(objSurvival);
+        if (bOwnedLocally) {
+            logDualSurvivalDebug("takeover_resume_existing_owner", {
+                userId: vUserId,
+                strategyCode: "rolling-futures-lt-dual",
+                runTag: objSurvival.runTag
+            });
+            startAutoTraderCycle(vUserId, "rolling-futures-lt-dual");
+            continue;
+        }
+
+        if (isSurvivalLeaseActive(objSurvival)) {
+            continue;
+        }
+
+        const objAcquire = await acquireSurvivalStateLease({
+            userId: vUserId,
+            strategyCode: "rolling-futures-lt-dual",
+            ownerServerId: gServerId,
+            ownerInstanceId: gServerInstanceId,
+            leaseDurationMs: getStrategyLeaseDurationMs()
+        });
+        if (!objAcquire.acquired || !objAcquire.state) {
+            continue;
+        }
+
+        setLocalSurvivalLeaseToken(vUserId, "rolling-futures-lt-dual", objAcquire.state.leaseToken);
+        logDualSurvivalDebug("takeover_acquired_from_survival_db", {
+            userId: vUserId,
+            strategyCode: "rolling-futures-lt-dual",
+            runTag: objAcquire.state.runTag,
+            previousOwnerServerId: objSurvival.ownerServerId,
+            previousOwnerInstanceId: objSurvival.ownerInstanceId
+        });
+        startAutoTraderCycle(vUserId, "rolling-futures-lt-dual");
+    }
+}
+
+function startDualSurvivalTakeoverWatcher(): void {
+    if (gSurvivalTakeoverInterval) {
+        return;
+    }
+    void recoverDualSurvivalTakeoverCandidates();
+    gSurvivalTakeoverInterval = setInterval(() => {
+        void recoverDualSurvivalTakeoverCandidates();
+    }, 12000);
+}
+
 export async function recoverRollingFuturesLtAutoTraderCycles(): Promise<void> {
+    startDualSurvivalTakeoverWatcher();
     const arrRuntimeRows = await listRollingFuturesLtRuntime();
     for (const objRuntime of arrRuntimeRows) {
         const vUserId = String(objRuntime.userId || "").trim();

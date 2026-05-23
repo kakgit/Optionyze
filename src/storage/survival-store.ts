@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { getSurvivalPostgresPool, isSurvivalPostgresConfigured } from "./survival-postgres";
 
 export interface SurvivalStateRecord {
@@ -83,6 +84,30 @@ export interface UpsertSurvivalStateInput {
     riskState?: Record<string, unknown>;
     recoveryMetrics?: Record<string, unknown>;
     lastOrderRefs?: string[];
+}
+
+export interface AcquireSurvivalStateLeaseInput {
+    userId: string;
+    strategyCode: string;
+    ownerServerId: string;
+    ownerInstanceId?: string;
+    leaseDurationMs: number;
+}
+
+export interface AcquireSurvivalStateLeaseResult {
+    acquired: boolean;
+    createdFresh: boolean;
+    reason: "acquired" | "owned_by_other" | "missing_state" | "survival_not_configured";
+    state: SurvivalStateRecord | null;
+}
+
+export interface RenewSurvivalStateLeaseInput {
+    userId: string;
+    strategyCode: string;
+    ownerServerId: string;
+    ownerInstanceId?: string;
+    leaseToken: string;
+    leaseDurationMs: number;
 }
 
 function mapSurvivalStateRow(pRow?: SurvivalStateRow | null): SurvivalStateRecord | null {
@@ -247,4 +272,136 @@ export async function listSurvivalStates(
     return objResult.rows
         .map((objRow) => mapSurvivalStateRow(objRow))
         .filter((objRow): objRow is SurvivalStateRecord => Boolean(objRow));
+}
+
+export async function acquireSurvivalStateLease(
+    pInput: AcquireSurvivalStateLeaseInput
+): Promise<AcquireSurvivalStateLeaseResult> {
+    if (!isSurvivalPostgresConfigured()) {
+        return {
+            acquired: false,
+            createdFresh: false,
+            reason: "survival_not_configured",
+            state: null
+        };
+    }
+
+    const objPool = getSurvivalPostgresPool();
+    const objClient = await objPool.connect();
+    const vUserId = String(pInput.userId || "").trim();
+    const vStrategyCode = String(pInput.strategyCode || "").trim();
+    const vOwnerServerId = String(pInput.ownerServerId || "").trim();
+    const vOwnerInstanceId = String(pInput.ownerInstanceId || "").trim() || vOwnerServerId;
+    const vLeaseDurationMs = Math.max(10000, Math.floor(Number(pInput.leaseDurationMs || 30000)));
+    const vNow = new Date();
+    const vExpiresAt = new Date(vNow.getTime() + vLeaseDurationMs);
+
+    try {
+        await objClient.query("BEGIN");
+        const objExisting = await objClient.query<SurvivalStateRow>(`
+            SELECT *
+            FROM optionyze_survival_state
+            WHERE user_id = $1
+              AND strategy_code = $2
+            FOR UPDATE
+        `, [vUserId, vStrategyCode]);
+
+        const objCurrent = objExisting.rows[0];
+        if (!objCurrent) {
+            await objClient.query("COMMIT");
+            return {
+                acquired: false,
+                createdFresh: false,
+                reason: "missing_state",
+                state: null
+            };
+        }
+
+        const vCurrentExpiresAtMs = objCurrent.lease_expires_at
+            ? new Date(objCurrent.lease_expires_at).getTime()
+            : Number.NaN;
+        const bOwnedByCaller = String(objCurrent.owner_server_id || "").trim() === vOwnerServerId
+            && String(objCurrent.owner_instance_id || "").trim() === vOwnerInstanceId;
+        const bExpired = !Number.isFinite(vCurrentExpiresAtMs) || vCurrentExpiresAtMs <= vNow.getTime();
+
+        if (!bOwnedByCaller && !bExpired) {
+            await objClient.query("COMMIT");
+            return {
+                acquired: false,
+                createdFresh: false,
+                reason: "owned_by_other",
+                state: mapSurvivalStateRow(objCurrent)
+            };
+        }
+
+        const vLeaseToken = crypto.randomUUID();
+        const objUpdated = await objClient.query<SurvivalStateRow>(`
+            UPDATE optionyze_survival_state
+            SET owner_server_id = $3,
+                owner_instance_id = $4,
+                lease_token = $5,
+                lease_expires_at = $6,
+                last_heartbeat_at = $7,
+                updated_at = NOW()
+            WHERE user_id = $1
+              AND strategy_code = $2
+            RETURNING *
+        `, [
+            vUserId,
+            vStrategyCode,
+            vOwnerServerId,
+            vOwnerInstanceId,
+            vLeaseToken,
+            vExpiresAt.toISOString(),
+            vNow.toISOString()
+        ]);
+        await objClient.query("COMMIT");
+        return {
+            acquired: true,
+            createdFresh: !bOwnedByCaller,
+            reason: "acquired",
+            state: mapSurvivalStateRow(objUpdated.rows[0])
+        };
+    }
+    catch (objError) {
+        await objClient.query("ROLLBACK").catch(() => undefined);
+        throw objError;
+    }
+    finally {
+        objClient.release();
+    }
+}
+
+export async function renewSurvivalStateLease(
+    pInput: RenewSurvivalStateLeaseInput
+): Promise<SurvivalStateRecord | null> {
+    if (!isSurvivalPostgresConfigured()) {
+        return null;
+    }
+
+    const objPool = getSurvivalPostgresPool();
+    const vNow = new Date();
+    const vExpiresAt = new Date(vNow.getTime() + Math.max(10000, Math.floor(Number(pInput.leaseDurationMs || 30000))));
+    const objResult = await objPool.query<SurvivalStateRow>(`
+        UPDATE optionyze_survival_state
+        SET lease_expires_at = $5,
+            last_heartbeat_at = $6,
+            updated_at = NOW()
+        WHERE user_id = $1
+          AND strategy_code = $2
+          AND owner_server_id = $3
+          AND owner_instance_id = $4
+          AND lease_token = $7
+        RETURNING *
+    `, [
+        String(pInput.userId || "").trim(),
+        String(pInput.strategyCode || "").trim(),
+        String(pInput.ownerServerId || "").trim(),
+        String(pInput.ownerInstanceId || "").trim() || String(pInput.ownerServerId || "").trim(),
+        vExpiresAt.toISOString(),
+        vNow.toISOString(),
+        String(pInput.leaseToken || "").trim()
+    ]);
+
+    return mapSurvivalStateRow(objResult.rows[0]);
 }
