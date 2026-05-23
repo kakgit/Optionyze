@@ -37,6 +37,17 @@ import {
 } from "../../storage/strategy-execution-request-store";
 import { getPendingStrategyAutoExecSettings } from "../../storage/admin-settings-store";
 import { findBestLiveOptionContract, getLiveMarketSnapshot, getLiveOptionTicker } from "../../strategies/rolling-options-pt-de/market-data";
+import { getServerId, getStrategyLeaseDurationMs } from "../../runtime/server-runtime";
+import {
+    acquireStrategyLease,
+    forceReleaseStrategyLease,
+    getStrategyLease,
+    releaseStrategyLease,
+    renewStrategyLease,
+    type StrategyLeaseRecord
+} from "../../storage/strategy-lease-store";
+import { getSurvivalState, listSurvivalStates, upsertSurvivalState } from "../../storage/survival-store";
+import { isPrimaryDatabaseUnavailableError } from "../../storage/postgres";
 
 interface DeltaWalletBalanceRow {
     asset_symbol?: string;
@@ -116,8 +127,11 @@ const gExecStrategyLocks = new Set<string>();
 const gNeutralityHedgeLocks = new Set<string>();
 const gAutoTraderIntervals = new Map<string, NodeJS.Timeout>();
 const gAutoTraderCycleLocks = new Set<string>();
+const gLocalStrategyLeaseTokens = new Map<string, string>();
 const gNeutralityHedgePendingMs = 45 * 1000;
 const gDuplicateLiveEventCooldownMs = 60 * 1000;
+const gServerId = getServerId();
+const gServerInstanceId = `${gServerId}:${process.pid}:${crypto.randomUUID()}`;
 const gRollingFuturesTelegramEventTypes = new Set([
     "engine_started",
     "engine_stopped",
@@ -411,6 +425,17 @@ async function executePendingDualStrategyRequestByRecord(
     const objRuntime = await loadRollingFuturesLtRuntime(pRequest.accountId, "rolling-futures-lt-dual");
     if (!objRuntime?.autoTraderEnabled || String(objRuntime.status || "").trim().toLowerCase() !== "running") {
         throw new Error("Turn Auto Trader ON before executing the live strategy.");
+    }
+
+    const objLeaseAcquire = await acquireDualStrategyLease(
+        pRequest.accountId,
+        "rolling-futures-lt-dual",
+        objRuntime,
+        objProfile,
+        vSelectedApiProfileId
+    );
+    if (!objLeaseAcquire.acquired) {
+        throw new Error(objLeaseAcquire.message || "This live strategy is currently owned by another server.");
     }
 
     const objCheck = await performRollingFuturesLtConnectionCheck(pRequest.accountId, "rolling-futures-lt-dual", vSelectedApiProfileId);
@@ -1593,20 +1618,63 @@ async function getDeltaClientForAccountId(pAccountId: string, pProfileId: string
     if (!vAccountId) {
         throw new Error("Please sign in to continue.");
     }
-    const objAccount = await getAccountById(vAccountId);
-    if (!objAccount) {
-        throw new Error("Account not found.");
+    try {
+        const objAccount = await getAccountById(vAccountId);
+        if (!objAccount) {
+            throw new Error("Account not found.");
+        }
+        const objProfile = await getDeltaApiProfile(vAccountId, pProfileId);
+        if (!objProfile) {
+            throw new Error("Delta API profile not found.");
+        }
+        const objClient = await new DeltaRestClient(objProfile.apiKey, objProfile.apiSecret);
+        return {
+            account: objAccount,
+            client: objClient,
+            profile: objProfile
+        };
     }
-    const objProfile = await getDeltaApiProfile(vAccountId, pProfileId);
-    if (!objProfile) {
-        throw new Error("Delta API profile not found.");
+    catch (objError) {
+        if (!isPrimaryDatabaseUnavailableError(objError)) {
+            throw objError;
+        }
+
+        const objSurvival = await getSurvivalState(vAccountId, "rolling-futures-lt-dual");
+        if (!objSurvival || objSurvival.selectedApiProfileId !== String(pProfileId || "").trim()) {
+            throw objError;
+        }
+        if (!objSurvival.apiKey || !objSurvival.apiSecret) {
+            throw objError;
+        }
+
+        const objClient = await new DeltaRestClient(objSurvival.apiKey, objSurvival.apiSecret);
+        return {
+            account: {
+                accountId: vAccountId,
+                fullName: "",
+                email: "",
+                mobileNo: "",
+                telegramChatId: "",
+                passwordHash: "",
+                isActive: true,
+                isAdmin: false,
+                execStrategy: true,
+                mustChangePassword: false,
+                createdAt: "",
+                updatedAt: ""
+            },
+            client: objClient,
+            profile: {
+                profileId: objSurvival.selectedApiProfileId,
+                accountId: vAccountId,
+                referenceName: objSurvival.profileReferenceName || "Survival Snapshot",
+                apiKey: objSurvival.apiKey,
+                apiSecret: objSurvival.apiSecret,
+                createdAt: objSurvival.createdAt,
+                updatedAt: objSurvival.updatedAt
+            }
+        };
     }
-    const objClient = await new DeltaRestClient(objProfile.apiKey, objProfile.apiSecret);
-    return {
-        account: objAccount,
-        client: objClient,
-        profile: objProfile
-    };
 }
 
 function getDeltaErrorPayload(pError: unknown): { error?: { code?: string; context?: { client_ip?: string } } } | null {
@@ -1932,10 +2000,33 @@ async function fetchLiveFuturePositions(
     pProfileId: string,
     pSymbolOverride?: string
 ): Promise<RollingFuturesLtImportedPositionRecord[]> {
-    const objProfile = await readLiveProfile(pUserId, pStrategyCode);
-    const objUiState = getMergedUiState(objProfile);
-    const vSymbol = normalizeSymbolValue(pSymbolOverride || objUiState.symbol);
-    const arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    let vSymbol: "BTC" | "ETH" = "BTC";
+    let arrSavedPositions: RollingFuturesLtImportedPositionRecord[] = [];
+    try {
+        const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+        const objUiState = getMergedUiState(objProfile);
+        vSymbol = normalizeSymbolValue(pSymbolOverride || objUiState.symbol);
+        arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    }
+    catch (objError) {
+        if (!isPrimaryDatabaseUnavailableError(objError)) {
+            throw objError;
+        }
+        const objSurvival = await getSurvivalState(pUserId, pStrategyCode);
+        vSymbol = normalizeSymbolValue(pSymbolOverride || objSurvival?.symbol || objSurvival?.uiState?.symbol);
+        arrSavedPositions = Array.isArray(objSurvival?.openPositions)
+            ? objSurvival!.openPositions.map((objPosition, pIndex) => mapLivePosition({
+                product_symbol: String(objPosition.contractName || ""),
+                size: Number(objPosition.qty || 0),
+                entry_price: Number(objPosition.entryPrice || 0),
+                mark_price: Number(objPosition.markPrice || 0),
+                margin: Number(objPosition.margin || 0),
+                liquidation_price: Number(objPosition.liquidationPrice || 0),
+                realized_pnl: 0,
+                unrealized_pnl: Number(objPosition.pnl || 0)
+            }, pStrategyCode, pUserId, pIndex))
+            : [];
+    }
     const objSavedByContractSide = new Map<string, RollingFuturesLtImportedPositionRecord>();
     arrSavedPositions.forEach((objRow) => {
         objSavedByContractSide.set(
@@ -2626,11 +2717,13 @@ async function repriceOrReplaceLimitFutureOrder(
 
 async function placeManagedManualFutureOrder(
     pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
     pSelectedApiProfileId: string,
     pSymbol: "BTC" | "ETH",
     pAction: "BUY" | "SELL",
     pQty: number,
-    pOrderType: "limit_order" | "market_order"
+    pOrderType: "limit_order" | "market_order",
+    pOrderKind: "HG" | "CL" = "HG"
 ): Promise<{
     order: Record<string, unknown>;
     request: Record<string, unknown>;
@@ -2646,6 +2739,7 @@ async function placeManagedManualFutureOrder(
     const vSide = pAction === "SELL" ? "sell" : "buy";
     const vQty = Math.max(1, Math.floor(Number(pQty || 1)));
     let objSnapshot = await getLiveMarketSnapshot(buildLiveMarketSnapshotConfig(pSymbol, pOrderType));
+    const vClientOrderId = await allocateStrategyClientOrderId(pUserId, pStrategyCode, pOrderKind);
     const objOrderPayload: Record<string, unknown> = {
         product_symbol: vContractName,
         size: vQty,
@@ -2653,7 +2747,8 @@ async function placeManagedManualFutureOrder(
         order_type: pOrderType,
         time_in_force: "gtc",
         post_only: pOrderType === "limit_order",
-        reduce_only: false
+        reduce_only: false,
+        ...(vClientOrderId ? { client_order_id: vClientOrderId } : {})
     };
 
     if (pOrderType !== "limit_order") {
@@ -3062,6 +3157,193 @@ function buildRuntimeStateWithStrategyStartedAt(
     }
     objState.strategyStartedAt = vStartedAt;
     return objState;
+}
+
+function getStrategyRunIdState(pRuntime: RollingFuturesLtRuntimeRecord | null): string {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    return String(objState.strategyRunId || "").trim();
+}
+
+function getStrategyRunTagState(pRuntime: RollingFuturesLtRuntimeRecord | null): string {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    return String(objState.strategyRunTag || "").trim().toUpperCase();
+}
+
+function getStrategyOrderSequenceState(pRuntime: RollingFuturesLtRuntimeRecord | null): number {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    const vSequence = Math.max(1, Math.floor(Number(objState.strategyOrderSequence || 1)));
+    return Number.isFinite(vSequence) ? vSequence : 1;
+}
+
+function createCompactStrategyRunTag(): string {
+    return crypto.randomBytes(5).toString("hex").toUpperCase();
+}
+
+function buildRuntimeStateWithStrategyRun(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pInput: {
+        strategyRunId?: string;
+        strategyRunTag?: string;
+        nextOrderSequence?: number;
+    }
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    const vRunId = String(pInput.strategyRunId || "").trim();
+    const vRunTag = String(pInput.strategyRunTag || "").trim().toUpperCase();
+    const vNextSequence = Math.max(1, Math.floor(Number(pInput.nextOrderSequence || 1)));
+    if (!vRunId || !vRunTag) {
+        delete objState.strategyRunId;
+        delete objState.strategyRunTag;
+        delete objState.strategyOrderSequence;
+        return objState;
+    }
+    objState.strategyRunId = vRunId;
+    objState.strategyRunTag = vRunTag;
+    objState.strategyOrderSequence = vNextSequence;
+    return objState;
+}
+
+function buildDeltaClientOrderId(
+    pRunTag: string,
+    pOrderKind: "EN" | "HG" | "SL" | "TP" | "RE" | "CL",
+    pSequence: number
+): string {
+    const vRunTag = String(pRunTag || "").trim().toUpperCase().slice(0, 10);
+    const vSequence = Math.max(1, Math.floor(Number(pSequence || 1))).toString(36).toUpperCase().padStart(2, "0").slice(-2);
+    return `RFD-${vRunTag}-${pOrderKind}${vSequence}`.slice(0, 32);
+}
+
+async function ensureActiveStrategyRun(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pStartedAt = ""
+): Promise<{
+    runtime: RollingFuturesLtRuntimeRecord;
+    strategyRunId: string;
+    strategyRunTag: string;
+}> {
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    let vRunId = getStrategyRunIdState(objRuntime);
+    let vRunTag = getStrategyRunTagState(objRuntime);
+    if (!vRunId) {
+        vRunId = crypto.randomUUID();
+    }
+    if (!vRunTag) {
+        vRunTag = createCompactStrategyRunTag();
+    }
+    const objSavedRuntime = await saveRollingFuturesLtRuntime({
+        ...objRuntime,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        state: {
+            ...((objRuntime.state || {}) as Record<string, unknown>),
+            ...buildRuntimeStateWithStrategyStartedAt(objRuntime, pStartedAt || getStrategyStartedAtState(objRuntime)),
+            ...buildRuntimeStateWithStrategyRun(objRuntime, {
+                strategyRunId: vRunId,
+                strategyRunTag: vRunTag,
+                nextOrderSequence: getStrategyOrderSequenceState(objRuntime)
+            })
+        }
+    });
+    return {
+        runtime: objSavedRuntime,
+        strategyRunId: vRunId,
+        strategyRunTag: vRunTag
+    };
+}
+
+async function allocateStrategyClientOrderId(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pOrderKind: "EN" | "HG" | "SL" | "TP" | "RE" | "CL"
+): Promise<string> {
+    try {
+        const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+        const vRunId = getStrategyRunIdState(objRuntime);
+        const vRunTag = getStrategyRunTagState(objRuntime);
+        if (!vRunId || !vRunTag || !objRuntime) {
+            return "";
+        }
+        const vSequence = getStrategyOrderSequenceState(objRuntime);
+        const vClientOrderId = buildDeltaClientOrderId(vRunTag, pOrderKind, vSequence);
+        await saveRollingFuturesLtRuntime({
+            ...objRuntime,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: {
+                ...((objRuntime.state || {}) as Record<string, unknown>),
+                ...buildRuntimeStateWithStrategyRun(objRuntime, {
+                    strategyRunId: vRunId,
+                    strategyRunTag: vRunTag,
+                    nextOrderSequence: vSequence + 1
+                })
+            }
+        });
+        return vClientOrderId;
+    }
+    catch (objError) {
+        if (!isPrimaryDatabaseUnavailableError(objError)) {
+            throw objError;
+        }
+        const objSurvival = await getSurvivalState(pUserId, pStrategyCode);
+        if (!objSurvival?.strategyRunId || !objSurvival.runTag) {
+            return "";
+        }
+        const vSequence = Math.max(1, Math.floor(Number(objSurvival.runtimeState?.strategyOrderSequence || 1)));
+        const vClientOrderId = buildDeltaClientOrderId(objSurvival.runTag, pOrderKind, vSequence);
+        await upsertSurvivalState({
+            userId: objSurvival.userId,
+            strategyCode: objSurvival.strategyCode,
+            strategyRunId: objSurvival.strategyRunId,
+            runTag: objSurvival.runTag,
+            runStatus: objSurvival.runStatus,
+            ownerServerId: objSurvival.ownerServerId,
+            ownerInstanceId: objSurvival.ownerInstanceId,
+            leaseToken: objSurvival.leaseToken,
+            leaseExpiresAt: objSurvival.leaseExpiresAt,
+            lastHeartbeatAt: new Date().toISOString(),
+            selectedApiProfileId: objSurvival.selectedApiProfileId,
+            profileReferenceName: objSurvival.profileReferenceName,
+            apiKey: objSurvival.apiKey,
+            apiSecret: objSurvival.apiSecret,
+            symbol: objSurvival.symbol,
+            strategyStartedAt: objSurvival.strategyStartedAt,
+            lastDeltaSyncAt: objSurvival.lastDeltaSyncAt,
+            lastPrimaryDbSyncAt: objSurvival.lastPrimaryDbSyncAt,
+            openPositions: objSurvival.openPositions,
+            uiState: objSurvival.uiState,
+            runtimeState: {
+                ...(objSurvival.runtimeState || {}),
+                strategyRunId: objSurvival.strategyRunId,
+                strategyRunTag: objSurvival.runTag,
+                strategyOrderSequence: vSequence + 1
+            },
+            riskState: objSurvival.riskState,
+            recoveryMetrics: objSurvival.recoveryMetrics,
+            lastOrderRefs: [...(objSurvival.lastOrderRefs || []), vClientOrderId].slice(-50)
+        });
+        return vClientOrderId;
+    }
+}
+
+async function clearActiveStrategyRun(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode
+): Promise<void> {
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    if (!objRuntime) {
+        return;
+    }
+    await saveRollingFuturesLtRuntime({
+        ...objRuntime,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        state: {
+            ...buildRuntimeStateWithStrategyStartedAt(objRuntime, ""),
+            ...buildRuntimeStateWithStrategyRun(objRuntime, {})
+        }
+    });
 }
 
 function getProfitClosePendingState(pRuntime: RollingFuturesLtRuntimeRecord | null): {
@@ -3933,11 +4215,13 @@ async function applyServerSideNeutralityCheck(
 
         const objPlacedHedge = await placeManagedManualFutureOrder(
             pUserId,
+            pStrategyCode,
             pSelectedApiProfileId,
             pSymbol,
             vHedgeAction,
             vHedgeQty,
-            "market_order"
+            "market_order",
+            "HG"
         );
         const { client: objOrderHistoryClient } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
         const vResolvedHedgeRealizedPnl = await resolveOrderRealizedPnlFromDelta(
@@ -4086,17 +4370,20 @@ async function executeStrategyPlacement(
     const vStrategyStartedAt = new Date().toISOString();
     await resetRecoveryMetrics(pUserId, pStrategyCode);
     const objRuntimeBeforeExec = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const objRunState = await ensureActiveStrategyRun(pUserId, pStrategyCode, vStrategyStartedAt);
     await saveRollingFuturesLtRuntime({
-        ...(objRuntimeBeforeExec || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
+        ...(objRunState.runtime || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
         userId: pUserId,
         strategyCode: pStrategyCode,
-        state: buildRuntimeStateWithStrategyStartedAt(
-            {
-                ...(objRuntimeBeforeExec || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
-                state: buildRuntimeStateWithProfitClosePending(objRuntimeBeforeExec, "", 0, "")
-            },
-            vStrategyStartedAt
-        )
+        state: {
+            ...buildRuntimeStateWithProfitClosePending(objRuntimeBeforeExec, "", 0, ""),
+            ...buildRuntimeStateWithStrategyStartedAt(objRunState.runtime, vStrategyStartedAt),
+            ...buildRuntimeStateWithStrategyRun(objRunState.runtime, {
+                strategyRunId: objRunState.strategyRunId,
+                strategyRunTag: objRunState.strategyRunTag,
+                nextOrderSequence: getStrategyOrderSequenceState(objRunState.runtime)
+            })
+        }
     });
     const objUiState = getMergedUiState(pProfile);
     const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
@@ -4139,147 +4426,167 @@ async function executeStrategyPlacement(
 
     const arrOrders: Array<Record<string, unknown>> = [];
     const arrContracts: Array<Record<string, unknown>> = [];
-
-    for (const vOptionSide of arrOptionSides) {
-        const objContract = await findBestLiveOptionContract(objConfig, vOptionSide, pInput.targetDelta, true);
-        if (!objContract) {
-            throw new Error(`No live ${vOptionSide} contract was found for ${pInput.symbol} with delta at or below ${pInput.targetDelta.toFixed(2)}.`);
-        }
-
-        const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
-        if (!(vAbsoluteDelta <= pInput.targetDelta)) {
-            throw new Error(`The selected ${vOptionSide} contract delta ${vAbsoluteDelta.toFixed(2)} exceeded New D ${pInput.targetDelta.toFixed(2)}.`);
-        }
-
-        const objOrderPayload: Record<string, unknown> = {
-            product_symbol: objContract.contractSymbol,
-            size: pInput.qty,
-            side: pInput.action,
-            order_type: "market_order",
-            time_in_force: "gtc",
-            post_only: false,
-            reduce_only: false
-        };
-        const objResponse = await client.apis.Orders.placeOrder({
-            order: objOrderPayload
-        });
-        const objPayload = readResponsePayload(objResponse);
-        arrOrders.push({
-            order: objPayload.result || objPayload,
-            request: objOrderPayload
-        });
-        arrContracts.push({
-            contractSymbol: objContract.contractSymbol,
-            optionSide: objContract.optionSide,
-            strike: objContract.strike,
-            delta: objContract.delta,
-            theta: objContract.theta,
-            markPrice: objContract.markPrice,
-            requestedExpiryDate: objContract.requestedExpiryDate,
-            resolvedExpiryDate: objContract.expiryDate,
-            usedNextDayExpiryFallback: objContract.usedNextDayFallback
-        });
-    }
-
-    const arrInitialSaved = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, [
-        ...arrExisting,
-        ...arrContracts.map((objContract) => ({
-            userId: pUserId,
-            strategyCode: pStrategyCode,
-            importId: crypto.randomUUID(),
-            contractName: String(objContract.contractSymbol || "").trim(),
-            side: pInput.action.toUpperCase(),
-            qty: pInput.qty,
-            entryPrice: Number(objContract.markPrice || 0),
-            markPrice: Number(objContract.markPrice || 0),
-            charges: 0,
-            pnl: 0,
-            margin: 0,
-            liquidationPrice: 0,
-            metadata: optionMetadataToRecord({
-                ...objOptionMetadata,
-                baseDelta: getSignedOptionBaseDelta(String(objContract.contractSymbol || "").trim(), Number(objContract.delta || 0)),
-                baseTheta: Math.abs(Number(objContract.theta || 0))
-            }),
-            openedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-        } satisfies RollingFuturesLtImportedPositionRecord))
-    ]);
-    const arrEntryCharges = await Promise.all(arrOrders.map(async (objOrder, pIndex) => {
-        const objContract = arrContracts[pIndex] || {};
-        const vContractName = String(objContract.contractSymbol || "").trim();
-        const vSide = String(pInput.action || "").trim().toUpperCase();
-        const vResolvedCharge = await resolveOrderChargeFromDelta(
-            client,
-            vContractName,
-            (objOrder.order && typeof objOrder.order === "object") ? objOrder.order as Record<string, unknown> : {},
-            vSide,
-            pInput.qty,
-            new Date().toISOString()
-        );
-        if (vResolvedCharge !== null) {
-            return vResolvedCharge;
-        }
-        return estimateTrackedPositionCharge({
-            contractName: vContractName,
-            qty: pInput.qty,
-            entryPrice: Number(objContract.markPrice || 0),
-            markPrice: Number(objContract.markPrice || 0)
-        });
-    }));
-    await incrementBrokerageRecoveryTotal(
-        pUserId,
-        pStrategyCode,
-        arrEntryCharges.reduce((pSum, vValue) => pSum + Number(vValue || 0), 0),
-        arrInitialSaved.length
-    );
-    const objNeutralCheck = await applyServerSideNeutralityCheck(
-        pUserId,
-        pStrategyCode,
-            pSelectedApiProfileId,
-            objUiState,
-            pInput.symbol,
-            arrInitialSaved,
-            null
-        );
-    if (objNeutralCheck.nextRuntimeState) {
-        const objRuntimeAfterExec = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-            || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
-        await saveRollingFuturesLtRuntime({
-            ...objRuntimeAfterExec,
-            userId: pUserId,
-            strategyCode: pStrategyCode,
-            selectedApiProfileId: pSelectedApiProfileId,
-            currentSymbol: pInput.symbol,
-            state: {
-                ...((objRuntimeAfterExec.state || {}) as Record<string, unknown>),
-                ...objNeutralCheck.nextRuntimeState
+    try {
+        for (const vOptionSide of arrOptionSides) {
+            const objContract = await findBestLiveOptionContract(objConfig, vOptionSide, pInput.targetDelta, true);
+            if (!objContract) {
+                throw new Error(`No live ${vOptionSide} contract was found for ${pInput.symbol} with delta at or below ${pInput.targetDelta.toFixed(2)}.`);
             }
-        });
-    }
 
-    return {
-        profileLabel: profile.referenceName || profile.apiKey || "",
-        trackedOpenPositions: objNeutralCheck.trackedOpenPositions,
-        contracts: arrContracts,
-        orders: arrOrders,
-        neutralCheck: {
-            mode: objNeutralCheck.mode,
-            hedgePlaced: objNeutralCheck.hedgePlaced,
-            totalDelta: objNeutralCheck.totalDelta,
-            totalTheta: objNeutralCheck.totalTheta,
-            threshold: objNeutralCheck.threshold
+            const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
+            if (!(vAbsoluteDelta <= pInput.targetDelta)) {
+                throw new Error(`The selected ${vOptionSide} contract delta ${vAbsoluteDelta.toFixed(2)} exceeded New D ${pInput.targetDelta.toFixed(2)}.`);
+            }
+
+            const vClientOrderId = await allocateStrategyClientOrderId(pUserId, pStrategyCode, "EN");
+            const objOrderPayload: Record<string, unknown> = {
+                product_symbol: objContract.contractSymbol,
+                size: pInput.qty,
+                side: pInput.action,
+                order_type: "market_order",
+                time_in_force: "gtc",
+                post_only: false,
+                reduce_only: false,
+                ...(vClientOrderId ? { client_order_id: vClientOrderId } : {})
+            };
+            const objResponse = await client.apis.Orders.placeOrder({
+                order: objOrderPayload
+            });
+            const objPayload = readResponsePayload(objResponse);
+            arrOrders.push({
+                order: objPayload.result || objPayload,
+                request: objOrderPayload
+            });
+            arrContracts.push({
+                contractSymbol: objContract.contractSymbol,
+                optionSide: objContract.optionSide,
+                strike: objContract.strike,
+                delta: objContract.delta,
+                theta: objContract.theta,
+                markPrice: objContract.markPrice,
+                requestedExpiryDate: objContract.requestedExpiryDate,
+                resolvedExpiryDate: objContract.expiryDate,
+                usedNextDayExpiryFallback: objContract.usedNextDayFallback
+            });
         }
-    };
+
+        const arrInitialSaved = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, [
+            ...arrExisting,
+            ...arrContracts.map((objContract) => ({
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                importId: crypto.randomUUID(),
+                contractName: String(objContract.contractSymbol || "").trim(),
+                side: pInput.action.toUpperCase(),
+                qty: pInput.qty,
+                entryPrice: Number(objContract.markPrice || 0),
+                markPrice: Number(objContract.markPrice || 0),
+                charges: 0,
+                pnl: 0,
+                margin: 0,
+                liquidationPrice: 0,
+                metadata: optionMetadataToRecord({
+                    ...objOptionMetadata,
+                    baseDelta: getSignedOptionBaseDelta(String(objContract.contractSymbol || "").trim(), Number(objContract.delta || 0)),
+                    baseTheta: Math.abs(Number(objContract.theta || 0))
+                }),
+                openedAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            } satisfies RollingFuturesLtImportedPositionRecord))
+        ]);
+        const arrEntryCharges = await Promise.all(arrOrders.map(async (objOrder, pIndex) => {
+            const objContract = arrContracts[pIndex] || {};
+            const vContractName = String(objContract.contractSymbol || "").trim();
+            const vSide = String(pInput.action || "").trim().toUpperCase();
+            const vResolvedCharge = await resolveOrderChargeFromDelta(
+                client,
+                vContractName,
+                (objOrder.order && typeof objOrder.order === "object") ? objOrder.order as Record<string, unknown> : {},
+                vSide,
+                pInput.qty,
+                new Date().toISOString()
+            );
+            if (vResolvedCharge !== null) {
+                return vResolvedCharge;
+            }
+            return estimateTrackedPositionCharge({
+                contractName: vContractName,
+                qty: pInput.qty,
+                entryPrice: Number(objContract.markPrice || 0),
+                markPrice: Number(objContract.markPrice || 0)
+            });
+        }));
+        await incrementBrokerageRecoveryTotal(
+            pUserId,
+            pStrategyCode,
+            arrEntryCharges.reduce((pSum, vValue) => pSum + Number(vValue || 0), 0),
+            arrInitialSaved.length
+        );
+        const objNeutralCheck = await applyServerSideNeutralityCheck(
+            pUserId,
+            pStrategyCode,
+                pSelectedApiProfileId,
+                objUiState,
+                pInput.symbol,
+                arrInitialSaved,
+                null
+            );
+        if (objNeutralCheck.nextRuntimeState) {
+            const objRuntimeAfterExec = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+                || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+            await saveRollingFuturesLtRuntime({
+                ...objRuntimeAfterExec,
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                selectedApiProfileId: pSelectedApiProfileId,
+                currentSymbol: pInput.symbol,
+                state: {
+                    ...((objRuntimeAfterExec.state || {}) as Record<string, unknown>),
+                    ...objNeutralCheck.nextRuntimeState
+                }
+            });
+        }
+        await syncDualStrategySurvivalState(
+            pUserId,
+            pStrategyCode,
+            pSelectedApiProfileId,
+            objNeutralCheck.trackedOpenPositions,
+            "active"
+        );
+
+        return {
+            profileLabel: profile.referenceName || profile.apiKey || "",
+            trackedOpenPositions: objNeutralCheck.trackedOpenPositions,
+            contracts: arrContracts,
+            orders: arrOrders,
+            neutralCheck: {
+                mode: objNeutralCheck.mode,
+                hedgePlaced: objNeutralCheck.hedgePlaced,
+                totalDelta: objNeutralCheck.totalDelta,
+                totalTheta: objNeutralCheck.totalTheta,
+                threshold: objNeutralCheck.threshold
+            }
+        };
+    }
+    catch (objError) {
+        const arrLatestSaved = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+        if (!arrLatestSaved.length) {
+            await clearActiveStrategyRun(pUserId, pStrategyCode);
+        }
+        throw objError;
+    }
 }
 
 async function closeTrackedPositionOnDelta(
     pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
     pSelectedApiProfileId: string,
-    pPosition: RollingFuturesLtImportedPositionRecord
+    pPosition: RollingFuturesLtImportedPositionRecord,
+    pOrderKind: "SL" | "TP" | "CL" = "CL"
 ) : Promise<{ payload: Record<string, unknown>; placedAt: string; realizedPnl: number | null; }> {
     const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const vPlacedAtIso = new Date().toISOString();
+    const vClientOrderId = await allocateStrategyClientOrderId(pUserId, pStrategyCode, pOrderKind);
     const objResponse = await client.apis.Orders.placeOrder({
         order: {
             product_symbol: pPosition.contractName,
@@ -4288,7 +4595,8 @@ async function closeTrackedPositionOnDelta(
             order_type: "market_order",
             time_in_force: "gtc",
             post_only: false,
-            reduce_only: true
+            reduce_only: true,
+            ...(vClientOrderId ? { client_order_id: vClientOrderId } : {})
         }
     });
     const objPayload = readResponsePayload(objResponse);
@@ -4372,6 +4680,7 @@ async function openTrackedOptionReEntry(
     }
 
     const vPlacedAtIso = new Date().toISOString();
+    const vClientOrderId = await allocateStrategyClientOrderId(pUserId, pStrategyCode, "RE");
     const objReEntryResponse = await client.apis.Orders.placeOrder({
         order: {
             product_symbol: objContract.contractSymbol,
@@ -4380,7 +4689,8 @@ async function openTrackedOptionReEntry(
             order_type: "market_order",
             time_in_force: "gtc",
             post_only: false,
-            reduce_only: false
+            reduce_only: false,
+            ...(vClientOrderId ? { client_order_id: vClientOrderId } : {})
         }
     });
     const objReEntryPayload = readResponsePayload(objReEntryResponse);
@@ -4427,7 +4737,7 @@ async function applyTriggeredOptionRule(
     pReason: "sl" | "tp",
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
 ): Promise<RollingFuturesLtImportedPositionRecord[]> {
-    const objCloseResult = await closeTrackedPositionOnDelta(pUserId, pSelectedApiProfileId, pPosition);
+    const objCloseResult = await closeTrackedPositionOnDelta(pUserId, pStrategyCode, pSelectedApiProfileId, pPosition, pReason === "sl" ? "SL" : "TP");
     const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const objMetadata = getTrackedOptionMetadata(pPosition);
     const vResolvedCloseCharge = await resolveOrderChargeFromDelta(
@@ -4576,6 +4886,16 @@ async function applyTriggeredOptionRule(
     }
 
     const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrNextPositions);
+    await syncDualStrategySurvivalState(
+        pUserId,
+        pStrategyCode,
+        pSelectedApiProfileId,
+        arrSaved,
+        arrSaved.length ? "active" : "ended"
+    );
+    if (!arrSaved.length) {
+        await clearActiveStrategyRun(pUserId, pStrategyCode);
+    }
     if (isDualRollingFuturesStrategy(pStrategyCode)) {
         await attemptAutoExecuteNextPendingDualStrategyRequest(pReason, pUserId);
     }
@@ -4639,6 +4959,7 @@ async function closeTrackedPositionsOnDelta(
     const arrClosePnls: number[] = [];
     const arrClosed: Array<Record<string, unknown>> = [];
     for (const objPosition of pPositions) {
+        const vClientOrderId = await allocateStrategyClientOrderId(pUserId, pStrategyCode, "CL");
         const objOrderPayload: Record<string, unknown> = {
             product_symbol: objPosition.contractName,
             size: objPosition.qty,
@@ -4646,7 +4967,8 @@ async function closeTrackedPositionsOnDelta(
             order_type: "market_order",
             time_in_force: "gtc",
             post_only: false,
-            reduce_only: true
+            reduce_only: true,
+            ...(vClientOrderId ? { client_order_id: vClientOrderId } : {})
         };
         const vPlacedAtIso = new Date().toISOString();
         const objResponse = await client.apis.Orders.placeOrder({ order: objOrderPayload });
@@ -4692,6 +5014,8 @@ async function closeTrackedPositionsOnDelta(
         arrClosePnls.reduce((pSum, vValue) => pSum + Number(vValue || 0), 0),
         0
     );
+    await syncDualStrategySurvivalState(pUserId, pStrategyCode, pSelectedApiProfileId, [], "ended");
+    await clearActiveStrategyRun(pUserId, pStrategyCode);
     return {
         closedPositions: arrClosed,
         profileLabel: profile.referenceName || profile.apiKey || ""
@@ -4756,11 +5080,18 @@ async function getRuntimeStatusInternal(req: Request, res: Response, pStrategyCo
     const vUserId = getAccountId(req);
     const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
     const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+    const objLease = isDualLeaseManagedStrategy(pStrategyCode)
+        ? await getStrategyLease(vUserId, pStrategyCode)
+        : null;
     res.json({
         status: "success",
-        data: objRuntime || {
-            ...getDefaultRollingFuturesLtRuntime(vUserId, pStrategyCode),
-            selectedApiProfileId: String(objProfile.selectedApiProfileId || "").trim()
+        data: {
+            ...(objRuntime || {
+                ...getDefaultRollingFuturesLtRuntime(vUserId, pStrategyCode),
+                selectedApiProfileId: String(objProfile.selectedApiProfileId || "").trim()
+            }),
+            lease: objLease && isLeaseActive(objLease) ? objLease : null,
+            currentServerId: gServerId
         }
     });
 }
@@ -4780,6 +5111,444 @@ async function checkConnectionInternal(req: Request, res: Response, pStrategyCod
 
 function getAutoTraderRuntimeKey(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): string {
     return `${String(pUserId || "").trim()}::${pStrategyCode}`;
+}
+
+function isDualLeaseManagedStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
+    return pStrategyCode === "rolling-futures-lt-dual";
+}
+
+function getLocalStrategyLeaseToken(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): string {
+    return String(gLocalStrategyLeaseTokens.get(getAutoTraderRuntimeKey(pUserId, pStrategyCode)) || "").trim();
+}
+
+function setLocalStrategyLeaseToken(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode, pLeaseToken: string): void {
+    const vRuntimeKey = getAutoTraderRuntimeKey(pUserId, pStrategyCode);
+    const vLeaseToken = String(pLeaseToken || "").trim();
+    if (!vLeaseToken) {
+        gLocalStrategyLeaseTokens.delete(vRuntimeKey);
+        return;
+    }
+    gLocalStrategyLeaseTokens.set(vRuntimeKey, vLeaseToken);
+}
+
+function isLeaseActive(pLease: StrategyLeaseRecord | null): boolean {
+    if (!pLease?.leaseExpiresAt) {
+        return false;
+    }
+    const vExpiresAtMs = new Date(pLease.leaseExpiresAt).getTime();
+    return Number.isFinite(vExpiresAtMs) && vExpiresAtMs > Date.now();
+}
+
+function buildStrategyLeaseMetadata(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pProfile: RollingFuturesLtProfileRecord | null,
+    pSelectedApiProfileId = ""
+): Record<string, unknown> {
+    const vProfileUiState = pProfile ? getMergedUiState(pProfile) : {};
+    const vSelectedProfileId = String(
+        pSelectedApiProfileId
+        || pRuntime?.selectedApiProfileId
+        || pProfile?.selectedApiProfileId
+        || ""
+    ).trim();
+
+    return {
+        serverId: gServerId,
+        currentSymbol: String(pRuntime?.currentSymbol || vProfileUiState.symbol || "").trim(),
+        runtimeStatus: String(pRuntime?.status || "").trim().toLowerCase(),
+        selectedApiProfileId: vSelectedProfileId,
+        strategyStartedAt: getStrategyStartedAtState(pRuntime || null)
+    };
+}
+
+async function acquireDualStrategyLease(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pProfile: RollingFuturesLtProfileRecord | null,
+    pSelectedApiProfileId = ""
+): Promise<{ acquired: boolean; lease: StrategyLeaseRecord | null; message: string; }> {
+    if (!isDualLeaseManagedStrategy(pStrategyCode)) {
+        return { acquired: true, lease: null, message: "" };
+    }
+
+    const objResult = await acquireStrategyLease({
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        ownerServerId: gServerId,
+        ownerInstanceId: gServerInstanceId,
+        leaseDurationMs: getStrategyLeaseDurationMs(),
+        metadata: buildStrategyLeaseMetadata(pRuntime, pProfile, pSelectedApiProfileId)
+    });
+
+    if (!objResult.acquired || !objResult.lease) {
+        const vOwnerLabel = String(objResult.lease?.ownerServerId || "another server").trim() || "another server";
+        return {
+            acquired: false,
+            lease: objResult.lease,
+            message: `This live strategy is currently owned by ${vOwnerLabel}.`
+        };
+    }
+
+    setLocalStrategyLeaseToken(pUserId, pStrategyCode, objResult.lease.leaseToken);
+    return {
+        acquired: true,
+        lease: objResult.lease,
+        message: ""
+    };
+}
+
+async function renewDualStrategyLease(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pProfile: RollingFuturesLtProfileRecord | null
+): Promise<boolean> {
+    if (!isDualLeaseManagedStrategy(pStrategyCode)) {
+        return true;
+    }
+
+    const vLeaseToken = getLocalStrategyLeaseToken(pUserId, pStrategyCode);
+    if (!vLeaseToken) {
+        const objAcquire = await acquireDualStrategyLease(pUserId, pStrategyCode, pRuntime, pProfile);
+        return objAcquire.acquired;
+    }
+
+    const objLease = await renewStrategyLease({
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        ownerServerId: gServerId,
+        ownerInstanceId: gServerInstanceId,
+        leaseToken: vLeaseToken,
+        leaseDurationMs: getStrategyLeaseDurationMs(),
+        metadata: buildStrategyLeaseMetadata(pRuntime, pProfile)
+    });
+
+    if (!objLease) {
+        setLocalStrategyLeaseToken(pUserId, pStrategyCode, "");
+        return false;
+    }
+
+    setLocalStrategyLeaseToken(pUserId, pStrategyCode, objLease.leaseToken);
+    return true;
+}
+
+async function releaseDualStrategyLease(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pForce = false
+): Promise<void> {
+    if (!isDualLeaseManagedStrategy(pStrategyCode)) {
+        return;
+    }
+
+    const vLeaseToken = getLocalStrategyLeaseToken(pUserId, pStrategyCode);
+    setLocalStrategyLeaseToken(pUserId, pStrategyCode, "");
+
+    if (pForce || !vLeaseToken) {
+        if (pForce) {
+            await forceReleaseStrategyLease(pUserId, pStrategyCode);
+        }
+        return;
+    }
+
+    await releaseStrategyLease(
+        pUserId,
+        pStrategyCode,
+        gServerId,
+        gServerInstanceId,
+        vLeaseToken
+    );
+}
+
+async function syncDualStrategySurvivalState(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pSelectedApiProfileId: string,
+    pPositions: RollingFuturesLtImportedPositionRecord[],
+    pStatus: "active" | "ended" = "active"
+): Promise<void> {
+    if (!isDualRollingFuturesStrategy(pStrategyCode)) {
+        return;
+    }
+
+    let objProfile: Awaited<ReturnType<typeof getDeltaApiProfile>> | null = null;
+    try {
+        objProfile = await getDeltaApiProfile(pUserId, pSelectedApiProfileId);
+    }
+    catch (_objError) {
+    }
+    const objLiveProfile = await readLiveProfile(pUserId, pStrategyCode).catch(() => null);
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const vRunId = getStrategyRunIdState(objRuntime);
+    const vRunTag = getStrategyRunTagState(objRuntime);
+    if (!vRunId || !vRunTag) {
+        return;
+    }
+
+    const objLease = await getStrategyLease(pUserId, pStrategyCode);
+    const objOpenPositions = await buildOpenPositionsPayload(pUserId, pStrategyCode, pPositions);
+    await upsertSurvivalState({
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        strategyRunId: vRunId,
+        runTag: vRunTag,
+        runStatus: pStatus,
+        ownerServerId: String(objLease?.ownerServerId || gServerId).trim(),
+        ownerInstanceId: String(objLease?.ownerInstanceId || gServerInstanceId).trim(),
+        leaseToken: String(objLease?.leaseToken || "").trim(),
+        leaseExpiresAt: String(objLease?.leaseExpiresAt || "").trim(),
+        lastHeartbeatAt: new Date().toISOString(),
+        selectedApiProfileId: pSelectedApiProfileId,
+        profileReferenceName: String(objProfile?.referenceName || "").trim(),
+        apiKey: String(objProfile?.apiKey || "").trim(),
+        apiSecret: String(objProfile?.apiSecret || "").trim(),
+        symbol: String(objRuntime?.currentSymbol || "").trim(),
+        strategyStartedAt: getStrategyStartedAtState(objRuntime),
+        lastDeltaSyncAt: new Date().toISOString(),
+        lastPrimaryDbSyncAt: new Date().toISOString(),
+        openPositions: pPositions.map((objPosition) => ({
+            importId: objPosition.importId,
+            contractName: objPosition.contractName,
+            side: objPosition.side,
+            qty: objPosition.qty,
+            entryPrice: objPosition.entryPrice,
+            markPrice: objPosition.markPrice,
+            charges: objPosition.charges,
+            pnl: objPosition.pnl,
+            margin: objPosition.margin,
+            liquidationPrice: objPosition.liquidationPrice,
+            metadata: objPosition.metadata || {},
+            openedAt: objPosition.openedAt,
+            updatedAt: objPosition.updatedAt
+        })),
+        uiState: objLiveProfile ? getMergedUiState(objLiveProfile) : {},
+        runtimeState: (objRuntime?.state || {}) as Record<string, unknown>,
+        riskState: {
+            uiState: objLiveProfile ? getMergedUiState(objLiveProfile) : {},
+            neutralStatus: objOpenPositions.neutralStatus,
+            totals: objOpenPositions.totals
+        },
+        recoveryMetrics: objOpenPositions.recoveryMetrics,
+        lastOrderRefs: []
+    });
+}
+
+async function syncSurvivalStateDuringPrimaryOutage(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pPositions: RollingFuturesLtImportedPositionRecord[],
+    pLastError = ""
+): Promise<void> {
+    if (!isDualRollingFuturesStrategy(pStrategyCode)) {
+        return;
+    }
+    const objSurvival = await getSurvivalState(pUserId, pStrategyCode);
+    if (!objSurvival) {
+        return;
+    }
+    await upsertSurvivalState({
+        userId: objSurvival.userId,
+        strategyCode: objSurvival.strategyCode,
+        strategyRunId: objSurvival.strategyRunId,
+        runTag: objSurvival.runTag,
+        runStatus: pPositions.length ? "active" : "ended",
+        ownerServerId: objSurvival.ownerServerId || gServerId,
+        ownerInstanceId: objSurvival.ownerInstanceId || gServerInstanceId,
+        leaseToken: objSurvival.leaseToken,
+        leaseExpiresAt: objSurvival.leaseExpiresAt,
+        lastHeartbeatAt: new Date().toISOString(),
+        selectedApiProfileId: objSurvival.selectedApiProfileId,
+        profileReferenceName: objSurvival.profileReferenceName,
+        apiKey: objSurvival.apiKey,
+        apiSecret: objSurvival.apiSecret,
+        symbol: objSurvival.symbol,
+        strategyStartedAt: objSurvival.strategyStartedAt,
+        lastDeltaSyncAt: new Date().toISOString(),
+        lastPrimaryDbSyncAt: objSurvival.lastPrimaryDbSyncAt,
+        openPositions: pPositions.map((objPosition) => ({
+            importId: objPosition.importId,
+            contractName: objPosition.contractName,
+            side: objPosition.side,
+            qty: objPosition.qty,
+            entryPrice: objPosition.entryPrice,
+            markPrice: objPosition.markPrice,
+            charges: objPosition.charges,
+            pnl: objPosition.pnl,
+            margin: objPosition.margin,
+            liquidationPrice: objPosition.liquidationPrice,
+            metadata: objPosition.metadata || {},
+            openedAt: objPosition.openedAt,
+            updatedAt: objPosition.updatedAt
+        })),
+        uiState: objSurvival.uiState,
+        runtimeState: {
+            ...(objSurvival.runtimeState || {}),
+            ...(pLastError ? { primaryDbOutageLastError: pLastError } : {})
+        },
+        riskState: objSurvival.riskState,
+        recoveryMetrics: objSurvival.recoveryMetrics,
+        lastOrderRefs: objSurvival.lastOrderRefs
+    });
+}
+
+function buildSyntheticProfileFromSurvival(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pSurvival: Awaited<ReturnType<typeof getSurvivalState>>
+): RollingFuturesLtProfileRecord {
+    return {
+        ...getDefaultRollingFuturesLtProfile(pUserId, pStrategyCode),
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        selectedApiProfileId: String(pSurvival?.selectedApiProfileId || "").trim(),
+        uiState: pSurvival?.uiState && typeof pSurvival.uiState === "object" ? pSurvival.uiState : {},
+        updatedAt: String(pSurvival?.updatedAt || "").trim()
+    };
+}
+
+async function applyTriggeredOptionRuleSurvivalOnly(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pSelectedApiProfileId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pPosition: RollingFuturesLtImportedPositionRecord,
+    pReason: "sl" | "tp",
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<RollingFuturesLtImportedPositionRecord[]> {
+    await closeTrackedPositionOnDelta(
+        pUserId,
+        pStrategyCode,
+        pSelectedApiProfileId,
+        pPosition,
+        pReason === "sl" ? "SL" : "TP"
+    );
+    let arrNextPositions = pTrackedPositions.filter((objRow) => objRow.importId !== pPosition.importId);
+    const objMetadata = getTrackedOptionMetadata(pPosition);
+    if (Boolean(objMetadata.reEnterEnabled)) {
+        const objReEntry = await openTrackedOptionReEntry(
+            pUserId,
+            pStrategyCode,
+            pSelectedApiProfileId,
+            pProfile,
+            pPosition,
+            objMetadata,
+            pReason
+        );
+        if (objReEntry) {
+            arrNextPositions = [...arrNextPositions, objReEntry.position];
+        }
+    }
+    return arrNextPositions;
+}
+
+async function applySurvivalOnlyNeutralityHedge(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pSelectedApiProfileId: string,
+    pSymbol: "BTC" | "ETH",
+    pUiState: Record<string, unknown>,
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pRuntimeState: Record<string, unknown>
+): Promise<{ positions: RollingFuturesLtImportedPositionRecord[]; hedgePlaced: boolean; }> {
+    const vMode = getNeutralModeFromUiState(pUiState);
+    if (vMode === "none") {
+        return { positions: pTrackedPositions, hedgePlaced: false };
+    }
+    const objTotals = await calculateTrackedNeutralTotals(pTrackedPositions);
+    const vCurrentOptionDeltaAbs = Math.max(0, Number(objTotals.optionDeltaAbs || 0));
+    const objBaseline = pRuntimeState?.deltaNeutralBaseline && typeof pRuntimeState.deltaNeutralBaseline === "object"
+        ? pRuntimeState.deltaNeutralBaseline as Record<string, unknown>
+        : {};
+    const vBaseOptionDeltaAbs = Math.max(
+        0,
+        Number(objBaseline.baseOptionDeltaAbs || objBaseline.entryOptionDeltaAbs || vCurrentOptionDeltaAbs || 0)
+    );
+    const vLastHedgeAtMs = Number.isFinite(new Date(String(objBaseline.lastHedgeAt || "")).getTime())
+        ? new Date(String(objBaseline.lastHedgeAt || "")).getTime()
+        : 0;
+    if (vLastHedgeAtMs > 0 && (Date.now() - vLastHedgeAtMs) < gNeutralityHedgeCooldownMs) {
+        return { positions: pTrackedPositions, hedgePlaced: false };
+    }
+
+    let bShouldHedge = false;
+    if (vMode === "theta") {
+        const vThetaAbs = Math.abs(objTotals.totalTheta);
+        const vThetaMinDelta = Number((vThetaAbs * Math.abs(Number(pUiState.minusDelta || -25)) / 100 * -1).toFixed(6));
+        const vThetaMaxDelta = Number((vThetaAbs * Math.abs(Number(pUiState.plusDelta || 25)) / 100).toFixed(6));
+        bShouldHedge = vThetaAbs > 0 && (objTotals.totalDelta < vThetaMinDelta || objTotals.totalDelta > vThetaMaxDelta);
+    }
+    else {
+        const vNegThresholdPct = Number.isFinite(Number(pUiState.minusDelta)) ? Number(pUiState.minusDelta) : -25;
+        const vPosThresholdPct = Number.isFinite(Number(pUiState.plusDelta)) ? Number(pUiState.plusDelta) : 25;
+        const vGammaFactor = vMode === "gamma" ? getGammaAwareCompressionFactor(objTotals.totalGamma) : 1;
+        const vDriftPct = vBaseOptionDeltaAbs > 0
+            ? Number(((objTotals.totalDelta / vBaseOptionDeltaAbs) * 100).toFixed(6))
+            : 0;
+        bShouldHedge = vBaseOptionDeltaAbs > 0
+            && (vDriftPct < (vNegThresholdPct / vGammaFactor) || vDriftPct > (vPosThresholdPct / vGammaFactor));
+    }
+    const vHedgeQty = Math.round(Math.abs(objTotals.totalDelta));
+    if (!bShouldHedge || !(vHedgeQty >= 1)) {
+        return { positions: pTrackedPositions, hedgePlaced: false };
+    }
+    const vHedgeAction: "BUY" | "SELL" = objTotals.totalDelta > 0 ? "SELL" : "BUY";
+    await placeManagedManualFutureOrder(
+        pUserId,
+        pStrategyCode,
+        pSelectedApiProfileId,
+        pSymbol,
+        vHedgeAction,
+        vHedgeQty,
+        "market_order",
+        "HG"
+    );
+    const arrLivePositions = await fetchLiveFuturePositions(pUserId, pStrategyCode, pSelectedApiProfileId, pSymbol);
+    return { positions: arrLivePositions, hedgePlaced: true };
+}
+
+async function runDualSurvivalOnlyCycle(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode
+): Promise<void> {
+    const objSurvival = await getSurvivalState(pUserId, pStrategyCode);
+    if (!objSurvival || objSurvival.runStatus !== "active" || !objSurvival.selectedApiProfileId) {
+        return;
+    }
+    const vSymbol = normalizeSymbolValue(objSurvival.symbol || objSurvival.uiState?.symbol);
+    const objProfile = buildSyntheticProfileFromSurvival(pUserId, pStrategyCode, objSurvival);
+    let arrPositions = await fetchLiveFuturePositions(pUserId, pStrategyCode, objSurvival.selectedApiProfileId, vSymbol);
+    const arrTriggeredOptions = await findTriggeredTrackedOptions(arrPositions, objSurvival.uiState || {});
+    for (const objTriggeredOption of arrTriggeredOptions) {
+        const objCurrentTrackedPosition = arrPositions.find((objRow) => objRow.importId === objTriggeredOption.position.importId);
+        if (!objCurrentTrackedPosition) {
+            continue;
+        }
+        arrPositions = await applyTriggeredOptionRuleSurvivalOnly(
+            pUserId,
+            pStrategyCode,
+            objSurvival.selectedApiProfileId,
+            objProfile,
+            objCurrentTrackedPosition,
+            objTriggeredOption.reason,
+            arrPositions
+        );
+    }
+    const objHedgeResult = await applySurvivalOnlyNeutralityHedge(
+        pUserId,
+        pStrategyCode,
+        objSurvival.selectedApiProfileId,
+        vSymbol,
+        objSurvival.uiState || {},
+        arrPositions,
+        objSurvival.runtimeState || {}
+    );
+    await syncSurvivalStateDuringPrimaryOutage(
+        pUserId,
+        pStrategyCode,
+        objHedgeResult.positions,
+        objHedgeResult.hedgePlaced ? "Primary DB unavailable; survival-only hedge cycle applied." : ""
+    );
 }
 
 function stopAutoTraderCycle(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): void {
@@ -4813,6 +5582,10 @@ async function runAutoTraderCycle(
         }
 
         const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+        if (!await renewDualStrategyLease(pUserId, pStrategyCode, objRuntime, objProfile)) {
+            stopAutoTraderCycle(pUserId, pStrategyCode);
+            return;
+        }
         const objUiState = getMergedUiState(objProfile);
         const vSelectedApiProfileId = String(objRuntime.selectedApiProfileId || objProfile.selectedApiProfileId || "").trim();
         const vSymbol = normalizeSymbolValue(objUiState.symbol);
@@ -5238,8 +6011,43 @@ async function runAutoTraderCycle(
                 }
             }
         });
+        await syncDualStrategySurvivalState(
+            pUserId,
+            pStrategyCode,
+            vSelectedApiProfileId,
+            objNeutralCheck.trackedOpenPositions,
+            objNeutralCheck.trackedOpenPositions.length ? "active" : "ended"
+        );
     }
     catch (objError) {
+        if (isPrimaryDatabaseUnavailableError(objError)) {
+            try {
+                await runDualSurvivalOnlyCycle(pUserId, pStrategyCode);
+            }
+            catch (_survivalError) {
+                try {
+                    const objSurvival = await getSurvivalState(pUserId, pStrategyCode);
+                    if (objSurvival?.selectedApiProfileId) {
+                        const vSurvivalSymbol = normalizeSymbolValue(objSurvival.symbol || objSurvival.uiState?.symbol);
+                        const arrLivePositions = await fetchLiveFuturePositions(
+                            pUserId,
+                            pStrategyCode,
+                            objSurvival.selectedApiProfileId,
+                            vSurvivalSymbol
+                        );
+                        await syncSurvivalStateDuringPrimaryOutage(
+                            pUserId,
+                            pStrategyCode,
+                            arrLivePositions,
+                            getErrorMessage(objError, "Primary DB unavailable during live cycle.")
+                        );
+                    }
+                }
+                catch (_snapshotError) {
+                }
+            }
+            return;
+        }
         const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
             || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
         const objProfile = await readLiveProfile(pUserId, pStrategyCode);
@@ -5315,6 +6123,14 @@ export async function recoverRollingFuturesLtAutoTraderCycles(): Promise<void> {
             continue;
         }
 
+        if (isDualLeaseManagedStrategy(vStrategyCode)) {
+            const objProfile = await readLiveProfile(vUserId, vStrategyCode);
+            const objLeaseAcquire = await acquireDualStrategyLease(vUserId, vStrategyCode, objRuntime, objProfile, vSelectedApiProfileId);
+            if (!objLeaseAcquire.acquired) {
+                continue;
+            }
+        }
+
         const vProtectionUntil = new Date(Date.now() + gRestartCloseProtectionMs).toISOString();
         await saveRollingFuturesLtRuntime({
             ...objRuntime,
@@ -5346,6 +6162,21 @@ async function enableAutoTraderInternal(req: Request, res: Response, pStrategyCo
     }
 
     const objExistingRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
+    if (isDualLeaseManagedStrategy(pStrategyCode)) {
+        const objLeaseAcquire = await acquireDualStrategyLease(vUserId, pStrategyCode, objExistingRuntime, objProfile, vSelectedApiProfileId);
+        if (!objLeaseAcquire.acquired) {
+            res.status(409).json({
+                status: "warning",
+                message: objLeaseAcquire.message,
+                data: {
+                    lease: objLeaseAcquire.lease,
+                    currentServerId: gServerId
+                }
+            });
+            return;
+        }
+    }
+
     const objSavedRuntime = await saveRollingFuturesLtRuntime({
         ...(objExistingRuntime || getDefaultRollingFuturesLtRuntime(vUserId, pStrategyCode)),
         userId: vUserId,
@@ -5407,6 +6238,7 @@ async function disableAutoTraderInternal(req: Request, res: Response, pStrategyC
         }
     );
     stopAutoTraderCycle(vUserId, pStrategyCode);
+    await releaseDualStrategyLease(vUserId, pStrategyCode, true);
 
     res.json({
         status: "success",
@@ -5642,6 +6474,16 @@ async function reconcileOpenPositionsInternal(req: Request, res: Response, pStra
             pStrategyCode,
             await applyImportedOptionBaseGreeks(applyImportedBaseDelta(arrPositions, vBaseDelta), vBaseDelta)
         );
+        await syncDualStrategySurvivalState(
+            vUserId,
+            pStrategyCode,
+            vProfileId,
+            arrSaved,
+            arrSaved.length ? "active" : "ended"
+        );
+        if (!arrSaved.length) {
+            await clearActiveStrategyRun(vUserId, pStrategyCode);
+        }
         const objOpenPositions = await buildOpenPositionsPayload(vUserId, pStrategyCode, arrSaved);
         const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
         if (arrSaved.length > 0 && !(getBrokerageRecoveryTotal(objRuntime) > 0)) {
@@ -5740,6 +6582,7 @@ async function closeImportedOpenPositionInternal(req: Request, res: Response, pS
 
         const { client, profile } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
         const vCloseSide = vLiveSide === "BUY" ? "sell" : "buy";
+        const vClientOrderId = await allocateStrategyClientOrderId(vUserId, pStrategyCode, "CL");
         const objOrderPayload: Record<string, unknown> = {
             product_symbol: String(objLivePosition.contractName || vContractName).trim(),
             size: vLiveQty,
@@ -5747,7 +6590,8 @@ async function closeImportedOpenPositionInternal(req: Request, res: Response, pS
             order_type: "market_order",
             time_in_force: "gtc",
             post_only: false,
-            reduce_only: true
+            reduce_only: true,
+            ...(vClientOrderId ? { client_order_id: vClientOrderId } : {})
         };
         const vPlacedAtIso = new Date().toISOString();
         const objResponse = await client.apis.Orders.placeOrder({ order: objOrderPayload });
@@ -5780,6 +6624,16 @@ async function closeImportedOpenPositionInternal(req: Request, res: Response, pS
             ));
         await incrementBrokerageRecoveryTotal(vUserId, pStrategyCode, vCloseCharge, arrRemainingSaved.length);
         await incrementRecoveredTotalPnl(vUserId, pStrategyCode, vClosePnl, arrRemainingSaved.length);
+        await syncDualStrategySurvivalState(
+            vUserId,
+            pStrategyCode,
+            vSelectedApiProfileId,
+            arrRemainingSaved,
+            arrRemainingSaved.length ? "active" : "ended"
+        );
+        if (!arrRemainingSaved.length) {
+            await clearActiveStrategyRun(vUserId, pStrategyCode);
+        }
         await logFuturesEvent(
             vUserId,
             pStrategyCode,
@@ -5907,11 +6761,13 @@ async function executeManualFutureInternal(req: Request, res: Response, pStrateg
         const { client, profile } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
         const objPlacedOrder = await placeManagedManualFutureOrder(
             vUserId,
+            pStrategyCode,
             vSelectedApiProfileId,
             vSymbol,
             vAction,
             vQty,
-            vOrderType
+            vOrderType,
+            "HG"
         );
         const arrTrackedPositions = await fetchLiveFuturePositions(vUserId, pStrategyCode, vSelectedApiProfileId, vSymbol);
         const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
@@ -5923,6 +6779,13 @@ async function executeManualFutureInternal(req: Request, res: Response, pStrateg
             ...arrPreserved,
             ...arrTrackedPositions
         ]);
+        await syncDualStrategySurvivalState(
+            vUserId,
+            pStrategyCode,
+            vSelectedApiProfileId,
+            arrSaved,
+            arrSaved.length ? "active" : "ended"
+        );
         const vResolvedEntryCharge = await resolveOrderChargeFromDelta(
             client,
             objPlacedOrder.contractName,
@@ -6105,6 +6968,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
             throw new Error(`The selected ${vLegSide.toUpperCase()} contract delta ${vAbsoluteDelta.toFixed(2)} exceeded New D ${vTargetDelta.toFixed(2)}.`);
         }
 
+        const vClientOrderId = await allocateStrategyClientOrderId(vUserId, pStrategyCode, "EN");
         const objOrderPayload: Record<string, unknown> = {
             product_symbol: objContract.contractSymbol,
             size: vQty,
@@ -6112,7 +6976,8 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
             order_type: "market_order",
             time_in_force: "gtc",
             post_only: false,
-            reduce_only: false
+            reduce_only: false,
+            ...(vClientOrderId ? { client_order_id: vClientOrderId } : {})
         };
         const objResponse = await client.apis.Orders.placeOrder({
             order: objOrderPayload
@@ -6143,6 +7008,13 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
                 updatedAt: new Date().toISOString()
             } satisfies RollingFuturesLtImportedPositionRecord
         ]);
+        await syncDualStrategySurvivalState(
+            vUserId,
+            pStrategyCode,
+            vSelectedApiProfileId,
+            arrSaved,
+            arrSaved.length ? "active" : "ended"
+        );
         const vResolvedEntryCharge = await resolveOrderChargeFromDelta(
             client,
             String(objContract.contractSymbol || "").trim(),
@@ -6610,6 +7482,7 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
         const arrClosePnls: number[] = [];
         const arrClosed: Array<Record<string, unknown>> = [];
         for (const objPosition of arrPositions) {
+            const vClientOrderId = await allocateStrategyClientOrderId(vUserId, pStrategyCode, "CL");
             const objOrderPayload: Record<string, unknown> = {
                 product_symbol: objPosition.contractName,
                 size: objPosition.qty,
@@ -6617,7 +7490,8 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
                 order_type: "market_order",
                 time_in_force: "gtc",
                 post_only: false,
-                reduce_only: true
+                reduce_only: true,
+                ...(vClientOrderId ? { client_order_id: vClientOrderId } : {})
             };
             const vPlacedAtIso = new Date().toISOString();
             const objResponse = await client.apis.Orders.placeOrder({ order: objOrderPayload });
@@ -6663,6 +7537,8 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
             arrClosePnls.reduce((pSum, vValue) => pSum + Number(vValue || 0), 0),
             0
         );
+        await syncDualStrategySurvivalState(vUserId, pStrategyCode, vSelectedApiProfileId, [], "ended");
+        await clearActiveStrategyRun(vUserId, pStrategyCode);
         await logFuturesEvent(
             vUserId,
             pStrategyCode,
@@ -6925,6 +7801,8 @@ export async function recalculateRollingFuturesLtShortRecoveryTotalPnl(req: Requ
 export async function listRollingFuturesLtDualRunningUsers(req: Request, res: Response): Promise<void> {
     try {
         const arrRuntimeRows = await listRollingFuturesLtRuntime();
+        const arrSurvivalRows = await listSurvivalStates("rolling-futures-lt-dual");
+        const objSurvivalByUserId = new Map(arrSurvivalRows.map((objRow) => [objRow.userId, objRow]));
         const arrDualRunning = arrRuntimeRows.filter((objRuntime) => {
             return objRuntime.strategyCode === "rolling-futures-lt-dual"
                 && objRuntime.autoTraderEnabled
@@ -6937,6 +7815,8 @@ export async function listRollingFuturesLtDualRunningUsers(req: Request, res: Re
             if (!objAccount) {
                 continue;
             }
+            const objLease = await getStrategyLease(objRuntime.userId, objRuntime.strategyCode);
+            const objSurvival = objSurvivalByUserId.get(objRuntime.userId) || null;
             arrUsers.push({
                 accountId: objAccount.accountId,
                 fullName: objAccount.fullName,
@@ -6946,6 +7826,12 @@ export async function listRollingFuturesLtDualRunningUsers(req: Request, res: Re
                 isActive: objAccount.isActive,
                 status: objRuntime.status,
                 autoTraderEnabled: objRuntime.autoTraderEnabled,
+                ownerServerId: isLeaseActive(objLease) ? objLease?.ownerServerId || "" : "",
+                leaseExpiresAt: isLeaseActive(objLease) ? objLease?.leaseExpiresAt || "" : "",
+                survivalMode: Boolean(objSurvival?.runtimeState?.primaryDbOutageLastError),
+                survivalOwnerServerId: String(objSurvival?.ownerServerId || "").trim(),
+                survivalUpdatedAt: String(objSurvival?.updatedAt || "").trim(),
+                strategyRunId: String(objSurvival?.strategyRunId || getStrategyRunIdState(objRuntime) || "").trim(),
                 lastCycleAt: objRuntime.lastCycleAt,
                 updatedAt: objRuntime.updatedAt
             });
@@ -6961,6 +7847,112 @@ export async function listRollingFuturesLtDualRunningUsers(req: Request, res: Re
         res.status(500).json({
             status: "danger",
             message: getErrorMessage(objError, "Unable to load running Dual users.")
+        });
+    }
+}
+
+export async function switchRollingFuturesLtDualBackToPrimaryController(req: Request, res: Response): Promise<void> {
+    const vUserId = String(req.params.accountId || "").trim();
+    if (!vUserId) {
+        res.status(400).json({
+            status: "warning",
+            message: "Account id is required."
+        });
+        return;
+    }
+
+    try {
+        const objSurvival = await getSurvivalState(vUserId, "rolling-futures-lt-dual");
+        if (!objSurvival) {
+            throw new Error("No Survival DB state was found for this running strategy.");
+        }
+        if (!objSurvival.selectedApiProfileId) {
+            throw new Error("Survival DB does not have the selected API profile id for this strategy.");
+        }
+
+        const objRuntime = await loadRollingFuturesLtRuntime(vUserId, "rolling-futures-lt-dual")
+            || getDefaultRollingFuturesLtRuntime(vUserId, "rolling-futures-lt-dual");
+        const objProfile = await readLiveProfile(vUserId, "rolling-futures-lt-dual");
+        const arrLivePositions = await fetchLiveFuturePositions(
+            vUserId,
+            "rolling-futures-lt-dual",
+            objSurvival.selectedApiProfileId,
+            normalizeSymbolValue(objSurvival.symbol || objSurvival.uiState?.symbol)
+        );
+        const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, "rolling-futures-lt-dual", arrLivePositions);
+        await saveRollingFuturesLtRuntime({
+            ...objRuntime,
+            userId: vUserId,
+            strategyCode: "rolling-futures-lt-dual",
+            status: "running",
+            autoTraderEnabled: true,
+            selectedApiProfileId: objSurvival.selectedApiProfileId,
+            currentSymbol: normalizeSymbolValue(objSurvival.symbol || objSurvival.uiState?.symbol),
+            lastCycleAt: new Date().toISOString(),
+            lastError: "",
+            state: {
+                ...(objSurvival.runtimeState || {}),
+                primaryDbOutageLastError: "",
+                openPositions: await buildOpenPositionsPayload(vUserId, "rolling-futures-lt-dual", arrSaved)
+            }
+        });
+        await saveRollingFuturesLtProfile({
+            ...objProfile,
+            userId: vUserId,
+            strategyCode: "rolling-futures-lt-dual",
+            selectedApiProfileId: objSurvival.selectedApiProfileId,
+            uiState: {
+                ...getMergedUiState(objProfile),
+                ...(objSurvival.uiState || {})
+            }
+        });
+        await upsertSurvivalState({
+            userId: objSurvival.userId,
+            strategyCode: objSurvival.strategyCode,
+            strategyRunId: objSurvival.strategyRunId,
+            runTag: objSurvival.runTag,
+            runStatus: objSurvival.runStatus,
+            ownerServerId: objSurvival.ownerServerId,
+            ownerInstanceId: objSurvival.ownerInstanceId,
+            leaseToken: objSurvival.leaseToken,
+            leaseExpiresAt: objSurvival.leaseExpiresAt,
+            lastHeartbeatAt: new Date().toISOString(),
+            selectedApiProfileId: objSurvival.selectedApiProfileId,
+            profileReferenceName: objSurvival.profileReferenceName,
+            apiKey: objSurvival.apiKey,
+            apiSecret: objSurvival.apiSecret,
+            symbol: objSurvival.symbol,
+            strategyStartedAt: objSurvival.strategyStartedAt,
+            lastDeltaSyncAt: objSurvival.lastDeltaSyncAt,
+            lastPrimaryDbSyncAt: new Date().toISOString(),
+            openPositions: objSurvival.openPositions,
+            uiState: objSurvival.uiState,
+            runtimeState: {
+                ...(objSurvival.runtimeState || {}),
+                primaryDbOutageLastError: ""
+            },
+            riskState: objSurvival.riskState,
+            recoveryMetrics: objSurvival.recoveryMetrics,
+            lastOrderRefs: objSurvival.lastOrderRefs
+        });
+        await logFuturesEvent(
+            vUserId,
+            "rolling-futures-lt-dual",
+            "manual_action",
+            "success",
+            "Returned To Primary DB",
+            "Admin switched this running dual strategy back to Primary DB control.",
+            { reason: "admin_switch_to_primary_db" }
+        );
+        res.json({
+            status: "success",
+            message: "Strategy switched back to Primary DB control successfully."
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to switch this strategy back to Primary DB.")
         });
     }
 }

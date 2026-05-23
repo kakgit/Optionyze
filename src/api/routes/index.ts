@@ -45,6 +45,7 @@ import {
     getRollingFuturesLtDualProfile,
     getRollingFuturesLtDualRuntimeStatus,
     listRollingFuturesLtDualRunningUsers,
+    switchRollingFuturesLtDualBackToPrimaryController,
     recalculateRollingFuturesLtDualRecoveryTotalPnl,
     updateRollingFuturesLtDualRecoveryMetrics,
     reconcileRollingFuturesLtDualOpenPositions,
@@ -152,6 +153,9 @@ export function createApiRouter(
     });
     objRouter.get("/rollingfutures-lt-dual/admin/running-users", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
         await listRollingFuturesLtDualRunningUsers(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/admin/running-users/:accountId/switch-primary", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
+        await switchRollingFuturesLtDualBackToPrimaryController(req, res);
     });
     objRouter.post("/rollingfutures-lt-dual/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await saveRollingFuturesLtDualProfile(req, res);

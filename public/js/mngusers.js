@@ -1,17 +1,20 @@
 const gState = {
     users: [],
     filteredUsers: [],
+    runningUsers: [],
     pendingExecutionRequests: [],
     editingAccountId: "",
     resettingAccountId: "",
     currentAccountId: "",
     activeModal: "",
     isLoadingUsers: false,
+    isLoadingRunningUsers: false,
     isLoadingExecutionRequests: false,
     isSavingExecutionSettings: false,
     isSavingUser: false,
     isResettingPassword: false,
-    executingRequestId: ""
+    executingRequestId: "",
+    switchingPrimaryAccountId: ""
 };
 
 const els = {};
@@ -23,6 +26,9 @@ document.addEventListener("DOMContentLoaded", () => {
     els.searchInput?.addEventListener("input", applyFilters);
     els.refreshButton?.addEventListener("click", () => {
         void loadAdminData({ showSuccess: true });
+    });
+    els.refreshRunningUsersButton?.addEventListener("click", () => {
+        void refreshRunningUsers();
     });
     els.refreshExecRequestsButton?.addEventListener("click", () => {
         void refreshExecutionRequests();
@@ -44,6 +50,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     els.overlay?.addEventListener("click", closeActiveModal);
     els.userTableBody?.addEventListener("click", handleTableAction);
+    els.runningUsersTableBody?.addEventListener("click", handleRunningUsersAction);
     els.execRequestTableBody?.addEventListener("click", handleExecRequestAction);
     document.addEventListener("keydown", handleDocumentKeydown);
 
@@ -54,12 +61,15 @@ function cacheElements() {
     els.app = document.getElementById("mngUsersApp");
     els.searchInput = document.getElementById("searchInput");
     els.refreshButton = document.getElementById("btnRefresh");
+    els.refreshRunningUsersButton = document.getElementById("btnRefreshRunningUsers");
     els.refreshExecRequestsButton = document.getElementById("btnRefreshExecRequests");
     els.addUserButton = document.getElementById("btnAddUser");
     els.pageStatus = document.getElementById("pageStatus");
     els.resultCount = document.getElementById("resultCount");
     els.userTableBody = document.getElementById("userTableBody");
     els.execRequestCount = document.getElementById("execRequestCount");
+    els.runningUsersCount = document.getElementById("runningUsersCount");
+    els.runningUsersTableBody = document.getElementById("runningUsersTableBody");
     els.execRequestTableBody = document.getElementById("execRequestTableBody");
     els.autoExecSl = document.getElementById("autoExecSl");
     els.autoExecTp = document.getElementById("autoExecTp");
@@ -95,6 +105,38 @@ function cacheElements() {
     els.resetTemporaryPassword = document.getElementById("resetTemporaryPassword");
     els.resetConfirmPassword = document.getElementById("resetConfirmPassword");
     els.resetMustChangePassword = document.getElementById("resetMustChangePassword");
+}
+
+async function loadRunningUsers() {
+    if (gState.isLoadingRunningUsers) {
+        return;
+    }
+
+    gState.isLoadingRunningUsers = true;
+    try {
+        const objResult = await requestJson("/api/rollingfutures-lt-dual/admin/running-users", {
+            credentials: "same-origin"
+        }, "Unable to load running dual users.");
+        gState.runningUsers = Array.isArray(objResult.data) ? objResult.data : [];
+        renderRunningUsers();
+    }
+    catch (objError) {
+        setPageStatus(getErrorMessage(objError, "Unable to load running dual users."), "error");
+    }
+    finally {
+        gState.isLoadingRunningUsers = false;
+    }
+}
+
+async function refreshRunningUsers() {
+    setButtonBusy(els.refreshRunningUsersButton, true, "");
+    try {
+        await loadRunningUsers();
+        setPageStatus(`Loaded ${gState.runningUsers.length} running dual user${gState.runningUsers.length === 1 ? "" : "s"}.`, "success");
+    }
+    finally {
+        restoreIconButton(els.refreshRunningUsersButton);
+    }
 }
 
 async function loadUsers() {
@@ -158,14 +200,55 @@ async function loadAdminData(pOptions) {
     setButtonBusy(els.refreshButton, true, "Refreshing...");
 
     try {
-        await Promise.all([loadUsers(), loadExecutionRequests(), loadExecutionSettings()]);
+        await Promise.all([loadUsers(), loadRunningUsers(), loadExecutionRequests(), loadExecutionSettings()]);
         if (bShowSuccess) {
-            setPageStatus(`Loaded ${gState.users.length} user account${gState.users.length === 1 ? "" : "s"} and ${gState.pendingExecutionRequests.length} pending strategy request${gState.pendingExecutionRequests.length === 1 ? "" : "s"}.`, "success");
+            setPageStatus(`Loaded ${gState.users.length} user account${gState.users.length === 1 ? "" : "s"}, ${gState.runningUsers.length} running dual user${gState.runningUsers.length === 1 ? "" : "s"}, and ${gState.pendingExecutionRequests.length} pending strategy request${gState.pendingExecutionRequests.length === 1 ? "" : "s"}.`, "success");
         }
     }
     finally {
         setButtonBusy(els.refreshButton, false, "Refresh");
     }
+}
+
+function renderRunningUsers() {
+    if (els.runningUsersCount) {
+        els.runningUsersCount.textContent = `${gState.runningUsers.length} running`;
+    }
+
+    if (!els.runningUsersTableBody) {
+        return;
+    }
+
+    if (!gState.runningUsers.length) {
+        els.runningUsersTableBody.innerHTML = `<tr><td colspan="6" class="mngusers-empty">No running Dual live users right now.</td></tr>`;
+        return;
+    }
+
+    els.runningUsersTableBody.innerHTML = gState.runningUsers.map((objUser) => {
+        const bSwitching = gState.switchingPrimaryAccountId === objUser.accountId;
+        const vModeChip = objUser.survivalMode
+            ? `<span class="mngusers-chip mngusers-chip-warn">Survival DB</span>`
+            : `<span class="mngusers-chip mngusers-chip-live">Primary DB</span>`;
+        const vOwner = objUser.survivalMode
+            ? (objUser.survivalOwnerServerId || objUser.ownerServerId || "-")
+            : (objUser.ownerServerId || "-");
+        return `
+            <tr>
+                <td class="mngusers-nowrap">${escapeHtml(objUser.fullName || "-")}</td>
+                <td class="mngusers-nowrap">${escapeHtml(objUser.email || "-")}</td>
+                <td>${vModeChip}</td>
+                <td class="mngusers-nowrap">${escapeHtml(vOwner)}</td>
+                <td class="mngusers-nowrap">${escapeHtml(formatDateTime(objUser.lastCycleAt || objUser.updatedAt))}</td>
+                <td class="mngusers-nowrap">
+                    ${objUser.survivalMode ? `
+                        <button class="app-link-btn" type="button" data-running-action="switch-primary" data-account-id="${escapeHtml(objUser.accountId)}" ${bSwitching ? "disabled" : ""}>
+                            ${bSwitching ? "Switching..." : "Switch To Primary DB"}
+                        </button>
+                    ` : `<span class="mngusers-chip mngusers-chip-muted">Normal</span>`}
+                </td>
+            </tr>
+        `;
+    }).join("");
 }
 
 async function loadExecutionSettings() {
@@ -370,6 +453,18 @@ function handleExecRequestAction(objEvent) {
     }
     if (vAction === "cancel" && vRequestId) {
         void cancelPendingRequest(vRequestId);
+    }
+}
+
+function handleRunningUsersAction(objEvent) {
+    const objButton = objEvent.target instanceof Element ? objEvent.target.closest("button[data-running-action]") : null;
+    if (!(objButton instanceof HTMLButtonElement)) {
+        return;
+    }
+    const vAction = String(objButton.dataset.runningAction || "").trim();
+    const vAccountId = String(objButton.dataset.accountId || "").trim();
+    if (vAction === "switch-primary" && vAccountId) {
+        void switchRunningUserToPrimary(vAccountId);
     }
 }
 
@@ -650,6 +745,38 @@ async function cancelPendingRequest(pRequestId) {
     finally {
         gState.executingRequestId = "";
         renderExecutionRequests();
+    }
+}
+
+async function switchRunningUserToPrimary(pAccountId) {
+    if (!pAccountId || gState.switchingPrimaryAccountId) {
+        return;
+    }
+
+    const objUser = gState.runningUsers.find((objRow) => objRow.accountId === pAccountId);
+    const vConfirmed = window.confirm(`Switch ${objUser?.fullName || "this running user"} back to Primary DB control now?`);
+    if (!vConfirmed) {
+        return;
+    }
+
+    gState.switchingPrimaryAccountId = pAccountId;
+    renderRunningUsers();
+
+    try {
+        const objResult = await requestJson(`/api/rollingfutures-lt-dual/admin/running-users/${encodeURIComponent(pAccountId)}/switch-primary`, {
+            method: "POST",
+            credentials: "same-origin"
+        }, "Unable to switch this running strategy back to Primary DB.");
+        setPageStatus(objResult.message || "Strategy switched back to Primary DB successfully.", "success");
+        await loadAdminData();
+    }
+    catch (objError) {
+        setPageStatus(getErrorMessage(objError, "Unable to switch this running strategy back to Primary DB."), "error");
+        await loadRunningUsers().catch(() => undefined);
+    }
+    finally {
+        gState.switchingPrimaryAccountId = "";
+        renderRunningUsers();
     }
 }
 

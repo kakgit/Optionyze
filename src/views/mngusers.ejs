@@ -58,6 +58,41 @@
         <section class="app-panel">
             <div class="mngusers-section-head">
                 <div>
+                    <h2>Dual Running Users</h2>
+                    <p class="app-copy">Review active Dual live users, see whether they are in Survival DB mode, and manually return them to Primary DB when you decide the database is healthy again.</p>
+                </div>
+                <div class="mngusers-inline-tools">
+                    <button id="btnRefreshRunningUsers" class="mngusers-icon-btn" type="button" title="Refresh running dual users" aria-label="Refresh running dual users">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                            <path d="M20 4v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <p id="runningUsersCount" class="app-copy">0 running</p>
+            <div class="mngusers-table-wrap">
+                <table class="mngusers-table">
+                    <thead>
+                        <tr>
+                            <th class="mngusers-nowrap">User Name</th>
+                            <th class="mngusers-nowrap">Email ID</th>
+                            <th>Mode</th>
+                            <th>Owner</th>
+                            <th class="mngusers-nowrap">Last Cycle</th>
+                            <th class="mngusers-nowrap">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="runningUsersTableBody">
+                        <tr><td colspan="6" class="mngusers-empty">Loading running dual users...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="app-panel">
+            <div class="mngusers-section-head">
+                <div>
                     <h2>Pending Strategy Executions</h2>
                     <p class="app-copy">Dual live Exec Strategy requests wait here for admin approval and execution.</p>
                 </div>

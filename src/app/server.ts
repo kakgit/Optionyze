@@ -6,7 +6,9 @@ import dns from "node:dns";
 import path from "node:path";
 import { createApiRouter } from "../api/routes";
 import { RunnerManager } from "../runners/runner-manager";
+import { getServerId } from "../runtime/server-runtime";
 import { ensurePostgresSchema, isPostgresConfigured } from "../storage/postgres";
+import { ensureSurvivalPostgresSchema } from "../storage/survival-postgres";
 import { StrategyFoGreeksPaperService } from "../strategies/strategy-fo-greeks-paper/service";
 import {
     renderRollingFuturesLiveDualPage,
@@ -45,6 +47,7 @@ async function bootstrap(): Promise<void> {
     const strategyFoPaperService = new StrategyFoGreeksPaperService(runnerManager);
 
     await ensurePostgresSchema();
+    await ensureSurvivalPostgresSchema();
     await ensureBootstrapAdminAccount();
     await cleanupExpiredSessions();
     await runnerManager.hydrate();
@@ -89,7 +92,7 @@ async function bootstrap(): Promise<void> {
     app.use("/api", createApiRouter(runnerManager, strategyFoPaperService));
 
     app.listen(port, () => {
-        console.log(`Optionyze server listening on port ${port}`);
+        console.log(`Optionyze server listening on port ${port} as ${getServerId()}`);
     });
 }
 

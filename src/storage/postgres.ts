@@ -14,6 +14,22 @@ function shouldRecyclePoolForError(pError: unknown): boolean {
         || vMessage.includes("server closed the connection unexpectedly");
 }
 
+export function isPrimaryDatabaseUnavailableError(pError: unknown): boolean {
+    const vMessage = pError instanceof Error
+        ? String(pError.message || "").toLowerCase()
+        : String((pError as { message?: unknown } | null)?.message || "").toLowerCase();
+
+    return shouldRecyclePoolForError(pError)
+        || vMessage.includes("database_url is not configured")
+        || vMessage.includes("connection refused")
+        || vMessage.includes("could not connect")
+        || vMessage.includes("timeout expired")
+        || vMessage.includes("econnreset")
+        || vMessage.includes("enotfound")
+        || vMessage.includes("the database system is starting up")
+        || vMessage.includes("the database system is shutting down");
+}
+
 function attachPoolLifecycleHandlers(pPool: Pool): void {
     pPool.on("error", (objError: Error) => {
         console.error("[postgres] pool error:", objError.message);
@@ -233,6 +249,23 @@ export async function ensurePostgresSchema(): Promise<void> {
             last_cycle_at TIMESTAMPTZ NULL,
             last_error TEXT NOT NULL DEFAULT '',
             state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (user_id, strategy_code)
+        );
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_strategy_leases (
+            user_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            strategy_code TEXT NOT NULL,
+            owner_server_id TEXT NOT NULL,
+            owner_instance_id TEXT NOT NULL DEFAULT '',
+            lease_token TEXT NOT NULL,
+            lease_expires_at TIMESTAMPTZ NOT NULL,
+            last_heartbeat_at TIMESTAMPTZ NOT NULL,
+            takeover_generation INTEGER NOT NULL DEFAULT 0,
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (user_id, strategy_code)
         );
