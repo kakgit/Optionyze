@@ -1452,14 +1452,23 @@
             const severity = String(row.severity || "info").trim().toLowerCase();
             const title = String(row.title || "Activity").trim();
             const message = String(row.message || "").trim();
+            const eventType = String(row.eventType || "").trim().toLowerCase();
             const createdAt = formatDateTimeDisplay(row.createdAt);
             const eventId = String(row.eventId || "").trim();
+            const eventBadge = eventType === "delta_exchange_error"
+                ? '<span class="rolling-demo-event-badge delta">Delta Exchange</span>'
+                : (eventType === "engine_error"
+                    ? '<span class="rolling-demo-event-badge engine">Engine</span>'
+                    : "");
             return `
                 <article class="rolling-demo-event-item ${escapeHtml(severity)}">
                     <div class="rolling-demo-event-head">
-                        <strong>${escapeHtml(title)}</strong>
+                        <div class="rolling-demo-event-title-stack">
+                            <strong class="rolling-demo-event-title">${escapeHtml(title)}</strong>
+                            ${eventBadge}
+                        </div>
                         <div style="display:flex; align-items:center; gap:10px;">
-                            <span>${escapeHtml(createdAt)}</span>
+                            <span class="rolling-demo-event-time">${escapeHtml(createdAt)}</span>
                             <button class="rolling-demo-icon-btn warn rolling-live-delete-event" type="button" data-event-id="${escapeHtml(eventId)}" title="Delete this activity log entry" aria-label="Delete this activity log entry">
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="M18 6 6 18" />
@@ -1468,7 +1477,7 @@
                             </button>
                         </div>
                     </div>
-                    <p>${escapeHtml(message)}</p>
+                    <p class="rolling-demo-event-message">${escapeHtml(message)}</p>
                 </article>
             `;
         }).join("");

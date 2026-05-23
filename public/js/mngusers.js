@@ -234,7 +234,7 @@ function renderRunningUsers() {
         const vSurvivalOwner = objUser.survivalOwnerServerId || "-";
         const vOutageChip = objUser.simulatedPrimaryDbOutage
             ? `<span class="mngusers-chip mngusers-chip-warn">Outage Test ON</span>`
-            : `<span class="mngusers-chip mngusers-chip-muted">Outage Test OFF</span>`;
+            : "";
         return `
             <tr>
                 <td class="mngusers-nowrap">${escapeHtml(objUser.fullName || "-")}</td>
@@ -242,7 +242,7 @@ function renderRunningUsers() {
                 <td>
                     <div class="mngusers-status-stack">
                         <div>${vModeChip}</div>
-                        <div>${vOutageChip}</div>
+                        ${vOutageChip ? `<div>${vOutageChip}</div>` : ""}
                     </div>
                 </td>
                 <td>

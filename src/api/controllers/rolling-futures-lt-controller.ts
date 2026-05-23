@@ -1910,6 +1910,99 @@ async function getFriendlyDeltaConnectionError(pError: unknown): Promise<{
     };
 }
 
+async function getDeltaErrorLogDescriptor(pError: unknown): Promise<{
+    isDeltaError: boolean;
+    eventType: string;
+    severity: "warning" | "error";
+    title: string;
+    message: string;
+    payload: Record<string, unknown>;
+}> {
+    const objFriendly = await getFriendlyDeltaConnectionError(pError);
+    const vRawMessage = getErrorMessage(pError, "Live auto trader cycle failed.");
+    const vNormalized = vRawMessage.toLowerCase();
+    const objPayload = getDeltaErrorPayload(pError);
+    const vDeltaCode = String(objPayload?.error?.code || "").trim();
+    const bLooksDeltaError = objFriendly.state !== "warning"
+        || Boolean(vDeltaCode)
+        || vNormalized.includes("delta")
+        || vNormalized.includes("unauthorized")
+        || vNormalized.includes("forbidden")
+        || vNormalized.includes("rate limit")
+        || vNormalized.includes("timeout")
+        || vNormalized.includes("fetch failed")
+        || vNormalized.includes("network");
+
+    if (!bLooksDeltaError) {
+        return {
+            isDeltaError: false,
+            eventType: "engine_error",
+            severity: "error",
+            title: "Live Auto Trader Cycle Failed",
+            message: vRawMessage,
+            payload: { reason: "auto_trader_cycle_error" }
+        };
+    }
+
+    if (objFriendly.state === "auth_failed") {
+        return {
+            isDeltaError: true,
+            eventType: "delta_exchange_error",
+            severity: "error",
+            title: "Delta Exchange Authentication Error",
+            message: objFriendly.message,
+            payload: {
+                reason: "delta_auth_error",
+                connectionState: objFriendly.state,
+                deltaCode: vDeltaCode
+            }
+        };
+    }
+
+    if (objFriendly.state === "rate_limited") {
+        return {
+            isDeltaError: true,
+            eventType: "delta_exchange_error",
+            severity: "warning",
+            title: "Delta Exchange Rate Limit",
+            message: objFriendly.message,
+            payload: {
+                reason: "delta_rate_limit",
+                connectionState: objFriendly.state,
+                deltaCode: vDeltaCode
+            }
+        };
+    }
+
+    if (objFriendly.state === "disconnected") {
+        return {
+            isDeltaError: true,
+            eventType: "delta_exchange_error",
+            severity: "error",
+            title: "Delta Exchange Connection Lost",
+            message: objFriendly.message,
+            payload: {
+                reason: "delta_connection_error",
+                connectionState: objFriendly.state,
+                deltaCode: vDeltaCode
+            }
+        };
+    }
+
+    return {
+        isDeltaError: true,
+        eventType: "delta_exchange_error",
+        severity: "error",
+        title: "Delta Exchange Error",
+        message: objFriendly.state === "warning" ? vRawMessage : objFriendly.message,
+        payload: {
+            reason: "delta_exchange_error",
+            connectionState: objFriendly.state,
+            deltaCode: vDeltaCode
+        }
+    };
+}
+
 async function resolveProfileId(req: Request, pStrategyCode: RollingFuturesLtStrategyCode): Promise<string> {
     const vQueryProfileId = String(req.query?.profileId || req.body?.profileId || "").trim();
     if (vQueryProfileId) {
@@ -6409,14 +6502,15 @@ async function runAutoTraderCycle(
             lastError: vErrorMessage
         });
         if (String(objRuntime.lastError || "").trim() !== vErrorMessage) {
+            const objErrorLog = await getDeltaErrorLogDescriptor(objError);
             await logFuturesEvent(
                 pUserId,
                 pStrategyCode,
-                "engine_error",
-                "error",
-                "Live Auto Trader Cycle Failed",
-                vErrorMessage,
-                { reason: "auto_trader_cycle_error" }
+                objErrorLog.eventType,
+                objErrorLog.severity,
+                objErrorLog.title,
+                objErrorLog.message,
+                objErrorLog.payload
             );
         }
     }

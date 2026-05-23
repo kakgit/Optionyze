@@ -625,6 +625,37 @@
     font-weight:700;
 }
 
+.rolling-demo-event-title-stack {
+    display:grid;
+    gap:6px;
+}
+
+.rolling-demo-event-badge {
+    display:inline-flex;
+    align-items:center;
+    width:max-content;
+    padding:4px 8px;
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,.10);
+    color:var(--app-muted);
+    font-size:.72rem;
+    font-weight:600;
+    letter-spacing:.03em;
+    text-transform:uppercase;
+}
+
+.rolling-demo-event-badge.delta {
+    border-color:rgba(248,113,113,.24);
+    background:rgba(248,113,113,.10);
+    color:#ffc0c0;
+}
+
+.rolling-demo-event-badge.engine {
+    border-color:rgba(242,182,90,.24);
+    background:rgba(242,182,90,.10);
+    color:#ffd79a;
+}
+
 .rolling-demo-event-time {
     color:var(--app-muted);
     font-size:.8rem;
