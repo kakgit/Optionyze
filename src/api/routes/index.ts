@@ -36,6 +36,7 @@ import {
     executeRollingFuturesLtDualManualFuture,
     executeRollingFuturesLtDualManualOption,
     executeRollingFuturesLtDualStrategy,
+    enableRollingFuturesLtDualSimulatedPrimaryOutageController,
     getRollingFuturesLtDualAccountSummary,
     getRollingFuturesLtDualClosedPositions,
     getRollingFuturesLtDualConnectionStatus,
@@ -45,6 +46,7 @@ import {
     getRollingFuturesLtDualProfile,
     getRollingFuturesLtDualRuntimeStatus,
     listRollingFuturesLtDualRunningUsers,
+    disableRollingFuturesLtDualSimulatedPrimaryOutageController,
     switchRollingFuturesLtDualBackToPrimaryController,
     recalculateRollingFuturesLtDualRecoveryTotalPnl,
     updateRollingFuturesLtDualRecoveryMetrics,
@@ -153,6 +155,12 @@ export function createApiRouter(
     });
     objRouter.get("/rollingfutures-lt-dual/admin/running-users", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
         await listRollingFuturesLtDualRunningUsers(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/admin/running-users/:accountId/simulate-primary-outage", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
+        await enableRollingFuturesLtDualSimulatedPrimaryOutageController(req, res);
+    });
+    objRouter.delete("/rollingfutures-lt-dual/admin/running-users/:accountId/simulate-primary-outage", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
+        await disableRollingFuturesLtDualSimulatedPrimaryOutageController(req, res);
     });
     objRouter.post("/rollingfutures-lt-dual/admin/running-users/:accountId/switch-primary", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
         await switchRollingFuturesLtDualBackToPrimaryController(req, res);

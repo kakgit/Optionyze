@@ -14,7 +14,8 @@ const gState = {
     isSavingUser: false,
     isResettingPassword: false,
     executingRequestId: "",
-    switchingPrimaryAccountId: ""
+    switchingPrimaryAccountId: "",
+    simulatingPrimaryOutageAccountId: ""
 };
 
 const els = {};
@@ -232,6 +233,7 @@ function renderRunningUsers() {
         const vOwner = objUser.survivalMode
             ? (objUser.survivalOwnerServerId || objUser.ownerServerId || "-")
             : (objUser.ownerServerId || "-");
+        const bSimulating = gState.simulatingPrimaryOutageAccountId === objUser.accountId;
         return `
             <tr>
                 <td class="mngusers-nowrap">${escapeHtml(objUser.fullName || "-")}</td>
@@ -240,11 +242,18 @@ function renderRunningUsers() {
                 <td class="mngusers-nowrap">${escapeHtml(vOwner)}</td>
                 <td class="mngusers-nowrap">${escapeHtml(formatDateTime(objUser.lastCycleAt || objUser.updatedAt))}</td>
                 <td class="mngusers-nowrap">
+                    ${!objUser.survivalMode ? `
+                        <button class="app-link-btn" type="button" data-running-action="${objUser.simulatedPrimaryDbOutage ? "clear-simulated-outage" : "simulate-primary-outage"}" data-account-id="${escapeHtml(objUser.accountId)}" ${bSimulating ? "disabled" : ""}>
+                            ${bSimulating
+                                ? (objUser.simulatedPrimaryDbOutage ? "Clearing..." : "Enabling...")
+                                : (objUser.simulatedPrimaryDbOutage ? "Clear Outage Test" : "Simulate Primary DB Outage")}
+                        </button>
+                    ` : ""}
                     ${objUser.survivalMode ? `
                         <button class="app-link-btn" type="button" data-running-action="switch-primary" data-account-id="${escapeHtml(objUser.accountId)}" ${bSwitching ? "disabled" : ""}>
                             ${bSwitching ? "Switching..." : "Switch To Primary DB"}
                         </button>
-                    ` : `<span class="mngusers-chip mngusers-chip-muted">Normal</span>`}
+                    ` : (!objUser.simulatedPrimaryDbOutage ? `<span class="mngusers-chip mngusers-chip-muted">Normal</span>` : "")}
                 </td>
             </tr>
         `;
@@ -465,6 +474,14 @@ function handleRunningUsersAction(objEvent) {
     const vAccountId = String(objButton.dataset.accountId || "").trim();
     if (vAction === "switch-primary" && vAccountId) {
         void switchRunningUserToPrimary(vAccountId);
+        return;
+    }
+    if (vAction === "simulate-primary-outage" && vAccountId) {
+        void setSimulatedPrimaryOutage(vAccountId, true);
+        return;
+    }
+    if (vAction === "clear-simulated-outage" && vAccountId) {
+        void setSimulatedPrimaryOutage(vAccountId, false);
     }
 }
 
@@ -776,6 +793,51 @@ async function switchRunningUserToPrimary(pAccountId) {
     }
     finally {
         gState.switchingPrimaryAccountId = "";
+        renderRunningUsers();
+    }
+}
+
+async function setSimulatedPrimaryOutage(pAccountId, pEnabled) {
+    if (!pAccountId || gState.simulatingPrimaryOutageAccountId) {
+        return;
+    }
+
+    const objUser = gState.runningUsers.find((objRow) => objRow.accountId === pAccountId);
+    const vConfirmed = window.confirm(
+        pEnabled
+            ? `Simulate Primary DB outage now for ${objUser?.fullName || "this running user"}?`
+            : `Clear the simulated Primary DB outage for ${objUser?.fullName || "this running user"}?`
+    );
+    if (!vConfirmed) {
+        return;
+    }
+
+    gState.simulatingPrimaryOutageAccountId = pAccountId;
+    renderRunningUsers();
+
+    try {
+        const objResult = await requestJson(`/api/rollingfutures-lt-dual/admin/running-users/${encodeURIComponent(pAccountId)}/simulate-primary-outage`, {
+            method: pEnabled ? "POST" : "DELETE",
+            credentials: "same-origin"
+        }, pEnabled
+            ? "Unable to enable simulated Primary DB outage."
+            : "Unable to clear simulated Primary DB outage.");
+        setPageStatus(
+            objResult.message || (pEnabled
+                ? "Simulated Primary DB outage enabled."
+                : "Simulated Primary DB outage cleared."),
+            "success"
+        );
+        await loadAdminData();
+    }
+    catch (objError) {
+        setPageStatus(getErrorMessage(objError, pEnabled
+            ? "Unable to enable simulated Primary DB outage."
+            : "Unable to clear simulated Primary DB outage."), "error");
+        await loadRunningUsers().catch(() => undefined);
+    }
+    finally {
+        gState.simulatingPrimaryOutageAccountId = "";
         renderRunningUsers();
     }
 }

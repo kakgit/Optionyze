@@ -119,6 +119,11 @@ const gProfitCloseConfirmationMs = 5 * 60 * 1000;
 const gRestartCloseProtectionMs = 5 * 60 * 1000;
 const gNeutralityHedgeCooldownMs = 2 * 60 * 1000;
 const gSurvivalDebugPrefix = "[dual-survival]";
+const gSimulatedPrimaryOutageUsers = new Map<string, {
+    strategyCode: RollingFuturesLtStrategyCode;
+    enabledAt: string;
+    enabledByAccountId: string;
+}>();
 
 function logDualSurvivalDebug(
     pStage: string,
@@ -149,6 +154,44 @@ function shouldForceDualSurvivalTest(
         .map((vValue) => String(vValue || "").trim())
         .filter(Boolean);
     return !arrAllowedUserIds.length || arrAllowedUserIds.includes(String(pUserId || "").trim());
+}
+
+function buildSimulatedPrimaryOutageError(): Error & {
+    code: string;
+    syscall: string;
+    hostname: string;
+} {
+    const objError = new Error("Simulated primary database outage for live-cycle testing.") as Error & {
+        code: string;
+        syscall: string;
+        hostname: string;
+    };
+    objError.code = "ENOTFOUND";
+    objError.syscall = "getaddrinfo";
+    objError.hostname = "simulated-primary-db-outage";
+    return objError;
+}
+
+function getSimulatedPrimaryOutageState(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode
+): {
+    strategyCode: RollingFuturesLtStrategyCode;
+    enabledAt: string;
+    enabledByAccountId: string;
+} | null {
+    const objState = gSimulatedPrimaryOutageUsers.get(String(pUserId || "").trim());
+    if (!objState || objState.strategyCode !== pStrategyCode) {
+        return null;
+    }
+    return objState;
+}
+
+function shouldSimulatePrimaryDbOutage(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode
+): boolean {
+    return Boolean(getSimulatedPrimaryOutageState(pUserId, pStrategyCode));
 }
 const gExecStrategyUnauthorizedMessage = "Not Authorised to Execute, Please Contact Admin";
 const gDualScaledBaselineFloorRatio = 0.25;
@@ -5748,6 +5791,17 @@ async function runAutoTraderCycle(
             return;
         }
 
+        if (shouldSimulatePrimaryDbOutage(pUserId, pStrategyCode)) {
+            const objSimulatedOutage = getSimulatedPrimaryOutageState(pUserId, pStrategyCode);
+            logDualSurvivalDebug("simulated_primary_db_outage_requested", {
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                enabledAt: String(objSimulatedOutage?.enabledAt || "").trim(),
+                enabledByAccountId: String(objSimulatedOutage?.enabledByAccountId || "").trim()
+            });
+            throw buildSimulatedPrimaryOutageError();
+        }
+
         const arrPreviouslySavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
         const arrLivePositions = await fetchLiveFuturePositions(pUserId, pStrategyCode, vSelectedApiProfileId, vSymbol);
         await reconcileRemovedTrackedPositionsPnl(
@@ -7998,6 +8052,8 @@ export async function listRollingFuturesLtDualRunningUsers(req: Request, res: Re
                 survivalOwnerServerId: String(objSurvival?.ownerServerId || "").trim(),
                 survivalUpdatedAt: String(objSurvival?.updatedAt || "").trim(),
                 strategyRunId: String(objSurvival?.strategyRunId || getStrategyRunIdState(objRuntime) || "").trim(),
+                simulatedPrimaryDbOutage: shouldSimulatePrimaryDbOutage(objRuntime.userId, "rolling-futures-lt-dual"),
+                simulatedPrimaryDbOutageEnabledAt: String(getSimulatedPrimaryOutageState(objRuntime.userId, "rolling-futures-lt-dual")?.enabledAt || "").trim(),
                 lastCycleAt: objRuntime.lastCycleAt,
                 updatedAt: objRuntime.updatedAt
             });
@@ -8015,6 +8071,54 @@ export async function listRollingFuturesLtDualRunningUsers(req: Request, res: Re
             message: getErrorMessage(objError, "Unable to load running Dual users.")
         });
     }
+}
+
+export async function enableRollingFuturesLtDualSimulatedPrimaryOutageController(req: Request, res: Response): Promise<void> {
+    const vUserId = String(req.params.accountId || "").trim();
+    const vEnabledByAccountId = String(getAccountId(req) || "").trim();
+    if (!vUserId) {
+        res.status(400).json({
+            status: "warning",
+            message: "Account id is required."
+        });
+        return;
+    }
+
+    gSimulatedPrimaryOutageUsers.set(vUserId, {
+        strategyCode: "rolling-futures-lt-dual",
+        enabledAt: new Date().toISOString(),
+        enabledByAccountId: vEnabledByAccountId
+    });
+    logDualSurvivalDebug("simulated_primary_db_outage_enabled", {
+        userId: vUserId,
+        strategyCode: "rolling-futures-lt-dual",
+        enabledByAccountId: vEnabledByAccountId
+    });
+    res.json({
+        status: "success",
+        message: "Simulated Primary DB outage enabled for this running dual strategy."
+    });
+}
+
+export async function disableRollingFuturesLtDualSimulatedPrimaryOutageController(req: Request, res: Response): Promise<void> {
+    const vUserId = String(req.params.accountId || "").trim();
+    if (!vUserId) {
+        res.status(400).json({
+            status: "warning",
+            message: "Account id is required."
+        });
+        return;
+    }
+
+    gSimulatedPrimaryOutageUsers.delete(vUserId);
+    logDualSurvivalDebug("simulated_primary_db_outage_disabled", {
+        userId: vUserId,
+        strategyCode: "rolling-futures-lt-dual"
+    });
+    res.json({
+        status: "success",
+        message: "Simulated Primary DB outage disabled for this running dual strategy."
+    });
 }
 
 export async function switchRollingFuturesLtDualBackToPrimaryController(req: Request, res: Response): Promise<void> {
