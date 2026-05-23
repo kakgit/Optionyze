@@ -18,8 +18,14 @@ export function isPrimaryDatabaseUnavailableError(pError: unknown): boolean {
     const vMessage = pError instanceof Error
         ? String(pError.message || "").toLowerCase()
         : String((pError as { message?: unknown } | null)?.message || "").toLowerCase();
+    const vCode = String((pError as { code?: unknown } | null)?.code || "").trim().toLowerCase();
 
     return shouldRecyclePoolForError(pError)
+        || vCode === "enotfound"
+        || vCode === "econnrefused"
+        || vCode === "econnreset"
+        || vCode === "57p01"
+        || vCode === "57p03"
         || vMessage.includes("database_url is not configured")
         || vMessage.includes("connection refused")
         || vMessage.includes("could not connect")
