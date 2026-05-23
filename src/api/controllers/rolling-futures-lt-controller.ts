@@ -5630,7 +5630,7 @@ async function runDualSurvivalOnlyCycle(
         strategyCode: pStrategyCode
     });
     const objSurvival = await getSurvivalState(pUserId, pStrategyCode);
-    if (!objSurvival || objSurvival.runStatus !== "active" || !objSurvival.selectedApiProfileId) {
+    if (!objSurvival || !objSurvival.selectedApiProfileId) {
         logDualSurvivalDebug("cycle_exit_invalid_state", {
             userId: pUserId,
             strategyCode: pStrategyCode,
@@ -5640,15 +5640,36 @@ async function runDualSurvivalOnlyCycle(
         });
         return;
     }
+    const vSymbol = normalizeSymbolValue(objSurvival.symbol || objSurvival.uiState?.symbol);
+    let arrPositions = await fetchLiveFuturePositions(pUserId, pStrategyCode, objSurvival.selectedApiProfileId, vSymbol);
+    if (objSurvival.runStatus !== "active" && !arrPositions.length) {
+        logDualSurvivalDebug("cycle_exit_invalid_state", {
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            hasSurvivalState: true,
+            runStatus: String(objSurvival.runStatus || "").trim(),
+            hasSelectedApiProfileId: true,
+            livePositionCount: 0
+        });
+        return;
+    }
+    if (objSurvival.runStatus !== "active" && arrPositions.length) {
+        logDualSurvivalDebug("cycle_reactivating_from_live_positions", {
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            previousRunStatus: String(objSurvival.runStatus || "").trim(),
+            livePositionCount: arrPositions.length
+        });
+    }
     logDualSurvivalDebug("cycle_state_loaded", {
         userId: pUserId,
         strategyCode: pStrategyCode,
         runTag: String(objSurvival.runTag || "").trim(),
         selectedApiProfileId: String(objSurvival.selectedApiProfileId || "").trim(),
         symbol: String(objSurvival.symbol || objSurvival.uiState?.symbol || "").trim(),
-        trackedPositionCount: Array.isArray(objSurvival.openPositions) ? objSurvival.openPositions.length : 0
+        trackedPositionCount: Array.isArray(objSurvival.openPositions) ? objSurvival.openPositions.length : 0,
+        livePositionCount: arrPositions.length
     });
-    const vSymbol = normalizeSymbolValue(objSurvival.symbol || objSurvival.uiState?.symbol);
     const objProfile = buildSyntheticProfileFromSurvival(pUserId, pStrategyCode, objSurvival);
     logDualSurvivalDebug("cycle_profile_built", {
         userId: pUserId,
@@ -5656,7 +5677,6 @@ async function runDualSurvivalOnlyCycle(
         symbol: vSymbol,
         selectedApiProfileId: String(objProfile.selectedApiProfileId || "").trim()
     });
-    let arrPositions = await fetchLiveFuturePositions(pUserId, pStrategyCode, objSurvival.selectedApiProfileId, vSymbol);
     logDualSurvivalDebug("cycle_live_positions_loaded", {
         userId: pUserId,
         strategyCode: pStrategyCode,
