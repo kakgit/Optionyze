@@ -235,7 +235,6 @@ function renderRunningUsers() {
         const vOutageChip = objUser.simulatedPrimaryDbOutage
             ? `<span class="mngusers-chip mngusers-chip-warn">Outage Test ON</span>`
             : `<span class="mngusers-chip mngusers-chip-muted">Outage Test OFF</span>`;
-        const bSimulating = gState.simulatingPrimaryOutageAccountId === objUser.accountId;
         return `
             <tr>
                 <td class="mngusers-nowrap">${escapeHtml(objUser.fullName || "-")}</td>
@@ -254,18 +253,11 @@ function renderRunningUsers() {
                 </td>
                 <td class="mngusers-nowrap">${escapeHtml(formatDateTime(objUser.lastCycleAt || objUser.updatedAt))}</td>
                 <td class="mngusers-nowrap">
-                    ${!objUser.survivalMode ? `
-                        <button class="app-link-btn" type="button" data-running-action="${objUser.simulatedPrimaryDbOutage ? "clear-simulated-outage" : "simulate-primary-outage"}" data-account-id="${escapeHtml(objUser.accountId)}" ${bSimulating ? "disabled" : ""}>
-                            ${bSimulating
-                                ? (objUser.simulatedPrimaryDbOutage ? "Clearing..." : "Enabling...")
-                                : (objUser.simulatedPrimaryDbOutage ? "Clear Outage Test" : "Simulate Primary DB Outage")}
-                        </button>
-                    ` : ""}
                     ${objUser.survivalMode ? `
                         <button class="app-link-btn" type="button" data-running-action="switch-primary" data-account-id="${escapeHtml(objUser.accountId)}" ${bSwitching ? "disabled" : ""}>
                             ${bSwitching ? "Switching..." : "Switch To Primary DB"}
                         </button>
-                    ` : (!objUser.simulatedPrimaryDbOutage ? `<span class="mngusers-chip mngusers-chip-muted">Normal</span>` : "")}
+                    ` : `<span class="mngusers-chip mngusers-chip-muted">Normal</span>`}
                 </td>
             </tr>
         `;
@@ -486,14 +478,6 @@ function handleRunningUsersAction(objEvent) {
     const vAccountId = String(objButton.dataset.accountId || "").trim();
     if (vAction === "switch-primary" && vAccountId) {
         void switchRunningUserToPrimary(vAccountId);
-        return;
-    }
-    if (vAction === "simulate-primary-outage" && vAccountId) {
-        void setSimulatedPrimaryOutage(vAccountId, true);
-        return;
-    }
-    if (vAction === "clear-simulated-outage" && vAccountId) {
-        void setSimulatedPrimaryOutage(vAccountId, false);
     }
 }
 
