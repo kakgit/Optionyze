@@ -230,16 +230,28 @@ function renderRunningUsers() {
         const vModeChip = objUser.survivalMode
             ? `<span class="mngusers-chip mngusers-chip-warn">Survival DB</span>`
             : `<span class="mngusers-chip mngusers-chip-live">Primary DB</span>`;
-        const vOwner = objUser.survivalMode
-            ? (objUser.survivalOwnerServerId || objUser.ownerServerId || "-")
-            : (objUser.ownerServerId || "-");
+        const vPrimaryOwner = objUser.ownerServerId || "-";
+        const vSurvivalOwner = objUser.survivalOwnerServerId || "-";
+        const vOutageChip = objUser.simulatedPrimaryDbOutage
+            ? `<span class="mngusers-chip mngusers-chip-warn">Outage Test ON</span>`
+            : `<span class="mngusers-chip mngusers-chip-muted">Outage Test OFF</span>`;
         const bSimulating = gState.simulatingPrimaryOutageAccountId === objUser.accountId;
         return `
             <tr>
                 <td class="mngusers-nowrap">${escapeHtml(objUser.fullName || "-")}</td>
                 <td class="mngusers-nowrap">${escapeHtml(objUser.email || "-")}</td>
-                <td>${vModeChip}</td>
-                <td class="mngusers-nowrap">${escapeHtml(vOwner)}</td>
+                <td>
+                    <div class="mngusers-status-stack">
+                        <div>${vModeChip}</div>
+                        <div>${vOutageChip}</div>
+                    </div>
+                </td>
+                <td>
+                    <div class="mngusers-owner-stack">
+                        <div><strong>Primary:</strong> ${escapeHtml(vPrimaryOwner)}</div>
+                        <div><strong>Survival:</strong> ${escapeHtml(vSurvivalOwner)}</div>
+                    </div>
+                </td>
                 <td class="mngusers-nowrap">${escapeHtml(formatDateTime(objUser.lastCycleAt || objUser.updatedAt))}</td>
                 <td class="mngusers-nowrap">
                     ${!objUser.survivalMode ? `

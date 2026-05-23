@@ -194,6 +194,22 @@
 
 .mngusers-empty { text-align:center; color:var(--app-muted); padding:28px 14px; }
 
+.mngusers-status-stack,
+.mngusers-owner-stack {
+    display:grid;
+    gap:8px;
+}
+
+.mngusers-owner-stack {
+    color:var(--app-muted);
+    min-width:170px;
+}
+
+.mngusers-owner-stack strong {
+    color:#dce5ff;
+    font-weight:600;
+}
+
 .mngusers-overlay {
     position:fixed;
     inset:0;
