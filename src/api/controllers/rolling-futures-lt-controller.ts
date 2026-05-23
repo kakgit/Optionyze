@@ -8217,6 +8217,9 @@ export async function listRollingFuturesLtDualRunningUsers(req: Request, res: Re
             }
             const objLease = await getStrategyLease(objRuntime.userId, objRuntime.strategyCode);
             const objSurvival = objSurvivalByUserId.get(objRuntime.userId) || null;
+            const vPrimaryLeaseOwnerServerId = isLeaseActive(objLease) ? String(objLease?.ownerServerId || "").trim() : "";
+            const vSurvivalOwnerServerId = String(objSurvival?.ownerServerId || "").trim();
+            const vDisplayOwnerServerId = vPrimaryLeaseOwnerServerId || vSurvivalOwnerServerId;
             arrUsers.push({
                 accountId: objAccount.accountId,
                 fullName: objAccount.fullName,
@@ -8226,10 +8229,10 @@ export async function listRollingFuturesLtDualRunningUsers(req: Request, res: Re
                 isActive: objAccount.isActive,
                 status: objRuntime.status,
                 autoTraderEnabled: objRuntime.autoTraderEnabled,
-                ownerServerId: isLeaseActive(objLease) ? objLease?.ownerServerId || "" : "",
+                ownerServerId: vDisplayOwnerServerId,
                 leaseExpiresAt: isLeaseActive(objLease) ? objLease?.leaseExpiresAt || "" : "",
                 survivalMode: Boolean(objSurvival?.runtimeState?.primaryDbOutageLastError),
-                survivalOwnerServerId: String(objSurvival?.ownerServerId || "").trim(),
+                survivalOwnerServerId: vSurvivalOwnerServerId,
                 survivalUpdatedAt: String(objSurvival?.updatedAt || "").trim(),
                 strategyRunId: String(objSurvival?.strategyRunId || getStrategyRunIdState(objRuntime) || "").trim(),
                 simulatedPrimaryDbOutage: shouldSimulatePrimaryDbOutage(objRuntime.userId, "rolling-futures-lt-dual"),
