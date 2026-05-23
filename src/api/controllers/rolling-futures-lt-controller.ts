@@ -132,6 +132,24 @@ function logDualSurvivalDebug(
     };
     console.warn(`${gSurvivalDebugPrefix} ${JSON.stringify(objPayload)}`);
 }
+
+function shouldForceDualSurvivalTest(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode
+): boolean {
+    if (pStrategyCode !== "rolling-futures-lt-dual") {
+        return false;
+    }
+    const vEnabled = String(process.env.FORCE_DUAL_SURVIVAL_TEST || "").trim().toLowerCase();
+    if (!["1", "true", "yes", "on"].includes(vEnabled)) {
+        return false;
+    }
+    const arrAllowedUserIds = String(process.env.FORCE_DUAL_SURVIVAL_TEST_USER_IDS || "")
+        .split(",")
+        .map((vValue) => String(vValue || "").trim())
+        .filter(Boolean);
+    return !arrAllowedUserIds.length || arrAllowedUserIds.includes(String(pUserId || "").trim());
+}
 const gExecStrategyUnauthorizedMessage = "Not Authorised to Execute, Please Contact Admin";
 const gDualScaledBaselineFloorRatio = 0.25;
 const gDeltaUiTimezoneOffsetMinutes = 5.5 * 60;
@@ -5717,6 +5735,16 @@ async function runAutoTraderCycle(
                 currentSymbol: vSymbol,
                 lastError: "Select an API profile before enabling live auto trader."
             });
+            return;
+        }
+
+        if (shouldForceDualSurvivalTest(pUserId, pStrategyCode)) {
+            logDualSurvivalDebug("forced_test_cycle_requested", {
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                selectedApiProfileId: vSelectedApiProfileId
+            });
+            await runDualSurvivalOnlyCycle(pUserId, pStrategyCode);
             return;
         }
 
