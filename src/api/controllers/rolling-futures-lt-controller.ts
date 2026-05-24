@@ -303,6 +303,28 @@ interface RollingFuturesLtRecalculatedTotalPnl {
     totalPnl: number;
 }
 
+interface RollingFuturesLtRecommendedStartQty {
+    recommendedQty: number;
+    rawQty: number;
+    roundedQty: number;
+    basketAdjustedQty: number;
+    availableBalance: number;
+    usableBalance: number;
+    hedgeReserve: number;
+    optionReservePerQty: number;
+    safetyFactor: number;
+    optionReserveMultiplier: number;
+    hedgeMarginRatio: number;
+    basketUpliftFactor: number;
+    contracts: Array<{
+        contractSymbol: string;
+        optionSide: "CE" | "PE";
+        markPrice: number;
+        delta: number;
+        expiryDate: string;
+    }>;
+}
+
 interface RollingFuturesLtOptionMetadata {
     baseDelta?: number;
     baseTheta?: number;
@@ -6839,6 +6861,175 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
     }
 }
 
+async function calculateRecommendedStartQtyInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
+    const vUserId = getAccountId(req);
+    const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        res.status(400).json({
+            status: "warning",
+            message: "Select an API profile before calculating Start Qty."
+        });
+        return;
+    }
+
+    try {
+        const objUiState = getMergedUiState(objProfile);
+        const objExecInput = normalizeExecStrategyInput(
+            String(objUiState.action1 || "sell"),
+            objUiState.symbol,
+            String(objUiState.legs1 || "ce"),
+            String(objUiState.expiryMode1 || "5"),
+            objUiState.expiryDate1,
+            1,
+            objUiState.newD1 || 0.53
+        );
+        const { client } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
+        const objWalletResponse = await client.apis.Wallet.getBalances();
+        const objWalletPayload = readResponsePayload(objWalletResponse);
+        const arrWalletRows = Array.isArray(objWalletPayload.result) ? objWalletPayload.result as DeltaWalletBalanceRow[] : [];
+        const objUsdRow = pickUsdBalanceRow(arrWalletRows);
+        const vAvailableBalance = Number(getAvailableBalanceUsd(objUsdRow).toFixed(2));
+        if (!(vAvailableBalance > 0)) {
+            throw new Error("Available Balance is not sufficient to calculate Start Qty.");
+        }
+
+        const arrOptionSides: Array<"CE" | "PE"> = objExecInput.legSide === "both"
+            ? (isDualRollingFuturesStrategy(pStrategyCode) ? ["CE", "PE"] : [])
+            : [objExecInput.legSide === "pe" ? "PE" : "CE"];
+        if (!arrOptionSides.length) {
+            throw new Error("Select a valid option leg before calculating Start Qty.");
+        }
+
+        const objConfig = {
+            symbol: objExecInput.symbol,
+            contractName: getContractNameForSymbol(objExecInput.symbol),
+            lotSize: getLotSizeForSymbol(objExecInput.symbol),
+            futureQty: 1,
+            futureOrderType: "market_order" as const,
+            action: objExecInput.action,
+            legSide: objExecInput.legSide,
+            expiryMode: objExecInput.expiryMode,
+            expiryDate: objExecInput.expiryDate,
+            optionQty: 1,
+            redOptionQtyPct: 100,
+            greenOptionQtyPct: 100,
+            newDelta: objExecInput.targetDelta,
+            reDelta: objExecInput.targetDelta,
+            deltaTakeProfit: Math.max(0, Number(objUiState.tpD1 || 0.25)),
+            deltaStopLoss: Math.max(0, Number(objUiState.slD1 || 0.65)),
+            reEnter: normalizeBooleanValue(objUiState.reEnter1, false),
+            addOneLotFuture: false,
+            renkoEnabled: false,
+            renkoStepPoints: 10,
+            renkoPriceSource: "spot_price" as const,
+            loopSeconds: 8
+        };
+
+        const arrContracts = (await Promise.all(arrOptionSides.map(async (vOptionSide) => {
+            return await findBestLiveOptionContract(objConfig, vOptionSide, objExecInput.targetDelta, true);
+        }))).filter((objContract): objContract is NonNullable<typeof objContract> => Boolean(objContract));
+
+        if (arrContracts.length !== arrOptionSides.length) {
+            throw new Error("Unable to find live option contract(s) for the current strategy setup.");
+        }
+
+        const objMarketSnapshot = await getLiveMarketSnapshot({
+            symbol: objExecInput.symbol,
+            contractName: getContractNameForSymbol(objExecInput.symbol),
+            lotSize: getLotSizeForSymbol(objExecInput.symbol),
+            futureQty: 1,
+            futureOrderType: "market_order",
+            action: objExecInput.action,
+            legSide: objExecInput.legSide,
+            expiryMode: objExecInput.expiryMode,
+            expiryDate: objExecInput.expiryDate,
+            optionQty: 1,
+            redOptionQtyPct: 100,
+            greenOptionQtyPct: 100,
+            newDelta: objExecInput.targetDelta,
+            reDelta: objExecInput.targetDelta,
+            deltaTakeProfit: Math.max(0, Number(objUiState.tpD1 || 0.25)),
+            deltaStopLoss: Math.max(0, Number(objUiState.slD1 || 0.65)),
+            reEnter: normalizeBooleanValue(objUiState.reEnter1, false),
+            addOneLotFuture: false,
+            renkoEnabled: false,
+            renkoStepPoints: 10,
+            renkoPriceSource: "spot_price",
+            loopSeconds: 8
+        });
+        const vLotSize = getLotSizeForSymbol(objExecInput.symbol);
+        const vOneLotValue = Number(objMarketSnapshot.futuresPrice || 0) * vLotSize;
+        const vSafetyFactor = 0.98;
+        const vOptionReserveMultiplier = objExecInput.action === "sell" ? 1 : 1;
+        const vHedgeMarginRatio = 0.01;
+        const vOptionNotionalReserveRatio = objExecInput.action === "sell" ? 0.006 : 0.003;
+        const vHedgeQty = Math.max(0, Math.floor(Number(objUiState.bsFutQty || 0)));
+        const vUsableBalance = Number((vAvailableBalance * vSafetyFactor).toFixed(2));
+        const vHedgeReserve = Number((Math.max(0, vOneLotValue) * vHedgeQty * vHedgeMarginRatio).toFixed(2));
+        const vPremiumReservePerQty = Number((arrContracts.reduce((pSum, objContract) => {
+            return pSum + (Math.max(0, Number(objContract.markPrice || 0)) * vLotSize);
+        }, 0) * vOptionReserveMultiplier).toFixed(2));
+        const vNotionalReservePerQty = Number((Math.max(0, vOneLotValue) * arrContracts.length * vOptionNotionalReserveRatio).toFixed(2));
+        const vOptionReservePerQty = Number(Math.max(vPremiumReservePerQty, vNotionalReservePerQty).toFixed(2));
+        if (!(vOptionReservePerQty > 0)) {
+            throw new Error("Unable to estimate option reserve for the selected strategy setup.");
+        }
+
+        const vRemainingForOptions = Math.max(0, vUsableBalance - vHedgeReserve);
+        const vRawQty = Math.max(0, Math.floor(vRemainingForOptions / vOptionReservePerQty));
+        const vBasketUpliftFactor = objExecInput.action === "sell" && objExecInput.legSide === "both" ? 2.25 : 1;
+        const vBasketAdjustedQty = Math.max(0, Math.floor(vRawQty * vBasketUpliftFactor));
+        const vRoundedQty = vBasketAdjustedQty >= 10
+            ? Math.floor(vBasketAdjustedQty / 10) * 10
+            : vBasketAdjustedQty;
+        const vRecommendedQty = Math.max(0, vRoundedQty);
+
+        const objEstimate: RollingFuturesLtRecommendedStartQty = {
+            recommendedQty: vRecommendedQty,
+            rawQty: vRawQty,
+            roundedQty: vRoundedQty,
+            basketAdjustedQty: vBasketAdjustedQty,
+            availableBalance: vAvailableBalance,
+            usableBalance: vUsableBalance,
+            hedgeReserve: vHedgeReserve,
+            optionReservePerQty: vOptionReservePerQty,
+            safetyFactor: vSafetyFactor,
+            optionReserveMultiplier: vOptionReserveMultiplier,
+            hedgeMarginRatio: vHedgeMarginRatio,
+            basketUpliftFactor: vBasketUpliftFactor,
+            contracts: arrContracts.map((objContract) => ({
+                contractSymbol: objContract.contractSymbol,
+                optionSide: objContract.optionSide,
+                markPrice: Number(Number(objContract.markPrice || 0).toFixed(2)),
+                delta: Number(Number(objContract.delta || 0).toFixed(4)),
+                expiryDate: objContract.expiryDate
+            }))
+        };
+
+        if (vRecommendedQty < 1) {
+            res.json({
+                status: "warning",
+                message: `Available Balance ${vAvailableBalance.toFixed(2)} is below the estimated reserve ${Number((vOptionReservePerQty + vHedgeReserve).toFixed(2)).toFixed(2)} for 1 safe Start Qty with the current strategy setup.`,
+                data: objEstimate
+            });
+            return;
+        }
+
+        res.json({
+            status: "success",
+            message: `Estimated Start Qty ${vRecommendedQty} from Available Balance ${vAvailableBalance.toFixed(2)} using current CE/PE setup.`,
+            data: objEstimate
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to calculate Start Qty.")
+        });
+    }
+}
+
 async function getImportableOpenPositionsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vProfileId = await resolveProfileId(req, pStrategyCode);
     if (!vProfileId) {
@@ -8504,6 +8695,117 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
     }
 }
 
+export async function forceRollingFuturesLtDualTakeoverHereController(req: Request, res: Response): Promise<void> {
+    const vUserId = String(req.params.accountId || "").trim();
+    if (!vUserId) {
+        res.status(400).json({
+            status: "warning",
+            message: "Account id is required."
+        });
+        return;
+    }
+
+    try {
+        const objRuntime = await loadRollingFuturesLtRuntime(vUserId, "rolling-futures-lt-dual")
+            || getDefaultRollingFuturesLtRuntime(vUserId, "rolling-futures-lt-dual");
+        const objProfile = await readLiveProfile(vUserId, "rolling-futures-lt-dual");
+        const vSelectedApiProfileId = String(objRuntime.selectedApiProfileId || objProfile.selectedApiProfileId || "").trim();
+        if (!vSelectedApiProfileId) {
+            throw new Error("No API profile is selected for this running strategy.");
+        }
+
+        const objExistingLease = await getStrategyLease(vUserId, "rolling-futures-lt-dual");
+        if (isLeaseActive(objExistingLease)
+            && objExistingLease?.ownerServerId === gServerId
+            && objExistingLease?.ownerInstanceId === gServerInstanceId) {
+            res.json({
+                status: "success",
+                message: `This running strategy is already owned by ${gServerId}.`
+            });
+            return;
+        }
+
+        await forceReleaseStrategyLease(vUserId, "rolling-futures-lt-dual");
+        setLocalStrategyLeaseToken(vUserId, "rolling-futures-lt-dual", "");
+        setLocalSurvivalLeaseToken(vUserId, "rolling-futures-lt-dual", "");
+
+        const objLeaseAcquire = await acquireDualStrategyLease(
+            vUserId,
+            "rolling-futures-lt-dual",
+            objRuntime,
+            objProfile,
+            vSelectedApiProfileId
+        );
+        if (!objLeaseAcquire.acquired) {
+            throw new Error(objLeaseAcquire.message || `Unable to assign this strategy to ${gServerId}.`);
+        }
+
+        const objSurvival = await getSurvivalState(vUserId, "rolling-futures-lt-dual");
+        if (objSurvival) {
+            await upsertSurvivalState({
+                userId: objSurvival.userId,
+                strategyCode: objSurvival.strategyCode,
+                strategyRunId: objSurvival.strategyRunId,
+                runTag: objSurvival.runTag,
+                runStatus: objSurvival.runStatus,
+                ownerServerId: gServerId,
+                ownerInstanceId: gServerInstanceId,
+                leaseToken: objSurvival.leaseToken,
+                leaseExpiresAt: new Date(Date.now() + getStrategyLeaseDurationMs()).toISOString(),
+                lastHeartbeatAt: new Date().toISOString(),
+                selectedApiProfileId: objSurvival.selectedApiProfileId,
+                profileReferenceName: objSurvival.profileReferenceName,
+                apiKey: objSurvival.apiKey,
+                apiSecret: objSurvival.apiSecret,
+                symbol: objSurvival.symbol,
+                strategyStartedAt: objSurvival.strategyStartedAt,
+                lastDeltaSyncAt: objSurvival.lastDeltaSyncAt,
+                lastPrimaryDbSyncAt: new Date().toISOString(),
+                openPositions: objSurvival.openPositions,
+                uiState: objSurvival.uiState,
+                runtimeState: objSurvival.runtimeState,
+                riskState: objSurvival.riskState,
+                recoveryMetrics: objSurvival.recoveryMetrics,
+                lastOrderRefs: objSurvival.lastOrderRefs
+            });
+        }
+
+        await saveRollingFuturesLtRuntime({
+            ...objRuntime,
+            userId: vUserId,
+            strategyCode: "rolling-futures-lt-dual",
+            status: "running",
+            autoTraderEnabled: true,
+            selectedApiProfileId: vSelectedApiProfileId,
+            currentSymbol: String(objRuntime.currentSymbol || getMergedUiState(objProfile).symbol || "").trim(),
+            lastError: ""
+        });
+        startAutoTraderCycle(vUserId, "rolling-futures-lt-dual");
+        await logFuturesEvent(
+            vUserId,
+            "rolling-futures-lt-dual",
+            "manual_action",
+            "warning",
+            "Forced Takeover Assigned",
+            `Admin assigned this running dual strategy to ${gServerId}.`,
+            {
+                reason: "admin_force_takeover_here",
+                targetServerId: gServerId
+            }
+        );
+        res.json({
+            status: "success",
+            message: `This running strategy is now assigned to ${gServerId}.`
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, `Unable to assign this strategy to ${gServerId}.`)
+        });
+    }
+}
+
 export async function getRollingFuturesLtDualProfile(req: Request, res: Response): Promise<void> {
     await getProfileInternal(req, res, "rolling-futures-lt-dual");
 }
@@ -8527,6 +8829,9 @@ export async function disableRollingFuturesLtDualAutoTrader(req: Request, res: R
 }
 export async function getRollingFuturesLtDualAccountSummary(req: Request, res: Response): Promise<void> {
     await getAccountSummaryInternal(req, res, "rolling-futures-lt-dual");
+}
+export async function calculateRollingFuturesLtDualRecommendedStartQty(req: Request, res: Response): Promise<void> {
+    await calculateRecommendedStartQtyInternal(req, res, "rolling-futures-lt-dual");
 }
 export async function executeRollingFuturesLtDualManualFuture(req: Request, res: Response): Promise<void> {
     await executeManualFutureInternal(req, res, "rolling-futures-lt-dual");

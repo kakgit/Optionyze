@@ -6,6 +6,7 @@ const gState = {
     editingAccountId: "",
     resettingAccountId: "",
     currentAccountId: "",
+    currentServerId: "",
     activeModal: "",
     isLoadingUsers: false,
     isLoadingRunningUsers: false,
@@ -23,6 +24,7 @@ const els = {};
 document.addEventListener("DOMContentLoaded", () => {
     cacheElements();
     gState.currentAccountId = String(els.app?.dataset.currentAccountId || "");
+    gState.currentServerId = String(els.app?.dataset.currentServerId || "").trim();
 
     els.searchInput?.addEventListener("input", applyFilters);
     els.refreshButton?.addEventListener("click", () => {
@@ -235,6 +237,7 @@ function renderRunningUsers() {
         const vOutageChip = objUser.simulatedPrimaryDbOutage
             ? `<span class="mngusers-chip mngusers-chip-warn">Outage Test ON</span>`
             : "";
+        const bOwnedHere = vPrimaryOwner === gState.currentServerId || vSurvivalOwner === gState.currentServerId;
         return `
             <tr>
                 <td class="mngusers-nowrap">${escapeHtml(objUser.fullName || "-")}</td>
@@ -253,11 +256,16 @@ function renderRunningUsers() {
                 </td>
                 <td class="mngusers-nowrap">${escapeHtml(formatDateTime(objUser.lastCycleAt || objUser.updatedAt))}</td>
                 <td class="mngusers-nowrap">
+                    ${!bOwnedHere ? `
+                        <button class="app-link-btn" type="button" data-running-action="force-takeover-here" data-account-id="${escapeHtml(objUser.accountId)}">
+                            Force Takeover Here
+                        </button>
+                    ` : ""}
                     ${objUser.survivalMode ? `
                         <button class="app-link-btn" type="button" data-running-action="switch-primary" data-account-id="${escapeHtml(objUser.accountId)}" ${bSwitching ? "disabled" : ""}>
                             ${bSwitching ? "Switching..." : "Switch To Primary DB"}
                         </button>
-                    ` : `<span class="mngusers-chip mngusers-chip-muted">Normal</span>`}
+                    ` : (!bOwnedHere ? "" : `<span class="mngusers-chip mngusers-chip-muted">Normal</span>`)}
                 </td>
             </tr>
         `;
@@ -476,6 +484,10 @@ function handleRunningUsersAction(objEvent) {
     }
     const vAction = String(objButton.dataset.runningAction || "").trim();
     const vAccountId = String(objButton.dataset.accountId || "").trim();
+    if (vAction === "force-takeover-here" && vAccountId) {
+        void forceTakeoverHere(vAccountId);
+        return;
+    }
     if (vAction === "switch-primary" && vAccountId) {
         void switchRunningUserToPrimary(vAccountId);
     }
@@ -790,6 +802,32 @@ async function switchRunningUserToPrimary(pAccountId) {
     finally {
         gState.switchingPrimaryAccountId = "";
         renderRunningUsers();
+    }
+}
+
+async function forceTakeoverHere(pAccountId) {
+    if (!pAccountId) {
+        return;
+    }
+
+    const objUser = gState.runningUsers.find((objRow) => objRow.accountId === pAccountId);
+    const vTargetServer = gState.currentServerId || "this server";
+    const vConfirmed = window.confirm(`Force takeover of ${objUser?.fullName || "this running user"} to ${vTargetServer}?`);
+    if (!vConfirmed) {
+        return;
+    }
+
+    try {
+        const objResult = await requestJson(`/api/rollingfutures-lt-dual/admin/running-users/${encodeURIComponent(pAccountId)}/force-takeover-here`, {
+            method: "POST",
+            credentials: "same-origin"
+        }, "Unable to force takeover to this server.");
+        setPageStatus(objResult.message || `Strategy assigned to ${vTargetServer}.`, "success");
+        await loadAdminData();
+    }
+    catch (objError) {
+        setPageStatus(getErrorMessage(objError, "Unable to force takeover to this server."), "error");
+        await loadRunningUsers().catch(() => undefined);
     }
 }
 

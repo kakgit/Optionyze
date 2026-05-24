@@ -26,6 +26,7 @@ import {
 } from "../controllers/strategyfo-paper-controller";
 import {
     checkRollingFuturesLtDualConnection,
+    calculateRollingFuturesLtDualRecommendedStartQty,
     clearRollingFuturesLtDualEventsController,
     deleteRollingFuturesLtDualEventController,
     closeRollingFuturesLtDualImportedOpenPosition,
@@ -36,6 +37,7 @@ import {
     executeRollingFuturesLtDualManualFuture,
     executeRollingFuturesLtDualManualOption,
     executeRollingFuturesLtDualStrategy,
+    forceRollingFuturesLtDualTakeoverHereController,
     enableRollingFuturesLtDualSimulatedPrimaryOutageController,
     getRollingFuturesLtDualAccountSummary,
     getRollingFuturesLtDualClosedPositions,
@@ -165,6 +167,9 @@ export function createApiRouter(
     objRouter.post("/rollingfutures-lt-dual/admin/running-users/:accountId/switch-primary", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
         await switchRollingFuturesLtDualBackToPrimaryController(req, res);
     });
+    objRouter.post("/rollingfutures-lt-dual/admin/running-users/:accountId/force-takeover-here", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
+        await forceRollingFuturesLtDualTakeoverHereController(req, res);
+    });
     objRouter.post("/rollingfutures-lt-dual/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await saveRollingFuturesLtDualProfile(req, res);
     });
@@ -185,6 +190,9 @@ export function createApiRouter(
     });
     objRouter.get("/rollingfutures-lt-dual/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getRollingFuturesLtDualAccountSummary(req, res);
+    });
+    objRouter.post("/rollingfutures-lt-dual/start-qty/calculate", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await calculateRollingFuturesLtDualRecommendedStartQty(req, res);
     });
     objRouter.post("/rollingfutures-lt-dual/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await executeRollingFuturesLtDualManualFuture(req, res);

@@ -34,8 +34,22 @@
                         </select>
                     </div>
                     <div class="rolling-futures-hero-badge">
-                        <label for="txtRollingFuturesStartQty">Start Qty</label>
-                        <input class="rolling-futures-start-qty" type="number" min="1" step="1" id="txtRollingFuturesStartQty" value="1" />
+                        <div class="rolling-futures-start-qty-label-row">
+                            <label for="txtRollingFuturesStartQty">Start Qty</label>
+                            <button class="rolling-futures-start-qty-calc-btn" type="button" id="btnRollingFuturesCalcStartQty" title="Calculate Start Qty from Available Balance" aria-label="Calculate Start Qty from Available Balance">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <rect x="4" y="3" width="16" height="18" rx="2" />
+                                    <path d="M8 7h8" />
+                                    <path d="M8 12h2" />
+                                    <path d="M14 12h2" />
+                                    <path d="M8 16h2" />
+                                    <path d="M14 16h2" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="rolling-futures-start-qty-row">
+                            <input class="rolling-futures-start-qty" type="number" min="1" step="1" id="txtRollingFuturesStartQty" value="1" />
+                        </div>
                     </div>
                     <div class="rolling-futures-hero-badge action">
                         <button class="rolling-demo-btn warn" type="button" id="btnRollingFuturesDemoAutoTrader">Auto Trader - OFF</button>
@@ -422,7 +436,7 @@
                 <div class="rolling-demo-card-head">
                     <h2>Closed Positions</h2>
                     <div class="rolling-demo-card-tools">
-                        <div class="rolling-demo-filters rolling-live-filters">
+                        <div class="rolling-demo-filters rolling-live-filters rolling-demo-filters-closed">
                             <div class="rolling-demo-field">
                                 <input type="datetime-local" id="txtRollingDualFuturesClosedFromDate" title="Filter closed positions from this date and time" aria-label="Filter closed positions from this date and time" />
                             </div>
@@ -437,6 +451,14 @@
                                             <path d="m6 6 12 12" />
                                         </svg>
                                     </button>
+                                </div>
+                            </div>
+                            <div class="rolling-demo-field">
+                                <div class="rolling-demo-check-wrap rolling-demo-check-wrap-compact">
+                                    <label class="rolling-futures-neutral-mode" for="chkRollingDualFuturesUpdateRecoveryTotals">
+                                        <input type="checkbox" id="chkRollingDualFuturesUpdateRecoveryTotals" />
+                                        <span>Update Total Charges and PnL</span>
+                                    </label>
                                 </div>
                             </div>
                             <div class="rolling-demo-field">

@@ -232,6 +232,12 @@
     align-items:center;
 }
 
+.rolling-demo-check-wrap-compact {
+    min-height: 42px;
+    display:flex;
+    align-items:center;
+}
+
 .rolling-demo-check {
     display:inline-flex;
     align-items:center;
@@ -239,9 +245,41 @@
     color:var(--app-text);
 }
 
+.rolling-demo-check-compact {
+    display:flex;
+    gap: 8px;
+    font-size: .88rem;
+    white-space: nowrap;
+    align-items:center;
+    line-height:1.1;
+}
+
 .rolling-demo-check input {
     width:18px;
     height:18px;
+}
+
+.rolling-demo-check-compact input {
+    width:18px;
+    min-width:18px;
+    margin:0;
+    flex:0 0 auto;
+    align-self:center;
+    transform: translateY(0);
+    min-height:18px;
+    height:18px;
+    padding:0;
+    border:0;
+    background:transparent;
+    box-shadow:none;
+    accent-color:#bfe9ff;
+}
+
+.rolling-demo-check-label {
+    display:flex;
+    align-items:center;
+    min-height:18px;
+    line-height:1.1;
 }
 
 .rolling-demo-btn {
@@ -292,6 +330,50 @@
 
 .rolling-demo-icon-btn.sell {
     color:#ffb5b5;
+}
+
+.rolling-futures-start-qty-row {
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+
+.rolling-futures-start-qty-row .rolling-futures-start-qty {
+    flex:1 1 auto;
+}
+
+.rolling-futures-start-qty-label-row {
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-bottom:6px;
+}
+
+.rolling-futures-start-qty-label-row label {
+    margin:0;
+}
+
+.rolling-futures-start-qty-calc-btn {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:20px;
+    height:20px;
+    padding:0;
+    border:0;
+    background:transparent;
+    color:#bfe9ff;
+    cursor:pointer;
+}
+
+.rolling-futures-start-qty-calc-btn svg {
+    width:16px;
+    height:16px;
+    stroke:currentColor;
+    fill:none;
+    stroke-width:1.9;
+    stroke-linecap:round;
+    stroke-linejoin:round;
 }
 
 .rolling-demo-btn.buy {
@@ -544,6 +626,39 @@
 
 .rolling-demo-filters .rolling-demo-check-wrap {
     justify-content:flex-end;
+}
+
+.rolling-demo-filters-closed {
+    display:flex;
+    align-items:flex-end;
+    justify-content:flex-end;
+    gap:12px;
+    flex-wrap:wrap;
+}
+
+.rolling-demo-filters-closed .rolling-demo-field {
+    flex:0 0 auto;
+}
+
+.rolling-demo-filters-closed .rolling-demo-check-wrap-compact {
+    min-height:44px;
+}
+
+.rolling-demo-filters-closed .rolling-futures-neutral-mode input {
+    width:18px;
+    min-width:18px;
+    height:18px;
+    min-height:18px;
+    margin:0;
+    padding:0;
+    border:0;
+    border-radius:0;
+    background:transparent;
+    box-shadow:none;
+    accent-color:#bfe9ff;
+    appearance:auto;
+    -webkit-appearance:checkbox;
+    -moz-appearance:auto;
 }
 
 .rolling-demo-log-grid {

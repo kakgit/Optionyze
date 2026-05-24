@@ -22,11 +22,13 @@ import {
 } from "../../storage/admin-settings-store";
 import { executePendingRollingFuturesLtDualStrategyRequest } from "./rolling-futures-lt-controller";
 import type { RunnerManager } from "../../runners/runner-manager";
+import { getServerId } from "../../runtime/server-runtime";
 
 export function renderMngUsersPage(req: Request, res: Response): void {
     res.render("mngusers", {
         pageTitle: "MngUsers | Optionyze",
-        currentAccount: req.authAccount
+        currentAccount: req.authAccount,
+        currentServerId: getServerId()
     });
 }
 

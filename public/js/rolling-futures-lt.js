@@ -46,6 +46,7 @@
         importStatus: document.getElementById(`${prefix}ImportStatus`),
         resetDefaultsButton: document.getElementById("btnRollingFuturesResetDefaults"),
         startQty: document.getElementById("txtRollingFuturesStartQty"),
+        calculateStartQtyButton: document.getElementById("btnRollingFuturesCalcStartQty"),
         symbol: document.getElementById("ddlRollingFuturesSymbol"),
         lotSize: document.getElementById("txtRollingFuturesLotSize"),
         futureOrderType: document.getElementById("ddlRollingFuturesOrderType"),
@@ -94,6 +95,7 @@
         closedFromDate: document.getElementById(`txt${idPrefix}ClosedFromDate`),
         closedToDate: document.getElementById(`txt${idPrefix}ClosedToDate`),
         clearClosedFiltersButton: document.getElementById(`btn${idPrefix}ClearClosedFilters`),
+        updateRecoveryTotalsCheckbox: document.getElementById(`chk${idPrefix}UpdateRecoveryTotals`),
         refreshClosedPositionsButton: document.getElementById(`btn${idPrefix}RefreshClosedPositions`),
         closedPositionsBody: document.getElementById(`${prefix}ClosedPositionsBody`),
         closedPrevPageButton: document.getElementById(`btn${idPrefix}ClosedPrevPage`),
@@ -991,9 +993,7 @@
         applyRuntimeStatus(objResult?.data || {});
     }
 
-    async function saveRecoveryMetricsOverride() {
-        const vBrokerage = Number(ids.brok2Rec instanceof HTMLInputElement ? ids.brok2Rec.value : 0);
-        const vTotalPnl = Number(ids.yet2Recover instanceof HTMLInputElement ? ids.yet2Recover.value : 0);
+    async function updateRecoveryMetrics(vBrokerage, vTotalPnl) {
         if (!Number.isFinite(vBrokerage) || !Number.isFinite(vTotalPnl)) {
             throw new Error("Enter valid numeric values for Total Brokerage to Recvr and Total PnL.");
         }
@@ -1005,10 +1005,20 @@
         return objResult;
     }
 
+    async function saveRecoveryMetricsOverride() {
+        const vBrokerage = Number(ids.brok2Rec instanceof HTMLInputElement ? ids.brok2Rec.value : 0);
+        const vTotalPnl = Number(ids.yet2Recover instanceof HTMLInputElement ? ids.yet2Recover.value : 0);
+        return updateRecoveryMetrics(vBrokerage, vTotalPnl);
+    }
+
     async function recalculateTotalPnlFromHistory() {
         const objResult = await postJson(`${endpointBase}/metrics/recalculate-total-pnl`, {});
         renderOpenPositions(objResult?.data);
         return objResult;
+    }
+
+    async function calculateRecommendedStartQty() {
+        return postJson(`${endpointBase}/start-qty/calculate`, {});
     }
 
     async function checkConnection() {
@@ -1439,6 +1449,21 @@
         return arrRows;
     }
 
+    function calculateClosedPositionRecoveryTotals(rows) {
+        const arrRows = Array.isArray(rows) ? rows : [];
+        return arrRows.reduce(function (totals, row) {
+            const vCharges = Number(row?.charges);
+            const vPnl = Number(row?.pnl);
+            return {
+                totalBrokerageToRecover: totals.totalBrokerageToRecover + (Number.isFinite(vCharges) ? vCharges : 0),
+                totalPnl: totals.totalPnl + (Number.isFinite(vPnl) ? vPnl : 0)
+            };
+        }, {
+            totalBrokerageToRecover: 0,
+            totalPnl: 0
+        });
+    }
+
     function renderEvents(rows) {
         const arrRows = Array.isArray(rows) ? rows : [];
         if (!ids.eventLog) {
@@ -1646,6 +1671,27 @@
     ids.startQty?.addEventListener("change", function () {
         syncQtyFromStartQty();
         queueProfileSave();
+    });
+    ids.calculateStartQtyButton?.addEventListener("click", function () {
+        void calculateRecommendedStartQty().then(function (objResult) {
+            const objData = objResult?.data || {};
+            const vQty = Math.max(0, Math.floor(Number(objData.recommendedQty || 0)));
+            if (!(ids.startQty instanceof HTMLInputElement)) {
+                return;
+            }
+            if (vQty < 1) {
+                setStatus(ids.pageStatus, String(objResult?.message || "Available Balance is too low for a safe Start Qty estimate."), "warning");
+                return;
+            }
+            ids.startQty.value = String(vQty);
+            syncQtyFromStartQty();
+            return saveProfile().then(function () {
+                const vMessage = String(objResult?.message || `Estimated Start Qty ${vQty}.`).trim();
+                setStatus(ids.pageStatus, `${vMessage} Start Qty has been updated.`, "success");
+            });
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to calculate Start Qty.", "danger");
+        });
     });
     ids.futureOrderType?.addEventListener("change", queueProfileSave);
     ids.onlyDeltaNeutral?.addEventListener("change", function () {
@@ -1952,8 +1998,21 @@
         });
     });
     ids.refreshClosedPositionsButton?.addEventListener("click", function () {
-        void loadClosedPositions().then(function () {
-            setStatus(ids.pageStatus, "Closed-position history refreshed.", "success");
+        void loadClosedPositions().then(function (rows) {
+            if (!(ids.updateRecoveryTotalsCheckbox instanceof HTMLInputElement) || !ids.updateRecoveryTotalsCheckbox.checked) {
+                setStatus(ids.pageStatus, "Closed-position history refreshed.", "success");
+                return null;
+            }
+            const objTotals = calculateClosedPositionRecoveryTotals(rows);
+            return updateRecoveryMetrics(objTotals.totalBrokerageToRecover, objTotals.totalPnl);
+        }).then(function (objResult) {
+            if (!objResult) {
+                return;
+            }
+            if (ids.updateRecoveryTotalsCheckbox instanceof HTMLInputElement) {
+                ids.updateRecoveryTotalsCheckbox.checked = false;
+            }
+            setStatus(ids.pageStatus, "Closed-position history refreshed and live recovery totals updated.", "success");
         }).catch(function (error) {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to load closed positions.", "danger");
         });

@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="/css/mngusers.css" />
 </head>
 <body class="app-page">
-    <div class="app-layout mngusers-layout" id="mngUsersApp" data-current-account-id="<%= currentAccount?.accountId || '' %>">
+    <div class="app-layout mngusers-layout" id="mngUsersApp" data-current-account-id="<%= currentAccount?.accountId || '' %>" data-current-server-id="<%= currentServerId || '' %>">
         <%- include('partials/app-header', { currentAccount }) %>
 
         <section class="mngusers-hero">
