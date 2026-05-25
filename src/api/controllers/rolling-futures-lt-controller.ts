@@ -48,6 +48,7 @@ import {
 } from "../../storage/strategy-lease-store";
 import {
     acquireSurvivalStateLease,
+    forceAcquireSurvivalStateLease,
     getSurvivalState,
     listSurvivalStates,
     renewSurvivalStateLease,
@@ -8697,10 +8698,28 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
         }
         const vHandbackTargetServerId = getPrimaryOriginServerIdFromState(objSurvival.runtimeState);
         const bHandbackPending = isPrimaryHandbackPendingState(objSurvival.runtimeState);
+        let objEffectiveSurvival = objSurvival;
         if (isSurvivalLeaseActive(objSurvival)
             && (objSurvival.ownerServerId !== gServerId || objSurvival.ownerInstanceId !== gServerInstanceId)
+            && bHandbackPending
+            && vHandbackTargetServerId === gServerId) {
+            const objForcedLease = await forceAcquireSurvivalStateLease({
+                userId: vUserId,
+                strategyCode: "rolling-futures-lt-dual",
+                ownerServerId: gServerId,
+                ownerInstanceId: gServerInstanceId,
+                leaseDurationMs: getStrategyLeaseDurationMs()
+            });
+            if (!objForcedLease) {
+                throw new Error("Unable to claim Survival DB ownership for handback on this server.");
+            }
+            setLocalSurvivalLeaseToken(vUserId, "rolling-futures-lt-dual", objForcedLease.leaseToken);
+            objEffectiveSurvival = objForcedLease;
+        }
+        if (isSurvivalLeaseActive(objEffectiveSurvival)
+            && (objEffectiveSurvival.ownerServerId !== gServerId || objEffectiveSurvival.ownerInstanceId !== gServerInstanceId)
             && !(bHandbackPending && vHandbackTargetServerId === gServerId)) {
-            const vOwnerLabel = String(objSurvival.ownerServerId || "another server").trim() || "another server";
+            const vOwnerLabel = String(objEffectiveSurvival.ownerServerId || "another server").trim() || "another server";
             throw new Error(`This strategy is currently owned by ${vOwnerLabel}. Use Force Takeover Here on this server first.`);
         }
 
@@ -8710,8 +8729,8 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
         const arrLivePositions = await fetchLiveFuturePositions(
             vUserId,
             "rolling-futures-lt-dual",
-            objSurvival.selectedApiProfileId,
-            normalizeSymbolValue(objSurvival.symbol || objSurvival.uiState?.symbol)
+            objEffectiveSurvival.selectedApiProfileId,
+            normalizeSymbolValue(objEffectiveSurvival.symbol || objEffectiveSurvival.uiState?.symbol)
         );
         const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, "rolling-futures-lt-dual", arrLivePositions);
         const objRuntimeToSave: RollingFuturesLtRuntimeRecord = {
@@ -8720,12 +8739,12 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
             strategyCode: "rolling-futures-lt-dual",
             status: "running",
             autoTraderEnabled: true,
-            selectedApiProfileId: objSurvival.selectedApiProfileId,
-            currentSymbol: normalizeSymbolValue(objSurvival.symbol || objSurvival.uiState?.symbol),
+            selectedApiProfileId: objEffectiveSurvival.selectedApiProfileId,
+            currentSymbol: normalizeSymbolValue(objEffectiveSurvival.symbol || objEffectiveSurvival.uiState?.symbol),
             lastCycleAt: new Date().toISOString(),
             lastError: "",
             state: {
-                ...(objSurvival.runtimeState || {}),
+                ...(objEffectiveSurvival.runtimeState || {}),
                 primaryDbOutageLastError: "",
                 openPositions: await buildOpenPositionsPayload(vUserId, "rolling-futures-lt-dual", arrSaved)
             }
@@ -8734,10 +8753,10 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
             ...objProfile,
             userId: vUserId,
             strategyCode: "rolling-futures-lt-dual",
-            selectedApiProfileId: objSurvival.selectedApiProfileId,
+            selectedApiProfileId: objEffectiveSurvival.selectedApiProfileId,
             uiState: {
                 ...getMergedUiState(objProfile),
-                ...(objSurvival.uiState || {})
+                ...(objEffectiveSurvival.uiState || {})
             }
         };
         await saveRollingFuturesLtRuntime(objRuntimeToSave);
@@ -8757,23 +8776,23 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
         }
 
         await upsertSurvivalState({
-            userId: objSurvival.userId,
-            strategyCode: objSurvival.strategyCode,
-            strategyRunId: objSurvival.strategyRunId,
-            runTag: objSurvival.runTag || getStrategyRunTagState(objRuntimeToSave) || "",
+            userId: objEffectiveSurvival.userId,
+            strategyCode: objEffectiveSurvival.strategyCode,
+            strategyRunId: objEffectiveSurvival.strategyRunId,
+            runTag: objEffectiveSurvival.runTag || getStrategyRunTagState(objRuntimeToSave) || "",
             runStatus: arrSaved.length ? "active" : "ended",
             ownerServerId: gServerId,
             ownerInstanceId: gServerInstanceId,
-            leaseToken: objSurvival.leaseToken,
-            leaseExpiresAt: objSurvival.leaseExpiresAt,
+            leaseToken: getLocalSurvivalLeaseToken(vUserId, "rolling-futures-lt-dual") || objEffectiveSurvival.leaseToken,
+            leaseExpiresAt: new Date(Date.now() + getStrategyLeaseDurationMs()).toISOString(),
             lastHeartbeatAt: new Date().toISOString(),
-            selectedApiProfileId: objSurvival.selectedApiProfileId,
-            profileReferenceName: objSurvival.profileReferenceName,
-            apiKey: objSurvival.apiKey,
-            apiSecret: objSurvival.apiSecret,
-            symbol: objSurvival.symbol,
-            strategyStartedAt: objSurvival.strategyStartedAt,
-            lastDeltaSyncAt: objSurvival.lastDeltaSyncAt,
+            selectedApiProfileId: objEffectiveSurvival.selectedApiProfileId,
+            profileReferenceName: objEffectiveSurvival.profileReferenceName,
+            apiKey: objEffectiveSurvival.apiKey,
+            apiSecret: objEffectiveSurvival.apiSecret,
+            symbol: objEffectiveSurvival.symbol,
+            strategyStartedAt: objEffectiveSurvival.strategyStartedAt,
+            lastDeltaSyncAt: objEffectiveSurvival.lastDeltaSyncAt,
             lastPrimaryDbSyncAt: new Date().toISOString(),
             openPositions: arrSaved.map((objPosition) => ({
                 importId: objPosition.importId,
@@ -8790,16 +8809,16 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
                 openedAt: objPosition.openedAt,
                 updatedAt: objPosition.updatedAt
             })),
-            uiState: objSurvival.uiState,
+            uiState: objEffectiveSurvival.uiState,
             runtimeState: {
-                ...(objSurvival.runtimeState || {}),
+                ...(objEffectiveSurvival.runtimeState || {}),
                 primaryDbOutageLastError: "",
                 pendingPrimaryHandback: false,
                 pendingPrimaryHandbackSince: ""
             },
-            riskState: objSurvival.riskState,
-            recoveryMetrics: objSurvival.recoveryMetrics,
-            lastOrderRefs: objSurvival.lastOrderRefs
+            riskState: objEffectiveSurvival.riskState,
+            recoveryMetrics: objEffectiveSurvival.recoveryMetrics,
+            lastOrderRefs: objEffectiveSurvival.lastOrderRefs
         });
         await logFuturesEvent(
             vUserId,

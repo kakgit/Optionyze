@@ -110,6 +110,14 @@ export interface RenewSurvivalStateLeaseInput {
     leaseDurationMs: number;
 }
 
+export interface ForceAcquireSurvivalStateLeaseInput {
+    userId: string;
+    strategyCode: string;
+    ownerServerId: string;
+    ownerInstanceId?: string;
+    leaseDurationMs: number;
+}
+
 function mapSurvivalStateRow(pRow?: SurvivalStateRow | null): SurvivalStateRecord | null {
     if (!pRow) {
         return null;
@@ -401,6 +409,47 @@ export async function renewSurvivalStateLease(
         vExpiresAt.toISOString(),
         vNow.toISOString(),
         String(pInput.leaseToken || "").trim()
+    ]);
+
+    return mapSurvivalStateRow(objResult.rows[0]);
+}
+
+export async function forceAcquireSurvivalStateLease(
+    pInput: ForceAcquireSurvivalStateLeaseInput
+): Promise<SurvivalStateRecord | null> {
+    if (!isSurvivalPostgresConfigured()) {
+        return null;
+    }
+
+    const objPool = getSurvivalPostgresPool();
+    const vUserId = String(pInput.userId || "").trim();
+    const vStrategyCode = String(pInput.strategyCode || "").trim();
+    const vOwnerServerId = String(pInput.ownerServerId || "").trim();
+    const vOwnerInstanceId = String(pInput.ownerInstanceId || "").trim() || vOwnerServerId;
+    const vLeaseDurationMs = Math.max(10000, Math.floor(Number(pInput.leaseDurationMs || 30000)));
+    const vNow = new Date();
+    const vExpiresAt = new Date(vNow.getTime() + vLeaseDurationMs);
+    const vLeaseToken = crypto.randomUUID();
+
+    const objResult = await objPool.query<SurvivalStateRow>(`
+        UPDATE optionyze_survival_state
+        SET owner_server_id = $3,
+            owner_instance_id = $4,
+            lease_token = $5,
+            lease_expires_at = $6,
+            last_heartbeat_at = $7,
+            updated_at = NOW()
+        WHERE user_id = $1
+          AND strategy_code = $2
+        RETURNING *
+    `, [
+        vUserId,
+        vStrategyCode,
+        vOwnerServerId,
+        vOwnerInstanceId,
+        vLeaseToken,
+        vExpiresAt.toISOString(),
+        vNow.toISOString()
     ]);
 
     return mapSurvivalStateRow(objResult.rows[0]);
