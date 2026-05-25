@@ -13,6 +13,7 @@ import {
     savePendingStrategyAutoExecSettingsController,
     updateManagedUserController
 } from "../controllers/users-controller";
+import { listSurvivalAdminRunningUsers } from "../controllers/survival-admin-controller";
 import {
     emergencyStopStrategyFoPaper,
     getStrategyFoPaperProfile,
@@ -65,7 +66,7 @@ import {
 } from "../controllers/delta-api-controller";
 import type { RunnerManager } from "../../runners/runner-manager";
 import type { StrategyFoGreeksPaperService } from "../../strategies/strategy-fo-greeks-paper/service";
-import { requireAdminApi, requireAuthApi, requireFreshPasswordApi } from "../middleware/auth-middleware";
+import { requireAdminApi, requireAuthApi, requireFreshPasswordApi, requireSurvivalAdminApi } from "../middleware/auth-middleware";
 
 export function createApiRouter(
     pRunnerManager: RunnerManager,
@@ -158,6 +159,9 @@ export function createApiRouter(
     objRouter.get("/rollingfutures-lt-dual/admin/running-users", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
         await listRollingFuturesLtDualRunningUsers(req, res);
     });
+    objRouter.get("/survival-admin/running-users", requireSurvivalAdminApi, async (req, res) => {
+        await listSurvivalAdminRunningUsers(req, res);
+    });
     objRouter.post("/rollingfutures-lt-dual/admin/running-users/:accountId/simulate-primary-outage", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
         await enableRollingFuturesLtDualSimulatedPrimaryOutageController(req, res);
     });
@@ -167,7 +171,13 @@ export function createApiRouter(
     objRouter.post("/rollingfutures-lt-dual/admin/running-users/:accountId/switch-primary", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
         await switchRollingFuturesLtDualBackToPrimaryController(req, res);
     });
+    objRouter.post("/survival-admin/running-users/:accountId/switch-primary", requireSurvivalAdminApi, async (req, res) => {
+        await switchRollingFuturesLtDualBackToPrimaryController(req, res);
+    });
     objRouter.post("/rollingfutures-lt-dual/admin/running-users/:accountId/force-takeover-here", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
+        await forceRollingFuturesLtDualTakeoverHereController(req, res);
+    });
+    objRouter.post("/survival-admin/running-users/:accountId/force-takeover-here", requireSurvivalAdminApi, async (req, res) => {
         await forceRollingFuturesLtDualTakeoverHereController(req, res);
     });
     objRouter.post("/rollingfutures-lt-dual/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {

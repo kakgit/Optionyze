@@ -261,7 +261,7 @@
             slD1: isDual ? "0.80" : (isLong ? "0.80" : "0.80"),
             reEnter1: true,
             closeNetProfitBrokerage: true,
-            brokerageMultiplier: isDual ? "3" : "10",
+            brokerageMultiplier: "10",
             reEnterBrok: true,
             closeBlockedMargin: true,
             blockedMarginPct: "10",
@@ -269,7 +269,15 @@
             onlyDeltaNeutral: !isDual,
             rangeDeltaNeutral: isDual,
             gammaAwareNeutral: false,
-            telegramAlertTypes: [],
+            telegramAlertTypes: [
+                "engine_stopped",
+                "engine_error",
+                "future_opened",
+                "future_closed",
+                "option_opened",
+                "option_closed",
+                "sl_triggered"
+            ],
             closedFromDate: closedFromDate,
             closedToDate: ""
         };
@@ -310,7 +318,7 @@
             const biWeeklyCandidate = getFutureFriday(currentDate, 1);
             const msPerDay = 24 * 60 * 60 * 1000;
             const daysToCandidate = Math.floor((biWeeklyCandidate.getTime() - currentDate.getTime()) / msPerDay);
-            return daysToCandidate <= 7 ? getFutureFriday(currentDate, 2) : biWeeklyCandidate;
+            return daysToCandidate <= 10 ? getFutureFriday(currentDate, 2) : biWeeklyCandidate;
         }
         if (modeValue === "6") {
             const lastFridayOfMonth = getLastFridayOfMonth(currentDate.getFullYear(), currentDate.getMonth());
@@ -324,7 +332,7 @@
             const lastFridayOfThirdMonth = getLastFridayOfMonth(currentDate.getFullYear(), currentDate.getMonth() + 2);
             const msPerDay = 24 * 60 * 60 * 1000;
             const daysToCandidate = Math.floor((lastFridayOfNextMonth.getTime() - currentDate.getTime()) / msPerDay);
-            return daysToCandidate <= 30 ? lastFridayOfThirdMonth : lastFridayOfNextMonth;
+            return daysToCandidate <= 40 ? lastFridayOfThirdMonth : lastFridayOfNextMonth;
         }
 
         return currentDate;

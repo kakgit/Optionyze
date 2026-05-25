@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= pageTitle %></title>
+    <link rel="stylesheet" href="/css/app-shell.css" />
+    <link rel="stylesheet" href="/css/mngusers.css" />
+    <style>
+        .survival-layout { width:min(1200px, calc(100% - 20px)); margin:0 auto; }
+        .survival-topbar { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:18px 0 6px; }
+        .survival-brand { display:flex; align-items:center; gap:12px; color:var(--app-text); text-decoration:none; font-weight:700; letter-spacing:.16em; }
+        .survival-mark { width:40px; height:40px; border-radius:14px; display:grid; place-items:center; background:linear-gradient(135deg, rgba(242,182,90,.22), rgba(125,211,252,.22)); }
+        .survival-meta { display:flex; align-items:center; gap:10px; color:var(--app-muted); }
+        .survival-chip { display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border-radius:999px; background:rgba(242,182,90,.10); border:1px solid rgba(242,182,90,.18); color:#ffd79d; font-size:.8rem; text-transform:uppercase; letter-spacing:.08em; }
+        .survival-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:14px; }
+        .survival-actions { display:flex; gap:12px; flex-wrap:wrap; }
+        @media (max-width: 900px) {
+            .survival-topbar,
+            .survival-head { flex-direction:column; align-items:flex-start; }
+        }
+    </style>
+</head>
+<body class="app-page">
+    <div class="app-layout survival-layout" id="survivalAdminApp" data-current-server-id="<%= currentServerId || '' %>">
+        <header class="survival-topbar">
+            <a class="survival-brand" href="/survival-admin/dashboard"><span class="survival-mark">O</span><span>SURVIVAL ADMIN</span></a>
+            <div class="survival-meta">
+                <span class="survival-chip">Current Server: <%= currentServerId %></span>
+                <span><%= survivalAdminAccount?.fullName || "Survival Admin" %></span>
+                <form method="post" action="/survival-admin/signout">
+                    <button class="app-link-btn" type="submit">Sign Out</button>
+                </form>
+            </div>
+        </header>
+
+        <section class="app-panel">
+            <div class="survival-head">
+                <div>
+                    <div class="survival-chip">Running Users</div>
+                    <h1>Delta Neutral Live Ownership</h1>
+                    <p class="app-copy">Review ownership, survival state, and last cycle activity for currently running Delta Neutral users. Use this page for takeover and handback operations.</p>
+                </div>
+                <div class="survival-actions">
+                    <a class="app-ghost-btn" href="/survival-admin/dashboard">Back To Dashboard</a>
+                    <button id="btnRefreshRunningUsers" class="mngusers-icon-btn" type="button" title="Refresh running users" aria-label="Refresh running users">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                            <path d="M20 4v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div id="pageStatus" class="mngusers-page-status"></div>
+            <p id="runningUsersCount" class="app-copy">0 running</p>
+            <div class="mngusers-table-wrap">
+                <table class="mngusers-table">
+                    <thead>
+                        <tr>
+                            <th class="mngusers-nowrap">User Name</th>
+                            <th class="mngusers-nowrap">Email ID</th>
+                            <th>Status</th>
+                            <th>Ownership</th>
+                            <th class="mngusers-nowrap">Last Cycle</th>
+                            <th class="mngusers-nowrap">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="runningUsersTableBody">
+                        <tr><td colspan="6" class="mngusers-empty">Loading running dual users...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="runningUsersPager" class="mngusers-pager"></div>
+        </section>
+    </div>
+
+    <script src="/js/survival-admin.js"></script>
+</body>
+</html>

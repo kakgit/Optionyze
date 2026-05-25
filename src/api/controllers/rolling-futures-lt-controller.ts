@@ -966,7 +966,7 @@ function resolveRollingFuturesExpiryDateByMode(pExpiryMode: string): string {
     if (vMode === "5") {
         const objBiWeeklyCandidate = getFutureFridayUtc(objDate, 1);
         const vDaysToCandidate = getDaysBetweenUtcDates(objDate, objBiWeeklyCandidate);
-        const objBiWeekly = vDaysToCandidate <= 7 ? getFutureFridayUtc(objDate, 2) : objBiWeeklyCandidate;
+        const objBiWeekly = vDaysToCandidate <= 10 ? getFutureFridayUtc(objDate, 2) : objBiWeeklyCandidate;
         return formatIsoDateFromParts(objBiWeekly.getUTCFullYear(), objBiWeekly.getUTCMonth(), objBiWeekly.getUTCDate());
     }
     if (vMode === "6") {
@@ -978,7 +978,7 @@ function resolveRollingFuturesExpiryDateByMode(pExpiryMode: string): string {
     if (vMode === "7") {
         const objLastFridayNextMonth = getLastFridayOfMonthUtc(objDate.getUTCFullYear(), objDate.getUTCMonth() + 1);
         const objLastFridayThirdMonth = getLastFridayOfMonthUtc(objDate.getUTCFullYear(), objDate.getUTCMonth() + 2);
-        const objSelected = getDaysBetweenUtcDates(objDate, objLastFridayNextMonth) <= 30
+        const objSelected = getDaysBetweenUtcDates(objDate, objLastFridayNextMonth) <= 40
             ? objLastFridayThirdMonth
             : objLastFridayNextMonth;
         return formatIsoDateFromParts(objSelected.getUTCFullYear(), objSelected.getUTCMonth(), objSelected.getUTCDate());
@@ -1129,12 +1129,20 @@ function getDefaultManualTraderUiState(
         slD1: bIsDual ? "0.50" : "0.65",
         reEnter1: true,
         closeNetProfitBrokerage: bIsDual,
-        brokerageMultiplier: bIsDual ? "10" : "3",
+        brokerageMultiplier: "10",
         reEnterBrok: bIsDual,
         closeBlockedMargin: bIsDual,
         blockedMarginPct: bIsDual ? "10" : "20",
         reEnterBlock: bIsDual,
-        telegramAlertTypes: [],
+        telegramAlertTypes: [
+            "engine_stopped",
+            "engine_error",
+            "future_opened",
+            "future_closed",
+            "option_opened",
+            "option_closed",
+            "sl_triggered"
+        ],
         closedFromDate: vClosedFromDate,
         closedToDate: ""
     };
@@ -1490,6 +1498,56 @@ function toEpochMicros(pDateValue: string, pEndOfMinute = false): number | null 
         return null;
     }
 
+    const objDdMmYyyyTimeMatch = vValue.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})$/);
+    if (objDdMmYyyyTimeMatch) {
+        const vDay = Number(objDdMmYyyyTimeMatch[1]);
+        const vMonth = Number(objDdMmYyyyTimeMatch[2]);
+        const vYear = Number(objDdMmYyyyTimeMatch[3]);
+        const vHour = Number(objDdMmYyyyTimeMatch[4]);
+        const vMinute = Number(objDdMmYyyyTimeMatch[5]);
+        const objDate = new Date(Date.UTC(
+            vYear,
+            vMonth - 1,
+            vDay,
+            vHour,
+            vMinute,
+            pEndOfMinute ? 59 : 0,
+            pEndOfMinute ? 999 : 0
+        ));
+        if (
+            objDate.getUTCFullYear() === vYear
+            && objDate.getUTCMonth() === (vMonth - 1)
+            && objDate.getUTCDate() === vDay
+            && objDate.getUTCHours() === vHour
+            && objDate.getUTCMinutes() === vMinute
+        ) {
+            return objDate.getTime() * 1000;
+        }
+    }
+
+    const objDdMmYyyyMatch = vValue.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+    if (objDdMmYyyyMatch) {
+        const vDay = Number(objDdMmYyyyMatch[1]);
+        const vMonth = Number(objDdMmYyyyMatch[2]);
+        const vYear = Number(objDdMmYyyyMatch[3]);
+        const objDate = new Date(Date.UTC(
+            vYear,
+            vMonth - 1,
+            vDay,
+            pEndOfMinute ? 23 : 0,
+            pEndOfMinute ? 59 : 0,
+            pEndOfMinute ? 59 : 0,
+            pEndOfMinute ? 999 : 0
+        ));
+        if (
+            objDate.getUTCFullYear() === vYear
+            && objDate.getUTCMonth() === (vMonth - 1)
+            && objDate.getUTCDate() === vDay
+        ) {
+            return objDate.getTime() * 1000;
+        }
+    }
+
     if (/[zZ]$|[+\-]\d{2}:\d{2}$/.test(vValue)) {
         const vEpochMs = Date.parse(vValue);
         if (!Number.isNaN(vEpochMs)) {
@@ -1790,6 +1848,7 @@ async function getDeltaClientForAccountId(pAccountId: string, pProfileId: string
                 passwordHash: "",
                 isActive: true,
                 isAdmin: false,
+                isSurvivalAdmin: false,
                 execStrategy: true,
                 mustChangePassword: false,
                 createdAt: "",
@@ -8607,6 +8666,11 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
         if (!objSurvival.selectedApiProfileId) {
             throw new Error("Survival DB does not have the selected API profile id for this strategy.");
         }
+        if (isSurvivalLeaseActive(objSurvival)
+            && (objSurvival.ownerServerId !== gServerId || objSurvival.ownerInstanceId !== gServerInstanceId)) {
+            const vOwnerLabel = String(objSurvival.ownerServerId || "another server").trim() || "another server";
+            throw new Error(`This strategy is currently owned by ${vOwnerLabel}. Use Force Takeover Here on this server first.`);
+        }
 
         const objRuntime = await loadRollingFuturesLtRuntime(vUserId, "rolling-futures-lt-dual")
             || getDefaultRollingFuturesLtRuntime(vUserId, "rolling-futures-lt-dual");
@@ -8618,7 +8682,7 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
             normalizeSymbolValue(objSurvival.symbol || objSurvival.uiState?.symbol)
         );
         const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, "rolling-futures-lt-dual", arrLivePositions);
-        await saveRollingFuturesLtRuntime({
+        const objRuntimeToSave: RollingFuturesLtRuntimeRecord = {
             ...objRuntime,
             userId: vUserId,
             strategyCode: "rolling-futures-lt-dual",
@@ -8633,8 +8697,8 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
                 primaryDbOutageLastError: "",
                 openPositions: await buildOpenPositionsPayload(vUserId, "rolling-futures-lt-dual", arrSaved)
             }
-        });
-        await saveRollingFuturesLtProfile({
+        };
+        const objProfileToSave: RollingFuturesLtProfileRecord = {
             ...objProfile,
             userId: vUserId,
             strategyCode: "rolling-futures-lt-dual",
@@ -8643,15 +8707,31 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
                 ...getMergedUiState(objProfile),
                 ...(objSurvival.uiState || {})
             }
-        });
+        };
+        await saveRollingFuturesLtRuntime(objRuntimeToSave);
+        await saveRollingFuturesLtProfile(objProfileToSave);
+
+        await forceReleaseStrategyLease(vUserId, "rolling-futures-lt-dual");
+        setLocalStrategyLeaseToken(vUserId, "rolling-futures-lt-dual", "");
+        const objLeaseAcquire = await acquireDualStrategyLease(
+            vUserId,
+            "rolling-futures-lt-dual",
+            objRuntimeToSave,
+            objProfileToSave,
+            objSurvival.selectedApiProfileId
+        );
+        if (!objLeaseAcquire.acquired) {
+            throw new Error(objLeaseAcquire.message || `Unable to restore Primary DB ownership on ${gServerId}.`);
+        }
+
         await upsertSurvivalState({
             userId: objSurvival.userId,
             strategyCode: objSurvival.strategyCode,
             strategyRunId: objSurvival.strategyRunId,
-            runTag: objSurvival.runTag,
-            runStatus: objSurvival.runStatus,
-            ownerServerId: objSurvival.ownerServerId,
-            ownerInstanceId: objSurvival.ownerInstanceId,
+            runTag: objSurvival.runTag || getStrategyRunTagState(objRuntimeToSave) || "",
+            runStatus: arrSaved.length ? "active" : "ended",
+            ownerServerId: gServerId,
+            ownerInstanceId: gServerInstanceId,
             leaseToken: objSurvival.leaseToken,
             leaseExpiresAt: objSurvival.leaseExpiresAt,
             lastHeartbeatAt: new Date().toISOString(),
@@ -8663,7 +8743,21 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
             strategyStartedAt: objSurvival.strategyStartedAt,
             lastDeltaSyncAt: objSurvival.lastDeltaSyncAt,
             lastPrimaryDbSyncAt: new Date().toISOString(),
-            openPositions: objSurvival.openPositions,
+            openPositions: arrSaved.map((objPosition) => ({
+                importId: objPosition.importId,
+                contractName: objPosition.contractName,
+                side: objPosition.side,
+                qty: objPosition.qty,
+                entryPrice: objPosition.entryPrice,
+                markPrice: objPosition.markPrice,
+                charges: objPosition.charges,
+                pnl: objPosition.pnl,
+                margin: objPosition.margin,
+                liquidationPrice: objPosition.liquidationPrice,
+                metadata: objPosition.metadata || {},
+                openedAt: objPosition.openedAt,
+                updatedAt: objPosition.updatedAt
+            })),
             uiState: objSurvival.uiState,
             runtimeState: {
                 ...(objSurvival.runtimeState || {}),
@@ -8682,12 +8776,20 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
             "Admin switched this running dual strategy back to Primary DB control.",
             { reason: "admin_switch_to_primary_db" }
         );
+        startAutoTraderCycle(vUserId, "rolling-futures-lt-dual");
         res.json({
             status: "success",
             message: "Strategy switched back to Primary DB control successfully."
         });
     }
     catch (objError) {
+        if (isPrimaryDatabaseUnavailableError(objError)) {
+            res.status(503).json({
+                status: "warning",
+                message: "Primary DB is still unavailable. Keep this strategy in Survival DB mode until Primary DB is restored."
+            });
+            return;
+        }
         res.status(500).json({
             status: "danger",
             message: getErrorMessage(objError, "Unable to switch this strategy back to Primary DB.")
@@ -8706,10 +8808,62 @@ export async function forceRollingFuturesLtDualTakeoverHereController(req: Reque
     }
 
     try {
-        const objRuntime = await loadRollingFuturesLtRuntime(vUserId, "rolling-futures-lt-dual")
-            || getDefaultRollingFuturesLtRuntime(vUserId, "rolling-futures-lt-dual");
-        const objProfile = await readLiveProfile(vUserId, "rolling-futures-lt-dual");
-        const vSelectedApiProfileId = String(objRuntime.selectedApiProfileId || objProfile.selectedApiProfileId || "").trim();
+        let objRuntime: RollingFuturesLtRuntimeRecord | null = null;
+        let objProfile: RollingFuturesLtProfileRecord | null = null;
+        let vSelectedApiProfileId = "";
+
+        try {
+            objRuntime = await loadRollingFuturesLtRuntime(vUserId, "rolling-futures-lt-dual")
+                || getDefaultRollingFuturesLtRuntime(vUserId, "rolling-futures-lt-dual");
+            objProfile = await readLiveProfile(vUserId, "rolling-futures-lt-dual");
+            vSelectedApiProfileId = String(objRuntime.selectedApiProfileId || objProfile.selectedApiProfileId || "").trim();
+        }
+        catch (objError) {
+            if (!isPrimaryDatabaseUnavailableError(objError)) {
+                throw objError;
+            }
+
+            const objSurvival = await getSurvivalState(vUserId, "rolling-futures-lt-dual");
+            if (!objSurvival) {
+                throw new Error("No Survival DB state was found for this running strategy.");
+            }
+            if (!objSurvival.selectedApiProfileId) {
+                throw new Error("Survival DB does not have the selected API profile id for this strategy.");
+            }
+            if (isSurvivalLeaseActive(objSurvival)
+                && objSurvival.ownerServerId === gServerId
+                && objSurvival.ownerInstanceId === gServerInstanceId) {
+                setLocalSurvivalLeaseToken(vUserId, "rolling-futures-lt-dual", objSurvival.leaseToken);
+                startAutoTraderCycle(vUserId, "rolling-futures-lt-dual");
+                res.json({
+                    status: "success",
+                    message: `This running strategy is already owned by ${gServerId} through Survival DB control.`
+                });
+                return;
+            }
+
+            const objAcquire = await acquireSurvivalStateLease({
+                userId: vUserId,
+                strategyCode: "rolling-futures-lt-dual",
+                ownerServerId: gServerId,
+                ownerInstanceId: gServerInstanceId,
+                leaseDurationMs: getStrategyLeaseDurationMs()
+            });
+            if (!objAcquire.acquired || !objAcquire.state) {
+                const vOwnerLabel = String(objAcquire.state?.ownerServerId || objSurvival.ownerServerId || "another server").trim() || "another server";
+                throw new Error(`This running strategy is currently owned by ${vOwnerLabel}.`);
+            }
+
+            setLocalStrategyLeaseToken(vUserId, "rolling-futures-lt-dual", "");
+            setLocalSurvivalLeaseToken(vUserId, "rolling-futures-lt-dual", objAcquire.state.leaseToken);
+            startAutoTraderCycle(vUserId, "rolling-futures-lt-dual");
+            res.json({
+                status: "success",
+                message: `This running strategy is now assigned to ${gServerId} through Survival DB control.`
+            });
+            return;
+        }
+
         if (!vSelectedApiProfileId) {
             throw new Error("No API profile is selected for this running strategy.");
         }
@@ -8777,7 +8931,7 @@ export async function forceRollingFuturesLtDualTakeoverHereController(req: Reque
             status: "running",
             autoTraderEnabled: true,
             selectedApiProfileId: vSelectedApiProfileId,
-            currentSymbol: String(objRuntime.currentSymbol || getMergedUiState(objProfile).symbol || "").trim(),
+            currentSymbol: String(objRuntime?.currentSymbol || getMergedUiState(objProfile || getDefaultRollingFuturesLtProfile(vUserId, "rolling-futures-lt-dual")).symbol || "").trim(),
             lastError: ""
         });
         startAutoTraderCycle(vUserId, "rolling-futures-lt-dual");

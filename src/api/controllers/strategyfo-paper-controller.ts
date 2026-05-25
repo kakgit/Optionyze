@@ -37,7 +37,7 @@ export function renderStrategyFoPaperPage(req: Request, res: Response): void {
 
 export function renderRollingFuturesLiveDualPage(req: Request, res: Response): void {
     res.render("rolling-futures-lt-dual", {
-        pageTitle: "Dual Rolling Futures - Live | Optionyze",
+        pageTitle: "Delta Neutral - Live | Optionyze",
         currentAccount: req.authAccount,
         defaultUserId: req.authAccount?.accountId || "demo-paper",
         rollingTelegramEventTypes: gRollingFuturesTelegramEventTypes

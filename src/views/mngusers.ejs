@@ -32,8 +32,15 @@
         <section class="app-panel">
             <div class="mngusers-toolbar">
                 <input id="searchInput" type="text" placeholder="Search by name, email, or mobile" />
-                <button id="btnRefresh" class="app-link-btn" type="button">Refresh</button>
-                <button id="btnAddUser" class="app-solid-btn" type="button">Add User</button>
+                <div class="mngusers-toolbar-actions">
+                    <button id="btnRefresh" class="mngusers-icon-btn" type="button" title="Refresh users" aria-label="Refresh users">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                            <path d="M20 4v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                        </svg>
+                    </button>
+                    <button id="btnAddUser" class="app-solid-btn" type="button">Add User</button>
+                </div>
             </div>
             <p id="resultCount" class="app-copy">0 shown</p>
             <div class="mngusers-table-wrap">
@@ -53,6 +60,7 @@
                     </tbody>
                 </table>
             </div>
+            <div id="userPager" class="mngusers-pager"></div>
         </section>
 
         <section class="app-panel">
@@ -88,6 +96,7 @@
                     </tbody>
                 </table>
             </div>
+            <div id="runningUsersPager" class="mngusers-pager"></div>
         </section>
 
         <section class="app-panel">
@@ -130,6 +139,7 @@
                     </tbody>
                 </table>
             </div>
+            <div id="execRequestPager" class="mngusers-pager"></div>
         </section>
     </div>
 
@@ -159,6 +169,7 @@
                     <label class="mngusers-check"><input id="isActive" type="checkbox" checked /> Active</label>
                     <label class="mngusers-check"><input id="execStrategy" type="checkbox" /> Exec Strategy</label>
                     <label class="mngusers-check"><input id="isAdmin" type="checkbox" /> Admin</label>
+                    <label class="mngusers-check"><input id="isSurvivalAdmin" type="checkbox" /> Survival Admin</label>
                     <label class="mngusers-check"><input id="mustChangePassword" type="checkbox" /> Force password change</label>
                 </div>
             </div>

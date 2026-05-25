@@ -44,6 +44,7 @@ export async function updateMyProfile(req: Request, res: Response): Promise<void
             telegramChatId: vTelegramChatId,
             isActive: objAccount.isActive,
             isAdmin: objAccount.isAdmin,
+            isSurvivalAdmin: objAccount.isSurvivalAdmin,
             execStrategy: objAccount.execStrategy,
             mustChangePassword: objAccount.mustChangePassword
         });

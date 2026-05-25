@@ -37,9 +37,16 @@
 
 .mngusers-toolbar {
     display:grid;
-    grid-template-columns:1fr auto auto;
+    grid-template-columns:1fr auto;
     gap:12px;
     margin-bottom:14px;
+}
+
+.mngusers-toolbar-actions {
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:12px;
 }
 
 .mngusers-section-head {
@@ -194,6 +201,52 @@
 
 .mngusers-empty { text-align:center; color:var(--app-muted); padding:28px 14px; }
 
+.mngusers-pager {
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:10px;
+    margin-top:12px;
+    min-height:36px;
+}
+
+.mngusers-pager-info {
+    color:var(--app-muted);
+    font-size:.88rem;
+}
+
+.mngusers-pager-controls {
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+
+.mngusers-pager-btn {
+    min-width:34px;
+    height:34px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:10px;
+    border:1px solid rgba(255,255,255,.10);
+    background:rgba(255,255,255,.04);
+    color:#dce5ff;
+    cursor:pointer;
+    font:inherit;
+}
+
+.mngusers-pager-btn[disabled] {
+    opacity:.45;
+    cursor:not-allowed;
+}
+
+.mngusers-pager-page {
+    color:#dce5ff;
+    font-size:.88rem;
+    min-width:64px;
+    text-align:center;
+}
+
 .mngusers-status-stack,
 .mngusers-owner-stack {
     display:grid;
@@ -304,6 +357,11 @@
     .mngusers-toolbar,
     .mngusers-modal-grid {
         grid-template-columns:1fr;
+    }
+
+    .mngusers-toolbar-actions,
+    .mngusers-pager {
+        justify-content:flex-start;
     }
 
     .mngusers-check-grid {

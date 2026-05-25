@@ -21,18 +21,18 @@
 
         <section class="dashboard-hero">
             <div class="app-panel">
-                <div class="dashboard-eyebrow">Control Center</div>
-                <h1 class="dashboard-title">Build, monitor, and grow your trading workspace from one dashboard.</h1>
-                <p class="app-copy">This is now the main landing page for your account. Use it to move into strategy controls, tighten account security, and keep the server-side setup organized as the product grows.</p>
+                <div class="dashboard-eyebrow">Delta Neutral Control Center</div>
+                <h1 class="dashboard-title">Operate your live delta neutral workflow from one dashboard.</h1>
+                <p class="app-copy">This dashboard is now the signed-in operating panel for the live strategy. Use it to move into Delta Neutral controls, review account and API readiness, and keep the server-side workflow organized while the product deepens around this one strategy.</p>
                 <div class="dashboard-actions">
-                    <a class="app-solid-btn" href="/strategyfogreeks">Open StrategyFOGreeks</a>
+                    <a class="app-solid-btn" href="/rollingfutures-lt-dual">Open Delta Neutral</a>
                     <a class="app-ghost-btn" href="/account/profile">Review My Profile</a>
                     <a class="app-ghost-btn" href="/account/delta-exchange-api">Delta API Settings</a>
                 </div>
                 <% if (vMustChangePassword) { %>
                     <div class="dashboard-note">Your account is marked for a password update. Please change it before doing anything important in the platform.</div>
                 <% } else { %>
-                    <div class="dashboard-note">Your login session is active and the dashboard is ready for the next phase of product buildout.</div>
+                    <div class="dashboard-note">Your login session is active and the dashboard is ready for live strategy setup, monitoring, and admin follow-through.</div>
                 <% } %>
                 <% if (infoMessage) { %>
                     <div class="app-success"><%= infoMessage %></div>
@@ -71,7 +71,7 @@
                     </div>
                     <div class="app-stat dashboard-stat">
                         <div class="dashboard-stat-label">Primary Workspace</div>
-                        <div class="dashboard-stat-value">Paper</div>
+                        <div class="dashboard-stat-value">Delta Neutral</div>
                     </div>
                 </div>
             </div>
@@ -81,30 +81,30 @@
             <div class="dashboard-section-head">
                 <div>
                     <h2>Quick Actions</h2>
-                    <p class="app-copy">Use these entry points to move between account setup, strategy control, and team administration without digging through menus.</p>
+                    <p class="app-copy">Use these entry points to move between live strategy control, account setup, and team administration without digging through menus.</p>
                 </div>
             </div>
             <div class="dashboard-shortcut-grid">
-                <a class="dashboard-shortcut" href="/strategyfogreeks">
+                <a class="dashboard-shortcut" href="/rollingfutures-lt-dual">
                     <div class="dashboard-shortcut-kicker">Strategy</div>
-                    <div class="dashboard-shortcut-title">Launch Paper Runner</div>
-                    <div class="dashboard-shortcut-copy">Open the StrategyFOGreeks control surface and continue from the live server-backed paper workflow.</div>
+                    <div class="dashboard-shortcut-title">Open Delta Neutral Live</div>
+                    <div class="dashboard-shortcut-copy">Go directly to the live delta neutral workspace for entries, hedge controls, closed-position refresh, alerts, and runtime state.</div>
                 </a>
                 <a class="dashboard-shortcut" href="/account/profile">
                     <div class="dashboard-shortcut-kicker">Profile</div>
                     <div class="dashboard-shortcut-title">Update Personal Details</div>
-                    <div class="dashboard-shortcut-copy">Review your name, email, mobile number, and Telegram details so account ownership stays clean.</div>
+                    <div class="dashboard-shortcut-copy">Review your name, email, mobile number, and Telegram details so the live strategy account stays clearly attributable.</div>
                 </a>
                 <a class="dashboard-shortcut" href="/account/delta-exchange-api">
                     <div class="dashboard-shortcut-kicker">Credentials</div>
                     <div class="dashboard-shortcut-title">Manage Delta API Profiles</div>
-                    <div class="dashboard-shortcut-copy">Store and organize exchange API references before strategy automation expands further.</div>
+                    <div class="dashboard-shortcut-copy">Store and organize exchange API profiles so the live strategy can connect cleanly and keep account-specific references separate.</div>
                 </a>
                 <% if (vIsAdmin) { %>
                     <a class="dashboard-shortcut" href="/mngusers">
                         <div class="dashboard-shortcut-kicker">Admin</div>
                         <div class="dashboard-shortcut-title">Manage Users</div>
-                        <div class="dashboard-shortcut-copy">Create accounts, control admin rights, and manage password reset status from the PostgreSQL-backed admin workspace.</div>
+                        <div class="dashboard-shortcut-copy">Create accounts, inspect running users, and manage live ownership, primary mode, and survival mode behavior from one admin workspace.</div>
                     </a>
                 <% } %>
                 <a class="dashboard-shortcut" href="/account/change-password">
@@ -115,7 +115,7 @@
                 <a class="dashboard-shortcut" href="/">
                     <div class="dashboard-shortcut-kicker">Platform</div>
                     <div class="dashboard-shortcut-title">Return to Home</div>
-                    <div class="dashboard-shortcut-copy">Jump back to the public landing page while the dashboard continues evolving into the core signed-in workspace.</div>
+                    <div class="dashboard-shortcut-copy">Jump back to the public landing page to review the product story while this dashboard remains the signed-in control surface.</div>
                 </a>
             </div>
         </section>
@@ -125,37 +125,37 @@
                 <div class="dashboard-section-head">
                     <div>
                         <h2>Suggested Flow</h2>
-                        <p class="app-copy">This is the cleanest sequence for getting an account production-ready without skipping setup details that will matter later.</p>
+                        <p class="app-copy">This is the cleanest sequence for getting an account ready for the live Delta Neutral workflow without skipping setup details that matter later.</p>
                     </div>
                 </div>
                 <div class="dashboard-steps">
                     <div class="dashboard-step">
                         <div class="dashboard-step-num">1</div>
                         <div>
-                            <div class="dashboard-step-title">Secure the account</div>
-                            <p class="app-copy">Confirm your profile data and set a strong password so the account is stable before strategy usage ramps up.</p>
+                        <div class="dashboard-step-title">Secure the account</div>
+                        <p class="app-copy">Confirm your profile data and set a strong password so the trading account is stable before live usage ramps up.</p>
                         </div>
                     </div>
                     <div class="dashboard-step">
                         <div class="dashboard-step-num">2</div>
                         <div>
-                            <div class="dashboard-step-title">Configure API references</div>
-                            <p class="app-copy">Add Delta Exchange API profiles and keep them organized by reference name instead of scattering keys across sessions.</p>
+                        <div class="dashboard-step-title">Configure API references</div>
+                        <p class="app-copy">Add Delta Exchange API profiles and keep them organized by reference name so the live strategy can be switched and audited cleanly.</p>
                         </div>
                     </div>
                     <div class="dashboard-step">
                         <div class="dashboard-step-num">3</div>
                         <div>
-                            <div class="dashboard-step-title">Enter the strategy workspace</div>
-                            <p class="app-copy">Use StrategyFOGreeks paper mode as the current operating area while the broader platform dashboard continues to expand.</p>
+                        <div class="dashboard-step-title">Enter the strategy workspace</div>
+                        <p class="app-copy">Use the Delta Neutral live page as the main operating area for entries, hedge checks, recovery totals, and event monitoring.</p>
                         </div>
                     </div>
                     <% if (vIsAdmin) { %>
                         <div class="dashboard-step">
                             <div class="dashboard-step-num">4</div>
                             <div>
-                                <div class="dashboard-step-title">Provision the team</div>
-                                <p class="app-copy">From Manage Users, create new accounts, assign admin access carefully, and keep reset flows intentional.</p>
+                        <div class="dashboard-step-title">Provision the team</div>
+                        <p class="app-copy">From Manage Users, create new accounts, assign admin access carefully, and keep live strategy operations visible across accounts.</p>
                             </div>
                         </div>
                     <% } %>
@@ -166,13 +166,13 @@
                 <div class="dashboard-section-head">
                     <div>
                         <h2>Workspace Notes</h2>
-                        <p class="app-copy">A few useful signals about the account and where this dashboard sits in the product right now.</p>
+                        <p class="app-copy">A few useful signals about the account and how this dashboard fits into the live strategy product right now.</p>
                     </div>
                 </div>
                 <div class="dashboard-detail-list">
                     <div class="dashboard-detail">
                         <strong>Current role</strong>
-                        <span><%= vIsAdmin ? "You can access both strategy workflows and admin management tools." : "You currently have access to user-level profile, security, and strategy areas." %></span>
+                        <span><%= vIsAdmin ? "You can access the live strategy workflow plus admin management tools." : "You currently have access to user-level profile, security, and live strategy areas." %></span>
                     </div>
                     <div class="dashboard-detail">
                         <strong>Account email</strong>
@@ -180,15 +180,15 @@
                     </div>
                     <div class="dashboard-detail">
                         <strong>Platform state</strong>
-                        <span>The app is live on Railway and this dashboard is now positioned as the signed-in home base for future status, PnL, runner health, and account summaries.</span>
+                        <span>The app is now centered on the Delta Neutral live workflow, and this dashboard serves as the signed-in home base for strategy entry, setup, and future runner health visibility.</span>
                     </div>
                     <div class="dashboard-detail">
                         <strong>Next dashboard milestone</strong>
-                        <span>Add live runner stats, strategy summaries, account completion indicators, and server activity snapshots once the backend endpoints are ready.</span>
+                        <span>Add live runner stats, Delta Neutral summaries, account readiness indicators, and server activity snapshots once the supporting endpoints are ready.</span>
                     </div>
                 </div>
                 <% if (vIsAdmin) { %>
-                    <div class="dashboard-info-banner">Admin visibility is enabled for this account, so this dashboard can become the control room for user provisioning and future operational monitoring.</div>
+                    <div class="dashboard-info-banner">Admin visibility is enabled for this account, so this dashboard can keep evolving into the control room for user provisioning, live ownership review, and operational monitoring.</div>
                 <% } %>
             </div>
         </section>

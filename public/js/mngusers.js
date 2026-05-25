@@ -3,6 +3,10 @@ const gState = {
     filteredUsers: [],
     runningUsers: [],
     pendingExecutionRequests: [],
+    pageSize: 5,
+    userPage: 1,
+    runningUsersPage: 1,
+    execRequestsPage: 1,
     editingAccountId: "",
     resettingAccountId: "",
     currentAccountId: "",
@@ -45,6 +49,7 @@ document.addEventListener("DOMContentLoaded", () => {
     els.addUserButton?.addEventListener("click", () => openUserModal());
     els.cancelModalButton?.addEventListener("click", closeActiveModal);
     els.closeModalButton?.addEventListener("click", closeActiveModal);
+    els.isSurvivalAdmin?.addEventListener("change", syncSurvivalAdminFormState);
     els.userForm?.addEventListener("submit", submitUserForm);
 
     els.closeResetPasswordModalButton?.addEventListener("click", closeActiveModal);
@@ -69,10 +74,13 @@ function cacheElements() {
     els.addUserButton = document.getElementById("btnAddUser");
     els.pageStatus = document.getElementById("pageStatus");
     els.resultCount = document.getElementById("resultCount");
+    els.userPager = document.getElementById("userPager");
     els.userTableBody = document.getElementById("userTableBody");
     els.execRequestCount = document.getElementById("execRequestCount");
     els.runningUsersCount = document.getElementById("runningUsersCount");
+    els.runningUsersPager = document.getElementById("runningUsersPager");
     els.runningUsersTableBody = document.getElementById("runningUsersTableBody");
+    els.execRequestPager = document.getElementById("execRequestPager");
     els.execRequestTableBody = document.getElementById("execRequestTableBody");
     els.autoExecSl = document.getElementById("autoExecSl");
     els.autoExecTp = document.getElementById("autoExecTp");
@@ -96,6 +104,7 @@ function cacheElements() {
     els.isActive = document.getElementById("isActive");
     els.execStrategy = document.getElementById("execStrategy");
     els.isAdmin = document.getElementById("isAdmin");
+    els.isSurvivalAdmin = document.getElementById("isSurvivalAdmin");
     els.mustChangePassword = document.getElementById("mustChangePassword");
 
     els.resetPasswordModal = document.getElementById("resetPasswordModal");
@@ -121,6 +130,7 @@ async function loadRunningUsers() {
             credentials: "same-origin"
         }, "Unable to load running dual users.");
         gState.runningUsers = Array.isArray(objResult.data) ? objResult.data : [];
+        gState.runningUsersPage = 1;
         renderRunningUsers();
     }
     catch (objError) {
@@ -176,6 +186,7 @@ async function loadExecutionRequests() {
             credentials: "same-origin"
         }, "Unable to load pending strategy execution requests.");
         gState.pendingExecutionRequests = Array.isArray(objResult.data) ? objResult.data : [];
+        gState.execRequestsPage = 1;
         renderExecutionRequests();
     }
     catch (objError) {
@@ -200,7 +211,7 @@ async function refreshExecutionRequests() {
 async function loadAdminData(pOptions) {
     const bShowSuccess = Boolean(pOptions?.showSuccess);
     setPageStatus("Loading admin data...", "info");
-    setButtonBusy(els.refreshButton, true, "Refreshing...");
+    setButtonBusy(els.refreshButton, true, "");
 
     try {
         await Promise.all([loadUsers(), loadRunningUsers(), loadExecutionRequests(), loadExecutionSettings()]);
@@ -209,25 +220,34 @@ async function loadAdminData(pOptions) {
         }
     }
     finally {
-        setButtonBusy(els.refreshButton, false, "Refresh");
+        restoreIconButton(els.refreshButton);
     }
 }
 
 function renderRunningUsers() {
-    if (els.runningUsersCount) {
-        els.runningUsersCount.textContent = `${gState.runningUsers.length} running`;
-    }
-
     if (!els.runningUsersTableBody) {
         return;
     }
 
+    if (els.runningUsersCount) {
+        els.runningUsersCount.textContent = `${gState.runningUsers.length} running`;
+    }
+
     if (!gState.runningUsers.length) {
         els.runningUsersTableBody.innerHTML = `<tr><td colspan="6" class="mngusers-empty">No running Dual live users right now.</td></tr>`;
+        renderPager(els.runningUsersPager, {
+            page: 1,
+            totalItems: 0,
+            totalPages: 0,
+            onPageChange: () => undefined
+        });
         return;
     }
 
-    els.runningUsersTableBody.innerHTML = gState.runningUsers.map((objUser) => {
+    const objPaged = paginateRows(gState.runningUsers, gState.runningUsersPage, gState.pageSize);
+    gState.runningUsersPage = objPaged.page;
+
+    els.runningUsersTableBody.innerHTML = objPaged.rows.map((objUser) => {
         const bSwitching = gState.switchingPrimaryAccountId === objUser.accountId;
         const vModeChip = objUser.survivalMode
             ? `<span class="mngusers-chip mngusers-chip-warn">Survival DB</span>`
@@ -270,6 +290,16 @@ function renderRunningUsers() {
             </tr>
         `;
     }).join("");
+
+    renderPager(els.runningUsersPager, {
+        page: objPaged.page,
+        totalItems: gState.runningUsers.length,
+        totalPages: objPaged.totalPages,
+        onPageChange: (pPage) => {
+            gState.runningUsersPage = pPage;
+            renderRunningUsers();
+        }
+    });
 }
 
 async function loadExecutionSettings() {
@@ -315,6 +345,8 @@ function applyFilters() {
         objUser.mobileNo,
         objUser.telegramChatId
     ].join(" ").toLowerCase().includes(vSearch));
+    gState.userPage = 1;
+    gState.execRequestsPage = 1;
     renderStats();
     renderTable();
     renderExecutionRequests();
@@ -340,13 +372,23 @@ function renderTable() {
 
     if (!gState.filteredUsers.length) {
         els.userTableBody.innerHTML = `<tr><td colspan="6" class="mngusers-empty">No users match the current search.</td></tr>`;
+        renderPager(els.userPager, {
+            page: 1,
+            totalItems: 0,
+            totalPages: 0,
+            onPageChange: () => undefined
+        });
         return;
     }
 
-    els.userTableBody.innerHTML = gState.filteredUsers.map((objUser) => {
+    const objPaged = paginateRows(gState.filteredUsers, gState.userPage, gState.pageSize);
+    gState.userPage = objPaged.page;
+
+    els.userTableBody.innerHTML = objPaged.rows.map((objUser) => {
         const vCreated = formatDateTime(objUser.createdAt);
         const vBadges = [
             objUser.isAdmin ? `<span class="mngusers-chip mngusers-chip-admin">Admin</span>` : `<span class="mngusers-chip mngusers-chip-muted">User</span>`,
+            objUser.isSurvivalAdmin ? `<span class="mngusers-chip mngusers-chip-info">Survival Admin</span>` : "",
             objUser.isActive ? `<span class="mngusers-chip mngusers-chip-live">Active</span>` : `<span class="mngusers-chip mngusers-chip-off">Inactive</span>`,
             objUser.mustChangePassword ? `<span class="mngusers-chip mngusers-chip-warn">Pwd Reset</span>` : ""
         ].filter(Boolean).join(" ");
@@ -366,20 +408,40 @@ function renderTable() {
                 <td>${objUser.mustChangePassword ? "Temporary password pending" : "Ready"}</td>
                 <td>
                     <div class="mngusers-actions">
-                        <button class="app-link-btn" type="button" data-action="edit" data-id="${escapeHtml(objUser.accountId)}" title="Edit user" aria-label="Edit user">
-                            Edit
+                        <button class="mngusers-icon-btn" type="button" data-action="edit" data-id="${escapeHtml(objUser.accountId)}" title="Edit user" aria-label="Edit user">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M4 20h4l10-10-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path>
+                                <path d="M13 7l4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                            </svg>
                         </button>
-                        <button class="app-link-btn" type="button" data-action="reset" data-id="${escapeHtml(objUser.accountId)}" title="Reset password" aria-label="Reset password">
-                            Reset Password
+                        <button class="mngusers-icon-btn" type="button" data-action="reset" data-id="${escapeHtml(objUser.accountId)}" title="Reset password" aria-label="Reset password">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M12 3a4 4 0 0 1 4 4v2h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1V7a4 4 0 0 1 4-4z" fill="none" stroke="currentColor" stroke-width="2"></path>
+                                <path d="M9 9V7a3 3 0 1 1 6 0v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                            </svg>
                         </button>
-                        <button class="app-link-btn" type="button" data-action="delete" data-id="${escapeHtml(objUser.accountId)}" title="Delete user" aria-label="Delete user" ${objUser.accountId === gState.currentAccountId ? "disabled" : ""}>
-                            Delete
+                        <button class="mngusers-icon-btn cancel" type="button" data-action="delete" data-id="${escapeHtml(objUser.accountId)}" title="Delete user" aria-label="Delete user" ${objUser.accountId === gState.currentAccountId ? "disabled" : ""}>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M4 7h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                                <path d="M9 7V5h6v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                                <path d="M8 7l1 12h6l1-12" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path>
+                            </svg>
                         </button>
                     </div>
                 </td>
             </tr>
         `;
     }).join("");
+
+    renderPager(els.userPager, {
+        page: objPaged.page,
+        totalItems: gState.filteredUsers.length,
+        totalPages: objPaged.totalPages,
+        onPageChange: (pPage) => {
+            gState.userPage = pPage;
+            renderTable();
+        }
+    });
 }
 
 function renderExecutionRequests() {
@@ -391,7 +453,9 @@ function renderExecutionRequests() {
     const arrRequests = gState.pendingExecutionRequests.filter((objRequest) => !vSearch || [
         objRequest.fullName,
         objRequest.email
-    ].join(" ").toLowerCase().includes(vSearch));
+    ].join(" ").toLowerCase().includes(vSearch)).sort((objA, objB) => {
+        return new Date(String(objA.createdAt || 0)).getTime() - new Date(String(objB.createdAt || 0)).getTime();
+    });
 
     if (els.execRequestCount) {
         els.execRequestCount.textContent = `${arrRequests.length} pending`;
@@ -399,10 +463,19 @@ function renderExecutionRequests() {
 
     if (!arrRequests.length) {
         els.execRequestTableBody.innerHTML = `<tr><td colspan="8" class="mngusers-empty">No pending strategy execution requests.</td></tr>`;
+        renderPager(els.execRequestPager, {
+            page: 1,
+            totalItems: 0,
+            totalPages: 0,
+            onPageChange: () => undefined
+        });
         return;
     }
 
-    els.execRequestTableBody.innerHTML = arrRequests.map((objRequest) => {
+    const objPaged = paginateRows(arrRequests, gState.execRequestsPage, gState.pageSize);
+    gState.execRequestsPage = objPaged.page;
+
+    els.execRequestTableBody.innerHTML = objPaged.rows.map((objRequest) => {
         const bExecuting = gState.executingRequestId === objRequest.requestId;
         const vStartQty = Number(objRequest.requestPayload?.startQty ?? objRequest.requestPayload?.qty);
         const vAvailableBalance = Number(objRequest.requestPayload?.availableBalance);
@@ -430,6 +503,61 @@ function renderExecutionRequests() {
             </tr>
         `;
     }).join("");
+
+    renderPager(els.execRequestPager, {
+        page: objPaged.page,
+        totalItems: arrRequests.length,
+        totalPages: objPaged.totalPages,
+        onPageChange: (pPage) => {
+            gState.execRequestsPage = pPage;
+            renderExecutionRequests();
+        }
+    });
+}
+
+function paginateRows(pRows, pPage, pPageSize) {
+    const vTotalItems = Array.isArray(pRows) ? pRows.length : 0;
+    const vTotalPages = Math.max(1, Math.ceil(vTotalItems / pPageSize));
+    const vPage = Math.min(Math.max(1, Number(pPage) || 1), vTotalPages);
+    const vStart = (vPage - 1) * pPageSize;
+    return {
+        rows: pRows.slice(vStart, vStart + pPageSize),
+        page: vPage,
+        totalPages: vTotalItems ? vTotalPages : 0,
+        totalItems: vTotalItems
+    };
+}
+
+function renderPager(pNode, pOptions) {
+    if (!(pNode instanceof HTMLElement)) {
+        return;
+    }
+
+    const vTotalItems = Math.max(0, Number(pOptions?.totalItems) || 0);
+    const vTotalPages = Math.max(0, Number(pOptions?.totalPages) || 0);
+    const vPage = Math.max(1, Number(pOptions?.page) || 1);
+    const fnOnPageChange = typeof pOptions?.onPageChange === "function" ? pOptions.onPageChange : null;
+
+    if (!vTotalItems || vTotalPages <= 1 || !fnOnPageChange) {
+        pNode.innerHTML = vTotalItems
+            ? `<div class="mngusers-pager-info">Showing ${vTotalItems} row${vTotalItems === 1 ? "" : "s"}</div>`
+            : "";
+        return;
+    }
+
+    pNode.innerHTML = `
+        <div class="mngusers-pager-info">Showing ${vTotalItems} row${vTotalItems === 1 ? "" : "s"}</div>
+        <div class="mngusers-pager-controls">
+            <button class="mngusers-pager-btn" type="button" data-page-nav="prev" ${vPage <= 1 ? "disabled" : ""}>‹</button>
+            <div class="mngusers-pager-page">Page ${vPage} / ${vTotalPages}</div>
+            <button class="mngusers-pager-btn" type="button" data-page-nav="next" ${vPage >= vTotalPages ? "disabled" : ""}>›</button>
+        </div>
+    `;
+
+    const objPrev = pNode.querySelector("button[data-page-nav='prev']");
+    const objNext = pNode.querySelector("button[data-page-nav='next']");
+    objPrev?.addEventListener("click", () => fnOnPageChange(Math.max(1, vPage - 1)));
+    objNext?.addEventListener("click", () => fnOnPageChange(Math.min(vTotalPages, vPage + 1)));
 }
 
 function handleTableAction(objEvent) {
@@ -512,7 +640,9 @@ function openUserModal(pUser) {
     setCheckedNode(els.isActive, pUser ? Boolean(pUser.isActive) : true);
     setCheckedNode(els.execStrategy, pUser ? Boolean(pUser.execStrategy) : false);
     setCheckedNode(els.isAdmin, pUser ? Boolean(pUser.isAdmin) : false);
+    setCheckedNode(els.isSurvivalAdmin, pUser ? Boolean(pUser.isSurvivalAdmin) : false);
     setCheckedNode(els.mustChangePassword, pUser ? Boolean(pUser.mustChangePassword) : false);
+    syncSurvivalAdminFormState();
 
     if (els.passwordFields instanceof HTMLElement) {
         els.passwordFields.hidden = Boolean(gState.editingAccountId);
@@ -587,11 +717,22 @@ async function submitUserForm(objEvent) {
         isActive: getCheckedNode(els.isActive),
         execStrategy: getCheckedNode(els.execStrategy),
         isAdmin: getCheckedNode(els.isAdmin),
+        isSurvivalAdmin: getCheckedNode(els.isSurvivalAdmin),
         mustChangePassword: getCheckedNode(els.mustChangePassword)
     };
 
     if (!objPayload.fullName || !objPayload.email || !objPayload.mobileNo) {
         setFormMessage(els.modalMessage, "Full name, email, and mobile number are required.", "error");
+        return;
+    }
+
+    if (objPayload.isSurvivalAdmin && objPayload.execStrategy) {
+        setFormMessage(els.modalMessage, "A Survival Admin account cannot have Exec Strategy enabled.", "error");
+        return;
+    }
+
+    if (objPayload.isSurvivalAdmin && gState.editingAccountId && gState.editingAccountId === gState.currentAccountId) {
+        setFormMessage(els.modalMessage, "Use a different dedicated account for Survival Admin access.", "error");
         return;
     }
 
@@ -638,6 +779,17 @@ async function submitUserForm(objEvent) {
     finally {
         gState.isSavingUser = false;
         setButtonBusy(els.saveUserButton, false, "Save User");
+    }
+}
+
+function syncSurvivalAdminFormState() {
+    const bSurvivalAdmin = getCheckedNode(els.isSurvivalAdmin);
+    if (els.execStrategy instanceof HTMLInputElement) {
+        els.execStrategy.disabled = bSurvivalAdmin;
+    }
+
+    if (bSurvivalAdmin) {
+        setCheckedNode(els.execStrategy, false);
     }
 }
 

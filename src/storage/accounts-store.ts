@@ -1,6 +1,15 @@
 import crypto from "node:crypto";
 import { hashPassword } from "../security/passwords";
 import { getPostgresPool, isPostgresConfigured, runPostgresQueryWithReconnect } from "./postgres";
+import {
+    deleteSurvivalAdminByPrimaryAccountId,
+    deleteSurvivalAdminSessionsByAdminId,
+    upsertSurvivalAdminFromPrimaryAccount
+} from "./survival-admin-store";
+import {
+    deleteSurvivalAccountDirectoryEntry,
+    upsertSurvivalAccountDirectoryEntry
+} from "./survival-account-directory-store";
 import type { AccountRecord } from "../types/models";
 
 const gBootstrapAdminDefaults = {
@@ -19,6 +28,7 @@ interface AccountRow {
     password_hash: string;
     is_active: boolean;
     is_admin: boolean;
+    is_survival_admin: boolean;
     exec_strategy: boolean;
     must_change_password: boolean;
     created_at: string | Date;
@@ -32,6 +42,7 @@ export interface CreateAccountInput {
     telegramChatId?: string;
     password: string;
     isAdmin?: boolean;
+    isSurvivalAdmin?: boolean;
     execStrategy?: boolean;
     isActive?: boolean;
     mustChangePassword?: boolean;
@@ -44,6 +55,7 @@ export interface UpdateAccountInput {
     telegramChatId?: string;
     isActive: boolean;
     isAdmin: boolean;
+    isSurvivalAdmin: boolean;
     execStrategy: boolean;
     mustChangePassword: boolean;
 }
@@ -81,7 +93,7 @@ export async function createAccount(pInput: CreateAccountInput): Promise<Account
     const vEmail = normalizeEmail(pInput.email);
     const objPool = getPostgresPool();
     const objExisting = await objPool.query<AccountRow>(`
-        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, exec_strategy, must_change_password, created_at, updated_at
+        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, is_survival_admin, exec_strategy, must_change_password, created_at, updated_at
         FROM optionyze_accounts
         WHERE email = $1
     `, [vEmail]);
@@ -104,11 +116,12 @@ export async function createAccount(pInput: CreateAccountInput): Promise<Account
             password_hash,
             is_active,
             is_admin,
+            is_survival_admin,
             exec_strategy,
             must_change_password,
             created_at,
             updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     `, [
         vAccountId,
         String(pInput.fullName || "").trim(),
@@ -118,6 +131,7 @@ export async function createAccount(pInput: CreateAccountInput): Promise<Account
         vPasswordHash,
         pInput.isActive !== false,
         Boolean(pInput.isAdmin),
+        Boolean(pInput.isSurvivalAdmin),
         Boolean(pInput.execStrategy),
         Boolean(pInput.mustChangePassword),
         vNow,
@@ -128,6 +142,7 @@ export async function createAccount(pInput: CreateAccountInput): Promise<Account
     if (!objAccount) {
         throw new Error("Failed to create account.");
     }
+    await syncSurvivalAdminState(objAccount);
 
     return objAccount;
 }
@@ -139,7 +154,7 @@ export async function getAccountByEmail(pEmail: string): Promise<AccountRecord |
 
     const objPool = getPostgresPool();
     const objResult = await objPool.query<AccountRow>(`
-        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, exec_strategy, must_change_password, created_at, updated_at
+        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, is_survival_admin, exec_strategy, must_change_password, created_at, updated_at
         FROM optionyze_accounts
         WHERE email = $1
     `, [normalizeEmail(pEmail)]);
@@ -153,7 +168,7 @@ export async function getAccountById(pAccountId: string): Promise<AccountRecord 
     }
 
     const objResult = await runPostgresQueryWithReconnect((pPool) => pPool.query<AccountRow>(`
-        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, exec_strategy, must_change_password, created_at, updated_at
+        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, is_survival_admin, exec_strategy, must_change_password, created_at, updated_at
         FROM optionyze_accounts
         WHERE account_id = $1
     `, [pAccountId]));
@@ -187,9 +202,10 @@ export async function updateAccount(pAccountId: string, pInput: UpdateAccountInp
             telegram_chat_id = $5,
             is_active = $6,
             is_admin = $7,
-            exec_strategy = $8,
-            must_change_password = $9,
-            updated_at = $10
+            is_survival_admin = $8,
+            exec_strategy = $9,
+            must_change_password = $10,
+            updated_at = $11
         WHERE account_id = $1
     `, [
         pAccountId,
@@ -199,6 +215,7 @@ export async function updateAccount(pAccountId: string, pInput: UpdateAccountInp
         String(pInput.telegramChatId || "").trim(),
         Boolean(pInput.isActive),
         Boolean(pInput.isAdmin),
+        Boolean(pInput.isSurvivalAdmin),
         Boolean(pInput.execStrategy),
         Boolean(pInput.mustChangePassword),
         new Date().toISOString()
@@ -208,6 +225,7 @@ export async function updateAccount(pAccountId: string, pInput: UpdateAccountInp
     if (!objAccount) {
         throw new Error("Account not found after update.");
     }
+    await syncSurvivalAdminState(objAccount);
 
     return objAccount;
 }
@@ -230,6 +248,10 @@ export async function updateAccountPassword(
             updated_at = $4
         WHERE account_id = $1
     `, [pAccountId, vPasswordHash, pMustChangePassword, new Date().toISOString()]);
+    const objAccount = await getAccountById(pAccountId);
+    if (objAccount) {
+        await syncSurvivalAdminState(objAccount);
+    }
 }
 
 export async function deleteAccount(pAccountId: string): Promise<void> {
@@ -237,6 +259,9 @@ export async function deleteAccount(pAccountId: string): Promise<void> {
         throw new Error("PostgreSQL is required for account deletion.");
     }
 
+    await deleteSurvivalAdminByPrimaryAccountId(pAccountId);
+    await deleteSurvivalAdminSessionsByAdminId(pAccountId);
+    await deleteSurvivalAccountDirectoryEntry(pAccountId);
     const objPool = getPostgresPool();
     await objPool.query(`DELETE FROM optionyze_accounts WHERE account_id = $1`, [pAccountId]);
 }
@@ -244,7 +269,7 @@ export async function deleteAccount(pAccountId: string): Promise<void> {
 async function getAnyAdminAccount(): Promise<AccountRecord | null> {
     const objPool = getPostgresPool();
     const objResult = await objPool.query<AccountRow>(`
-        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, exec_strategy, must_change_password, created_at, updated_at
+        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, is_survival_admin, exec_strategy, must_change_password, created_at, updated_at
         FROM optionyze_accounts
         WHERE is_admin = true
         ORDER BY created_at ASC
@@ -268,9 +293,27 @@ function mapAccountRow(pRow?: AccountRow | null): AccountRecord | null {
         passwordHash: String(pRow.password_hash || ""),
         isActive: Boolean(pRow.is_active),
         isAdmin: Boolean(pRow.is_admin),
+        isSurvivalAdmin: Boolean(pRow.is_survival_admin),
         execStrategy: Boolean(pRow.exec_strategy),
         mustChangePassword: Boolean(pRow.must_change_password),
         createdAt: new Date(pRow.created_at).toISOString(),
         updatedAt: new Date(pRow.updated_at).toISOString()
     };
+}
+
+async function syncSurvivalAdminState(pAccount: AccountRecord): Promise<void> {
+    await upsertSurvivalAccountDirectoryEntry({
+        accountId: pAccount.accountId,
+        fullName: pAccount.fullName,
+        email: pAccount.email,
+        isActive: pAccount.isActive
+    });
+
+    if (pAccount.isSurvivalAdmin && pAccount.isActive) {
+        await upsertSurvivalAdminFromPrimaryAccount(pAccount);
+        return;
+    }
+
+    await deleteSurvivalAdminByPrimaryAccountId(pAccount.accountId);
+    await deleteSurvivalAdminSessionsByAdminId(pAccount.accountId);
 }

@@ -29,14 +29,25 @@ import {
 import { renderMngUsersPage } from "../api/controllers/users-controller";
 import { renderDeltaExchangeApiPage, renderMyProfilePage, sendTelegramProfileTest, updateMyProfile } from "../api/controllers/account-controller";
 import {
+    attachSurvivalAdminContext,
     attachAuthContext,
     requireAdminPage,
     requireAuthPage,
     requireFreshPasswordPage,
-    requireGuestPage
+    requireGuestPage,
+    requireSurvivalAdminGuestPage,
+    requireSurvivalAdminPage
 } from "../api/middleware/auth-middleware";
 import { ensureBootstrapAdminAccount } from "../storage/accounts-store";
 import { cleanupExpiredSessions } from "../storage/sessions-store";
+import { cleanupExpiredSurvivalAdminSessions } from "../storage/survival-admin-store";
+import {
+    renderSurvivalAdminDashboardPage,
+    renderSurvivalAdminRunningUsersPage,
+    renderSurvivalAdminSignInPage,
+    signInSurvivalAdmin,
+    signOutSurvivalAdmin
+} from "../api/controllers/survival-admin-controller";
 
 dns.setDefaultResultOrder("ipv4first");
 
@@ -50,6 +61,7 @@ async function bootstrap(): Promise<void> {
     await ensureSurvivalPostgresSchema();
     await ensureBootstrapAdminAccount();
     await cleanupExpiredSessions();
+    await cleanupExpiredSurvivalAdminSessions();
     await runnerManager.hydrate();
     await recoverRollingFuturesLtAutoTraderCycles();
 
@@ -59,6 +71,7 @@ async function bootstrap(): Promise<void> {
     app.use(express.urlencoded({ extended: true }));
     app.use(express.static(path.resolve(process.cwd(), "public")));
     app.use(attachAuthContext);
+    app.use(attachSurvivalAdminContext);
 
     app.get("/", (_req, res) => {
         res.render("home", {
@@ -73,6 +86,13 @@ async function bootstrap(): Promise<void> {
     app.post("/auth/signout", requireAuthPage, async (req, res) => {
         await signOutAccount(req, res);
     });
+    app.get("/survival-admin/signin", requireSurvivalAdminGuestPage, renderSurvivalAdminSignInPage);
+    app.post("/survival-admin/signin", signInSurvivalAdmin);
+    app.post("/survival-admin/signout", requireSurvivalAdminPage, async (req, res) => {
+        await signOutSurvivalAdmin(req, res);
+    });
+    app.get("/survival-admin/dashboard", requireSurvivalAdminPage, renderSurvivalAdminDashboardPage);
+    app.get("/survival-admin/running-users", requireSurvivalAdminPage, renderSurvivalAdminRunningUsersPage);
     app.get("/dashboard", requireAuthPage, requireFreshPasswordPage, renderDashboardPage);
     app.get("/rollingfutures-lt-dual", requireAuthPage, requireFreshPasswordPage, renderRollingFuturesLiveDualPage);
     app.get("/mngusers", requireAuthPage, requireFreshPasswordPage, requireAdminPage, renderMngUsersPage);

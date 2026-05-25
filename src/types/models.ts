@@ -63,6 +63,7 @@ export interface AccountRecord {
     passwordHash: string;
     isActive: boolean;
     isAdmin: boolean;
+    isSurvivalAdmin: boolean;
     execStrategy: boolean;
     mustChangePassword: boolean;
     createdAt: string;
@@ -77,6 +78,7 @@ export interface ManagedUserRecord {
     telegramChatId: string;
     isActive: boolean;
     isAdmin: boolean;
+    isSurvivalAdmin: boolean;
     execStrategy: boolean;
     mustChangePassword: boolean;
     createdAt: string;
@@ -111,6 +113,26 @@ export interface SessionRecord {
     accountId: string;
     expiresAt: string;
     createdAt: string;
+}
+
+export interface SurvivalAdminRecord {
+    adminId: string;
+    primaryAccountId: string;
+    fullName: string;
+    email: string;
+    passwordHash: string;
+    isActive: boolean;
+    createdAt: string;
+    updatedAt: string;
+    lastLoginAt: string;
+}
+
+export interface SurvivalAdminSessionRecord {
+    sessionId: string;
+    adminId: string;
+    expiresAt: string;
+    createdAt: string;
+    lastSeenAt: string;
 }
 
 export interface RunnerState {

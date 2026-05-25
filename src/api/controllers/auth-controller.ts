@@ -32,7 +32,7 @@ export function renderSignUpPage(_req: Request, res: Response): void {
 
 export function renderDashboardPage(req: Request, res: Response): void {
     res.render("dashboard", {
-        pageTitle: "Dashboard | Optionyze",
+        pageTitle: "Delta Neutral Dashboard | Optionyze",
         currentAccount: req.authAccount,
         infoMessage: req.query.message === "password-changed" ? "Password updated successfully." : ""
     });
@@ -78,6 +78,7 @@ export async function signUpAccount(req: Request, res: Response): Promise<void> 
             telegramChatId: objValues.telegramChatId || "",
             password: vPassword,
             isAdmin: false,
+            isSurvivalAdmin: false,
             isActive: true,
             mustChangePassword: false
         });

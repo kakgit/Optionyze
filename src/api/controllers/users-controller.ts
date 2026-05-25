@@ -12,6 +12,9 @@ import {
     loadManagedUsers,
     upsertManagedUserProfile
 } from "../../storage/users-store";
+import { loadRollingFuturesLtRuntime } from "../../storage/rolling-futures-lt-runtime-store";
+import { getStrategyLease } from "../../storage/strategy-lease-store";
+import { getSurvivalState } from "../../storage/survival-store";
 import {
     deletePendingStrategyExecutionRequest,
     listPendingStrategyExecutionRequests
@@ -103,6 +106,7 @@ export async function createManagedUserController(req: Request, res: Response): 
     try {
         const objAccountInput = readCreateAccountInput(req);
         validateCreateManagedUser(objAccountInput, String(req.body?.confirmPassword || ""));
+        await assertSurvivalAdminEligibilityForCreate(req, objAccountInput);
 
         const objAccount = await createAccount(objAccountInput);
         await upsertManagedUserProfile({
@@ -135,6 +139,7 @@ export async function updateManagedUserController(req: Request, res: Response): 
         const objAccountInput = readUpdateAccountInput(req);
         validateManagedUserUpdate(objAccountInput);
         assertAdminSelfProtection(req, vAccountId, objAccountInput.isAdmin, objAccountInput.isActive);
+        await assertSurvivalAdminEligibilityForUpdate(req, vAccountId, objAccountInput);
 
         const objAccount = await updateAccount(vAccountId, objAccountInput);
         await upsertManagedUserProfile({
@@ -213,6 +218,7 @@ function readCreateAccountInput(req: Request): CreateAccountInput {
         telegramChatId: String(req.body?.telegramChatId || "").trim(),
         password: String(req.body?.password || ""),
         isAdmin: Boolean(req.body?.isAdmin),
+        isSurvivalAdmin: Boolean(req.body?.isSurvivalAdmin),
         execStrategy: Boolean(req.body?.execStrategy),
         isActive: req.body?.isActive !== false,
         mustChangePassword: Boolean(req.body?.mustChangePassword)
@@ -227,6 +233,7 @@ function readUpdateAccountInput(req: Request): UpdateAccountInput {
         telegramChatId: String(req.body?.telegramChatId || "").trim(),
         isActive: Boolean(req.body?.isActive),
         isAdmin: Boolean(req.body?.isAdmin),
+        isSurvivalAdmin: Boolean(req.body?.isSurvivalAdmin),
         execStrategy: Boolean(req.body?.execStrategy),
         mustChangePassword: Boolean(req.body?.mustChangePassword)
     };
@@ -246,6 +253,58 @@ function validateCreateManagedUser(pInput: CreateAccountInput, pConfirmPassword:
 
 function validateManagedUserUpdate(pInput: UpdateAccountInput): void {
     validateManagedUserBasics(pInput.fullName, pInput.email, pInput.mobileNo, pInput.telegramChatId);
+}
+
+async function assertSurvivalAdminEligibilityForCreate(req: Request, pInput: CreateAccountInput): Promise<void> {
+    if (!pInput.isSurvivalAdmin) {
+        return;
+    }
+    validateSurvivalAdminInput(req, "", pInput.isSurvivalAdmin, Boolean(pInput.execStrategy));
+}
+
+async function assertSurvivalAdminEligibilityForUpdate(req: Request, pAccountId: string, pInput: UpdateAccountInput): Promise<void> {
+    validateSurvivalAdminInput(req, pAccountId, pInput.isSurvivalAdmin, pInput.execStrategy);
+    if (!pInput.isSurvivalAdmin) {
+        return;
+    }
+
+    const [objRuntime, objLease, objSurvival] = await Promise.all([
+        loadRollingFuturesLtRuntime(pAccountId, "rolling-futures-lt-dual"),
+        getStrategyLease(pAccountId, "rolling-futures-lt-dual"),
+        getSurvivalState(pAccountId, "rolling-futures-lt-dual")
+    ]);
+    const bRuntimeSaysRunning = Boolean(
+        objRuntime
+        && objRuntime.autoTraderEnabled
+        && String(objRuntime.status || "").trim().toLowerCase() === "running"
+    );
+    const vLeaseExpiresAtMs = objLease?.leaseExpiresAt ? new Date(objLease.leaseExpiresAt).getTime() : Number.NaN;
+    const bActiveLease = Boolean(objLease && Number.isFinite(vLeaseExpiresAtMs) && vLeaseExpiresAtMs > Date.now());
+    const vSurvivalLeaseExpiresAtMs = objSurvival?.leaseExpiresAt ? new Date(objSurvival.leaseExpiresAt).getTime() : Number.NaN;
+    const bActiveSurvival = Boolean(
+        objSurvival
+        && objSurvival.runStatus === "active"
+        && Number.isFinite(vSurvivalLeaseExpiresAtMs)
+        && vSurvivalLeaseExpiresAtMs > Date.now()
+    );
+    const bHasRunningDualStrategy = bRuntimeSaysRunning && (bActiveLease || bActiveSurvival);
+    if (bHasRunningDualStrategy) {
+        throw new Error("A Survival Admin account cannot have an active Delta Neutral strategy running.");
+    }
+}
+
+function validateSurvivalAdminInput(req: Request, pAccountId: string, pIsSurvivalAdmin: boolean, pExecStrategy: boolean): void {
+    if (!pIsSurvivalAdmin) {
+        return;
+    }
+
+    if (pExecStrategy) {
+        throw new Error("A Survival Admin account cannot have Exec Strategy enabled.");
+    }
+
+    if (req.authAccount?.accountId && req.authAccount.accountId === pAccountId) {
+        throw new Error("Use a different dedicated account for Survival Admin access.");
+    }
 }
 
 function validateManagedUserBasics(

@@ -1,6 +1,13 @@
 import type { NextFunction, Request, Response } from "express";
 import { getAccountById } from "../../storage/accounts-store";
 import { deleteSession, getSessionById, getSessionCookieName } from "../../storage/sessions-store";
+import {
+    deleteSurvivalAdminSession,
+    getSurvivalAdminById,
+    getSurvivalAdminSessionById
+} from "../../storage/survival-admin-store";
+
+const gSurvivalAdminSessionCookieName = "optionyze_survival_admin_sid";
 
 export async function attachAuthContext(req: Request, res: Response, next: NextFunction): Promise<void> {
     req.authAccount = null;
@@ -39,7 +46,56 @@ export async function attachAuthContext(req: Request, res: Response, next: NextF
     catch (objError) {
         console.error("[auth] failed to attach auth context:", objError);
         res.locals.currentAccount = null;
+        if (isSurvivalAdminPath(req.path)) {
+            next();
+            return;
+        }
         res.status(503).send("Database connection is temporarily unavailable. Please retry.");
+    }
+}
+
+export async function attachSurvivalAdminContext(req: Request, res: Response, next: NextFunction): Promise<void> {
+    req.survivalAdminAccount = null;
+    req.survivalAdminSessionId = null;
+
+    try {
+        const vSessionId = readCookie(req, getSurvivalAdminSessionCookieName());
+        if (!vSessionId) {
+            res.locals.survivalAdminAccount = null;
+            next();
+            return;
+        }
+
+        const objSession = await getSurvivalAdminSessionById(vSessionId);
+        if (!objSession) {
+            clearSurvivalAdminSessionCookie(res);
+            res.locals.survivalAdminAccount = null;
+            next();
+            return;
+        }
+
+        const objAccount = await getSurvivalAdminById(objSession.adminId);
+        if (!objAccount || !objAccount.isActive) {
+            await deleteSurvivalAdminSession(vSessionId);
+            clearSurvivalAdminSessionCookie(res);
+            res.locals.survivalAdminAccount = null;
+            next();
+            return;
+        }
+
+        req.survivalAdminAccount = objAccount;
+        req.survivalAdminSessionId = objSession.sessionId;
+        res.locals.survivalAdminAccount = objAccount;
+        next();
+    }
+    catch (objError) {
+        console.error("[survival-admin-auth] failed to attach survival admin context:", objError);
+        res.locals.survivalAdminAccount = null;
+        if (isSurvivalAdminPath(req.path)) {
+            res.status(503).send("Survival Admin access is temporarily unavailable. Please retry.");
+            return;
+        }
+        next();
     }
 }
 
@@ -52,9 +108,27 @@ export function requireGuestPage(req: Request, res: Response, next: NextFunction
     next();
 }
 
+export function requireSurvivalAdminGuestPage(req: Request, res: Response, next: NextFunction): void {
+    if (req.survivalAdminAccount) {
+        res.redirect("/survival-admin/dashboard");
+        return;
+    }
+
+    next();
+}
+
 export function requireAuthPage(req: Request, res: Response, next: NextFunction): void {
     if (!req.authAccount) {
         res.redirect("/signin");
+        return;
+    }
+
+    next();
+}
+
+export function requireSurvivalAdminPage(req: Request, res: Response, next: NextFunction): void {
+    if (!req.survivalAdminAccount) {
+        res.redirect("/survival-admin/signin");
         return;
     }
 
@@ -87,6 +161,15 @@ export function requireFreshPasswordPage(req: Request, res: Response, next: Next
 export function requireAuthApi(req: Request, res: Response, next: NextFunction): void {
     if (!req.authAccount) {
         res.status(401).json({ status: "warning", message: "Please sign in to continue." });
+        return;
+    }
+
+    next();
+}
+
+export function requireSurvivalAdminApi(req: Request, res: Response, next: NextFunction): void {
+    if (!req.survivalAdminAccount) {
+        res.status(401).json({ status: "warning", message: "Please sign in as a Survival Admin to continue." });
         return;
     }
 
@@ -127,6 +210,21 @@ export function setSessionCookie(res: Response, pSessionId: string): void {
     });
 }
 
+export function getSurvivalAdminSessionCookieName(): string {
+    return gSurvivalAdminSessionCookieName;
+}
+
+export function setSurvivalAdminSessionCookie(res: Response, pSessionId: string): void {
+    const vSecure = String(process.env.NODE_ENV || "").toLowerCase() === "production";
+    res.cookie(getSurvivalAdminSessionCookieName(), pSessionId, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: vSecure,
+        path: "/",
+        expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+    });
+}
+
 export function clearSessionCookie(res: Response): void {
     res.clearCookie(getSessionCookieName(), {
         httpOnly: true,
@@ -134,6 +232,20 @@ export function clearSessionCookie(res: Response): void {
         secure: String(process.env.NODE_ENV || "").toLowerCase() === "production",
         path: "/"
     });
+}
+
+export function clearSurvivalAdminSessionCookie(res: Response): void {
+    res.clearCookie(getSurvivalAdminSessionCookieName(), {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: String(process.env.NODE_ENV || "").toLowerCase() === "production",
+        path: "/"
+    });
+}
+
+function isSurvivalAdminPath(pPath: string): boolean {
+    const vPath = String(pPath || "").trim().toLowerCase();
+    return vPath.startsWith("/survival-admin") || vPath.startsWith("/api/survival-admin");
 }
 
 function readCookie(req: Request, pCookieName: string): string {

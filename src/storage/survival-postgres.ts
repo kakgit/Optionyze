@@ -66,4 +66,48 @@ export async function ensureSurvivalPostgresSchema(): Promise<void> {
             PRIMARY KEY (user_id, strategy_code)
         );
     `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_survival_admin_accounts (
+            admin_id TEXT PRIMARY KEY,
+            primary_account_id TEXT NOT NULL UNIQUE,
+            full_name TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT true,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_login_at TIMESTAMPTZ NULL
+        );
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_survival_account_directory (
+            account_id TEXT PRIMARY KEY,
+            full_name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT true,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_survival_admin_sessions (
+            session_id TEXT PRIMARY KEY,
+            admin_id TEXT NOT NULL REFERENCES optionyze_survival_admin_accounts(admin_id) ON DELETE CASCADE,
+            expires_at TIMESTAMPTZ NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+
+    await objPool.query(`
+        CREATE INDEX IF NOT EXISTS idx_optionyze_survival_admin_sessions_admin_id
+        ON optionyze_survival_admin_sessions(admin_id);
+    `);
+
+    await objPool.query(`
+        CREATE INDEX IF NOT EXISTS idx_optionyze_survival_admin_sessions_expires_at
+        ON optionyze_survival_admin_sessions(expires_at);
+    `);
 }
