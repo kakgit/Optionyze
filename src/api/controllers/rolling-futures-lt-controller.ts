@@ -5473,6 +5473,15 @@ function buildStrategyLeaseMetadata(
     };
 }
 
+function getPrimaryOriginServerIdFromState(pState: Record<string, unknown> | null | undefined): string {
+    const vOrigin = String(pState?.primaryOriginServerId || "").trim().toLowerCase();
+    return vOrigin || "render";
+}
+
+function isPrimaryHandbackPendingState(pState: Record<string, unknown> | null | undefined): boolean {
+    return Boolean(pState?.pendingPrimaryHandback);
+}
+
 async function acquireDualStrategyLease(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -5635,7 +5644,12 @@ async function syncDualStrategySurvivalState(
             updatedAt: objPosition.updatedAt
         })),
         uiState: objLiveProfile ? getMergedUiState(objLiveProfile) : {},
-        runtimeState: (objRuntime?.state || {}) as Record<string, unknown>,
+        runtimeState: {
+            ...((objRuntime?.state || {}) as Record<string, unknown>),
+            primaryOriginServerId: String(objLease?.ownerServerId || gServerId).trim().toLowerCase() || "render",
+            pendingPrimaryHandback: false,
+            pendingPrimaryHandbackSince: ""
+        },
         riskState: {
             uiState: objLiveProfile ? getMergedUiState(objLiveProfile) : {},
             neutralStatus: objOpenPositions.neutralStatus,
@@ -5702,6 +5716,9 @@ async function syncSurvivalStateDuringPrimaryOutage(
         uiState: objSurvival.uiState,
         runtimeState: {
             ...(objSurvival.runtimeState || {}),
+            primaryOriginServerId: getPrimaryOriginServerIdFromState(objSurvival.runtimeState),
+            pendingPrimaryHandback: true,
+            pendingPrimaryHandbackSince: String(objSurvival.runtimeState?.pendingPrimaryHandbackSince || new Date().toISOString()).trim(),
             ...(pLastError ? { primaryDbOutageLastError: pLastError } : {})
         },
         riskState: objSurvival.riskState,
@@ -8570,6 +8587,9 @@ export async function listRollingFuturesLtDualRunningUsers(req: Request, res: Re
             }
             const vPrimaryLeaseOwnerServerId = isLeaseActive(objLease) ? String(objLease?.ownerServerId || "").trim() : "";
             const vSurvivalOwnerServerId = String(objSurvival?.ownerServerId || "").trim();
+            const bSurvivalMode = Boolean(objSurvival?.runtimeState?.primaryDbOutageLastError)
+                || isPrimaryHandbackPendingState(objSurvival?.runtimeState as Record<string, unknown>)
+                || (!!vSurvivalOwnerServerId && vSurvivalOwnerServerId !== vPrimaryLeaseOwnerServerId);
             const vDisplayOwnerServerId = vPrimaryLeaseOwnerServerId || vSurvivalOwnerServerId;
             arrUsers.push({
                 accountId: objAccount.accountId,
@@ -8582,7 +8602,9 @@ export async function listRollingFuturesLtDualRunningUsers(req: Request, res: Re
                 autoTraderEnabled: objRuntime.autoTraderEnabled,
                 ownerServerId: vDisplayOwnerServerId,
                 leaseExpiresAt: isLeaseActive(objLease) ? objLease?.leaseExpiresAt || "" : "",
-                survivalMode: Boolean(objSurvival?.runtimeState?.primaryDbOutageLastError),
+                survivalMode: bSurvivalMode,
+                handbackPending: isPrimaryHandbackPendingState(objSurvival?.runtimeState as Record<string, unknown>),
+                handbackTargetServerId: getPrimaryOriginServerIdFromState(objSurvival?.runtimeState as Record<string, unknown>),
                 survivalOwnerServerId: vSurvivalOwnerServerId,
                 survivalUpdatedAt: String(objSurvival?.updatedAt || "").trim(),
                 strategyRunId: String(objSurvival?.strategyRunId || getStrategyRunIdState(objRuntime) || "").trim(),
@@ -8673,8 +8695,11 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
         if (!objSurvival.selectedApiProfileId) {
             throw new Error("Survival DB does not have the selected API profile id for this strategy.");
         }
+        const vHandbackTargetServerId = getPrimaryOriginServerIdFromState(objSurvival.runtimeState);
+        const bHandbackPending = isPrimaryHandbackPendingState(objSurvival.runtimeState);
         if (isSurvivalLeaseActive(objSurvival)
-            && (objSurvival.ownerServerId !== gServerId || objSurvival.ownerInstanceId !== gServerInstanceId)) {
+            && (objSurvival.ownerServerId !== gServerId || objSurvival.ownerInstanceId !== gServerInstanceId)
+            && !(bHandbackPending && vHandbackTargetServerId === gServerId)) {
             const vOwnerLabel = String(objSurvival.ownerServerId || "another server").trim() || "another server";
             throw new Error(`This strategy is currently owned by ${vOwnerLabel}. Use Force Takeover Here on this server first.`);
         }
@@ -8768,7 +8793,9 @@ export async function switchRollingFuturesLtDualBackToPrimaryController(req: Req
             uiState: objSurvival.uiState,
             runtimeState: {
                 ...(objSurvival.runtimeState || {}),
-                primaryDbOutageLastError: ""
+                primaryDbOutageLastError: "",
+                pendingPrimaryHandback: false,
+                pendingPrimaryHandbackSince: ""
             },
             riskState: objSurvival.riskState,
             recoveryMetrics: objSurvival.recoveryMetrics,
@@ -8924,7 +8951,12 @@ export async function forceRollingFuturesLtDualTakeoverHereController(req: Reque
                 lastPrimaryDbSyncAt: new Date().toISOString(),
                 openPositions: objSurvival.openPositions,
                 uiState: objSurvival.uiState,
-                runtimeState: objSurvival.runtimeState,
+                runtimeState: {
+                    ...(objSurvival.runtimeState || {}),
+                    primaryOriginServerId: getPrimaryOriginServerIdFromState(objSurvival.runtimeState),
+                    pendingPrimaryHandback: isPrimaryHandbackPendingState(objSurvival.runtimeState),
+                    pendingPrimaryHandbackSince: String(objSurvival.runtimeState?.pendingPrimaryHandbackSince || "").trim()
+                },
                 riskState: objSurvival.riskState,
                 recoveryMetrics: objSurvival.recoveryMetrics,
                 lastOrderRefs: objSurvival.lastOrderRefs

@@ -167,7 +167,10 @@ export async function listSurvivalAdminRunningUsers(req: Request, res: Response)
                     autoTraderEnabled: true,
                     ownerServerId: String(objRow.ownerServerId || "").trim() || "-",
                     leaseExpiresAt: String(objRow.leaseExpiresAt || "").trim(),
-                    survivalMode: Boolean(objRow.runtimeState?.primaryDbOutageLastError),
+                    survivalMode: Boolean(objRow.runtimeState?.primaryDbOutageLastError)
+                        || isPrimaryHandbackPendingState(objRow.runtimeState),
+                    handbackPending: isPrimaryHandbackPendingState(objRow.runtimeState),
+                    handbackTargetServerId: getPrimaryOriginServerIdFromState(objRow.runtimeState),
                     survivalOwnerServerId: String(objRow.ownerServerId || "").trim() || "-",
                     survivalUpdatedAt: String(objRow.updatedAt || "").trim(),
                     strategyRunId: String(objRow.strategyRunId || "").trim(),
@@ -214,6 +217,9 @@ export async function listSurvivalAdminRunningUsers(req: Request, res: Response)
                     objExisting.leaseExpiresAt = bActiveLease ? String(objLease?.leaseExpiresAt || "").trim() : objExisting.leaseExpiresAt;
                     objExisting.lastCycleAt = String(objRuntime.lastCycleAt || objExisting.lastCycleAt || "").trim();
                     objExisting.updatedAt = String(objRuntime.updatedAt || objExisting.updatedAt || "").trim();
+                    objExisting.survivalMode = Boolean(objExisting.survivalMode)
+                        || Boolean(objExisting.handbackPending)
+                        || (!!objExisting.survivalOwnerServerId && objExisting.survivalOwnerServerId !== "-" && objExisting.survivalOwnerServerId !== vPrimaryOwner);
                     continue;
                 }
 
@@ -226,6 +232,8 @@ export async function listSurvivalAdminRunningUsers(req: Request, res: Response)
                     ownerServerId: vPrimaryOwner || "-",
                     leaseExpiresAt: bActiveLease ? String(objLease?.leaseExpiresAt || "").trim() : "",
                     survivalMode: false,
+                    handbackPending: false,
+                    handbackTargetServerId: "render",
                     survivalOwnerServerId: "-",
                     survivalUpdatedAt: "",
                     strategyRunId: "",
@@ -272,4 +280,13 @@ function getSurvivalAdminInfoMessage(req: Request): string {
 
 function getErrorMessage(pError: unknown, pFallback: string): string {
     return pError instanceof Error && pError.message ? pError.message : pFallback;
+}
+
+function getPrimaryOriginServerIdFromState(pState: Record<string, unknown> | null | undefined): string {
+    const vOrigin = String(pState?.primaryOriginServerId || "").trim().toLowerCase();
+    return vOrigin || "render";
+}
+
+function isPrimaryHandbackPendingState(pState: Record<string, unknown> | null | undefined): boolean {
+    return Boolean(pState?.pendingPrimaryHandback);
 }

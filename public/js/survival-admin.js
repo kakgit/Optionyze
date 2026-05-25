@@ -68,12 +68,45 @@ function renderRunningUsers() {
         const vPrimaryOwner = objUser.ownerServerId || "-";
         const vSurvivalOwner = objUser.survivalOwnerServerId || "-";
         const bOwnedHere = vPrimaryOwner === gSurvivalState.currentServerId || vSurvivalOwner === gSurvivalState.currentServerId;
+        const vHandbackTarget = objUser.handbackTargetServerId || "render";
+        const bHandbackPending = Boolean(objUser.handbackPending);
+        const bCanHandbackHere = bHandbackPending && gSurvivalState.currentServerId === vHandbackTarget;
         const vModeChip = objUser.survivalMode
             ? `<span class="mngusers-chip mngusers-chip-warn">Survival Live</span>`
             : `<span class="mngusers-chip mngusers-chip-live">Primary Live</span>`;
         const vOwnerStateChip = objUser.survivalMode
             ? `<span class="mngusers-chip mngusers-chip-warn">Owner: ${escapeHtml(vSurvivalOwner !== "-" ? vSurvivalOwner : vPrimaryOwner)}</span>`
             : `<span class="mngusers-chip mngusers-chip-info">Owner: ${escapeHtml(vPrimaryOwner)}</span>`;
+
+        let vActionHtml = "";
+        if (bCanHandbackHere) {
+            vActionHtml = `
+                <button class="app-link-btn" type="button" data-running-action="switch-primary" data-account-id="${escapeHtml(objUser.accountId)}" ${bSwitching ? "disabled" : ""}>
+                    ${bSwitching ? "Handing Back..." : `Handback To ${escapeHtml(vHandbackTarget)}`}
+                </button>
+            `;
+        }
+        else if (!bOwnedHere) {
+            vActionHtml = `
+                <button class="app-link-btn" type="button" data-running-action="force-takeover-here" data-account-id="${escapeHtml(objUser.accountId)}">
+                    Force Takeover Here
+                </button>
+            `;
+        }
+        else if (objUser.survivalMode && !bHandbackPending) {
+            vActionHtml = `
+                <button class="app-link-btn" type="button" data-running-action="switch-primary" data-account-id="${escapeHtml(objUser.accountId)}" ${bSwitching ? "disabled" : ""}>
+                    ${bSwitching ? "Switching..." : "Switch To Primary DB"}
+                </button>
+            `;
+        }
+        else if (bHandbackPending) {
+            vActionHtml = `<span class="mngusers-chip mngusers-chip-muted">Handback Pending: ${escapeHtml(vHandbackTarget)}</span>`;
+        }
+        else if (bOwnedHere) {
+            vActionHtml = `<span class="mngusers-chip mngusers-chip-muted">Normal</span>`;
+        }
+
         return `
             <tr>
                 <td class="mngusers-nowrap">${escapeHtml(objUser.fullName || "-")}</td>
@@ -86,20 +119,7 @@ function renderRunningUsers() {
                     </div>
                 </td>
                 <td class="mngusers-nowrap">${escapeHtml(formatDateTime(objUser.lastCycleAt || objUser.updatedAt))}</td>
-                <td class="mngusers-nowrap">
-                    ${!bOwnedHere ? `
-                        <button class="app-link-btn" type="button" data-running-action="force-takeover-here" data-account-id="${escapeHtml(objUser.accountId)}">
-                            Force Takeover Here
-                        </button>
-                    ` : ""}
-                    ${objUser.survivalMode && bOwnedHere ? `
-                        <button class="app-link-btn" type="button" data-running-action="switch-primary" data-account-id="${escapeHtml(objUser.accountId)}" ${bSwitching ? "disabled" : ""}>
-                            ${bSwitching ? "Switching..." : "Switch To Primary DB"}
-                        </button>
-                    ` : (objUser.survivalMode
-                        ? `<span class="mngusers-chip mngusers-chip-muted">Take over here first</span>`
-                        : (!bOwnedHere ? "" : `<span class="mngusers-chip mngusers-chip-muted">Normal</span>`))}
-                </td>
+                <td class="mngusers-nowrap">${vActionHtml}</td>
             </tr>
         `;
     }).join("");

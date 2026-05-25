@@ -254,10 +254,41 @@ function renderRunningUsers() {
             : `<span class="mngusers-chip mngusers-chip-live">Primary DB</span>`;
         const vPrimaryOwner = objUser.ownerServerId || "-";
         const vSurvivalOwner = objUser.survivalOwnerServerId || "-";
+        const vHandbackTarget = objUser.handbackTargetServerId || "render";
+        const bHandbackPending = Boolean(objUser.handbackPending);
         const vOutageChip = objUser.simulatedPrimaryDbOutage
             ? `<span class="mngusers-chip mngusers-chip-warn">Outage Test ON</span>`
             : "";
         const bOwnedHere = vPrimaryOwner === gState.currentServerId || vSurvivalOwner === gState.currentServerId;
+        const bCanHandbackHere = bHandbackPending && gState.currentServerId === vHandbackTarget;
+        let vActionHtml = "";
+        if (bCanHandbackHere) {
+            vActionHtml = `
+                <button class="app-link-btn" type="button" data-running-action="switch-primary" data-account-id="${escapeHtml(objUser.accountId)}" ${bSwitching ? "disabled" : ""}>
+                    ${bSwitching ? "Handing Back..." : `Handback To ${escapeHtml(vHandbackTarget)}`}
+                </button>
+            `;
+        }
+        else if (!bOwnedHere) {
+            vActionHtml = `
+                <button class="app-link-btn" type="button" data-running-action="force-takeover-here" data-account-id="${escapeHtml(objUser.accountId)}">
+                    Force Takeover Here
+                </button>
+            `;
+        }
+        else if (objUser.survivalMode && !bHandbackPending) {
+            vActionHtml = `
+                <button class="app-link-btn" type="button" data-running-action="switch-primary" data-account-id="${escapeHtml(objUser.accountId)}" ${bSwitching ? "disabled" : ""}>
+                    ${bSwitching ? "Switching..." : "Switch To Primary DB"}
+                </button>
+            `;
+        }
+        else if (bHandbackPending) {
+            vActionHtml = `<span class="mngusers-chip mngusers-chip-muted">Handback Pending: ${escapeHtml(vHandbackTarget)}</span>`;
+        }
+        else if (bOwnedHere) {
+            vActionHtml = `<span class="mngusers-chip mngusers-chip-muted">Normal</span>`;
+        }
         return `
             <tr>
                 <td class="mngusers-nowrap">${escapeHtml(objUser.fullName || "-")}</td>
@@ -275,18 +306,7 @@ function renderRunningUsers() {
                     </div>
                 </td>
                 <td class="mngusers-nowrap">${escapeHtml(formatDateTime(objUser.lastCycleAt || objUser.updatedAt))}</td>
-                <td class="mngusers-nowrap">
-                    ${!bOwnedHere ? `
-                        <button class="app-link-btn" type="button" data-running-action="force-takeover-here" data-account-id="${escapeHtml(objUser.accountId)}">
-                            Force Takeover Here
-                        </button>
-                    ` : ""}
-                    ${objUser.survivalMode ? `
-                        <button class="app-link-btn" type="button" data-running-action="switch-primary" data-account-id="${escapeHtml(objUser.accountId)}" ${bSwitching ? "disabled" : ""}>
-                            ${bSwitching ? "Switching..." : "Switch To Primary DB"}
-                        </button>
-                    ` : (!bOwnedHere ? "" : `<span class="mngusers-chip mngusers-chip-muted">Normal</span>`)}
-                </td>
+                <td class="mngusers-nowrap">${vActionHtml}</td>
             </tr>
         `;
     }).join("");
