@@ -8561,6 +8561,13 @@ export async function listRollingFuturesLtDualRunningUsers(req: Request, res: Re
             }
             const objLease = await getStrategyLease(objRuntime.userId, objRuntime.strategyCode);
             const objSurvival = objSurvivalByUserId.get(objRuntime.userId) || null;
+            const arrImportedPositions = await listRollingFuturesLtImportedPositions(objRuntime.userId, objRuntime.strategyCode);
+            const bHasImportedPositions = arrImportedPositions.some((objPosition) => Number(objPosition.qty || 0) > 0);
+            const bHasSurvivalPositions = Array.isArray(objSurvival?.openPositions)
+                && objSurvival!.openPositions.some((objPosition) => Number((objPosition as Record<string, unknown>)?.qty || 0) > 0);
+            if (!bHasImportedPositions && !bHasSurvivalPositions) {
+                continue;
+            }
             const vPrimaryLeaseOwnerServerId = isLeaseActive(objLease) ? String(objLease?.ownerServerId || "").trim() : "";
             const vSurvivalOwnerServerId = String(objSurvival?.ownerServerId || "").trim();
             const vDisplayOwnerServerId = vPrimaryLeaseOwnerServerId || vSurvivalOwnerServerId;

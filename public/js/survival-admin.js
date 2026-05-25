@@ -65,17 +65,20 @@ function renderRunningUsers() {
 
     sEls.runningUsersTableBody.innerHTML = objPaged.rows.map((objUser) => {
         const bSwitching = gSurvivalState.switchingPrimaryAccountId === objUser.accountId;
-        const vModeChip = objUser.survivalMode
-            ? `<span class="mngusers-chip mngusers-chip-warn">Survival DB</span>`
-            : `<span class="mngusers-chip mngusers-chip-live">Primary DB</span>`;
         const vPrimaryOwner = objUser.ownerServerId || "-";
         const vSurvivalOwner = objUser.survivalOwnerServerId || "-";
         const bOwnedHere = vPrimaryOwner === gSurvivalState.currentServerId || vSurvivalOwner === gSurvivalState.currentServerId;
+        const vModeChip = objUser.survivalMode
+            ? `<span class="mngusers-chip mngusers-chip-warn">Survival Live</span>`
+            : `<span class="mngusers-chip mngusers-chip-live">Primary Live</span>`;
+        const vOwnerStateChip = objUser.survivalMode
+            ? `<span class="mngusers-chip mngusers-chip-warn">Owner: ${escapeHtml(vSurvivalOwner !== "-" ? vSurvivalOwner : vPrimaryOwner)}</span>`
+            : `<span class="mngusers-chip mngusers-chip-info">Owner: ${escapeHtml(vPrimaryOwner)}</span>`;
         return `
             <tr>
                 <td class="mngusers-nowrap">${escapeHtml(objUser.fullName || "-")}</td>
                 <td class="mngusers-nowrap">${escapeHtml(objUser.email || "-")}</td>
-                <td><div class="mngusers-status-stack"><div>${vModeChip}</div></div></td>
+                <td><div class="mngusers-status-stack"><div>${vModeChip}</div><div>${vOwnerStateChip}</div></div></td>
                 <td>
                     <div class="mngusers-owner-stack">
                         <div><strong>Primary:</strong> ${escapeHtml(vPrimaryOwner)}</div>

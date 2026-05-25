@@ -3,6 +3,7 @@ import { verifyPassword } from "../../security/passwords";
 import { getAccountByEmail } from "../../storage/accounts-store";
 import { loadManagedUsers } from "../../storage/users-store";
 import { listRollingFuturesLtRuntime } from "../../storage/rolling-futures-lt-runtime-store";
+import { listRollingFuturesLtImportedPositions } from "../../storage/rolling-futures-lt-store";
 import { getStrategyLease } from "../../storage/strategy-lease-store";
 import { isSurvivalPostgresConfigured } from "../../storage/survival-postgres";
 import { isPrimaryDatabaseUnavailableError } from "../../storage/postgres";
@@ -137,15 +138,31 @@ export async function listSurvivalAdminRunningUsers(req: Request, res: Response)
         }
 
         const objManagedUsersById = new Map(arrManagedUsers.map((objRow) => [objRow.accountId, objRow]));
+        const resolveUserIdentity = (pAccountId: string): { fullName: string; email: string; } => {
+            const objManagedUser = objManagedUsersById.get(pAccountId);
+            if (objManagedUser) {
+                return {
+                    fullName: String(objManagedUser.fullName || "").trim() || pAccountId,
+                    email: String(objManagedUser.email || "").trim() || "-"
+                };
+            }
+            const objDirectory = objDirectoryByAccountId.get(pAccountId);
+            return {
+                fullName: String(objDirectory?.fullName || "").trim() || pAccountId,
+                email: String(objDirectory?.email || "").trim() || "-"
+            };
+        };
         const arrUsers = arrSurvivalRows
             .filter((objRow) => objRow.runStatus === "active")
+            .filter((objRow) => Array.isArray(objRow.openPositions)
+                && objRow.openPositions.some((objPosition) => Number((objPosition as Record<string, unknown>)?.qty || 0) > 0))
             .filter((objRow) => !objManagedUsersById.get(objRow.userId)?.isSurvivalAdmin)
             .map((objRow) => {
-                const objDirectory = objDirectoryByAccountId.get(objRow.userId);
+                const objIdentity = resolveUserIdentity(objRow.userId);
                 return {
                     accountId: objRow.userId,
-                    fullName: objDirectory?.fullName || objRow.userId,
-                    email: objDirectory?.email || "-",
+                    fullName: objIdentity.fullName,
+                    email: objIdentity.email,
                     status: "running",
                     autoTraderEnabled: true,
                     ownerServerId: String(objRow.ownerServerId || "").trim() || "-",
@@ -180,6 +197,13 @@ export async function listSurvivalAdminRunningUsers(req: Request, res: Response)
                     continue;
                 }
                 const objLease = await getStrategyLease(objRuntime.userId, objRuntime.strategyCode);
+                const objSurvival = objUsersByAccountId.get(objRuntime.userId);
+                const arrImportedPositions = await listRollingFuturesLtImportedPositions(objRuntime.userId, objRuntime.strategyCode);
+                const bHasImportedPositions = arrImportedPositions.some((objPosition) => Number(objPosition.qty || 0) > 0);
+                const bHasSurvivalPositions = Boolean(objSurvival);
+                if (!bHasImportedPositions && !bHasSurvivalPositions) {
+                    continue;
+                }
                 const objExisting = objUsersByAccountId.get(objRuntime.userId);
                 const vLeaseExpiresAtMs = objLease?.leaseExpiresAt ? new Date(objLease.leaseExpiresAt).getTime() : Number.NaN;
                 const bActiveLease = Boolean(objLease && Number.isFinite(vLeaseExpiresAtMs) && vLeaseExpiresAtMs > Date.now());
