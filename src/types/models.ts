@@ -99,6 +99,10 @@ export interface PendingStrategyExecutionRecord {
     strategyCode: string;
     triggerSource: string;
     requestPayload: Record<string, unknown>;
+    ownerServerId?: string;
+    primaryOwnerServerId?: string;
+    survivalOwnerServerId?: string;
+    canExecuteHere?: boolean;
     createdAt: string;
     updatedAt: string;
 }

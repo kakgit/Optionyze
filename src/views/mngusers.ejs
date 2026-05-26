@@ -29,6 +29,39 @@
             </div>
         </section>
 
+        <section class="app-panel mngusers-survival-panel">
+            <div class="mngusers-section-head">
+                <div>
+                    <h2>Survival Admin Access</h2>
+                    <p class="app-copy">Keep these links handy for outage-time control. Survival Admin is for failover visibility, takeover, and recovery only.</p>
+                </div>
+                <div class="mngusers-inline-tools">
+                    <a class="app-ghost-btn" href="https://optionyze.onrender.com/survival-admin/signin" target="_blank" rel="noopener noreferrer">Open Render Survival Admin</a>
+                    <a class="app-ghost-btn" href="https://optionyze-production.up.railway.app/survival-admin/signin" target="_blank" rel="noopener noreferrer">Open Railway Survival Admin</a>
+                </div>
+            </div>
+            <div class="mngusers-survival-grid">
+                <div class="mngusers-survival-card">
+                    <div class="mngusers-survival-label">Render</div>
+                    <a class="mngusers-survival-link" href="https://optionyze.onrender.com/survival-admin/signin" target="_blank" rel="noopener noreferrer">https://optionyze.onrender.com/survival-admin/signin</a>
+                </div>
+                <div class="mngusers-survival-card">
+                    <div class="mngusers-survival-label">Railway</div>
+                    <a class="mngusers-survival-link" href="https://optionyze-production.up.railway.app/survival-admin/signin" target="_blank" rel="noopener noreferrer">https://optionyze-production.up.railway.app/survival-admin/signin</a>
+                </div>
+            </div>
+            <div class="mngusers-runbook">
+                <div class="mngusers-runbook-title">Operator Steps</div>
+                <ol class="mngusers-runbook-list">
+                    <li>Use `MngUsers` or `Survival Admin` to confirm which live users are currently running and which server owns them.</li>
+                    <li>During a Primary DB outage, let the current owner continue automatically or use `Force Takeover Here` from the standby server if needed.</li>
+                    <li>Use `Survival Admin` only with dedicated `Survival Admin` accounts. These accounts should not run strategies themselves.</li>
+                    <li>After infrastructure recovers, verify ownership has stabilized before doing any manual recovery action.</li>
+                    <li>If `Handback To render` appears, use it only when you want ownership explicitly returned to the origin server.</li>
+                </ol>
+            </div>
+        </section>
+
         <section class="app-panel">
             <div class="mngusers-toolbar">
                 <input id="searchInput" type="text" placeholder="Search by name, email, or mobile" />
@@ -130,7 +163,7 @@
                             <th>Triggered By</th>
                             <th>Qty</th>
                             <th>Balance</th>
-                            <th>Strategy</th>
+                            <th>Strategy / Owner</th>
                             <th class="mngusers-nowrap">Actions</th>
                         </tr>
                     </thead>

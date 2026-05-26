@@ -52,7 +52,45 @@ export async function listManagedUsersController(_req: Request, res: Response): 
 export async function listPendingStrategyExecutionRequestsController(_req: Request, res: Response): Promise<void> {
     try {
         const arrRequests = await listPendingStrategyExecutionRequests();
-        res.json({ status: "success", data: arrRequests });
+        const vCurrentServerId = String(getServerId() || "").trim().toLowerCase();
+        const arrEnrichedRequests = await Promise.all(arrRequests.map(async (objRequest) => {
+            let vPrimaryOwnerServerId = "";
+            let vSurvivalOwnerServerId = "";
+
+            try {
+                const [objRuntime, objLease, objSurvival] = await Promise.all([
+                    loadRollingFuturesLtRuntime(objRequest.accountId, "rolling-futures-lt-dual"),
+                    getStrategyLease(objRequest.accountId, "rolling-futures-lt-dual"),
+                    getSurvivalState(objRequest.accountId, "rolling-futures-lt-dual")
+                ]);
+                const vLeaseExpiresAtMs = objLease?.leaseExpiresAt ? new Date(objLease.leaseExpiresAt).getTime() : Number.NaN;
+                const bRuntimeRunning = Boolean(
+                    objRuntime?.autoTraderEnabled
+                    && String(objRuntime.status || "").trim().toLowerCase() === "running"
+                );
+                const bActiveLease = Boolean(objLease && bRuntimeRunning && Number.isFinite(vLeaseExpiresAtMs) && vLeaseExpiresAtMs > Date.now());
+                vPrimaryOwnerServerId = bActiveLease ? String(objLease?.ownerServerId || "").trim().toLowerCase() : "";
+
+                const bActiveSurvival = String(objSurvival?.runStatus || "").trim().toLowerCase() === "active";
+                vSurvivalOwnerServerId = bActiveSurvival
+                    ? String(objSurvival?.ownerServerId || "").trim().toLowerCase()
+                    : "";
+            }
+            catch {
+                vPrimaryOwnerServerId = "";
+                vSurvivalOwnerServerId = "";
+            }
+
+            const vEffectiveOwnerServerId = vPrimaryOwnerServerId || vSurvivalOwnerServerId;
+            return {
+                ...objRequest,
+                ownerServerId: vEffectiveOwnerServerId || "-",
+                primaryOwnerServerId: vPrimaryOwnerServerId || "-",
+                survivalOwnerServerId: vSurvivalOwnerServerId || "-",
+                canExecuteHere: !vEffectiveOwnerServerId || vEffectiveOwnerServerId === vCurrentServerId
+            };
+        }));
+        res.json({ status: "success", data: arrEnrichedRequests });
     }
     catch (objError) {
         res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to load pending strategy execution requests.") });

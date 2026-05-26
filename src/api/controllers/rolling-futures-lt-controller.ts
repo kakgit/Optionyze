@@ -32,8 +32,8 @@ import {
 import {
     createPendingStrategyExecutionRequest,
     deletePendingStrategyExecutionRequest,
-    getNextAutoExecutablePendingStrategyRequest,
-    getPendingStrategyExecutionRequestById
+    getPendingStrategyExecutionRequestById,
+    listPendingStrategyExecutionRequests
 } from "../../storage/strategy-execution-request-store";
 import { getPendingStrategyAutoExecSettings } from "../../storage/admin-settings-store";
 import { findBestLiveOptionContract, getLiveMarketSnapshot, getLiveOptionTicker } from "../../strategies/rolling-options-pt-de/market-data";
@@ -541,6 +541,10 @@ async function executePendingDualStrategyRequestByRecord(
         vSelectedApiProfileId
     );
     if (!objLeaseAcquire.acquired) {
+        const vOwnerLabel = String(objLeaseAcquire.lease?.ownerServerId || "").trim();
+        if (vOwnerLabel) {
+            throw new Error(`This live strategy is currently owned by ${vOwnerLabel}. Open Pending Strategy Executions on ${vOwnerLabel} to execute it there.`);
+        }
         throw new Error(objLeaseAcquire.message || "This live strategy is currently owned by another server.");
     }
 
@@ -594,7 +598,38 @@ async function attemptAutoExecuteNextPendingDualStrategyRequest(
         return;
     }
 
-    const objRequest = await getNextAutoExecutablePendingStrategyRequest();
+    const arrPendingRequests = (await listPendingStrategyExecutionRequests())
+        .filter((objRequest) => objRequest.execStrategy)
+        .sort((pLeft, pRight) => {
+            return new Date(String(pLeft.createdAt || 0)).getTime() - new Date(String(pRight.createdAt || 0)).getTime();
+        });
+
+    let objRequest: (typeof arrPendingRequests)[number] | null = null;
+    for (const objCandidate of arrPendingRequests) {
+        const [objRuntime, objLease, objSurvival] = await Promise.all([
+            loadRollingFuturesLtRuntime(objCandidate.accountId, "rolling-futures-lt-dual"),
+            getStrategyLease(objCandidate.accountId, "rolling-futures-lt-dual"),
+            getSurvivalState(objCandidate.accountId, "rolling-futures-lt-dual")
+        ]);
+
+        const vLeaseExpiresAtMs = objLease?.leaseExpiresAt ? new Date(objLease.leaseExpiresAt).getTime() : Number.NaN;
+        const bRuntimeRunning = Boolean(
+            objRuntime?.autoTraderEnabled
+            && String(objRuntime.status || "").trim().toLowerCase() === "running"
+        );
+        const bActiveLease = Boolean(objLease && bRuntimeRunning && Number.isFinite(vLeaseExpiresAtMs) && vLeaseExpiresAtMs > Date.now());
+        const vPrimaryOwnerServerId = bActiveLease ? String(objLease?.ownerServerId || "").trim().toLowerCase() : "";
+        const bActiveSurvival = String(objSurvival?.runStatus || "").trim().toLowerCase() === "active";
+        const vSurvivalOwnerServerId = bActiveSurvival
+            ? String(objSurvival?.ownerServerId || "").trim().toLowerCase()
+            : "";
+        const vEffectiveOwnerServerId = vPrimaryOwnerServerId || vSurvivalOwnerServerId;
+        if (!vEffectiveOwnerServerId || vEffectiveOwnerServerId === gServerId) {
+            objRequest = objCandidate;
+            break;
+        }
+    }
+
     if (!objRequest) {
         return;
     }
@@ -9088,9 +9123,11 @@ export async function executePendingRollingFuturesLtDualStrategyRequest(req: Req
         });
     }
     catch (objError) {
-        res.status(500).json({
+        const vMessage = getErrorMessage(objError, "Unable to execute the pending live strategy request.");
+        const vStatusCode = /currently owned by/i.test(vMessage) ? 409 : 500;
+        res.status(vStatusCode).json({
             status: "danger",
-            message: getErrorMessage(objError, "Unable to execute the pending live strategy request.")
+            message: vMessage
         });
     }
 }

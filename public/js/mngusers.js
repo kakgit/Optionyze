@@ -497,8 +497,20 @@ function renderExecutionRequests() {
 
     els.execRequestTableBody.innerHTML = objPaged.rows.map((objRequest) => {
         const bExecuting = gState.executingRequestId === objRequest.requestId;
+        const bCanExecuteHere = objRequest.canExecuteHere !== false;
         const vStartQty = Number(objRequest.requestPayload?.startQty ?? objRequest.requestPayload?.qty);
         const vAvailableBalance = Number(objRequest.requestPayload?.availableBalance);
+        const vOwnerServerId = String(objRequest.ownerServerId || "").trim();
+        const vOwnerLabel = !vOwnerServerId || vOwnerServerId === "-"
+            ? "this server"
+            : vOwnerServerId === gState.currentServerId
+                ? `${vOwnerServerId} (current)`
+                : vOwnerServerId;
+        const vExecuteTitle = bExecuting
+            ? "Executing..."
+            : bCanExecuteHere
+                ? "Execute"
+                : `Execute this request from ${vOwnerServerId || "the owner server"}`;
         return `
             <tr>
                 <td class="mngusers-nowrap">${escapeHtml(formatDateTime(objRequest.createdAt))}</td>
@@ -507,9 +519,12 @@ function renderExecutionRequests() {
                 <td>${escapeHtml(getExecutionTriggerLabel(objRequest.triggerSource))}</td>
                 <td>${Number.isFinite(vStartQty) ? escapeHtml(String(vStartQty)) : "-"}</td>
                 <td>${Number.isFinite(vAvailableBalance) ? escapeHtml(`${vAvailableBalance.toFixed(2)} USD`) : "-"}</td>
-                <td>${objRequest.execStrategy ? `<span class="mngusers-chip mngusers-chip-info">Enabled</span>` : `<span class="mngusers-chip mngusers-chip-muted">Disabled</span>`}</td>
+                <td>
+                    ${objRequest.execStrategy ? `<span class="mngusers-chip mngusers-chip-info">Enabled</span>` : `<span class="mngusers-chip mngusers-chip-muted">Disabled</span>`}
+                    <div class="mngusers-table-subtle">Owner: ${escapeHtml(vOwnerLabel)}</div>
+                </td>
                 <td class="mngusers-nowrap">
-                    <button class="mngusers-icon-btn execute" type="button" data-request-action="execute" data-request-id="${escapeHtml(objRequest.requestId)}" title="${bExecuting ? "Executing..." : "Execute"}" aria-label="${bExecuting ? "Executing..." : "Execute"}" ${bExecuting ? "disabled" : ""}>
+                    <button class="mngusers-icon-btn execute" type="button" data-request-action="execute" data-request-id="${escapeHtml(objRequest.requestId)}" title="${escapeHtml(vExecuteTitle)}" aria-label="${escapeHtml(vExecuteTitle)}" ${bExecuting || !bCanExecuteHere ? "disabled" : ""}>
                         <svg viewBox="0 0 24 24" aria-hidden="true">
                             <path d="M8 5v14l11-7z" fill="currentColor"></path>
                         </svg>
