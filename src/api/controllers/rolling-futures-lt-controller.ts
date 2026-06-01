@@ -124,6 +124,7 @@ const gProfitClosePauseAfterOptionRuleMs = 15000;
 const gProfitCloseReEntryCooldownMs = 5 * 60 * 1000;
 const gProfitCloseConfirmationMs = 5 * 60 * 1000;
 const gRestartCloseProtectionMs = 5 * 60 * 1000;
+const gOptionRecoveryRefreshDelayMs = 5 * 60 * 1000;
 const gNeutralityHedgeCooldownMs = 2 * 60 * 1000;
 const gSurvivalDebugPrefix = "[dual-survival]";
 const gLocalSurvivalLeaseTokens = new Map<string, string>();
@@ -2897,6 +2898,45 @@ function buildRuntimeStateWithPendingReEntry(
     return objState;
 }
 
+function getPendingOptionRecoveryRefreshState(pRuntime: RollingFuturesLtRuntimeRecord | null): {
+    reason: "sl" | "tp" | "";
+    runAt: string;
+    scheduledAt: string;
+} {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    const objPending = objState.pendingOptionRecoveryRefresh && typeof objState.pendingOptionRecoveryRefresh === "object"
+        ? objState.pendingOptionRecoveryRefresh as Record<string, unknown>
+        : {};
+    const vReason = String(objPending.reason || "").trim().toLowerCase();
+    return {
+        reason: vReason === "sl" || vReason === "tp" ? vReason : "",
+        runAt: String(objPending.runAt || "").trim(),
+        scheduledAt: String(objPending.scheduledAt || "").trim()
+    };
+}
+
+function buildRuntimeStateWithPendingOptionRecoveryRefresh(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pReason: "sl" | "tp" | "" = "",
+    pRunAt = "",
+    pScheduledAt = ""
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    const vReason = String(pReason || "").trim().toLowerCase();
+    const vRunAt = String(pRunAt || "").trim();
+    const vScheduledAt = String(pScheduledAt || "").trim();
+    if (!(vReason === "sl" || vReason === "tp") || !vRunAt || !vScheduledAt) {
+        delete objState.pendingOptionRecoveryRefresh;
+        return objState;
+    }
+    objState.pendingOptionRecoveryRefresh = {
+        reason: vReason,
+        runAt: vRunAt,
+        scheduledAt: vScheduledAt
+    };
+    return objState;
+}
+
 function getRestartCloseProtectionUntil(pRuntime: RollingFuturesLtRuntimeRecord | null): string {
     const objState = (pRuntime?.state || {}) as Record<string, unknown>;
     const objProtection = objState.restartCloseProtection && typeof objState.restartCloseProtection === "object"
@@ -5113,6 +5153,7 @@ async function applyTriggeredOptionRule(
             reason: pReason
         }
     );
+    await schedulePendingOptionRecoveryRefresh(pUserId, pStrategyCode, pReason);
 
     const vProfitClosePauseUntil = new Date(Date.now() + gProfitClosePauseAfterOptionRuleMs).toISOString();
     const objRuntimeBeforeProfitPause = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
@@ -6150,6 +6191,12 @@ async function runAutoTraderCycle(
             "auto_trader_live_reconcile"
         );
         let arrSavedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrLivePositions);
+        await processPendingOptionRecoveryRefresh(
+            pUserId,
+            pStrategyCode,
+            vSelectedApiProfileId,
+            objRuntime
+        );
         const objScheduledReEntry = getScheduledReEntryState(objRuntime);
         const vRestartProtectionUntil = getRestartCloseProtectionUntil(objRuntime);
         const vNowMs = Date.now();
@@ -8405,6 +8452,227 @@ async function updateRecoveryMetricsInternal(req: Request, res: Response, pStrat
         message: "Recovery metrics updated.",
         data: objOpenPositions
     });
+}
+
+async function fetchTrackedClosedOrderHistoryRows(
+    pClient: any,
+    pSelectedSymbol: "BTC" | "ETH",
+    pStartTimeIso = ""
+): Promise<DeltaOrderHistoryRow[]> {
+    const vPageSize = 100;
+    const arrRows: DeltaOrderHistoryRow[] = [];
+    let vAfterCursor = "";
+    let vSafetyCounter = 0;
+    const vStartTime = toEpochMicros(pStartTimeIso);
+    while (vSafetyCounter < 100) {
+        const objParams: Record<string, string | number> = { page_size: vPageSize };
+        if (vStartTime) {
+            objParams.start_time = vStartTime;
+        }
+        if (vAfterCursor) {
+            objParams.after = vAfterCursor;
+        }
+        const objResponse = await pClient.apis.TradeHistory.getOrderHistory(objParams);
+        const objPayload = readResponsePayload(objResponse);
+        const arrPageRows = Array.isArray(objPayload.result) ? objPayload.result as DeltaOrderHistoryRow[] : [];
+        arrRows.push(...arrPageRows);
+        const vNextAfter = String((objPayload.meta as { after?: unknown } | undefined)?.after || "").trim();
+        vSafetyCounter += 1;
+        if (!vNextAfter || vNextAfter === vAfterCursor || arrPageRows.length < vPageSize) {
+            break;
+        }
+        vAfterCursor = vNextAfter;
+    }
+
+    return arrRows
+        .filter((objRow) => String(objRow.state || "").trim().toLowerCase() === "closed")
+        .filter((objRow) => {
+            const vContract = String(objRow.product_symbol || objRow.symbol || "").trim().toUpperCase();
+            return isTrackedContractForSymbol(vContract, pSelectedSymbol);
+        });
+}
+
+async function resolveStrategyStartedAtForRecoveryRefresh(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode
+): Promise<string> {
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    let vStrategyStartedAt = getStrategyStartedAtState(objRuntime);
+    if (!vStrategyStartedAt) {
+        const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+        const vClosedFromDate = String(getMergedUiState(objProfile).closedFromDate || "").trim();
+        const vBackfilledStartedAt = parseDeltaUiDateTimeLocalToIsoString(vClosedFromDate);
+        if (vBackfilledStartedAt) {
+            await saveRollingFuturesLtRuntime({
+                ...objRuntime,
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                state: buildRuntimeStateWithStrategyStartedAt(objRuntime, vBackfilledStartedAt)
+            });
+            vStrategyStartedAt = vBackfilledStartedAt;
+        }
+    }
+    return vStrategyStartedAt;
+}
+
+async function recalculateAndPersistRecoveryMetricsFromClosedHistory(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pSelectedApiProfileId: string
+): Promise<{
+    openPositions: RollingFuturesLtOpenPositionsPayload;
+    recalculated: {
+        strategyStartedAt: string;
+        totalBrokerageToRecover: number;
+        totalPnl: number;
+        closedCount: number;
+    };
+}> {
+    type RecoveryRefreshTotals = {
+        strategyStartedAt: string;
+        totalBrokerageToRecover: number;
+        totalPnl: number;
+        closedCount: number;
+    };
+    const vStrategyStartedAt = await resolveStrategyStartedAtForRecoveryRefresh(pUserId, pStrategyCode);
+    if (!vStrategyStartedAt) {
+        throw new Error("Strategy start date was not found. Start the strategy first, then refresh recovery totals automatically.");
+    }
+
+    const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+    const objUiState = getMergedUiState(objProfile);
+    const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
+    const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
+    const arrRows = await fetchTrackedClosedOrderHistoryRows(client, vSelectedSymbol, vStrategyStartedAt);
+    const objRecalculated = arrRows.reduce<RecoveryRefreshTotals>((pTotals, pRow) => {
+        return {
+            strategyStartedAt: vStrategyStartedAt,
+            totalBrokerageToRecover: pTotals.totalBrokerageToRecover + toFiniteNumber(pRow.paid_commission, 0),
+            totalPnl: pTotals.totalPnl + toFiniteNumber(pRow.meta_data?.pnl, 0),
+            closedCount: pTotals.closedCount + 1
+        };
+    }, {
+        strategyStartedAt: vStrategyStartedAt,
+        totalBrokerageToRecover: 0,
+        totalPnl: 0,
+        closedCount: 0
+    } satisfies RecoveryRefreshTotals);
+
+    await saveBrokerageRecoveryTotal(pUserId, pStrategyCode, objRecalculated.totalBrokerageToRecover);
+    await saveRecoveredTotalPnl(pUserId, pStrategyCode, objRecalculated.totalPnl);
+    const objOpenPositions = await buildOpenPositionsPayload(pUserId, pStrategyCode);
+    return {
+        openPositions: objOpenPositions,
+        recalculated: {
+            strategyStartedAt: objRecalculated.strategyStartedAt,
+            totalBrokerageToRecover: Number(objRecalculated.totalBrokerageToRecover.toFixed(4)),
+            totalPnl: Number(objRecalculated.totalPnl.toFixed(4)),
+            closedCount: objRecalculated.closedCount
+        }
+    };
+}
+
+async function schedulePendingOptionRecoveryRefresh(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pReason: "sl" | "tp"
+): Promise<void> {
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const vScheduledAt = new Date().toISOString();
+    const vRunAt = new Date(Date.now() + gOptionRecoveryRefreshDelayMs).toISOString();
+    await saveRollingFuturesLtRuntime({
+        ...objRuntime,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        state: buildRuntimeStateWithPendingOptionRecoveryRefresh(
+            objRuntime,
+            pReason,
+            vRunAt,
+            vScheduledAt
+        )
+    });
+    await logFuturesEvent(
+        pUserId,
+        pStrategyCode,
+        "manual_action",
+        "info",
+        pReason === "sl" ? "Option SL Recovery Refresh Scheduled" : "Option TP Recovery Refresh Scheduled",
+        `Closed-position charges and realized PnL will be refreshed automatically after 5 minutes for this ${pReason.toUpperCase()} option exit.`,
+        {
+            reason: pReason === "sl" ? "option_sl_recovery_refresh_scheduled" : "option_tp_recovery_refresh_scheduled",
+            runAt: vRunAt
+        }
+    );
+}
+
+async function processPendingOptionRecoveryRefresh(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pSelectedApiProfileId: string,
+    pRuntime: RollingFuturesLtRuntimeRecord | null
+): Promise<void> {
+    const objRuntime = pRuntime || await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const objPending = getPendingOptionRecoveryRefreshState(objRuntime);
+    if (!objPending.reason || !objPending.runAt) {
+        return;
+    }
+    const vRunAtMs = new Date(objPending.runAt).getTime();
+    if (!Number.isFinite(vRunAtMs) || vRunAtMs > Date.now()) {
+        return;
+    }
+
+    try {
+        const objResult = await recalculateAndPersistRecoveryMetricsFromClosedHistory(
+            pUserId,
+            pStrategyCode,
+            pSelectedApiProfileId
+        );
+        const objLatestRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+            || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+        await saveRollingFuturesLtRuntime({
+            ...objLatestRuntime,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithPendingOptionRecoveryRefresh(objLatestRuntime, "", "", "")
+        });
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "manual_action",
+            "success",
+            "Option Recovery Refresh Completed",
+            `Closed-position totals were refreshed automatically from Delta history. Brokerage ${objResult.recalculated.totalBrokerageToRecover.toFixed(4)}, Total PnL ${objResult.recalculated.totalPnl.toFixed(4)}.`,
+            {
+                reason: objPending.reason === "sl" ? "option_sl_recovery_refresh_completed" : "option_tp_recovery_refresh_completed",
+                totalBrokerageToRecover: objResult.recalculated.totalBrokerageToRecover,
+                totalPnl: objResult.recalculated.totalPnl,
+                closedCount: objResult.recalculated.closedCount
+            }
+        );
+    }
+    catch (objError) {
+        const objLatestRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+            || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+        await saveRollingFuturesLtRuntime({
+            ...objLatestRuntime,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithPendingOptionRecoveryRefresh(objLatestRuntime, "", "", "")
+        });
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "engine_error",
+            "warning",
+            "Option Recovery Refresh Failed",
+            getErrorMessage(objError, "Automatic recovery refresh failed."),
+            {
+                reason: objPending.reason === "sl" ? "option_sl_recovery_refresh_failed" : "option_tp_recovery_refresh_failed"
+            }
+        );
+    }
 }
 
 async function recalculateRecoveryTotalPnlInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {

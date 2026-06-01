@@ -633,6 +633,28 @@
         }
     }
 
+    function mergeRuntimeRecoveryMetrics(runtimeState) {
+        const vBrokerage = Number(runtimeState?.brokerageRecoveryTotal);
+        const vRecoveredPnl = Number(runtimeState?.recoveredTotalPnl);
+        if (!Number.isFinite(vBrokerage) || !Number.isFinite(vRecoveredPnl)) {
+            return null;
+        }
+        const objCurrent = lastRecoveryMetrics && typeof lastRecoveryMetrics === "object"
+            ? lastRecoveryMetrics
+            : {};
+        const vCurrentNet = Number(objCurrent.netPnl);
+        const vCurrentRecoveredPnl = Number(objCurrent.totalPnl);
+        const vCurrentBrokerage = Number(objCurrent.totalBrokerageToRecover);
+        const vOpenComponent = Number.isFinite(vCurrentNet) && Number.isFinite(vCurrentRecoveredPnl) && Number.isFinite(vCurrentBrokerage)
+            ? (vCurrentNet - vCurrentRecoveredPnl + vCurrentBrokerage)
+            : 0;
+        return {
+            totalBrokerageToRecover: Number(vBrokerage.toFixed(4)),
+            totalPnl: Number(vRecoveredPnl.toFixed(4)),
+            netPnl: Number((vRecoveredPnl + vOpenComponent - vBrokerage).toFixed(4))
+        };
+    }
+
     function updateNeutralBadges(neutralStatus) {
         const objStatus = neutralStatus || {};
         const totalDelta = Number(objStatus.totalDelta || 0);
@@ -693,11 +715,15 @@
             ids.autoTraderButton.classList.toggle("success", autoTraderEnabled);
             ids.autoTraderButton.classList.toggle("warn", !autoTraderEnabled);
         }
-        if (!lastRecoveryMetrics) {
+        const objRuntimeRecoveryMetrics = mergeRuntimeRecoveryMetrics(objRuntime.state);
+        if (objRuntimeRecoveryMetrics) {
+            applyRecoveryMetrics(objRuntimeRecoveryMetrics);
+        }
+        else if (!lastRecoveryMetrics) {
             applyRecoveryMetrics({
-                totalBrokerageToRecover: Number(objRuntime.state?.brokerageRecoveryTotal || 0),
-                totalPnl: Number(objRuntime.state?.recoveredTotalPnl || 0),
-                netPnl: Number(objRuntime.state?.recoveredTotalPnl || 0) - Number(objRuntime.state?.brokerageRecoveryTotal || 0)
+                totalBrokerageToRecover: 0,
+                totalPnl: 0,
+                netPnl: 0
             });
         }
         updateNeutralBadges(lastNeutralStatus);
