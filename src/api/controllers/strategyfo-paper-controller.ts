@@ -44,6 +44,15 @@ export function renderRollingFuturesLiveDualPage(req: Request, res: Response): v
     });
 }
 
+export function renderCoveredOptionsPage(req: Request, res: Response): void {
+    res.render("covered-options", {
+        pageTitle: "Covered Options - Live | Optionyze",
+        currentAccount: req.authAccount,
+        defaultUserId: req.authAccount?.accountId || "demo-paper",
+        rollingTelegramEventTypes: gRollingFuturesTelegramEventTypes
+    });
+}
+
 export async function startStrategyFoPaper(req: Request, res: Response, pService: StrategyFoGreeksPaperService): Promise<void> {
     const objConfig = (req.body?.config || {}) as Partial<StrategyFoGreeksPaperConfig>;
     res.json(await pService.start({

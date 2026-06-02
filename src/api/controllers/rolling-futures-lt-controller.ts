@@ -115,7 +115,8 @@ interface DeltaActiveOrderRow {
 const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
     "rolling-futures-lt-long": "Long Rolling Futures",
     "rolling-futures-lt-short": "Short Rolling Futures",
-    "rolling-futures-lt-dual": "Dual Rolling Futures"
+    "rolling-futures-lt-dual": "Dual Rolling Futures",
+    "covered-options": "Covered Options"
 };
 const gFutureLimitRetryDelayMs = 5000;
 const gFutureLimitRetryCount = 5;
@@ -152,7 +153,7 @@ function shouldForceDualSurvivalTest(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode
 ): boolean {
-    if (pStrategyCode !== "rolling-futures-lt-dual") {
+    if (!isDualRollingFuturesStrategy(pStrategyCode)) {
         return false;
     }
     const vEnabled = String(process.env.FORCE_DUAL_SURVIVAL_TEST || "").trim().toLowerCase();
@@ -328,6 +329,7 @@ interface RollingFuturesLtRecommendedStartQty {
 }
 
 interface RollingFuturesLtOptionMetadata {
+    rowIndex?: number;
     baseDelta?: number;
     baseTheta?: number;
     takeProfitDelta?: number;
@@ -360,7 +362,18 @@ function getAccountId(req: Request): string {
 }
 
 function isDualRollingFuturesStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "rolling-futures-lt-dual";
+    return pStrategyCode === "rolling-futures-lt-dual" || pStrategyCode === "covered-options";
+}
+
+function isCoveredOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
+    return pStrategyCode === "covered-options";
+}
+
+function normalizeOptionRowIndex(
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pValue: unknown
+): 1 | 2 {
+    return isCoveredOptionsStrategy(pStrategyCode) && Number(pValue) === 2 ? 2 : 1;
 }
 
 function isDualExecStrategyAllowed(pStrategyCode: RollingFuturesLtStrategyCode, pExecStrategy: boolean | null | undefined): boolean {
@@ -386,6 +399,7 @@ function normalizeExecStrategyInput(
     expiryDate: string;
     qty: number;
     targetDelta: number;
+    rowIndex?: 1 | 2;
 } {
     const vAction = String(pAction || "").trim().toLowerCase();
     const vSymbol = normalizeSymbolValue(pSymbol);
@@ -419,6 +433,7 @@ async function runExecStrategyPlacement(
         expiryDate: string;
         qty: number;
         targetDelta: number;
+        rowIndex?: 1 | 2;
     },
     pReason: "exec_strategy" | "admin_exec_strategy"
 ): Promise<{
@@ -499,6 +514,7 @@ async function executePendingDualStrategyRequestByRecord(
     pRequest: {
         requestId: string;
         accountId: string;
+        strategyCode: string;
         fullName: string;
         email: string;
         execStrategy: boolean;
@@ -517,26 +533,29 @@ async function executePendingDualStrategyRequestByRecord(
         threshold: number | null;
     };
 }> {
-    if (!isDualExecStrategyAllowed("rolling-futures-lt-dual", pRequest.execStrategy)) {
+    const vStrategyCode: RollingFuturesLtStrategyCode = pRequest.strategyCode === "covered-options"
+        ? "covered-options"
+        : "rolling-futures-lt-dual";
+    if (!isDualExecStrategyAllowed(vStrategyCode, pRequest.execStrategy)) {
         throw new Error(gExecStrategyUnauthorizedMessage);
     }
 
-    await clearRollingOptionsEventsByStrategy(pRequest.accountId, "rolling-futures-lt-dual");
+    await clearRollingOptionsEventsByStrategy(pRequest.accountId, vStrategyCode);
 
-    const objProfile = await readLiveProfile(pRequest.accountId, "rolling-futures-lt-dual");
+    const objProfile = await readLiveProfile(pRequest.accountId, vStrategyCode);
     const vSelectedApiProfileId = String(pRequest.requestPayload.selectedApiProfileId || objProfile.selectedApiProfileId || "").trim();
     if (!vSelectedApiProfileId) {
         throw new Error("Select an API profile before executing the live strategy.");
     }
 
-    const objRuntime = await loadRollingFuturesLtRuntime(pRequest.accountId, "rolling-futures-lt-dual");
+    const objRuntime = await loadRollingFuturesLtRuntime(pRequest.accountId, vStrategyCode);
     if (!objRuntime?.autoTraderEnabled || String(objRuntime.status || "").trim().toLowerCase() !== "running") {
         throw new Error("Turn Auto Trader ON before executing the live strategy.");
     }
 
     const objLeaseAcquire = await acquireDualStrategyLease(
         pRequest.accountId,
-        "rolling-futures-lt-dual",
+        vStrategyCode,
         objRuntime,
         objProfile,
         vSelectedApiProfileId
@@ -549,7 +568,7 @@ async function executePendingDualStrategyRequestByRecord(
         throw new Error(objLeaseAcquire.message || "This live strategy is currently owned by another server.");
     }
 
-    const objCheck = await performRollingFuturesLtConnectionCheck(pRequest.accountId, "rolling-futures-lt-dual", vSelectedApiProfileId);
+    const objCheck = await performRollingFuturesLtConnectionCheck(pRequest.accountId, vStrategyCode, vSelectedApiProfileId);
     if (objCheck.profile.connectionStatus.state !== "connected") {
         throw new Error(objCheck.profile.connectionStatus.message || "Delta connection is not healthy.");
     }
@@ -563,10 +582,11 @@ async function executePendingDualStrategyRequestByRecord(
         pRequest.requestPayload.qty,
         pRequest.requestPayload.targetDelta
     );
+    objExecInput.rowIndex = normalizeOptionRowIndex(vStrategyCode, pRequest.requestPayload.rowIndex);
 
     const objExecResult = await runExecStrategyPlacement(
         pRequest.accountId,
-        "rolling-futures-lt-dual",
+        vStrategyCode,
         vSelectedApiProfileId,
         objProfile,
         objExecInput,
@@ -579,7 +599,7 @@ async function executePendingDualStrategyRequestByRecord(
         await saveRollingFuturesLtProfile({
             ...objProfile,
             userId: pRequest.accountId,
-            strategyCode: "rolling-futures-lt-dual",
+            strategyCode: vStrategyCode,
             selectedApiProfileId: vSelectedApiProfileId,
             uiState: {
                 ...getMergedUiState(objProfile),
@@ -592,7 +612,8 @@ async function executePendingDualStrategyRequestByRecord(
 
 async function attemptAutoExecuteNextPendingDualStrategyRequest(
     pTriggerReason: "sl" | "tp",
-    pSourceUserId: string
+    pSourceUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode
 ): Promise<void> {
     const objSettings = await getPendingStrategyAutoExecSettings();
     if ((pTriggerReason === "sl" && !objSettings.slEnabled) || (pTriggerReason === "tp" && !objSettings.tpEnabled)) {
@@ -608,9 +629,9 @@ async function attemptAutoExecuteNextPendingDualStrategyRequest(
     let objRequest: (typeof arrPendingRequests)[number] | null = null;
     for (const objCandidate of arrPendingRequests) {
         const [objRuntime, objLease, objSurvival] = await Promise.all([
-            loadRollingFuturesLtRuntime(objCandidate.accountId, "rolling-futures-lt-dual"),
-            getStrategyLease(objCandidate.accountId, "rolling-futures-lt-dual"),
-            getSurvivalState(objCandidate.accountId, "rolling-futures-lt-dual")
+            loadRollingFuturesLtRuntime(objCandidate.accountId, pStrategyCode),
+            getStrategyLease(objCandidate.accountId, pStrategyCode),
+            getSurvivalState(objCandidate.accountId, pStrategyCode)
         ]);
 
         const vLeaseExpiresAtMs = objLease?.leaseExpiresAt ? new Date(objLease.leaseExpiresAt).getTime() : Number.NaN;
@@ -640,7 +661,7 @@ async function attemptAutoExecuteNextPendingDualStrategyRequest(
         await deletePendingStrategyExecutionRequest(objRequest.requestId);
         await logFuturesEvent(
             objRequest.accountId,
-            "rolling-futures-lt-dual",
+            pStrategyCode,
             "option_opened",
             "success",
             "Auto Executed Pending Strategy",
@@ -656,7 +677,7 @@ async function attemptAutoExecuteNextPendingDualStrategyRequest(
     catch (objError) {
         await logFuturesEvent(
             objRequest.accountId,
-            "rolling-futures-lt-dual",
+            pStrategyCode,
             "engine_error",
             "error",
             "Pending Strategy Auto Execution Failed",
@@ -672,6 +693,7 @@ async function attemptAutoExecuteNextPendingDualStrategyRequest(
 
 async function queueDualPendingExecStrategyRequest(
     pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
     pSelectedApiProfileId: string,
     pUiState: Record<string, unknown>,
     pTriggerSource: string,
@@ -679,10 +701,10 @@ async function queueDualPendingExecStrategyRequest(
     pAvailableBalance: number | null = null
 ): Promise<{ created: boolean; message: string; }> {
     const objAccount = await getAccountById(pUserId);
-    if (!isDualExecStrategyAllowed("rolling-futures-lt-dual", objAccount?.execStrategy)) {
+    if (!isDualExecStrategyAllowed(pStrategyCode, objAccount?.execStrategy)) {
         await logFuturesEvent(
             pUserId,
-            "rolling-futures-lt-dual",
+            pStrategyCode,
             "manual_action",
             "warning",
             "Exec Strategy Not Authorised",
@@ -708,7 +730,7 @@ async function queueDualPendingExecStrategyRequest(
     try {
         await createPendingStrategyExecutionRequest({
             accountId: pUserId,
-            strategyCode: "rolling-futures-lt-dual",
+            strategyCode: pStrategyCode,
             triggerSource: pTriggerSource,
             requestPayload: {
                 selectedApiProfileId: pSelectedApiProfileId,
@@ -726,7 +748,7 @@ async function queueDualPendingExecStrategyRequest(
 
         await logFuturesEvent(
             pUserId,
-            "rolling-futures-lt-dual",
+            pStrategyCode,
             "manual_action",
             "success",
             "Exec Strategy Request Submitted",
@@ -751,7 +773,7 @@ async function queueDualPendingExecStrategyRequest(
         if (vMessage === "Strategy Execution is already active.") {
             await logFuturesEvent(
                 pUserId,
-                "rolling-futures-lt-dual",
+                pStrategyCode,
                 "manual_action",
                 "warning",
                 "Exec Strategy Request Already Active",
@@ -1115,6 +1137,110 @@ function getCurrentDeltaUiDateTimeLocalString(): string {
     return `${vYear}-${vMonth}-${vDay}T${vHour}:${vMinute}`;
 }
 
+function getOptionRowStateKeys(
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pRowIndex: unknown
+): {
+    action: string;
+    legs: string;
+    expiryMode: string;
+    expiryDate: string;
+    qty: string;
+    newD: string;
+    reD: string;
+    tpD: string;
+    slD: string;
+    reEnter: string;
+} {
+    const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pRowIndex);
+    return {
+        action: `action${vRowIndex}`,
+        legs: `legs${vRowIndex}`,
+        expiryMode: `expiryMode${vRowIndex}`,
+        expiryDate: `expiryDate${vRowIndex}`,
+        qty: `qty${vRowIndex}`,
+        newD: `newD${vRowIndex}`,
+        reD: `reD${vRowIndex}`,
+        tpD: `tpD${vRowIndex}`,
+        slD: `slD${vRowIndex}`,
+        reEnter: `reEnter${vRowIndex}`
+    };
+}
+
+function getDefaultOptionRowUiState(
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pRowIndex: unknown
+): Record<string, unknown> {
+    const bIsShort = pStrategyCode === "rolling-futures-lt-short";
+    const bIsDual = isDualRollingFuturesStrategy(pStrategyCode);
+    const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pRowIndex);
+    const objDefaults: Record<string, unknown> = {
+        action: "sell",
+        legs: bIsDual ? "both" : (bIsShort ? "pe" : "ce"),
+        expiryMode: bIsDual ? "6" : "5",
+        expiryDate: "",
+        qty: "1",
+        newD: bIsDual ? "0.25" : "0.53",
+        reD: bIsDual ? "0.25" : "0.53",
+        tpD: bIsDual ? "0.12" : "0.25",
+        slD: bIsDual ? "0.50" : "0.65",
+        reEnter: true
+    };
+    if (isCoveredOptionsStrategy(pStrategyCode) && vRowIndex === 1) {
+        objDefaults.action = "buy";
+        objDefaults.expiryMode = "6";
+        objDefaults.newD = "0.90";
+        objDefaults.reD = "0.90";
+        objDefaults.tpD = "2.00";
+        objDefaults.slD = "0.15";
+    }
+    if (isCoveredOptionsStrategy(pStrategyCode) && vRowIndex === 2) {
+        objDefaults.action = "sell";
+        objDefaults.expiryMode = "2";
+        objDefaults.newD = "0.53";
+        objDefaults.reD = "0.53";
+        objDefaults.tpD = "0.20";
+        objDefaults.slD = "0.65";
+    }
+    return objDefaults;
+}
+
+function getNormalizedOptionRowUiState(
+    pUiState: Record<string, unknown>,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pRowIndex: unknown
+): {
+    rowIndex: 1 | 2;
+    action: "buy" | "sell";
+    legs: "ce" | "pe" | "both";
+    expiryMode: string;
+    expiryDate: string;
+    qty: string;
+    newD: string;
+    reD: string;
+    tpD: string;
+    slD: string;
+    reEnter: boolean;
+} {
+    const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pRowIndex);
+    const objKeys = getOptionRowStateKeys(pStrategyCode, vRowIndex);
+    const objDefaults = getDefaultOptionRowUiState(pStrategyCode, vRowIndex);
+    const vExpiryMode = normalizeStringValue(pUiState[objKeys.expiryMode], String(objDefaults.expiryMode));
+    return {
+        rowIndex: vRowIndex,
+        action: String(pUiState[objKeys.action] || objDefaults.action).trim().toLowerCase() === "buy" ? "buy" : "sell",
+        legs: normalizeRollingFuturesLegSelection(pUiState[objKeys.legs], String(objDefaults.legs || "ce")),
+        expiryMode: vExpiryMode,
+        expiryDate: normalizeRollingFuturesExpiryDate(vExpiryMode, pUiState[objKeys.expiryDate]),
+        qty: normalizeStringValue(pUiState[objKeys.qty], String(objDefaults.qty)),
+        newD: normalizeStringValue(pUiState[objKeys.newD], String(objDefaults.newD)),
+        reD: normalizeStringValue(pUiState[objKeys.reD], String(objDefaults.reD)),
+        tpD: normalizeStringValue(pUiState[objKeys.tpD], String(objDefaults.tpD)),
+        slD: normalizeStringValue(pUiState[objKeys.slD], String(objDefaults.slD)),
+        reEnter: normalizeBooleanValue(pUiState[objKeys.reEnter], Boolean(objDefaults.reEnter))
+    };
+}
+
 function formatDeltaUiDateTimeLocalString(pValue: string): string {
     const vEpochMs = new Date(String(pValue || "")).getTime();
     if (!Number.isFinite(vEpochMs)) {
@@ -1143,28 +1269,18 @@ function getDefaultManualTraderUiState(
     pStrategyCode: RollingFuturesLtStrategyCode
 ): Record<string, unknown> {
     const bIsShort = pStrategyCode === "rolling-futures-lt-short";
-    const bIsDual = pStrategyCode === "rolling-futures-lt-dual";
+    const bIsDual = isDualRollingFuturesStrategy(pStrategyCode);
     const vClosedFromDate = getCurrentDeltaUiDateTimeLocalString();
-    return {
+    const objState: Record<string, unknown> = {
         startQty: "1",
         symbol: "BTC",
         manualFutOrderType: "market_order",
         bsFutQty: "1",
         minusDelta: bIsDual ? "-10" : "-25",
         plusDelta: bIsDual ? "10" : "25",
-        action1: "sell",
-        legs1: bIsDual ? "both" : (bIsShort ? "pe" : "ce"),
         onlyDeltaNeutral: false,
         rangeDeltaNeutral: false,
         gammaAwareNeutral: false,
-        expiryMode1: bIsDual ? "6" : "5",
-        expiryDate1: "",
-        qty1: "1",
-        newD1: bIsDual ? "0.25" : "0.53",
-        reD1: bIsDual ? "0.25" : "0.53",
-        tpD1: bIsDual ? "0.12" : "0.25",
-        slD1: bIsDual ? "0.50" : "0.65",
-        reEnter1: true,
         closeNetProfitBrokerage: bIsDual,
         brokerageMultiplier: "10",
         reEnterBrok: bIsDual,
@@ -1183,6 +1299,21 @@ function getDefaultManualTraderUiState(
         closedFromDate: vClosedFromDate,
         closedToDate: ""
     };
+    [1, ...(isCoveredOptionsStrategy(pStrategyCode) ? [2] : [])].forEach((vRowIndex) => {
+        const objKeys = getOptionRowStateKeys(pStrategyCode, vRowIndex);
+        const objDefaults = getDefaultOptionRowUiState(pStrategyCode, vRowIndex);
+        objState[objKeys.action] = objDefaults.action;
+        objState[objKeys.legs] = objDefaults.legs;
+        objState[objKeys.expiryMode] = objDefaults.expiryMode;
+        objState[objKeys.expiryDate] = objDefaults.expiryDate;
+        objState[objKeys.qty] = objDefaults.qty;
+        objState[objKeys.newD] = objDefaults.newD;
+        objState[objKeys.reD] = objDefaults.reD;
+        objState[objKeys.tpD] = objDefaults.tpD;
+        objState[objKeys.slD] = objDefaults.slD;
+        objState[objKeys.reEnter] = objDefaults.reEnter;
+    });
+    return objState;
 }
 
 function isFutureContractSymbol(pValue: unknown): boolean {
@@ -1256,6 +1387,7 @@ function getSignedOptionBaseDelta(pContractName: unknown, pDeltaValue: unknown):
 
 function optionMetadataToRecord(pMetadata: RollingFuturesLtOptionMetadata): Record<string, unknown> {
     return {
+        rowIndex: pMetadata.rowIndex,
         baseDelta: pMetadata.baseDelta,
         baseTheta: pMetadata.baseTheta,
         takeProfitDelta: pMetadata.takeProfitDelta,
@@ -1426,13 +1558,17 @@ function calculateLivePositionPnl(
 
 function getLiveOptionRuleMetadataFromUiState(
     pUiState: Record<string, unknown>,
-    pReason: string
+    pReason: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pRowIndex: unknown = 1
 ): RollingFuturesLtOptionMetadata {
+    const objRowState = getNormalizedOptionRowUiState(pUiState, pStrategyCode, pRowIndex);
     return {
-        takeProfitDelta: Math.max(0, Number(pUiState.tpD1 || 0.25)),
-        stopLossDelta: Math.max(0, Number(pUiState.slD1 || 0.65)),
-        reEntryDelta: Math.max(0, Number(pUiState.reD1 || 0.53)),
-        reEnterEnabled: Boolean(pUiState.reEnter1),
+        rowIndex: objRowState.rowIndex,
+        takeProfitDelta: Math.max(0, Number(objRowState.tpD || 0.25)),
+        stopLossDelta: Math.max(0, Number(objRowState.slD || 0.65)),
+        reEntryDelta: Math.max(0, Number(objRowState.reD || 0.53)),
+        reEnterEnabled: Boolean(objRowState.reEnter),
         openedReason: pReason
     };
 }
@@ -2138,29 +2274,16 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
             .map((pValue) => String(pValue || "").trim())
             .filter((pValue) => Boolean(pValue) && gRollingFuturesTelegramEventTypes.has(pValue))
         : [];
-    return {
+    const objMergedUiState: Record<string, unknown> = {
         startQty: normalizeStringValue(objUiState.startQty, String(objDefaults.startQty)),
         symbol: normalizeSymbolValue(objUiState.symbol),
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
         minusDelta: normalizeStringValue(objUiState.minusDelta, String(objDefaults.minusDelta)),
         plusDelta: normalizeStringValue(objUiState.plusDelta, String(objDefaults.plusDelta)),
-        action1: String(objUiState.action1 || objDefaults.action1).trim().toLowerCase() === "buy" ? "buy" : "sell",
-        legs1: normalizeRollingFuturesLegSelection(objUiState.legs1, String(objDefaults.legs1 || "ce")),
         onlyDeltaNeutral: normalizeBooleanValue(objUiState.onlyDeltaNeutral, Boolean(objDefaults.onlyDeltaNeutral)),
         rangeDeltaNeutral: normalizeBooleanValue(objUiState.rangeDeltaNeutral, Boolean(objDefaults.rangeDeltaNeutral)),
         gammaAwareNeutral: normalizeBooleanValue(objUiState.gammaAwareNeutral, Boolean(objDefaults.gammaAwareNeutral)),
-        expiryMode1: normalizeStringValue(objUiState.expiryMode1, String(objDefaults.expiryMode1)),
-        expiryDate1: normalizeRollingFuturesExpiryDate(
-            normalizeStringValue(objUiState.expiryMode1, String(objDefaults.expiryMode1)),
-            objUiState.expiryDate1
-        ),
-        qty1: normalizeStringValue(objUiState.qty1, String(objDefaults.qty1)),
-        newD1: normalizeStringValue(objUiState.newD1, String(objDefaults.newD1)),
-        reD1: normalizeStringValue(objUiState.reD1, String(objDefaults.reD1)),
-        tpD1: normalizeStringValue(objUiState.tpD1, String(objDefaults.tpD1)),
-        slD1: normalizeStringValue(objUiState.slD1, String(objDefaults.slD1)),
-        reEnter1: normalizeBooleanValue(objUiState.reEnter1, Boolean(objDefaults.reEnter1)),
         closeNetProfitBrokerage: normalizeBooleanValue(objUiState.closeNetProfitBrokerage, Boolean(objDefaults.closeNetProfitBrokerage)),
         brokerageMultiplier: normalizeStringValue(objUiState.brokerageMultiplier, String(objDefaults.brokerageMultiplier)),
         reEnterBrok: normalizeBooleanValue(objUiState.reEnterBrok, Boolean(objDefaults.reEnterBrok)),
@@ -2171,6 +2294,21 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         closedFromDate: String(objUiState.closedFromDate || "").trim(),
         closedToDate: String(objUiState.closedToDate || "").trim()
     };
+    [1, ...(isCoveredOptionsStrategy(pProfile.strategyCode) ? [2] : [])].forEach((vRowIndex) => {
+        const objRowState = getNormalizedOptionRowUiState(objUiState, pProfile.strategyCode, vRowIndex);
+        const objKeys = getOptionRowStateKeys(pProfile.strategyCode, vRowIndex);
+        objMergedUiState[objKeys.action] = objRowState.action;
+        objMergedUiState[objKeys.legs] = objRowState.legs;
+        objMergedUiState[objKeys.expiryMode] = objRowState.expiryMode;
+        objMergedUiState[objKeys.expiryDate] = objRowState.expiryDate;
+        objMergedUiState[objKeys.qty] = objRowState.qty;
+        objMergedUiState[objKeys.newD] = objRowState.newD;
+        objMergedUiState[objKeys.reD] = objRowState.reD;
+        objMergedUiState[objKeys.tpD] = objRowState.tpD;
+        objMergedUiState[objKeys.slD] = objRowState.slD;
+        objMergedUiState[objKeys.reEnter] = objRowState.reEnter;
+    });
+    return objMergedUiState;
 }
 
 function normalizeProfileSaveInput(
@@ -2185,45 +2323,47 @@ function normalizeProfileSaveInput(
             .map((pValue) => String(pValue || "").trim())
             .filter((pValue) => Boolean(pValue) && gRollingFuturesTelegramEventTypes.has(pValue))
         : [];
+    const objNormalizedUiState: Record<string, unknown> = {
+        startQty: normalizeStringValue(objUiState.startQty, String(objDefaults.startQty)),
+        symbol: normalizeSymbolValue(objUiState.symbol),
+        manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
+        bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
+        minusDelta: normalizeStringValue(objUiState.minusDelta, String(objDefaults.minusDelta)),
+        plusDelta: normalizeStringValue(objUiState.plusDelta, String(objDefaults.plusDelta)),
+        onlyDeltaNeutral: normalizeBooleanValue(objUiState.onlyDeltaNeutral, Boolean(objDefaults.onlyDeltaNeutral)),
+        rangeDeltaNeutral: normalizeBooleanValue(objUiState.rangeDeltaNeutral, Boolean(objDefaults.rangeDeltaNeutral)),
+        gammaAwareNeutral: normalizeBooleanValue(objUiState.gammaAwareNeutral, Boolean(objDefaults.gammaAwareNeutral)),
+        closeNetProfitBrokerage: normalizeBooleanValue(objUiState.closeNetProfitBrokerage, Boolean(objDefaults.closeNetProfitBrokerage)),
+        brokerageMultiplier: normalizeStringValue(objUiState.brokerageMultiplier, String(objDefaults.brokerageMultiplier)),
+        reEnterBrok: normalizeBooleanValue(objUiState.reEnterBrok, Boolean(objDefaults.reEnterBrok)),
+        closeBlockedMargin: normalizeBooleanValue(objUiState.closeBlockedMargin, Boolean(objDefaults.closeBlockedMargin)),
+        blockedMarginPct: normalizeStringValue(objUiState.blockedMarginPct, String(objDefaults.blockedMarginPct)),
+        reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
+        telegramAlertTypes: Array.from(new Set(arrTelegramPrefs)),
+        closedFromDate: String(objUiState.closedFromDate || "").trim(),
+        closedToDate: String(objUiState.closedToDate || "").trim()
+    };
+    [1, ...(isCoveredOptionsStrategy(pStrategyCode) ? [2] : [])].forEach((vRowIndex) => {
+        const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
+        const objKeys = getOptionRowStateKeys(pStrategyCode, vRowIndex);
+        objNormalizedUiState[objKeys.action] = objRowState.action;
+        objNormalizedUiState[objKeys.legs] = objRowState.legs;
+        objNormalizedUiState[objKeys.expiryMode] = objRowState.expiryMode;
+        objNormalizedUiState[objKeys.expiryDate] = objRowState.expiryDate;
+        objNormalizedUiState[objKeys.qty] = objRowState.qty;
+        objNormalizedUiState[objKeys.newD] = objRowState.newD;
+        objNormalizedUiState[objKeys.reD] = objRowState.reD;
+        objNormalizedUiState[objKeys.tpD] = objRowState.tpD;
+        objNormalizedUiState[objKeys.slD] = objRowState.slD;
+        objNormalizedUiState[objKeys.reEnter] = objRowState.reEnter;
+    });
     return {
         ...getDefaultRollingFuturesLtProfile(pUserId, pStrategyCode),
         ...pIncoming,
         userId: pUserId,
         strategyCode: pStrategyCode,
         selectedApiProfileId: String(pIncoming.selectedApiProfileId || "").trim(),
-        uiState: {
-            startQty: normalizeStringValue(objUiState.startQty, String(objDefaults.startQty)),
-            symbol: normalizeSymbolValue(objUiState.symbol),
-            manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
-            bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
-            minusDelta: normalizeStringValue(objUiState.minusDelta, String(objDefaults.minusDelta)),
-            plusDelta: normalizeStringValue(objUiState.plusDelta, String(objDefaults.plusDelta)),
-            action1: String(objUiState.action1 || objDefaults.action1).trim().toLowerCase() === "buy" ? "buy" : "sell",
-            legs1: normalizeRollingFuturesLegSelection(objUiState.legs1, String(objDefaults.legs1 || "ce")),
-            onlyDeltaNeutral: normalizeBooleanValue(objUiState.onlyDeltaNeutral, Boolean(objDefaults.onlyDeltaNeutral)),
-            rangeDeltaNeutral: normalizeBooleanValue(objUiState.rangeDeltaNeutral, Boolean(objDefaults.rangeDeltaNeutral)),
-            gammaAwareNeutral: normalizeBooleanValue(objUiState.gammaAwareNeutral, Boolean(objDefaults.gammaAwareNeutral)),
-            expiryMode1: normalizeStringValue(objUiState.expiryMode1, String(objDefaults.expiryMode1)),
-            expiryDate1: normalizeRollingFuturesExpiryDate(
-                normalizeStringValue(objUiState.expiryMode1, String(objDefaults.expiryMode1)),
-                objUiState.expiryDate1
-            ),
-            qty1: normalizeStringValue(objUiState.qty1, String(objDefaults.qty1)),
-            newD1: normalizeStringValue(objUiState.newD1, String(objDefaults.newD1)),
-            reD1: normalizeStringValue(objUiState.reD1, String(objDefaults.reD1)),
-            tpD1: normalizeStringValue(objUiState.tpD1, String(objDefaults.tpD1)),
-            slD1: normalizeStringValue(objUiState.slD1, String(objDefaults.slD1)),
-            reEnter1: normalizeBooleanValue(objUiState.reEnter1, Boolean(objDefaults.reEnter1)),
-            closeNetProfitBrokerage: normalizeBooleanValue(objUiState.closeNetProfitBrokerage, Boolean(objDefaults.closeNetProfitBrokerage)),
-            brokerageMultiplier: normalizeStringValue(objUiState.brokerageMultiplier, String(objDefaults.brokerageMultiplier)),
-            reEnterBrok: normalizeBooleanValue(objUiState.reEnterBrok, Boolean(objDefaults.reEnterBrok)),
-            closeBlockedMargin: normalizeBooleanValue(objUiState.closeBlockedMargin, Boolean(objDefaults.closeBlockedMargin)),
-            blockedMarginPct: normalizeStringValue(objUiState.blockedMarginPct, String(objDefaults.blockedMarginPct)),
-            reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
-            telegramAlertTypes: Array.from(new Set(arrTelegramPrefs)),
-            closedFromDate: String(objUiState.closedFromDate || "").trim(),
-            closedToDate: String(objUiState.closedToDate || "").trim()
-        },
+        uiState: objNormalizedUiState,
         connectionStatus: {
             ...getDefaultRollingFuturesLtProfile(pUserId, pStrategyCode).connectionStatus,
             ...(pIncoming.connectionStatus || {})
@@ -2650,6 +2790,23 @@ function buildNeutralStatus(
     pAutoTraderEnabled: boolean,
     pRuntime: RollingFuturesLtRuntimeRecord | null = null
 ): RollingFuturesLtNeutralStatus {
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        return {
+            mode: "none",
+            totalDelta: Number(Number(pTotals.totalDelta || 0).toFixed(6)),
+            totalTheta: Number(Number(pTotals.totalTheta || 0).toFixed(6)),
+            totalGamma: Number(Number(pTotals.totalGamma || 0).toFixed(6)),
+            minDelta: null,
+            maxDelta: null,
+            deltaDriftPct: null,
+            baseOptionDeltaAbs: null,
+            effectiveBaseOptionDeltaAbs: null,
+            baselineFloorDeltaAbs: null,
+            gammaFactor: null,
+            deltaBalanceTone: "secondary",
+            deltaBalanceText: "Balance: Mode OFF"
+        };
+    }
     if (!pAutoTraderEnabled) {
         return {
             mode: "none",
@@ -4281,6 +4438,18 @@ async function applyServerSideNeutralityCheck(
     threshold: number | null;
     nextRuntimeState: Record<string, unknown> | null;
 }> {
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        const objTotals = await calculateTrackedNeutralTotals(pTrackedPositions);
+        return {
+            trackedOpenPositions: pTrackedPositions,
+            hedgePlaced: false,
+            totalDelta: objTotals.totalDelta,
+            totalTheta: objTotals.totalTheta,
+            mode: "none",
+            threshold: null,
+            nextRuntimeState: null
+        };
+    }
     const vMode = getNeutralModeFromUiState(pUiState);
     const objRuntimeBase = pRuntime
         || await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
@@ -4712,6 +4881,7 @@ async function executeStrategyPlacement(
         expiryDate: string;
         qty: number;
         targetDelta: number;
+        rowIndex?: 1 | 2;
     }
 ): Promise<{
     profileLabel: string;
@@ -4747,12 +4917,19 @@ async function executeStrategyPlacement(
     });
     const objUiState = getMergedUiState(pProfile);
     const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pInput.rowIndex);
     const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
-    if (arrOpenOptions.length > 0) {
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        const objOpenRowPosition = arrOpenOptions.find((objPosition) => normalizeOptionRowIndex(pStrategyCode, getTrackedOptionMetadata(objPosition).rowIndex) === vRowIndex);
+        if (objOpenRowPosition) {
+            throw new Error(`An option position is already open on row ${vRowIndex} (${objOpenRowPosition.contractName}). Close the existing row ${vRowIndex} option before opening a new one.`);
+        }
+    }
+    else if (arrOpenOptions.length > 0) {
         throw new Error(`An option position is already open (${arrOpenOptions[0].contractName}). Close the existing option before opening a new one.`);
     }
-    const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(objUiState, "strategy_option_open");
-    const bIsDualStrategy = pStrategyCode === "rolling-futures-lt-dual";
+    const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(objUiState, "strategy_option_open", pStrategyCode, vRowIndex);
+    const bIsDualStrategy = isDualRollingFuturesStrategy(pStrategyCode);
     const arrOptionSides: Array<"CE" | "PE"> = pInput.legSide === "both"
         ? (bIsDualStrategy ? ["CE", "PE"] : [])
         : [pInput.legSide === "pe" ? "PE" : "CE"];
@@ -4982,9 +5159,11 @@ async function openTrackedOptionReEntry(
 } | null> {
     const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const objUiState = getMergedUiState(pProfile);
+    const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pMetadata.rowIndex);
+    const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
     const vSymbol = normalizeSymbolValue(objUiState.symbol);
     const vLegSide = getTrackedOptionLegSide(pClosedPosition.contractName);
-    const vTargetDelta = Math.max(0, Number(pMetadata.reEntryDelta || objUiState.reD1 || 0.53));
+    const vTargetDelta = Math.max(0, Number(pMetadata.reEntryDelta || objRowState.reD || 0.53));
     if (!(vTargetDelta > 0)) {
         return null;
     }
@@ -4997,17 +5176,17 @@ async function openTrackedOptionReEntry(
         futureOrderType: "market_order" as const,
         action: String(pClosedPosition.side || "").trim().toUpperCase() === "BUY" ? "buy" as const : "sell" as const,
         legSide: vLegSide,
-        expiryMode: (["1", "2", "4", "5", "6", "7"].includes(String(objUiState.expiryMode1 || "5").trim())
-            ? String(objUiState.expiryMode1 || "5").trim()
+        expiryMode: (["1", "2", "4", "5", "6", "7"].includes(String(objRowState.expiryMode || "5").trim())
+            ? String(objRowState.expiryMode || "5").trim()
             : "5") as "1" | "2" | "4" | "5" | "6" | "7",
-        expiryDate: String(objUiState.expiryDate1 || "").trim(),
+        expiryDate: String(objRowState.expiryDate || "").trim(),
         optionQty: Math.max(1, Math.floor(Number(pClosedPosition.qty || 1))),
         redOptionQtyPct: 100,
         greenOptionQtyPct: 100,
         newDelta: vTargetDelta,
         reDelta: vTargetDelta,
-        deltaTakeProfit: Math.max(0, Number(pMetadata.takeProfitDelta || objUiState.tpD1 || 0.25)),
-        deltaStopLoss: Math.max(0, Number(pMetadata.stopLossDelta || objUiState.slD1 || 0.65)),
+        deltaTakeProfit: Math.max(0, Number(pMetadata.takeProfitDelta || objRowState.tpD || 0.25)),
+        deltaStopLoss: Math.max(0, Number(pMetadata.stopLossDelta || objRowState.slD || 0.65)),
         reEnter: Boolean(pMetadata.reEnterEnabled),
         addOneLotFuture: false,
         renkoEnabled: false,
@@ -5033,8 +5212,8 @@ async function openTrackedOptionReEntry(
     if (shouldTriggerTrackedOption(
         pClosedPosition.side,
         vAbsoluteDelta,
-        Number(pMetadata.takeProfitDelta || objUiState.tpD1 || 0.25),
-        Number(pMetadata.stopLossDelta || objUiState.slD1 || 0.65)
+        Number(pMetadata.takeProfitDelta || objRowState.tpD || 0.25),
+        Number(pMetadata.stopLossDelta || objRowState.slD || 0.65)
     ).shouldAct) {
         return null;
     }
@@ -5070,10 +5249,11 @@ async function openTrackedOptionReEntry(
             margin: 0,
             liquidationPrice: 0,
             metadata: optionMetadataToRecord({
+                rowIndex: vRowIndex,
                 baseDelta: getSignedOptionBaseDelta(String(objContract.contractSymbol || "").trim(), vAbsoluteDelta),
                 baseTheta: Math.abs(Number(objContract.theta || 0)),
-                takeProfitDelta: Math.max(0, Number(pMetadata.takeProfitDelta || objUiState.tpD1 || 0.25)),
-                stopLossDelta: Math.max(0, Number(pMetadata.stopLossDelta || objUiState.slD1 || 0.65)),
+                takeProfitDelta: Math.max(0, Number(pMetadata.takeProfitDelta || objRowState.tpD || 0.25)),
+                stopLossDelta: Math.max(0, Number(pMetadata.stopLossDelta || objRowState.slD || 0.65)),
                 reEntryDelta: vTargetDelta,
                 reEnterEnabled: Boolean(pMetadata.reEnterEnabled),
                 openedReason: pReason === "sl" ? "sl_reentry" : "tp_reentry"
@@ -5258,7 +5438,7 @@ async function applyTriggeredOptionRule(
         await clearActiveStrategyRun(pUserId, pStrategyCode);
     }
     if (isDualRollingFuturesStrategy(pStrategyCode)) {
-        await attemptAutoExecuteNextPendingDualStrategyRequest(pReason, pUserId);
+        await attemptAutoExecuteNextPendingDualStrategyRequest(pReason, pUserId, pStrategyCode);
     }
     return arrSaved;
 }
@@ -5288,8 +5468,10 @@ async function findTriggeredTrackedOptions(
             continue;
         }
         const objMetadata = getTrackedOptionMetadata(objPosition);
-        const vLiveTakeProfitDelta = Number(pUiState.tpD1);
-        const vLiveStopLossDelta = Number(pUiState.slD1);
+        const vRowIndex = normalizeOptionRowIndex(objPosition.strategyCode, objMetadata.rowIndex);
+        const objRowState = getNormalizedOptionRowUiState(pUiState, objPosition.strategyCode, vRowIndex);
+        const vLiveTakeProfitDelta = Number(objRowState.tpD);
+        const vLiveStopLossDelta = Number(objRowState.slD);
         const objDecision = shouldTriggerTrackedOption(
             objPosition.side,
             vCurrentDelta,
@@ -5495,7 +5677,7 @@ function setLocalSurvivalLeaseToken(pUserId: string, pStrategyCode: RollingFutur
 }
 
 function isDualLeaseManagedStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "rolling-futures-lt-dual";
+    return isDualRollingFuturesStrategy(pStrategyCode);
 }
 
 function getLocalStrategyLeaseToken(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): string {
@@ -5918,6 +6100,9 @@ async function applySurvivalOnlyNeutralityHedge(
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
     pRuntimeState: Record<string, unknown>
 ): Promise<{ positions: RollingFuturesLtImportedPositionRecord[]; hedgePlaced: boolean; }> {
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        return { positions: pTrackedPositions, hedgePlaced: false };
+    }
     const vMode = getNeutralModeFromUiState(pUiState);
     if (vMode === "none") {
         return { positions: pTrackedPositions, hedgePlaced: false };
@@ -6217,6 +6402,7 @@ async function runAutoTraderCycle(
             if (isDualRollingFuturesStrategy(pStrategyCode) && !arrSavedPositions.length) {
                 const objQueueResult = await queueDualPendingExecStrategyRequest(
                     pUserId,
+                    pStrategyCode,
                     vSelectedApiProfileId,
                     objUiState as Record<string, unknown>,
                     objScheduledReEntry.reason === "brokerage"
@@ -6479,6 +6665,7 @@ async function runAutoTraderCycle(
                 const objPostCloseSummary = await fetchAccountSummarySnapshot(pUserId, vSelectedApiProfileId, vSymbol);
                 const objQueueResult = await queueDualPendingExecStrategyRequest(
                     pUserId,
+                    pStrategyCode,
                     vSelectedApiProfileId,
                     objUiState as Record<string, unknown>,
                     objProfitRule.reason === "brokerage"
@@ -6792,7 +6979,7 @@ export async function recoverRollingFuturesLtAutoTraderCycles(): Promise<void> {
             && vStatus === "running"
             && !!vUserId
             && !!vSelectedApiProfileId
-            && (vStrategyCode === "rolling-futures-lt-long" || vStrategyCode === "rolling-futures-lt-short" || vStrategyCode === "rolling-futures-lt-dual");
+            && (vStrategyCode === "rolling-futures-lt-long" || vStrategyCode === "rolling-futures-lt-short" || isDualRollingFuturesStrategy(vStrategyCode));
 
         if (!bShouldResume) {
             continue;
@@ -7555,6 +7742,13 @@ async function closeImportedOpenPositionInternal(req: Request, res: Response, pS
 }
 
 async function executeManualFutureInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        res.status(400).json({
+            status: "warning",
+            message: "Manual futures are disabled for Covered Options."
+        });
+        return;
+    }
     const vUserId = getAccountId(req);
     const objProfile = await readLiveProfile(vUserId, pStrategyCode);
     const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
@@ -7738,6 +7932,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
     const vAction = String(req.body?.action || "").trim().toLowerCase();
     const vSymbol = normalizeSymbolValue(req.body?.symbol || getMergedUiState(objProfile).symbol);
     const vLegSide = String(req.body?.legSide || "").trim().toLowerCase();
+    const vRowIndex = normalizeOptionRowIndex(pStrategyCode, req.body?.rowIndex);
     const vExpiryMode = String(req.body?.expiryMode || "5").trim() as "1" | "2" | "4" | "5" | "6" | "7";
     const vExpiryDate = normalizeRollingFuturesExpiryDate(vExpiryMode, req.body?.expiryDate);
     const vQty = Math.max(1, Math.floor(Number(req.body?.qty || 1)));
@@ -7770,14 +7965,20 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
         const { client, profile } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
         const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
         const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
-        const bIsDualStrategy = pStrategyCode === "rolling-futures-lt-dual";
-        if (!bIsDualStrategy && arrOpenOptions.length > 0) {
+        const bIsDualStrategy = isDualRollingFuturesStrategy(pStrategyCode);
+        if (isCoveredOptionsStrategy(pStrategyCode)) {
+            const objOpenRowPosition = arrOpenOptions.find((objPosition) => normalizeOptionRowIndex(pStrategyCode, getTrackedOptionMetadata(objPosition).rowIndex) === vRowIndex);
+            if (objOpenRowPosition) {
+                throw new Error(`An option position is already open on row ${vRowIndex} (${objOpenRowPosition.contractName}). Close the existing row ${vRowIndex} option before placing another order.`);
+            }
+        }
+        else if (!bIsDualStrategy && arrOpenOptions.length > 0) {
             throw new Error(`An option position is already open (${arrOpenOptions[0].contractName}). Close the existing option before placing another option order.`);
         }
-        if (bIsDualStrategy && hasTrackedOptionLeg(arrExisting, vLegSide === "pe" ? "pe" : "ce")) {
+        if (bIsDualStrategy && !isCoveredOptionsStrategy(pStrategyCode) && hasTrackedOptionLeg(arrExisting, vLegSide === "pe" ? "pe" : "ce")) {
             throw new Error(`A ${vLegSide.toUpperCase()} option is already open. Close the existing ${vLegSide.toUpperCase()} leg before placing another one.`);
         }
-        const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(getMergedUiState(objProfile), "manual_option_open");
+        const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(getMergedUiState(objProfile), "manual_option_open", pStrategyCode, vRowIndex);
         const objConfig = {
             symbol: vSymbol,
             contractName: getContractNameForSymbol(vSymbol),
@@ -7889,6 +8090,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
                 contractName: objContract.contractSymbol,
                 qty: vQty,
                 targetDelta: vTargetDelta,
+                rowIndex: vRowIndex,
                 reason: "manual_option"
             }
         );
@@ -7899,6 +8101,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
             data: {
                 action: vAction,
                 legSide: vLegSide,
+                rowIndex: vRowIndex,
                 qty: vQty,
                 targetDelta: vTargetDelta,
                 order: objPayload.result || objPayload,
@@ -7988,6 +8191,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
         req.body?.qty || 1,
         req.body?.targetDelta || 0.53
     );
+    objExecInput.rowIndex = normalizeOptionRowIndex(pStrategyCode, req.body?.rowIndex);
 
     if (vAction !== "buy" && vAction !== "sell") {
         res.status(400).json({ status: "warning", message: "Select a valid Action before executing the live strategy." });
@@ -7997,7 +8201,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
         res.status(400).json({ status: "warning", message: "Select valid Legs before executing the live strategy." });
         return;
     }
-    if (pStrategyCode !== "rolling-futures-lt-dual" && vLegSide === "both") {
+    if (!isDualRollingFuturesStrategy(pStrategyCode) && vLegSide === "both") {
         res.status(400).json({ status: "warning", message: "Select either CE or PE for this live strategy page." });
         return;
     }
@@ -8035,6 +8239,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
                     expiryDate: objExecInput.expiryDate,
                     qty: objExecInput.qty,
                     targetDelta: objExecInput.targetDelta,
+                    rowIndex: objExecInput.rowIndex,
                     startQty: objExecInput.qty,
                     availableBalance: objSummary.availableBalance
                 }
@@ -8580,6 +8785,11 @@ async function schedulePendingOptionRecoveryRefresh(
 ): Promise<void> {
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
         || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const objPending = getPendingOptionRecoveryRefreshState(objRuntime);
+    const vExistingRunAtMs = new Date(String(objPending.runAt || "")).getTime();
+    if (objPending.reason && Number.isFinite(vExistingRunAtMs) && vExistingRunAtMs > Date.now()) {
+        return;
+    }
     const vScheduledAt = new Date().toISOString();
     const vRunAt = new Date(Date.now() + gOptionRecoveryRefreshDelayMs).toISOString();
     await saveRollingFuturesLtRuntime({
@@ -9437,4 +9647,80 @@ export async function updateRollingFuturesLtDualRecoveryMetrics(req: Request, re
 }
 export async function recalculateRollingFuturesLtDualRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "rolling-futures-lt-dual");
+}
+
+export async function getCoveredOptionsProfile(req: Request, res: Response): Promise<void> {
+    await getProfileInternal(req, res, "covered-options");
+}
+export async function saveCoveredOptionsProfile(req: Request, res: Response): Promise<void> {
+    await saveProfileInternal(req, res, "covered-options");
+}
+export async function getCoveredOptionsConnectionStatus(req: Request, res: Response): Promise<void> {
+    await getConnectionStatusInternal(req, res, "covered-options");
+}
+export async function getCoveredOptionsRuntimeStatus(req: Request, res: Response): Promise<void> {
+    await getRuntimeStatusInternal(req, res, "covered-options");
+}
+export async function checkCoveredOptionsConnection(req: Request, res: Response): Promise<void> {
+    await checkConnectionInternal(req, res, "covered-options");
+}
+export async function enableCoveredOptionsAutoTrader(req: Request, res: Response): Promise<void> {
+    await enableAutoTraderInternal(req, res, "covered-options");
+}
+export async function disableCoveredOptionsAutoTrader(req: Request, res: Response): Promise<void> {
+    await disableAutoTraderInternal(req, res, "covered-options");
+}
+export async function getCoveredOptionsAccountSummary(req: Request, res: Response): Promise<void> {
+    await getAccountSummaryInternal(req, res, "covered-options");
+}
+export async function calculateCoveredOptionsRecommendedStartQty(req: Request, res: Response): Promise<void> {
+    await calculateRecommendedStartQtyInternal(req, res, "covered-options");
+}
+export async function executeCoveredOptionsManualFuture(req: Request, res: Response): Promise<void> {
+    await executeManualFutureInternal(req, res, "covered-options");
+}
+export async function executeCoveredOptionsManualOption(req: Request, res: Response): Promise<void> {
+    await executeManualOptionInternal(req, res, "covered-options");
+}
+export async function executeCoveredOptionsStrategy(req: Request, res: Response): Promise<void> {
+    await executeStrategyInternal(req, res, "covered-options");
+}
+export async function getCoveredOptionsImportableOpenPositions(req: Request, res: Response): Promise<void> {
+    await getImportableOpenPositionsInternal(req, res, "covered-options");
+}
+export async function getCoveredOptionsOpenPositions(req: Request, res: Response): Promise<void> {
+    await getOpenPositionsInternal(req, res, "covered-options");
+}
+export async function saveCoveredOptionsOpenPositions(req: Request, res: Response): Promise<void> {
+    await saveOpenPositionsInternal(req, res, "covered-options");
+}
+export async function deleteCoveredOptionsOpenPosition(req: Request, res: Response): Promise<void> {
+    await deleteOpenPositionInternal(req, res, "covered-options");
+}
+export async function reconcileCoveredOptionsOpenPositions(req: Request, res: Response): Promise<void> {
+    await reconcileOpenPositionsInternal(req, res, "covered-options");
+}
+export async function closeCoveredOptionsImportedOpenPosition(req: Request, res: Response): Promise<void> {
+    await closeImportedOpenPositionInternal(req, res, "covered-options");
+}
+export async function getCoveredOptionsClosedPositions(req: Request, res: Response): Promise<void> {
+    await getClosedPositionsInternal(req, res, "covered-options");
+}
+export async function getCoveredOptionsEvents(req: Request, res: Response): Promise<void> {
+    await getEventsInternal(req, res, "covered-options");
+}
+export async function clearCoveredOptionsEventsController(req: Request, res: Response): Promise<void> {
+    await clearEventsInternal(req, res, "covered-options");
+}
+export async function deleteCoveredOptionsEventController(req: Request, res: Response): Promise<void> {
+    await deleteEventInternal(req, res, "covered-options");
+}
+export async function executeCoveredOptionsKillSwitch(req: Request, res: Response): Promise<void> {
+    await executeKillSwitchInternal(req, res, "covered-options");
+}
+export async function updateCoveredOptionsRecoveryMetrics(req: Request, res: Response): Promise<void> {
+    await updateRecoveryMetricsInternal(req, res, "covered-options");
+}
+export async function recalculateCoveredOptionsRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
+    await recalculateRecoveryTotalPnlInternal(req, res, "covered-options");
 }

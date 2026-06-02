@@ -1,17 +1,23 @@
 (function () {
     const rawMode = String(document.body?.dataset?.rollingFuturesLive || "").trim().toLowerCase();
-    const mode = rawMode === "short" || rawMode === "dual" ? rawMode : "long";
+    const mode = rawMode === "short" || rawMode === "dual" || rawMode === "covered" ? rawMode : "long";
     const initialExecStrategyEnabled = String(document.body?.dataset?.execStrategyEnabled || "").trim().toLowerCase() === "true";
     const prefix = mode === "short"
         ? "rollingShortFutures"
-        : (mode === "dual" ? "rollingDualFutures" : "rollingLongFutures");
+        : ((mode === "dual" || mode === "covered") ? "rollingDualFutures" : "rollingLongFutures");
     const idPrefix = mode === "short"
         ? "RollingShortFutures"
-        : (mode === "dual" ? "RollingDualFutures" : "RollingLongFutures");
+        : ((mode === "dual" || mode === "covered") ? "RollingDualFutures" : "RollingLongFutures");
     const endpointBase = mode === "short"
         ? "/api/rollingfutures-lt-short"
-        : (mode === "dual" ? "/api/rollingfutures-lt-dual" : "/api/rollingfutures-lt-long");
-    const modeLabel = mode === "short" ? "Short Mode" : (mode === "dual" ? "Dual Mode" : "Long Mode");
+        : (mode === "dual"
+            ? "/api/rollingfutures-lt-dual"
+            : (mode === "covered" ? "/api/covered-options" : "/api/rollingfutures-lt-long"));
+    const modeLabel = mode === "short"
+        ? "Short Mode"
+        : (mode === "covered" ? "Covered Options" : (mode === "dual" ? "Dual Mode" : "Long Mode"));
+    const isCoveredMode = mode === "covered";
+    const isDualLikeMode = mode === "dual" || mode === "covered";
     const currentAccountId = String(document.body?.dataset?.currentAccountId || "").trim();
     const currentAccountIsAdmin = String(document.body?.dataset?.currentAccountAdmin || "").trim().toLowerCase() === "true";
     const currentAccountFullName = String(document.body?.dataset?.currentAccountFullName || "").trim();
@@ -57,6 +63,12 @@
         buyCeButton: document.getElementById("btnRollingFuturesBuyCe"),
         buyPeButton: document.getElementById("btnRollingFuturesBuyPe"),
         execStrategyButton: document.getElementById("btnRollingFuturesExecAllLegs"),
+        sellPeButton2: document.getElementById("btnRollingFuturesSellPe2"),
+        sellCeButton2: document.getElementById("btnRollingFuturesSellCe2"),
+        buyCeButton2: document.getElementById("btnRollingFuturesBuyCe2"),
+        buyPeButton2: document.getElementById("btnRollingFuturesBuyPe2"),
+        execStrategyButton1: document.getElementById("btnRollingFuturesExecAllLegs1"),
+        execStrategyButton2: document.getElementById("btnRollingFuturesExecAllLegs2"),
         bsFutQty: document.getElementById("txtRollingFuturesBsQty"),
         minusDelta: document.getElementById("txtRollingFuturesMinusDelta"),
         plusDelta: document.getElementById("txtRollingFuturesPlusDelta"),
@@ -78,6 +90,16 @@
         tpD1: document.getElementById("txtRollingFuturesTpD1"),
         slD1: document.getElementById("txtRollingFuturesSlD1"),
         reEnter1: document.getElementById("chkRollingFuturesReEnter1"),
+        action2: document.getElementById("ddlRollingFuturesAction2"),
+        legs2: document.getElementById("ddlRollingFuturesLegs2"),
+        optionExpiryMode2: document.getElementById("ddlRollingFuturesExpiryType2"),
+        optionExpiryDate2: document.getElementById("txtRollingFuturesExpiry2"),
+        qty2: document.getElementById("txtRollingFuturesQty2"),
+        newD2: document.getElementById("txtRollingFuturesNewD2"),
+        reD2: document.getElementById("txtRollingFuturesReD2"),
+        tpD2: document.getElementById("txtRollingFuturesTpD2"),
+        slD2: document.getElementById("txtRollingFuturesSlD2"),
+        reEnter2: document.getElementById("chkRollingFuturesReEnter2"),
         closeNetProfitBrokerage: document.getElementById("chkRollingFuturesCloseNetProfitBrokerage"),
         brokerageMultiplier: document.getElementById("txtRollingFuturesBrokerageMultiplier"),
         brok2Rec: document.getElementById("txtRollingFuturesBrok2Rec"),
@@ -129,7 +151,7 @@
     let manualFutureOrderInFlight = false;
     let manualOptionOrderInFlight = false;
     let execStrategyInFlight = false;
-    let execStrategyEnabled = mode === "dual" ? initialExecStrategyEnabled : true;
+    let execStrategyEnabled = isDualLikeMode ? initialExecStrategyEnabled : true;
     let closedFiltersRefreshTimer = null;
     let adminRunningUsers = [];
     let targetUserId = currentAccountId;
@@ -226,6 +248,155 @@
         }
     }
 
+    function getSupportedOptionRowIndexes() {
+        return isCoveredMode ? [1, 2] : [1];
+    }
+
+    function normalizeOptionRowIndex(rowIndex) {
+        const vRowIndex = Number(rowIndex);
+        return isCoveredMode && vRowIndex === 2 ? 2 : 1;
+    }
+
+    function getOptionRowNodes(rowIndex) {
+        const vRowIndex = normalizeOptionRowIndex(rowIndex);
+        if (vRowIndex === 2) {
+            return {
+                action: ids.action2,
+                legs: ids.legs2,
+                expiryMode: ids.optionExpiryMode2,
+                expiryDate: ids.optionExpiryDate2,
+                qty: ids.qty2,
+                newD: ids.newD2,
+                reD: ids.reD2,
+                tpD: ids.tpD2,
+                slD: ids.slD2,
+                reEnter: ids.reEnter2,
+                sellPeButton: ids.sellPeButton2,
+                sellCeButton: ids.sellCeButton2,
+                buyCeButton: ids.buyCeButton2,
+                buyPeButton: ids.buyPeButton2,
+                execStrategyButton: ids.execStrategyButton2
+            };
+        }
+        return {
+            action: ids.action1,
+            legs: ids.legs1,
+            expiryMode: ids.optionExpiryMode,
+            expiryDate: ids.optionExpiryDate,
+            qty: ids.qty1,
+            newD: ids.newD1,
+            reD: ids.reD1,
+            tpD: ids.tpD1,
+            slD: ids.slD1,
+            reEnter: ids.reEnter1,
+            sellPeButton: ids.sellPeButton,
+            sellCeButton: ids.sellCeButton,
+            buyCeButton: ids.buyCeButton,
+            buyPeButton: ids.buyPeButton,
+            execStrategyButton: vRowIndex === 1 && isCoveredMode ? ids.execStrategyButton1 : ids.execStrategyButton
+        };
+    }
+
+    function getOptionRowStateKeys(rowIndex) {
+        const vRowIndex = normalizeOptionRowIndex(rowIndex);
+        return {
+            action: `action${vRowIndex}`,
+            legs: `legs${vRowIndex}`,
+            expiryMode: `expiryMode${vRowIndex}`,
+            expiryDate: `expiryDate${vRowIndex}`,
+            qty: `qty${vRowIndex}`,
+            newD: `newD${vRowIndex}`,
+            reD: `reD${vRowIndex}`,
+            tpD: `tpD${vRowIndex}`,
+            slD: `slD${vRowIndex}`,
+            reEnter: `reEnter${vRowIndex}`
+        };
+    }
+
+    function getOptionRowDefaultState(rowIndex) {
+        const vRowIndex = normalizeOptionRowIndex(rowIndex);
+        const isLong = mode === "long";
+        const defaultLegs = isDualLikeMode ? "both" : (mode === "short" ? "pe" : "ce");
+        const optionDefaults = {
+            action: "sell",
+            legs: defaultLegs,
+            expiryMode: isDualLikeMode ? "5" : "5",
+            expiryDate: "",
+            qty: "1",
+            newD: isDualLikeMode ? "0.65" : (isLong ? "0.65" : "0.65"),
+            reD: isDualLikeMode ? "0.65" : (isLong ? "0.65" : "0.65"),
+            tpD: isDualLikeMode ? "0.30" : (isLong ? "0.30" : "0.30"),
+            slD: isDualLikeMode ? "0.80" : (isLong ? "0.80" : "0.80"),
+            reEnter: true
+        };
+        if (isCoveredMode && vRowIndex === 2) {
+            return {
+                ...optionDefaults,
+                expiryMode: "2",
+                newD: "0.53",
+                reD: "0.53",
+                tpD: "0.20",
+                slD: "0.65"
+            };
+        }
+        if (isCoveredMode && vRowIndex === 1) {
+            return {
+                ...optionDefaults,
+                action: "buy",
+                expiryMode: "6",
+                newD: "0.90",
+                reD: "0.90",
+                tpD: "2.00",
+                slD: "0.15"
+            };
+        }
+        return optionDefaults;
+    }
+
+    function readOptionRowState(rowIndex) {
+        const vRowIndex = normalizeOptionRowIndex(rowIndex);
+        const keys = getOptionRowStateKeys(vRowIndex);
+        const nodes = getOptionRowNodes(vRowIndex);
+        const defaults = getOptionRowDefaultState(vRowIndex);
+        const vLegs = getInputValue(nodes.legs, defaults.legs).toLowerCase();
+        const rowState = {};
+        rowState[keys.action] = getInputValue(nodes.action, defaults.action).toLowerCase() === "buy" ? "buy" : "sell";
+        rowState[keys.legs] = isDualLikeMode && vLegs === "both"
+            ? "both"
+            : (vLegs === "pe" ? "pe" : "ce");
+        rowState[keys.expiryMode] = String(nodes.expiryMode?.value || defaults.expiryMode).trim();
+        rowState[keys.expiryDate] = String(nodes.expiryDate?.value || defaults.expiryDate).trim();
+        rowState[keys.qty] = getInputValue(nodes.qty, defaults.qty);
+        rowState[keys.newD] = getInputValue(nodes.newD, defaults.newD);
+        rowState[keys.reD] = getInputValue(nodes.reD, defaults.reD);
+        rowState[keys.tpD] = getInputValue(nodes.tpD, defaults.tpD);
+        rowState[keys.slD] = getInputValue(nodes.slD, defaults.slD);
+        rowState[keys.reEnter] = getCheckboxValue(nodes.reEnter, defaults.reEnter);
+        return rowState;
+    }
+
+    function applyOptionRowState(uiState, rowIndex) {
+        const vRowIndex = normalizeOptionRowIndex(rowIndex);
+        const keys = getOptionRowStateKeys(vRowIndex);
+        const nodes = getOptionRowNodes(vRowIndex);
+        const defaults = getOptionRowDefaultState(vRowIndex);
+        const defaultLegs = defaults.legs;
+        const savedLegs = uiState[keys.legs];
+        const finalLegs = isDualLikeMode
+            ? ((savedLegs === "both" || savedLegs === "pe" || savedLegs === "ce") ? savedLegs : defaultLegs)
+            : ((savedLegs === "pe" || savedLegs === "ce") ? savedLegs : defaultLegs);
+        setInputValue(nodes.action, String(uiState[keys.action] || defaults.action).trim().toLowerCase() === "buy" ? "buy" : "sell");
+        setInputValue(nodes.legs, finalLegs);
+        setInputValue(nodes.expiryMode, String(uiState[keys.expiryMode] || defaults.expiryMode).trim() || defaults.expiryMode);
+        setInputValue(nodes.expiryDate, String(uiState[keys.expiryDate] || defaults.expiryDate).trim());
+        setInputValue(nodes.qty, uiState[keys.qty] ?? defaults.qty);
+        setInputValue(nodes.newD, uiState[keys.newD] ?? defaults.newD);
+        setInputValue(nodes.reD, uiState[keys.reD] ?? defaults.reD);
+        setInputValue(nodes.tpD, uiState[keys.tpD] ?? defaults.tpD);
+        setInputValue(nodes.slD, uiState[keys.slD] ?? defaults.slD);
+        setCheckboxValue(nodes.reEnter, uiState[keys.reEnter] ?? defaults.reEnter);
+    }
+
     function formatCurrentDateTimeLocalValue() {
         const dateValue = new Date();
         const yearValue = dateValue.getFullYear();
@@ -237,37 +408,25 @@
     }
 
     function getDefaultUiState() {
-        const isLong = mode === "long";
-        const isDual = mode === "dual";
         const closedFromDate = formatCurrentDateTimeLocalValue();
-        return {
+        const defaultState = {
             startQty: "1",
             symbol: "BTC",
             manualFutOrderType: "market_order",
             bsFutQty: "1",
-            minusDelta: isDual ? "-25" : "-15",
-            plusDelta: isDual ? "25" : "20",
-            action1: "sell",
-            legs1: mode === "dual" ? "both" : (mode === "short" ? "pe" : "ce"),
+            minusDelta: isDualLikeMode ? "-25" : "-15",
+            plusDelta: isDualLikeMode ? "25" : "20",
             onlyDeltaNeutral: false,
             rangeDeltaNeutral: false,
             gammaAwareNeutral: false,
-            expiryMode1: isDual ? "5" : "5",
-            expiryDate1: "",
-            qty1: "1",
-            newD1: isDual ? "0.65" : (isLong ? "0.65" : "0.65"),
-            reD1: isDual ? "0.65" : (isLong ? "0.65" : "0.65"),
-            tpD1: isDual ? "0.30" : (isLong ? "0.30" : "0.30"),
-            slD1: isDual ? "0.80" : (isLong ? "0.80" : "0.80"),
-            reEnter1: true,
             closeNetProfitBrokerage: true,
             brokerageMultiplier: "10",
             reEnterBrok: true,
             closeBlockedMargin: true,
             blockedMarginPct: "10",
             reEnterBlock: true,
-            onlyDeltaNeutral: !isDual,
-            rangeDeltaNeutral: isDual,
+            onlyDeltaNeutral: !isDualLikeMode && !isCoveredMode,
+            rangeDeltaNeutral: isDualLikeMode && !isCoveredMode,
             gammaAwareNeutral: false,
             telegramAlertTypes: [
                 "engine_stopped",
@@ -281,6 +440,21 @@
             closedFromDate: closedFromDate,
             closedToDate: ""
         };
+        getSupportedOptionRowIndexes().forEach(function (rowIndex) {
+            const keys = getOptionRowStateKeys(rowIndex);
+            const defaults = getOptionRowDefaultState(rowIndex);
+            defaultState[keys.action] = defaults.action;
+            defaultState[keys.legs] = defaults.legs;
+            defaultState[keys.expiryMode] = defaults.expiryMode;
+            defaultState[keys.expiryDate] = defaults.expiryDate;
+            defaultState[keys.qty] = defaults.qty;
+            defaultState[keys.newD] = defaults.newD;
+            defaultState[keys.reD] = defaults.reD;
+            defaultState[keys.tpD] = defaults.tpD;
+            defaultState[keys.slD] = defaults.slD;
+            defaultState[keys.reEnter] = defaults.reEnter;
+        });
+        return defaultState;
     }
 
     function getLastFridayOfMonth(yearValue, monthIndex) {
@@ -454,19 +628,25 @@
         }
     }
 
-    function applyExpiryModeDefaults(force) {
-        if (!(ids.optionExpiryMode instanceof HTMLSelectElement) || !(ids.optionExpiryDate instanceof HTMLInputElement)) {
-            return;
-        }
-        void force;
-        const resolvedDate = resolveExpiryDateByMode(ids.optionExpiryMode.value);
-        const formattedDate = formatDateInputValue(resolvedDate);
-        if (formattedDate) {
-            ids.optionExpiryDate.value = formattedDate;
-        }
+    function applyExpiryModeDefaults(force, rowIndex) {
+        const rowIndexes = typeof rowIndex === "number" ? [normalizeOptionRowIndex(rowIndex)] : getSupportedOptionRowIndexes();
+        rowIndexes.forEach(function (currentRowIndex) {
+            const nodes = getOptionRowNodes(currentRowIndex);
+            if (!(nodes.expiryMode instanceof HTMLSelectElement) || !(nodes.expiryDate instanceof HTMLInputElement)) {
+                return;
+            }
+            const resolvedDate = resolveExpiryDateByMode(nodes.expiryMode.value);
+            const formattedDate = formatDateInputValue(resolvedDate);
+            if ((force || !String(nodes.expiryDate.value || "").trim()) && formattedDate) {
+                nodes.expiryDate.value = formattedDate;
+            }
+        });
     }
 
     function syncNeutralModeCheckboxes(changedKey) {
+        if (isCoveredMode) {
+            return;
+        }
         const onlyDeltaNeutral = ids.onlyDeltaNeutral instanceof HTMLInputElement ? ids.onlyDeltaNeutral : null;
         const rangeDeltaNeutral = ids.rangeDeltaNeutral instanceof HTMLInputElement ? ids.rangeDeltaNeutral : null;
         const gammaAwareNeutral = ids.gammaAwareNeutral instanceof HTMLInputElement ? ids.gammaAwareNeutral : null;
@@ -495,6 +675,9 @@
     }
 
     function getActiveNeutralModeKey() {
+        if (isCoveredMode) {
+            return "none";
+        }
         if (ids.gammaAwareNeutral instanceof HTMLInputElement && ids.gammaAwareNeutral.checked) {
             return "gamma";
         }
@@ -508,6 +691,9 @@
     }
 
     function getCurrentNeutralModeFromCheckboxes() {
+        if (isCoveredMode) {
+            return "none";
+        }
         if (ids.gammaAwareNeutral instanceof HTMLInputElement && ids.gammaAwareNeutral.checked) {
             return "gamma";
         }
@@ -521,6 +707,9 @@
     }
 
     function getNeutralBadgeSummaryText(status) {
+        if (isCoveredMode) {
+            return "";
+        }
         const minDelta = Number(status.minDelta);
         const maxDelta = Number(status.maxDelta);
         const driftPct = Number(status.deltaDriftPct);
@@ -563,7 +752,7 @@
     }
 
     function canUseExecStrategy() {
-        return mode !== "dual" || execStrategyEnabled;
+        return !isDualLikeMode || execStrategyEnabled;
     }
 
     function setButtonsEnabled() {
@@ -588,9 +777,18 @@
                 button.disabled = manualFutureOrderInFlight || !canUseLiveActions();
             }
         });
-        [ids.sellPeButton, ids.sellCeButton, ids.buyCeButton, ids.buyPeButton].forEach(function (button) {
-            if (button instanceof HTMLButtonElement) {
-                button.disabled = manualOptionOrderInFlight || !canUseLiveActions();
+        getSupportedOptionRowIndexes().forEach(function (rowIndex) {
+            const nodes = getOptionRowNodes(rowIndex);
+            [nodes.sellPeButton, nodes.sellCeButton, nodes.buyCeButton, nodes.buyPeButton].forEach(function (button) {
+                if (button instanceof HTMLButtonElement) {
+                    button.disabled = manualOptionOrderInFlight || !canUseLiveActions();
+                }
+            });
+            if (nodes.execStrategyButton instanceof HTMLButtonElement) {
+                nodes.execStrategyButton.disabled = execStrategyInFlight || !canUseLiveActions() || !canUseExecStrategy();
+                nodes.execStrategyButton.title = canUseExecStrategy()
+                    ? `Execute the live strategy for option row ${rowIndex}`
+                    : "Not Authorised to Execute, Please Contact Admin";
             }
         });
         if (ids.execStrategyButton instanceof HTMLButtonElement) {
@@ -656,6 +854,15 @@
     }
 
     function updateNeutralBadges(neutralStatus) {
+        if (isCoveredMode) {
+            if (ids.deltaBadgesGroup) {
+                ids.deltaBadgesGroup.hidden = true;
+            }
+            if (ids.neutralBadgesRow) {
+                ids.neutralBadgesRow.hidden = true;
+            }
+            return;
+        }
         const objStatus = neutralStatus || {};
         const totalDelta = Number(objStatus.totalDelta || 0);
         const bRulesActive = autoTraderEnabled;
@@ -746,32 +953,16 @@
     }
 
     function getUiState() {
-        return {
+        const state = {
             startQty: getInputValue(ids.startQty, "1"),
             symbol: String(ids.symbol?.value || "BTC").trim().toUpperCase(),
             manualFutOrderType: String(ids.futureOrderType?.value || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
             bsFutQty: getInputValue(ids.bsFutQty, "1"),
             minusDelta: getInputValue(ids.minusDelta, "-25"),
             plusDelta: getInputValue(ids.plusDelta, "25"),
-            action1: getInputValue(ids.action1, "sell").toLowerCase() === "buy" ? "buy" : "sell",
-            legs1: (function () {
-                const vLegs = getInputValue(ids.legs1, mode === "dual" ? "both" : (mode === "short" ? "pe" : "ce")).toLowerCase();
-                if (mode === "dual" && vLegs === "both") {
-                    return "both";
-                }
-                return vLegs === "pe" ? "pe" : "ce";
-            }()),
-            onlyDeltaNeutral: getCheckboxValue(ids.onlyDeltaNeutral, false),
-            rangeDeltaNeutral: getCheckboxValue(ids.rangeDeltaNeutral, false),
+            onlyDeltaNeutral: isCoveredMode ? false : getCheckboxValue(ids.onlyDeltaNeutral, false),
+            rangeDeltaNeutral: isCoveredMode ? false : getCheckboxValue(ids.rangeDeltaNeutral, false),
             gammaAwareNeutral: getCheckboxValue(ids.gammaAwareNeutral, false),
-            expiryMode1: String(ids.optionExpiryMode?.value || "5").trim(),
-            expiryDate1: String(ids.optionExpiryDate?.value || "").trim(),
-            qty1: getInputValue(ids.qty1, "1"),
-            newD1: getInputValue(ids.newD1, "0.53"),
-            reD1: getInputValue(ids.reD1, "0.53"),
-            tpD1: getInputValue(ids.tpD1, "0.25"),
-            slD1: getInputValue(ids.slD1, "0.65"),
-            reEnter1: getCheckboxValue(ids.reEnter1, true),
             closeNetProfitBrokerage: getCheckboxValue(ids.closeNetProfitBrokerage, false),
             brokerageMultiplier: getInputValue(ids.brokerageMultiplier, "3"),
             reEnterBrok: getCheckboxValue(ids.reEnterBrok, false),
@@ -786,6 +977,10 @@
             closedFromDate: String(ids.closedFromDate?.value || "").trim(),
             closedToDate: String(ids.closedToDate?.value || "").trim()
         };
+        getSupportedOptionRowIndexes().forEach(function (rowIndex) {
+            Object.assign(state, readOptionRowState(rowIndex));
+        });
+        return state;
     }
 
     function applyUiState(uiState) {
@@ -801,24 +996,12 @@
             setInputValue(ids.bsFutQty, objUiState.bsFutQty);
             setInputValue(ids.minusDelta, objUiState.minusDelta);
             setInputValue(ids.plusDelta, objUiState.plusDelta);
-            setInputValue(ids.action1, String(objUiState.action1 || "sell").trim().toLowerCase() === "buy" ? "buy" : "sell");
-            const defaultLegs = mode === "dual" ? "both" : (mode === "short" ? "pe" : "ce");
-            const savedLegs = objUiState.legs1;
-            const finalLegs = mode === "dual"
-                ? ((savedLegs === "both" || savedLegs === "pe" || savedLegs === "ce") ? savedLegs : defaultLegs)
-                : ((savedLegs === "pe" || savedLegs === "ce") ? savedLegs : defaultLegs);
-            setInputValue(ids.legs1, finalLegs);
-            setCheckboxValue(ids.onlyDeltaNeutral, objUiState.onlyDeltaNeutral);
-            setCheckboxValue(ids.rangeDeltaNeutral, objUiState.rangeDeltaNeutral);
-            setCheckboxValue(ids.gammaAwareNeutral, objUiState.gammaAwareNeutral);
-            setInputValue(ids.optionExpiryMode, String(objUiState.expiryMode1 || "5").trim() || "5");
-            setInputValue(ids.optionExpiryDate, String(objUiState.expiryDate1 || "").trim());
-            setInputValue(ids.qty1, objUiState.qty1);
-            setInputValue(ids.newD1, objUiState.newD1);
-            setInputValue(ids.reD1, objUiState.reD1);
-            setInputValue(ids.tpD1, objUiState.tpD1);
-            setInputValue(ids.slD1, objUiState.slD1);
-            setCheckboxValue(ids.reEnter1, objUiState.reEnter1);
+            setCheckboxValue(ids.onlyDeltaNeutral, isCoveredMode ? false : objUiState.onlyDeltaNeutral);
+            setCheckboxValue(ids.rangeDeltaNeutral, isCoveredMode ? false : objUiState.rangeDeltaNeutral);
+            setCheckboxValue(ids.gammaAwareNeutral, isCoveredMode ? false : objUiState.gammaAwareNeutral);
+            getSupportedOptionRowIndexes().forEach(function (rowIndex) {
+                applyOptionRowState(objUiState, rowIndex);
+            });
             setCheckboxValue(ids.closeNetProfitBrokerage, objUiState.closeNetProfitBrokerage);
             setInputValue(ids.brokerageMultiplier, objUiState.brokerageMultiplier);
             setCheckboxValue(ids.reEnterBrok, objUiState.reEnterBrok);
@@ -849,11 +1032,16 @@
     }
 
     function syncQtyFromStartQty() {
-        if (!(ids.startQty instanceof HTMLInputElement) || !(ids.qty1 instanceof HTMLInputElement)) {
+        if (!(ids.startQty instanceof HTMLInputElement)) {
             return;
         }
         const vStartQty = String(ids.startQty.value || "").trim() || "1";
-        ids.qty1.value = vStartQty;
+        getSupportedOptionRowIndexes().forEach(function (rowIndex) {
+            const nodes = getOptionRowNodes(rowIndex);
+            if (nodes.qty instanceof HTMLInputElement) {
+                nodes.qty.value = vStartQty;
+            }
+        });
     }
 
     async function resetManualTraderDefaults() {
@@ -1112,7 +1300,9 @@
         }
     }
 
-    async function executeStrategy() {
+    async function executeStrategy(rowIndex) {
+        const optionRowIndex = normalizeOptionRowIndex(rowIndex);
+        const rowNodes = getOptionRowNodes(optionRowIndex);
         if (execStrategyInFlight) {
             throw new Error("Exec Strategy is already running. Please wait for it to finish.");
         }
@@ -1128,12 +1318,12 @@
             throw new Error("Turn Auto Trader ON before executing the live strategy.");
         }
 
-        const vAction = String(ids.action1?.value || "").trim().toLowerCase();
-        const vLegSide = String(ids.legs1?.value || "").trim().toLowerCase();
-        const vExpiryMode = String(ids.optionExpiryMode?.value || "5").trim();
-        const vExpiryDate = String(ids.optionExpiryDate?.value || "").trim();
-        const vQty = Math.max(1, Math.floor(Number(ids.qty1?.value || 1)));
-        const vTargetDelta = Math.max(0, Number(ids.newD1?.value || 0.53));
+        const vAction = String(rowNodes.action?.value || "").trim().toLowerCase();
+        const vLegSide = String(rowNodes.legs?.value || "").trim().toLowerCase();
+        const vExpiryMode = String(rowNodes.expiryMode?.value || "5").trim();
+        const vExpiryDate = String(rowNodes.expiryDate?.value || "").trim();
+        const vQty = Math.max(1, Math.floor(Number(rowNodes.qty?.value || 1)));
+        const vTargetDelta = Math.max(0, Number(rowNodes.newD?.value || 0.53));
         const vSymbol = String(ids.symbol?.value || "BTC").trim().toUpperCase();
 
         if (vAction !== "buy" && vAction !== "sell") {
@@ -1147,6 +1337,7 @@
         setButtonsEnabled();
         try {
             return await postJson(`${endpointBase}/strategy/execute`, {
+                rowIndex: optionRowIndex,
                 action: vAction,
                 symbol: vSymbol,
                 legSide: vLegSide,
@@ -1162,7 +1353,9 @@
         }
     }
 
-    async function placeManualOption(action, legSide) {
+    async function placeManualOption(action, legSide, rowIndex) {
+        const optionRowIndex = normalizeOptionRowIndex(rowIndex);
+        const rowNodes = getOptionRowNodes(optionRowIndex);
         const vAction = String(action || "").trim().toLowerCase();
         const vLegSide = String(legSide || "").trim().toLowerCase();
         if ((vAction !== "buy" && vAction !== "sell") || (vLegSide !== "ce" && vLegSide !== "pe")) {
@@ -1177,10 +1370,10 @@
             throw new Error("Delta connection is not healthy enough to place a live option order.");
         }
 
-        const vExpiryMode = String(ids.optionExpiryMode?.value || "5").trim();
-        const vExpiryDate = String(ids.optionExpiryDate?.value || "").trim();
-        const vQty = Math.max(1, Math.floor(Number(ids.qty1?.value || 1)));
-        const vTargetDelta = Math.max(0, Number(ids.newD1?.value || 0.53));
+        const vExpiryMode = String(rowNodes.expiryMode?.value || "5").trim();
+        const vExpiryDate = String(rowNodes.expiryDate?.value || "").trim();
+        const vQty = Math.max(1, Math.floor(Number(rowNodes.qty?.value || 1)));
+        const vTargetDelta = Math.max(0, Number(rowNodes.newD?.value || 0.53));
         const vSymbol = String(ids.symbol?.value || "BTC").trim().toUpperCase();
 
         if (!vExpiryDate) {
@@ -1194,6 +1387,7 @@
         setButtonsEnabled();
         try {
             return await postJson(`${endpointBase}/manual/option`, {
+                rowIndex: optionRowIndex,
                 action: vAction,
                 symbol: vSymbol,
                 legSide: vLegSide,
@@ -1747,14 +1941,6 @@
         ids.bsFutQty,
         ids.minusDelta,
         ids.plusDelta,
-        ids.action1,
-        ids.legs1,
-        ids.qty1,
-        ids.newD1,
-        ids.reD1,
-        ids.tpD1,
-        ids.slD1,
-        ids.reEnter1,
         ids.closeNetProfitBrokerage,
         ids.brokerageMultiplier,
         ids.reEnterBrok,
@@ -1767,11 +1953,29 @@
             node.addEventListener("input", queueProfileSave);
         }
     });
-    ids.optionExpiryMode?.addEventListener("change", function () {
-        applyExpiryModeDefaults(true);
-        queueProfileSave();
+    getSupportedOptionRowIndexes().forEach(function (rowIndex) {
+        const nodes = getOptionRowNodes(rowIndex);
+        [
+            nodes.action,
+            nodes.legs,
+            nodes.qty,
+            nodes.newD,
+            nodes.reD,
+            nodes.tpD,
+            nodes.slD,
+            nodes.reEnter
+        ].forEach(function (node) {
+            node?.addEventListener("change", queueProfileSave);
+            if (node instanceof HTMLInputElement && node.type !== "checkbox") {
+                node.addEventListener("input", queueProfileSave);
+            }
+        });
+        nodes.expiryMode?.addEventListener("change", function () {
+            applyExpiryModeDefaults(true, rowIndex);
+            queueProfileSave();
+        });
+        nodes.expiryDate?.addEventListener("change", queueProfileSave);
     });
-    ids.optionExpiryDate?.addEventListener("change", queueProfileSave);
     ids.telegramEventCheckboxes.forEach(function (checkbox) {
         checkbox.addEventListener("change", queueProfileSave);
     });
@@ -1899,7 +2103,7 @@
         });
     });
     ids.sellPeButton?.addEventListener("click", function () {
-        void placeManualOption("sell", "pe").then(function (objResult) {
+        void placeManualOption("sell", "pe", 1).then(function (objResult) {
             const trackedPayload = objResult?.data?.trackedOpenPositions || null;
             const objOrder = objResult?.data?.order || {};
             const vOrderId = String(objOrder.id || objOrder.order_id || "").trim();
@@ -1918,7 +2122,7 @@
         });
     });
     ids.sellCeButton?.addEventListener("click", function () {
-        void placeManualOption("sell", "ce").then(function (objResult) {
+        void placeManualOption("sell", "ce", 1).then(function (objResult) {
             const trackedPayload = objResult?.data?.trackedOpenPositions || null;
             const objOrder = objResult?.data?.order || {};
             const vOrderId = String(objOrder.id || objOrder.order_id || "").trim();
@@ -1937,7 +2141,7 @@
         });
     });
     ids.buyCeButton?.addEventListener("click", function () {
-        void placeManualOption("buy", "ce").then(function (objResult) {
+        void placeManualOption("buy", "ce", 1).then(function (objResult) {
             const trackedPayload = objResult?.data?.trackedOpenPositions || null;
             const objOrder = objResult?.data?.order || {};
             const vOrderId = String(objOrder.id || objOrder.order_id || "").trim();
@@ -1956,7 +2160,7 @@
         });
     });
     ids.buyPeButton?.addEventListener("click", function () {
-        void placeManualOption("buy", "pe").then(function (objResult) {
+        void placeManualOption("buy", "pe", 1).then(function (objResult) {
             const trackedPayload = objResult?.data?.trackedOpenPositions || null;
             const objOrder = objResult?.data?.order || {};
             const vOrderId = String(objOrder.id || objOrder.order_id || "").trim();
@@ -1975,7 +2179,123 @@
         });
     });
     ids.execStrategyButton?.addEventListener("click", function () {
-        void executeStrategy().then(function (objResult) {
+        void executeStrategy(1).then(function (objResult) {
+            const trackedPayload = objResult?.data?.trackedOpenPositions || null;
+            const objNeutralCheck = objResult?.data?.neutralCheck || {};
+            const bHedgePlaced = Boolean(objNeutralCheck?.hedgePlaced);
+            if (trackedPayload) {
+                renderOpenPositions(trackedPayload);
+            }
+            const vMessage = String(objResult?.message || "Exec Strategy placed live option order(s).").trim();
+            setStatus(ids.pageStatus, bHedgePlaced ? `${vMessage} Server-side neutrality hedge also executed.` : vMessage, "success");
+            return Promise.all([
+                loadProfile().catch(function () { return undefined; }),
+                loadAccountSummary(),
+                loadConnectionStatus(),
+                loadEvents().catch(function () { return undefined; })
+            ]);
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to execute the live strategy.", "danger");
+        });
+    });
+    ids.sellPeButton2?.addEventListener("click", function () {
+        void placeManualOption("sell", "pe", 2).then(function (objResult) {
+            const trackedPayload = objResult?.data?.trackedOpenPositions || null;
+            const objOrder = objResult?.data?.order || {};
+            const vOrderId = String(objOrder.id || objOrder.order_id || "").trim();
+            const vMessage = String(objResult?.message || "SELL PE live option order placed.").trim();
+            if (trackedPayload) {
+                renderOpenPositions(trackedPayload);
+            }
+            setStatus(ids.pageStatus, vOrderId ? `${vMessage} Order ID: ${vOrderId}` : vMessage, "success");
+            return Promise.all([
+                loadAccountSummary(),
+                loadConnectionStatus(),
+                loadEvents().catch(function () { return undefined; })
+            ]);
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to place SELL PE order.", "danger");
+        });
+    });
+    ids.sellCeButton2?.addEventListener("click", function () {
+        void placeManualOption("sell", "ce", 2).then(function (objResult) {
+            const trackedPayload = objResult?.data?.trackedOpenPositions || null;
+            const objOrder = objResult?.data?.order || {};
+            const vOrderId = String(objOrder.id || objOrder.order_id || "").trim();
+            const vMessage = String(objResult?.message || "SELL CE live option order placed.").trim();
+            if (trackedPayload) {
+                renderOpenPositions(trackedPayload);
+            }
+            setStatus(ids.pageStatus, vOrderId ? `${vMessage} Order ID: ${vOrderId}` : vMessage, "success");
+            return Promise.all([
+                loadAccountSummary(),
+                loadConnectionStatus(),
+                loadEvents().catch(function () { return undefined; })
+            ]);
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to place SELL CE order.", "danger");
+        });
+    });
+    ids.buyCeButton2?.addEventListener("click", function () {
+        void placeManualOption("buy", "ce", 2).then(function (objResult) {
+            const trackedPayload = objResult?.data?.trackedOpenPositions || null;
+            const objOrder = objResult?.data?.order || {};
+            const vOrderId = String(objOrder.id || objOrder.order_id || "").trim();
+            const vMessage = String(objResult?.message || "BUY CE live option order placed.").trim();
+            if (trackedPayload) {
+                renderOpenPositions(trackedPayload);
+            }
+            setStatus(ids.pageStatus, vOrderId ? `${vMessage} Order ID: ${vOrderId}` : vMessage, "success");
+            return Promise.all([
+                loadAccountSummary(),
+                loadConnectionStatus(),
+                loadEvents().catch(function () { return undefined; })
+            ]);
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to place BUY CE order.", "danger");
+        });
+    });
+    ids.buyPeButton2?.addEventListener("click", function () {
+        void placeManualOption("buy", "pe", 2).then(function (objResult) {
+            const trackedPayload = objResult?.data?.trackedOpenPositions || null;
+            const objOrder = objResult?.data?.order || {};
+            const vOrderId = String(objOrder.id || objOrder.order_id || "").trim();
+            const vMessage = String(objResult?.message || "BUY PE live option order placed.").trim();
+            if (trackedPayload) {
+                renderOpenPositions(trackedPayload);
+            }
+            setStatus(ids.pageStatus, vOrderId ? `${vMessage} Order ID: ${vOrderId}` : vMessage, "success");
+            return Promise.all([
+                loadAccountSummary(),
+                loadConnectionStatus(),
+                loadEvents().catch(function () { return undefined; })
+            ]);
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to place BUY PE order.", "danger");
+        });
+    });
+    ids.execStrategyButton1?.addEventListener("click", function () {
+        void executeStrategy(1).then(function (objResult) {
+            const trackedPayload = objResult?.data?.trackedOpenPositions || null;
+            const objNeutralCheck = objResult?.data?.neutralCheck || {};
+            const bHedgePlaced = Boolean(objNeutralCheck?.hedgePlaced);
+            if (trackedPayload) {
+                renderOpenPositions(trackedPayload);
+            }
+            const vMessage = String(objResult?.message || "Exec Strategy placed live option order(s).").trim();
+            setStatus(ids.pageStatus, bHedgePlaced ? `${vMessage} Server-side neutrality hedge also executed.` : vMessage, "success");
+            return Promise.all([
+                loadProfile().catch(function () { return undefined; }),
+                loadAccountSummary(),
+                loadConnectionStatus(),
+                loadEvents().catch(function () { return undefined; })
+            ]);
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to execute the live strategy.", "danger");
+        });
+    });
+    ids.execStrategyButton2?.addEventListener("click", function () {
+        void executeStrategy(2).then(function (objResult) {
             const trackedPayload = objResult?.data?.trackedOpenPositions || null;
             const objNeutralCheck = objResult?.data?.neutralCheck || {};
             const bHedgePlaced = Boolean(objNeutralCheck?.hedgePlaced);

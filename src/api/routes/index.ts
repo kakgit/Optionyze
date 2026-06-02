@@ -26,20 +26,40 @@ import {
     validateStrategyFoPaperLogin
 } from "../controllers/strategyfo-paper-controller";
 import {
+    calculateCoveredOptionsRecommendedStartQty,
     checkRollingFuturesLtDualConnection,
+    checkCoveredOptionsConnection,
     calculateRollingFuturesLtDualRecommendedStartQty,
+    clearCoveredOptionsEventsController,
     clearRollingFuturesLtDualEventsController,
+    closeCoveredOptionsImportedOpenPosition,
     deleteRollingFuturesLtDualEventController,
+    deleteCoveredOptionsEventController,
     closeRollingFuturesLtDualImportedOpenPosition,
+    deleteCoveredOptionsOpenPosition,
     deleteRollingFuturesLtDualOpenPosition,
+    disableCoveredOptionsAutoTrader,
     disableRollingFuturesLtDualAutoTrader,
+    enableCoveredOptionsAutoTrader,
     enableRollingFuturesLtDualAutoTrader,
+    executeCoveredOptionsKillSwitch,
+    executeCoveredOptionsManualFuture,
+    executeCoveredOptionsManualOption,
+    executeCoveredOptionsStrategy,
     executeRollingFuturesLtDualKillSwitch,
     executeRollingFuturesLtDualManualFuture,
     executeRollingFuturesLtDualManualOption,
     executeRollingFuturesLtDualStrategy,
     forceRollingFuturesLtDualTakeoverHereController,
     enableRollingFuturesLtDualSimulatedPrimaryOutageController,
+    getCoveredOptionsAccountSummary,
+    getCoveredOptionsClosedPositions,
+    getCoveredOptionsConnectionStatus,
+    getCoveredOptionsEvents,
+    getCoveredOptionsImportableOpenPositions,
+    getCoveredOptionsOpenPositions,
+    getCoveredOptionsProfile,
+    getCoveredOptionsRuntimeStatus,
     getRollingFuturesLtDualAccountSummary,
     getRollingFuturesLtDualClosedPositions,
     getRollingFuturesLtDualConnectionStatus,
@@ -51,9 +71,14 @@ import {
     listRollingFuturesLtDualRunningUsers,
     disableRollingFuturesLtDualSimulatedPrimaryOutageController,
     switchRollingFuturesLtDualBackToPrimaryController,
+    recalculateCoveredOptionsRecoveryTotalPnl,
     recalculateRollingFuturesLtDualRecoveryTotalPnl,
+    updateCoveredOptionsRecoveryMetrics,
     updateRollingFuturesLtDualRecoveryMetrics,
+    reconcileCoveredOptionsOpenPositions,
     reconcileRollingFuturesLtDualOpenPositions,
+    saveCoveredOptionsOpenPositions,
+    saveCoveredOptionsProfile,
     saveRollingFuturesLtDualOpenPositions,
     saveRollingFuturesLtDualProfile
 } from "../controllers/rolling-futures-lt-controller";
@@ -251,6 +276,82 @@ export function createApiRouter(
     });
     objRouter.post("/rollingfutures-lt-dual/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await clearRollingFuturesLtDualEventsController(req, res);
+    });
+
+    objRouter.get("/covered-options/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCoveredOptionsProfile(req, res);
+    });
+    objRouter.post("/covered-options/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveCoveredOptionsProfile(req, res);
+    });
+    objRouter.get("/covered-options/connection/status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCoveredOptionsConnectionStatus(req, res);
+    });
+    objRouter.get("/covered-options/runtime", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCoveredOptionsRuntimeStatus(req, res);
+    });
+    objRouter.post("/covered-options/connection/check", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await checkCoveredOptionsConnection(req, res);
+    });
+    objRouter.post("/covered-options/auto-trader/start", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await enableCoveredOptionsAutoTrader(req, res);
+    });
+    objRouter.post("/covered-options/auto-trader/stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await disableCoveredOptionsAutoTrader(req, res);
+    });
+    objRouter.get("/covered-options/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCoveredOptionsAccountSummary(req, res);
+    });
+    objRouter.post("/covered-options/start-qty/calculate", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await calculateCoveredOptionsRecommendedStartQty(req, res);
+    });
+    objRouter.post("/covered-options/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeCoveredOptionsManualFuture(req, res);
+    });
+    objRouter.post("/covered-options/manual/option", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeCoveredOptionsManualOption(req, res);
+    });
+    objRouter.post("/covered-options/strategy/execute", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeCoveredOptionsStrategy(req, res);
+    });
+    objRouter.get("/covered-options/open-positions/importable", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCoveredOptionsImportableOpenPositions(req, res);
+    });
+    objRouter.get("/covered-options/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCoveredOptionsOpenPositions(req, res);
+    });
+    objRouter.post("/covered-options/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveCoveredOptionsOpenPositions(req, res);
+    });
+    objRouter.post("/covered-options/open-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteCoveredOptionsOpenPosition(req, res);
+    });
+    objRouter.post("/covered-options/open-positions/reconcile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await reconcileCoveredOptionsOpenPositions(req, res);
+    });
+    objRouter.post("/covered-options/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await closeCoveredOptionsImportedOpenPosition(req, res);
+    });
+    objRouter.post("/covered-options/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeCoveredOptionsKillSwitch(req, res);
+    });
+    objRouter.post("/covered-options/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateCoveredOptionsRecoveryMetrics(req, res);
+    });
+    objRouter.post("/covered-options/metrics/recalculate-total-pnl", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await recalculateCoveredOptionsRecoveryTotalPnl(req, res);
+    });
+    objRouter.get("/covered-options/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCoveredOptionsClosedPositions(req, res);
+    });
+    objRouter.get("/covered-options/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCoveredOptionsEvents(req, res);
+    });
+    objRouter.post("/covered-options/events/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteCoveredOptionsEventController(req, res);
+    });
+    objRouter.post("/covered-options/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearCoveredOptionsEventsController(req, res);
     });
 
     return objRouter;
