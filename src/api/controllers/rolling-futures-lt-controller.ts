@@ -6318,7 +6318,7 @@ async function runAutoTraderCycle(
 
     gAutoTraderCycleLocks.add(vRuntimeKey);
     try {
-        const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+        let objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
         if (!objRuntime?.autoTraderEnabled || String(objRuntime.status || "").trim().toLowerCase() !== "running") {
             stopAutoTraderCycle(pUserId, pStrategyCode);
             return;
@@ -6382,6 +6382,7 @@ async function runAutoTraderCycle(
             vSelectedApiProfileId,
             objRuntime
         );
+        objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode) || objRuntime;
         const objScheduledReEntry = getScheduledReEntryState(objRuntime);
         const vRestartProtectionUntil = getRestartCloseProtectionUntil(objRuntime);
         const vNowMs = Date.now();
