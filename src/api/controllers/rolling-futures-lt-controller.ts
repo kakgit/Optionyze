@@ -337,6 +337,8 @@ interface RollingFuturesLtOptionMetadata {
     reEntryDelta?: number;
     reEnterEnabled?: boolean;
     openedReason?: string;
+    requestedExpiryDate?: string;
+    resolvedExpiryDate?: string;
 }
 
 interface RollingFuturesLtAccountSummarySnapshot {
@@ -1005,10 +1007,45 @@ function getDaysBetweenUtcDates(pFromDate: Date, pToDate: Date): number {
     return Math.floor((pToDate.getTime() - pFromDate.getTime()) / vMsPerDay);
 }
 
-function resolveRollingFuturesExpiryDateByMode(pExpiryMode: string): string {
+function normalizeIsoDateOnly(pValue: unknown): string {
+    const vValue = String(pValue || "").trim();
+    const objMatch = vValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!objMatch) {
+        return "";
+    }
+    const vYear = Number(objMatch[1]);
+    const vMonth = Number(objMatch[2]);
+    const vDay = Number(objMatch[3]);
+    const objDate = new Date(Date.UTC(vYear, vMonth - 1, vDay));
+    if (
+        objDate.getUTCFullYear() !== vYear
+        || (objDate.getUTCMonth() + 1) !== vMonth
+        || objDate.getUTCDate() !== vDay
+    ) {
+        return "";
+    }
+    return `${String(vYear).padStart(4, "0")}-${String(vMonth).padStart(2, "0")}-${String(vDay).padStart(2, "0")}`;
+}
+
+function addDaysToIsoDateValue(pDateValue: string, pDays: number): string {
+    const vDateValue = normalizeIsoDateOnly(pDateValue);
+    if (!vDateValue) {
+        return "";
+    }
+    const objDate = new Date(`${vDateValue}T00:00:00Z`);
+    if (Number.isNaN(objDate.getTime())) {
+        return "";
+    }
+    objDate.setUTCDate(objDate.getUTCDate() + Math.trunc(Number(pDays || 0)));
+    return formatIsoDateFromParts(objDate.getUTCFullYear(), objDate.getUTCMonth(), objDate.getUTCDate());
+}
+
+function resolveRollingFuturesExpiryDateByModeFromBaseDate(pExpiryMode: string, pBaseDate?: unknown): string {
     const vMode = String(pExpiryMode || "").trim();
-    const objNow = new Date();
-    const objDate = new Date(Date.UTC(objNow.getUTCFullYear(), objNow.getUTCMonth(), objNow.getUTCDate()));
+    const vBaseDate = normalizeIsoDateOnly(pBaseDate);
+    const objDate = vBaseDate
+        ? new Date(`${vBaseDate}T00:00:00Z`)
+        : new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
 
     if (vMode === "1") {
         objDate.setUTCDate(objDate.getUTCDate() + 1);
@@ -1044,6 +1081,10 @@ function resolveRollingFuturesExpiryDateByMode(pExpiryMode: string): string {
     }
 
     return formatIsoDateFromParts(objDate.getUTCFullYear(), objDate.getUTCMonth(), objDate.getUTCDate());
+}
+
+function resolveRollingFuturesExpiryDateByMode(pExpiryMode: string): string {
+    return resolveRollingFuturesExpiryDateByModeFromBaseDate(pExpiryMode);
 }
 
 function normalizeRollingFuturesExpiryDate(pExpiryMode: string, pExpiryDate: unknown): string {
@@ -1192,7 +1233,7 @@ function getDefaultOptionRowUiState(
         objDefaults.newD = "0.90";
         objDefaults.reD = "0.90";
         objDefaults.tpD = "2.00";
-        objDefaults.slD = "0.15";
+        objDefaults.slD = "0.50";
     }
     if (isCoveredOptionsStrategy(pStrategyCode) && vRowIndex === 2) {
         objDefaults.action = "sell";
@@ -1200,7 +1241,7 @@ function getDefaultOptionRowUiState(
         objDefaults.newD = "0.53";
         objDefaults.reD = "0.53";
         objDefaults.tpD = "0.20";
-        objDefaults.slD = "0.65";
+        objDefaults.slD = "2.00";
     }
     return objDefaults;
 }
@@ -1394,8 +1435,69 @@ function optionMetadataToRecord(pMetadata: RollingFuturesLtOptionMetadata): Reco
         stopLossDelta: pMetadata.stopLossDelta,
         reEntryDelta: pMetadata.reEntryDelta,
         reEnterEnabled: pMetadata.reEnterEnabled,
-        openedReason: pMetadata.openedReason
+        openedReason: pMetadata.openedReason,
+        requestedExpiryDate: normalizeIsoDateOnly(pMetadata.requestedExpiryDate),
+        resolvedExpiryDate: normalizeIsoDateOnly(pMetadata.resolvedExpiryDate)
     };
+}
+
+function parseOptionExpiryDateFromContractName(pContractName: unknown): string {
+    const vContractName = String(pContractName || "").trim().toUpperCase();
+    const objMatch = vContractName.match(/-(\d{2})(\d{2})(\d{2})$/);
+    if (!objMatch) {
+        return "";
+    }
+    const vDay = Number(objMatch[1]);
+    const vMonth = Number(objMatch[2]);
+    const vYear = 2000 + Number(objMatch[3]);
+    const objDate = new Date(Date.UTC(vYear, vMonth - 1, vDay));
+    if (
+        objDate.getUTCFullYear() !== vYear
+        || (objDate.getUTCMonth() + 1) !== vMonth
+        || objDate.getUTCDate() !== vDay
+    ) {
+        return "";
+    }
+    return formatIsoDateFromParts(objDate.getUTCFullYear(), objDate.getUTCMonth(), objDate.getUTCDate());
+}
+
+function getTrackedOptionResolvedExpiryDate(pPosition: RollingFuturesLtImportedPositionRecord): string {
+    const objMetadata = getTrackedOptionMetadata(pPosition);
+    const vResolvedExpiryDate = normalizeIsoDateOnly(objMetadata.resolvedExpiryDate || objMetadata.requestedExpiryDate);
+    if (vResolvedExpiryDate) {
+        return vResolvedExpiryDate;
+    }
+    return parseOptionExpiryDateFromContractName(pPosition.contractName);
+}
+
+function getCurrentDeltaUiDateTimeParts(): { date: string; hour: number; minute: number; } {
+    const vNowUtcMs = Date.now();
+    const objUiDate = new Date(vNowUtcMs + (gDeltaUiTimezoneOffsetMinutes * 60 * 1000));
+    return {
+        date: formatIsoDateFromParts(objUiDate.getUTCFullYear(), objUiDate.getUTCMonth(), objUiDate.getUTCDate()),
+        hour: objUiDate.getUTCHours(),
+        minute: objUiDate.getUTCMinutes()
+    };
+}
+
+function isDeltaUiTimeAtOrAfter(pHour: number, pMinute = 0): boolean {
+    const objCurrent = getCurrentDeltaUiDateTimeParts();
+    return objCurrent.hour > pHour || (objCurrent.hour === pHour && objCurrent.minute >= pMinute);
+}
+
+function resolveCoveredCutoffReEntryExpiryDate(pExpiryMode: string, pCurrentExpiryDate: string): string {
+    const vCurrentExpiryDate = normalizeIsoDateOnly(pCurrentExpiryDate);
+    if (!vCurrentExpiryDate) {
+        return resolveRollingFuturesExpiryDateByMode(pExpiryMode);
+    }
+    let vNextExpiryDate = resolveRollingFuturesExpiryDateByModeFromBaseDate(pExpiryMode, vCurrentExpiryDate);
+    if (!vNextExpiryDate || vNextExpiryDate <= vCurrentExpiryDate) {
+        vNextExpiryDate = resolveRollingFuturesExpiryDateByModeFromBaseDate(
+            pExpiryMode,
+            addDaysToIsoDateValue(vCurrentExpiryDate, 1)
+        );
+    }
+    return vNextExpiryDate || addDaysToIsoDateValue(vCurrentExpiryDate, 1) || vCurrentExpiryDate;
 }
 
 function hasMissingTrackedOptionBaseGreeks(pPosition: RollingFuturesLtImportedPositionRecord): boolean {
@@ -4919,13 +5021,7 @@ async function executeStrategyPlacement(
     const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
     const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pInput.rowIndex);
     const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
-    if (isCoveredOptionsStrategy(pStrategyCode)) {
-        const objOpenRowPosition = arrOpenOptions.find((objPosition) => normalizeOptionRowIndex(pStrategyCode, getTrackedOptionMetadata(objPosition).rowIndex) === vRowIndex);
-        if (objOpenRowPosition) {
-            throw new Error(`An option position is already open on row ${vRowIndex} (${objOpenRowPosition.contractName}). Close the existing row ${vRowIndex} option before opening a new one.`);
-        }
-    }
-    else if (arrOpenOptions.length > 0) {
+    if (!isCoveredOptionsStrategy(pStrategyCode) && arrOpenOptions.length > 0) {
         throw new Error(`An option position is already open (${arrOpenOptions[0].contractName}). Close the existing option before opening a new one.`);
     }
     const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(objUiState, "strategy_option_open", pStrategyCode, vRowIndex);
@@ -5025,7 +5121,9 @@ async function executeStrategyPlacement(
                 metadata: optionMetadataToRecord({
                     ...objOptionMetadata,
                     baseDelta: getSignedOptionBaseDelta(String(objContract.contractSymbol || "").trim(), Number(objContract.delta || 0)),
-                    baseTheta: Math.abs(Number(objContract.theta || 0))
+                    baseTheta: Math.abs(Number(objContract.theta || 0)),
+                    requestedExpiryDate: String(objContract.requestedExpiryDate || "").trim(),
+                    resolvedExpiryDate: String(objContract.expiryDate || "").trim()
                 }),
                 openedAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
@@ -5151,7 +5249,12 @@ async function openTrackedOptionReEntry(
     pProfile: RollingFuturesLtProfileRecord,
     pClosedPosition: RollingFuturesLtImportedPositionRecord,
     pMetadata: RollingFuturesLtOptionMetadata,
-    pReason: "sl" | "tp"
+    pReason: "sl" | "tp" | "expiry_cutoff",
+    pOptions?: {
+        forceExpiryDate?: string;
+        useRowAction?: boolean;
+        useRowQty?: boolean;
+    }
 ): Promise<{
     position: RollingFuturesLtImportedPositionRecord;
     orderPayload: Record<string, unknown>;
@@ -5164,6 +5267,13 @@ async function openTrackedOptionReEntry(
     const vSymbol = normalizeSymbolValue(objUiState.symbol);
     const vLegSide = getTrackedOptionLegSide(pClosedPosition.contractName);
     const vTargetDelta = Math.max(0, Number(pMetadata.reEntryDelta || objRowState.reD || 0.53));
+    const vExpiryDate = normalizeIsoDateOnly(pOptions?.forceExpiryDate) || String(objRowState.expiryDate || "").trim();
+    const vOrderAction = pOptions?.useRowAction
+        ? (String(objRowState.action || "sell").trim().toLowerCase() === "buy" ? "buy" as const : "sell" as const)
+        : (String(pClosedPosition.side || "").trim().toUpperCase() === "BUY" ? "buy" as const : "sell" as const);
+    const vOptionQty = pOptions?.useRowQty
+        ? Math.max(1, Math.floor(Number(objRowState.qty || pClosedPosition.qty || 1)))
+        : Math.max(1, Math.floor(Number(pClosedPosition.qty || 1)));
     if (!(vTargetDelta > 0)) {
         return null;
     }
@@ -5174,13 +5284,13 @@ async function openTrackedOptionReEntry(
         lotSize: getLotSizeForSymbol(vSymbol),
         futureQty: 1,
         futureOrderType: "market_order" as const,
-        action: String(pClosedPosition.side || "").trim().toUpperCase() === "BUY" ? "buy" as const : "sell" as const,
+        action: vOrderAction,
         legSide: vLegSide,
         expiryMode: (["1", "2", "4", "5", "6", "7"].includes(String(objRowState.expiryMode || "5").trim())
             ? String(objRowState.expiryMode || "5").trim()
             : "5") as "1" | "2" | "4" | "5" | "6" | "7",
-        expiryDate: String(objRowState.expiryDate || "").trim(),
-        optionQty: Math.max(1, Math.floor(Number(pClosedPosition.qty || 1))),
+        expiryDate: vExpiryDate,
+        optionQty: vOptionQty,
         redOptionQtyPct: 100,
         greenOptionQtyPct: 100,
         newDelta: vTargetDelta,
@@ -5210,7 +5320,7 @@ async function openTrackedOptionReEntry(
         return null;
     }
     if (shouldTriggerTrackedOption(
-        pClosedPosition.side,
+        vOrderAction.toUpperCase(),
         vAbsoluteDelta,
         Number(pMetadata.takeProfitDelta || objRowState.tpD || 0.25),
         Number(pMetadata.stopLossDelta || objRowState.slD || 0.65)
@@ -5223,8 +5333,8 @@ async function openTrackedOptionReEntry(
     const objReEntryResponse = await client.apis.Orders.placeOrder({
         order: {
             product_symbol: objContract.contractSymbol,
-            size: Math.max(1, Math.floor(Number(pClosedPosition.qty || 1))),
-            side: String(pClosedPosition.side || "").trim().toUpperCase() === "BUY" ? "buy" : "sell",
+            size: vOptionQty,
+            side: vOrderAction,
             order_type: "market_order",
             time_in_force: "gtc",
             post_only: false,
@@ -5240,8 +5350,8 @@ async function openTrackedOptionReEntry(
             strategyCode: pStrategyCode,
             importId: crypto.randomUUID(),
             contractName: String(objContract.contractSymbol || "").trim(),
-            side: String(pClosedPosition.side || "").trim().toUpperCase(),
-            qty: Math.max(1, Math.floor(Number(pClosedPosition.qty || 1))),
+            side: vOrderAction.toUpperCase(),
+            qty: vOptionQty,
             entryPrice: Number(objContract.markPrice || 0),
             markPrice: Number(objContract.markPrice || 0),
             charges: 0,
@@ -5256,7 +5366,11 @@ async function openTrackedOptionReEntry(
                 stopLossDelta: Math.max(0, Number(pMetadata.stopLossDelta || objRowState.slD || 0.65)),
                 reEntryDelta: vTargetDelta,
                 reEnterEnabled: Boolean(pMetadata.reEnterEnabled),
-                openedReason: pReason === "sl" ? "sl_reentry" : "tp_reentry"
+                openedReason: pReason === "sl"
+                    ? "sl_reentry"
+                    : (pReason === "tp" ? "tp_reentry" : "expiry_cutoff_reentry"),
+                requestedExpiryDate: objContract.requestedExpiryDate,
+                resolvedExpiryDate: objContract.expiryDate
             }),
             openedAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
@@ -5274,10 +5388,16 @@ async function applyTriggeredOptionRule(
     pPosition: RollingFuturesLtImportedPositionRecord,
     pCurrentDelta: number,
     pCurrentMarkPrice: number | null,
-    pReason: "sl" | "tp",
+    pReason: "sl" | "tp" | "expiry_cutoff",
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
 ): Promise<RollingFuturesLtImportedPositionRecord[]> {
-    const objCloseResult = await closeTrackedPositionOnDelta(pUserId, pStrategyCode, pSelectedApiProfileId, pPosition, pReason === "sl" ? "SL" : "TP");
+    const objCloseResult = await closeTrackedPositionOnDelta(
+        pUserId,
+        pStrategyCode,
+        pSelectedApiProfileId,
+        pPosition,
+        pReason === "sl" ? "SL" : (pReason === "tp" ? "TP" : "CL")
+    );
     const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const objMetadata = getTrackedOptionMetadata(pPosition);
     const vResolvedCloseCharge = await resolveOrderChargeFromDelta(
@@ -5304,26 +5424,46 @@ async function applyTriggeredOptionRule(
         );
     let arrNextPositions = pTrackedPositions.filter((objRow) => objRow.importId !== pPosition.importId);
 
-    await logFuturesEvent(
-        pUserId,
-        pStrategyCode,
-        pReason === "sl" ? "sl_triggered" : "tp_triggered",
-        pReason === "sl" ? "warning" : "info",
-        pReason === "sl" ? "Option SL Triggered" : "Option TP Triggered",
-        `Closed option ${pPosition.contractName} after ${pReason.toUpperCase()} hit at delta ${Math.abs(Number(pCurrentDelta || 0)).toFixed(3)}.`,
-        {
-            contractName: pPosition.contractName,
-            qty: pPosition.qty,
-            currentDelta: Math.abs(Number(pCurrentDelta || 0)),
-            reason: pReason
-        }
-    );
+    if (pReason === "expiry_cutoff") {
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "option_closed",
+            "info",
+            "Same-Day Expiry Cutoff Closed",
+            `Closed same-day expiry option ${pPosition.contractName} at or after 4:00 PM Delta time.`,
+            {
+                contractName: pPosition.contractName,
+                qty: pPosition.qty,
+                resolvedExpiryDate: getTrackedOptionResolvedExpiryDate(pPosition),
+                reason: pReason
+            }
+        );
+    }
+    else {
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            pReason === "sl" ? "sl_triggered" : "tp_triggered",
+            pReason === "sl" ? "warning" : "info",
+            pReason === "sl" ? "Option SL Triggered" : "Option TP Triggered",
+            `Closed option ${pPosition.contractName} after ${pReason.toUpperCase()} hit at delta ${Math.abs(Number(pCurrentDelta || 0)).toFixed(3)}.`,
+            {
+                contractName: pPosition.contractName,
+                qty: pPosition.qty,
+                currentDelta: Math.abs(Number(pCurrentDelta || 0)),
+                reason: pReason
+            }
+        );
+    }
     await logFuturesEvent(
         pUserId,
         pStrategyCode,
         "future_closed",
         vClosePnl < 0 ? "warning" : "info",
-        pReason === "sl" ? "Option SL Realized PnL" : "Option TP Realized PnL",
+        pReason === "sl"
+            ? "Option SL Realized PnL"
+            : (pReason === "tp" ? "Option TP Realized PnL" : "Expiry Cutoff Realized PnL"),
         `Captured realized PnL ${vClosePnl.toFixed(2)} and close charge ${vCloseCharge.toFixed(2)} for ${pPosition.contractName}.`,
         {
             contractName: pPosition.contractName,
@@ -5333,7 +5473,9 @@ async function applyTriggeredOptionRule(
             reason: pReason
         }
     );
-    await schedulePendingOptionRecoveryRefresh(pUserId, pStrategyCode, pReason);
+    if (pReason === "sl" || pReason === "tp") {
+        await schedulePendingOptionRecoveryRefresh(pUserId, pStrategyCode, pReason);
+    }
 
     const vProfitClosePauseUntil = new Date(Date.now() + gProfitClosePauseAfterOptionRuleMs).toISOString();
     const objRuntimeBeforeProfitPause = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
@@ -5361,6 +5503,7 @@ async function applyTriggeredOptionRule(
                 vOptionReentryPendingUntil
             )
         });
+        const objRowState = getNormalizedOptionRowUiState(getMergedUiState(pProfile), pStrategyCode, objMetadata.rowIndex);
         const objReEntry = await openTrackedOptionReEntry(
             pUserId,
             pStrategyCode,
@@ -5368,7 +5511,17 @@ async function applyTriggeredOptionRule(
             pProfile,
             pPosition,
             objMetadata,
-            pReason
+            pReason,
+            pReason === "expiry_cutoff" && isCoveredOptionsStrategy(pStrategyCode)
+                ? {
+                    forceExpiryDate: resolveCoveredCutoffReEntryExpiryDate(
+                        objRowState.expiryMode,
+                        getTrackedOptionResolvedExpiryDate(pPosition)
+                    ),
+                    useRowAction: true,
+                    useRowQty: true
+                }
+                : undefined
         );
         try {
             if (objReEntry) {
@@ -5394,10 +5547,12 @@ async function applyTriggeredOptionRule(
                 await logFuturesEvent(
                     pUserId,
                     pStrategyCode,
-                    "reentry_opened",
+                    pReason === "expiry_cutoff" ? "option_opened" : "reentry_opened",
                     "success",
-                    "Option Re-Entry Opened",
-                    `Opened replacement option ${objReEntry.position.contractName} after ${pReason.toUpperCase()} using Re D ${Number(objMetadata.reEntryDelta || 0).toFixed(2)}.`,
+                    pReason === "expiry_cutoff" ? "Expiry Cutoff Re-Entry Opened" : "Option Re-Entry Opened",
+                    pReason === "expiry_cutoff"
+                        ? `Opened replacement option ${objReEntry.position.contractName} after same-day expiry cutoff using row ${objRowState.rowIndex} settings.`
+                        : `Opened replacement option ${objReEntry.position.contractName} after ${pReason.toUpperCase()} using Re D ${Number(objMetadata.reEntryDelta || 0).toFixed(2)}.`,
                     {
                         contractName: objReEntry.position.contractName,
                         qty: objReEntry.position.qty,
@@ -5437,7 +5592,7 @@ async function applyTriggeredOptionRule(
     if (!arrSaved.length) {
         await clearActiveStrategyRun(pUserId, pStrategyCode);
     }
-    if (isDualRollingFuturesStrategy(pStrategyCode)) {
+    if (isDualRollingFuturesStrategy(pStrategyCode) && (pReason === "sl" || pReason === "tp")) {
         await attemptAutoExecuteNextPendingDualStrategyRequest(pReason, pUserId, pStrategyCode);
     }
     return arrSaved;
@@ -5450,16 +5605,32 @@ async function findTriggeredTrackedOptions(
     position: RollingFuturesLtImportedPositionRecord;
     currentDelta: number;
     currentMarkPrice: number | null;
-    reason: "sl" | "tp";
+    reason: "sl" | "tp" | "expiry_cutoff";
 }>> {
     const arrTriggered: Array<{
         position: RollingFuturesLtImportedPositionRecord;
         currentDelta: number;
         currentMarkPrice: number | null;
-        reason: "sl" | "tp";
+        reason: "sl" | "tp" | "expiry_cutoff";
     }> = [];
+    const objCurrentDeltaTime = getCurrentDeltaUiDateTimeParts();
     for (const objPosition of pTrackedPositions) {
         if (!isOptionContractSymbol(objPosition.contractName)) {
+            continue;
+        }
+        const vResolvedExpiryDate = getTrackedOptionResolvedExpiryDate(objPosition);
+        if (
+            isCoveredOptionsStrategy(objPosition.strategyCode)
+            && vResolvedExpiryDate
+            && vResolvedExpiryDate === objCurrentDeltaTime.date
+            && isDeltaUiTimeAtOrAfter(16, 0)
+        ) {
+            arrTriggered.push({
+                position: objPosition,
+                currentDelta: 0,
+                currentMarkPrice: null,
+                reason: "expiry_cutoff"
+            });
             continue;
         }
         const objTicker = await getLiveOptionTicker(String(objPosition.contractName || "").trim());
@@ -6062,7 +6233,7 @@ async function applyTriggeredOptionRuleSurvivalOnly(
     pSelectedApiProfileId: string,
     pProfile: RollingFuturesLtProfileRecord,
     pPosition: RollingFuturesLtImportedPositionRecord,
-    pReason: "sl" | "tp",
+    pReason: "sl" | "tp" | "expiry_cutoff",
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
 ): Promise<RollingFuturesLtImportedPositionRecord[]> {
     await closeTrackedPositionOnDelta(
@@ -6070,7 +6241,7 @@ async function applyTriggeredOptionRuleSurvivalOnly(
         pStrategyCode,
         pSelectedApiProfileId,
         pPosition,
-        pReason === "sl" ? "SL" : "TP"
+        pReason === "sl" ? "SL" : (pReason === "tp" ? "TP" : "CL")
     );
     let arrNextPositions = pTrackedPositions.filter((objRow) => objRow.importId !== pPosition.importId);
     const objMetadata = getTrackedOptionMetadata(pPosition);
@@ -6082,7 +6253,17 @@ async function applyTriggeredOptionRuleSurvivalOnly(
             pProfile,
             pPosition,
             objMetadata,
-            pReason
+            pReason,
+            pReason === "expiry_cutoff" && isCoveredOptionsStrategy(pStrategyCode)
+                ? {
+                    forceExpiryDate: resolveCoveredCutoffReEntryExpiryDate(
+                        getNormalizedOptionRowUiState(getMergedUiState(pProfile), pStrategyCode, objMetadata.rowIndex).expiryMode,
+                        getTrackedOptionResolvedExpiryDate(pPosition)
+                    ),
+                    useRowAction: true,
+                    useRowQty: true
+                }
+                : undefined
         );
         if (objReEntry) {
             arrNextPositions = [...arrNextPositions, objReEntry.position];
@@ -7967,13 +8148,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
         const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
         const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
         const bIsDualStrategy = isDualRollingFuturesStrategy(pStrategyCode);
-        if (isCoveredOptionsStrategy(pStrategyCode)) {
-            const objOpenRowPosition = arrOpenOptions.find((objPosition) => normalizeOptionRowIndex(pStrategyCode, getTrackedOptionMetadata(objPosition).rowIndex) === vRowIndex);
-            if (objOpenRowPosition) {
-                throw new Error(`An option position is already open on row ${vRowIndex} (${objOpenRowPosition.contractName}). Close the existing row ${vRowIndex} option before placing another order.`);
-            }
-        }
-        else if (!bIsDualStrategy && arrOpenOptions.length > 0) {
+        if (!bIsDualStrategy && arrOpenOptions.length > 0) {
             throw new Error(`An option position is already open (${arrOpenOptions[0].contractName}). Close the existing option before placing another option order.`);
         }
         if (bIsDualStrategy && !isCoveredOptionsStrategy(pStrategyCode) && hasTrackedOptionLeg(arrExisting, vLegSide === "pe" ? "pe" : "ce")) {
@@ -8048,7 +8223,9 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
                 metadata: optionMetadataToRecord({
                     ...objOptionMetadata,
                     baseDelta: getSignedOptionBaseDelta(String(objContract.contractSymbol || "").trim(), vAbsoluteDelta),
-                    baseTheta: Math.abs(Number(objContract.theta || 0))
+                    baseTheta: Math.abs(Number(objContract.theta || 0)),
+                    requestedExpiryDate: objContract.requestedExpiryDate,
+                    resolvedExpiryDate: objContract.expiryDate
                 }),
                 openedAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
@@ -8212,7 +8389,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
     }
 
     try {
-        if (isDualRollingFuturesStrategy(pStrategyCode)) {
+        if (isDualRollingFuturesStrategy(pStrategyCode) && !isCoveredOptionsStrategy(pStrategyCode)) {
             const arrExistingOpenPositions = await fetchLiveFuturePositions(
                 vUserId,
                 pStrategyCode,

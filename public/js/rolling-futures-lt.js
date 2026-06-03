@@ -67,8 +67,6 @@
         sellCeButton2: document.getElementById("btnRollingFuturesSellCe2"),
         buyCeButton2: document.getElementById("btnRollingFuturesBuyCe2"),
         buyPeButton2: document.getElementById("btnRollingFuturesBuyPe2"),
-        execStrategyButton1: document.getElementById("btnRollingFuturesExecAllLegs1"),
-        execStrategyButton2: document.getElementById("btnRollingFuturesExecAllLegs2"),
         bsFutQty: document.getElementById("txtRollingFuturesBsQty"),
         minusDelta: document.getElementById("txtRollingFuturesMinusDelta"),
         plusDelta: document.getElementById("txtRollingFuturesPlusDelta"),
@@ -274,8 +272,7 @@
                 sellPeButton: ids.sellPeButton2,
                 sellCeButton: ids.sellCeButton2,
                 buyCeButton: ids.buyCeButton2,
-                buyPeButton: ids.buyPeButton2,
-                execStrategyButton: ids.execStrategyButton2
+                buyPeButton: ids.buyPeButton2
             };
         }
         return {
@@ -292,8 +289,7 @@
             sellPeButton: ids.sellPeButton,
             sellCeButton: ids.sellCeButton,
             buyCeButton: ids.buyCeButton,
-            buyPeButton: ids.buyPeButton,
-            execStrategyButton: vRowIndex === 1 && isCoveredMode ? ids.execStrategyButton1 : ids.execStrategyButton
+            buyPeButton: ids.buyPeButton
         };
     }
 
@@ -336,7 +332,7 @@
                 newD: "0.53",
                 reD: "0.53",
                 tpD: "0.20",
-                slD: "0.65"
+                slD: "2.00"
             };
         }
         if (isCoveredMode && vRowIndex === 1) {
@@ -347,7 +343,7 @@
                 newD: "0.90",
                 reD: "0.90",
                 tpD: "2.00",
-                slD: "0.15"
+                slD: "0.50"
             };
         }
         return optionDefaults;
@@ -784,12 +780,6 @@
                     button.disabled = manualOptionOrderInFlight || !canUseLiveActions();
                 }
             });
-            if (nodes.execStrategyButton instanceof HTMLButtonElement) {
-                nodes.execStrategyButton.disabled = execStrategyInFlight || !canUseLiveActions() || !canUseExecStrategy();
-                nodes.execStrategyButton.title = canUseExecStrategy()
-                    ? `Execute the live strategy for option row ${rowIndex}`
-                    : "Not Authorised to Execute, Please Contact Admin";
-            }
         });
         if (ids.execStrategyButton instanceof HTMLButtonElement) {
             ids.execStrategyButton.disabled = execStrategyInFlight || !canUseLiveActions() || !canUseExecStrategy();
@@ -1318,6 +1308,8 @@
             throw new Error("Turn Auto Trader ON before executing the live strategy.");
         }
 
+        await saveProfile();
+
         const vAction = String(rowNodes.action?.value || "").trim().toLowerCase();
         const vLegSide = String(rowNodes.legs?.value || "").trim().toLowerCase();
         const vExpiryMode = String(rowNodes.expiryMode?.value || "5").trim();
@@ -1353,6 +1345,26 @@
         }
     }
 
+    async function executeCoveredStrategies() {
+        if (!isCoveredMode) {
+            return executeStrategy(1);
+        }
+
+        const results = [];
+        for (const rowIndex of getSupportedOptionRowIndexes()) {
+            results.push(await executeStrategy(rowIndex));
+        }
+        return {
+            status: "success",
+            message: `Exec Strategy placed live option order(s) for ${results.length} rows.`,
+            data: {
+                trackedOpenPositions: results[results.length - 1]?.data?.trackedOpenPositions || null,
+                neutralCheck: results[results.length - 1]?.data?.neutralCheck || {},
+                rowResults: results
+            }
+        };
+    }
+
     async function placeManualOption(action, legSide, rowIndex) {
         const optionRowIndex = normalizeOptionRowIndex(rowIndex);
         const rowNodes = getOptionRowNodes(optionRowIndex);
@@ -1369,6 +1381,8 @@
         if (!canUseLiveActions()) {
             throw new Error("Delta connection is not healthy enough to place a live option order.");
         }
+
+        await saveProfile();
 
         const vExpiryMode = String(rowNodes.expiryMode?.value || "5").trim();
         const vExpiryDate = String(rowNodes.expiryDate?.value || "").trim();
@@ -2179,7 +2193,7 @@
         });
     });
     ids.execStrategyButton?.addEventListener("click", function () {
-        void executeStrategy(1).then(function (objResult) {
+        void (isCoveredMode ? executeCoveredStrategies() : executeStrategy(1)).then(function (objResult) {
             const trackedPayload = objResult?.data?.trackedOpenPositions || null;
             const objNeutralCheck = objResult?.data?.neutralCheck || {};
             const bHedgePlaced = Boolean(objNeutralCheck?.hedgePlaced);
@@ -2272,46 +2286,6 @@
             ]);
         }).catch(function (error) {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to place BUY PE order.", "danger");
-        });
-    });
-    ids.execStrategyButton1?.addEventListener("click", function () {
-        void executeStrategy(1).then(function (objResult) {
-            const trackedPayload = objResult?.data?.trackedOpenPositions || null;
-            const objNeutralCheck = objResult?.data?.neutralCheck || {};
-            const bHedgePlaced = Boolean(objNeutralCheck?.hedgePlaced);
-            if (trackedPayload) {
-                renderOpenPositions(trackedPayload);
-            }
-            const vMessage = String(objResult?.message || "Exec Strategy placed live option order(s).").trim();
-            setStatus(ids.pageStatus, bHedgePlaced ? `${vMessage} Server-side neutrality hedge also executed.` : vMessage, "success");
-            return Promise.all([
-                loadProfile().catch(function () { return undefined; }),
-                loadAccountSummary(),
-                loadConnectionStatus(),
-                loadEvents().catch(function () { return undefined; })
-            ]);
-        }).catch(function (error) {
-            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to execute the live strategy.", "danger");
-        });
-    });
-    ids.execStrategyButton2?.addEventListener("click", function () {
-        void executeStrategy(2).then(function (objResult) {
-            const trackedPayload = objResult?.data?.trackedOpenPositions || null;
-            const objNeutralCheck = objResult?.data?.neutralCheck || {};
-            const bHedgePlaced = Boolean(objNeutralCheck?.hedgePlaced);
-            if (trackedPayload) {
-                renderOpenPositions(trackedPayload);
-            }
-            const vMessage = String(objResult?.message || "Exec Strategy placed live option order(s).").trim();
-            setStatus(ids.pageStatus, bHedgePlaced ? `${vMessage} Server-side neutrality hedge also executed.` : vMessage, "success");
-            return Promise.all([
-                loadProfile().catch(function () { return undefined; }),
-                loadAccountSummary(),
-                loadConnectionStatus(),
-                loadEvents().catch(function () { return undefined; })
-            ]);
-        }).catch(function (error) {
-            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to execute the live strategy.", "danger");
         });
     });
     ids.importButton?.addEventListener("click", function () {
