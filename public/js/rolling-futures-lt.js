@@ -1777,7 +1777,9 @@
             return;
         }
         if (!importablePositions.length) {
-            ids.importList.innerHTML = "<div class=\"rolling-demo-event-empty\">No live futures positions are open on Delta Exchange for the selected symbol.</div>";
+            ids.importList.innerHTML = isCoveredMode
+                ? "<div class=\"rolling-demo-event-empty\">No live option positions are open on Delta Exchange for the selected symbol.</div>"
+                : "<div class=\"rolling-demo-event-empty\">No live futures positions are open on Delta Exchange for the selected symbol.</div>";
             return;
         }
         ids.importList.innerHTML = importablePositions.map(function (row) {
@@ -1803,12 +1805,22 @@
     async function loadImportablePositions() {
         await checkConnection();
         if (!canUseLiveActions()) {
-            throw new Error("Delta connection is not healthy enough to import live futures positions.");
+            throw new Error(isCoveredMode
+                ? "Delta connection is not healthy enough to import live option positions."
+                : "Delta connection is not healthy enough to import live futures positions.");
         }
         const objResult = await getJson(`${endpointBase}/open-positions/importable`);
         const arrPositions = Array.isArray(objResult?.data?.positions) ? objResult.data.positions : [];
         renderImportablePositions(arrPositions);
-        setStatus(ids.importStatus, arrPositions.length ? "" : "No live futures positions were returned for the selected symbol.", arrPositions.length ? "" : "warning");
+        setStatus(
+            ids.importStatus,
+            arrPositions.length
+                ? ""
+                : (isCoveredMode
+                    ? "No live option positions were returned for the selected symbol."
+                    : "No live futures positions were returned for the selected symbol."),
+            arrPositions.length ? "" : "warning"
+        );
         openImportModal();
     }
 
@@ -1834,7 +1846,9 @@
             return selectedIds.includes(String(row.importId || "").trim());
         });
         if (!selectedRows.length) {
-            throw new Error("Select at least one live futures position to import.");
+            throw new Error(isCoveredMode
+                ? "Select at least one live option position to import."
+                : "Select at least one live futures position to import.");
         }
         const objResult = await saveImportedPositions(selectedRows);
         closeImportModal();
@@ -2302,7 +2316,9 @@
         });
     });
     ids.killSwitchButton?.addEventListener("click", function () {
-        const confirmed = window.confirm("Kill switch will place reduce-only market close orders for all saved live futures positions. Continue?");
+        const confirmed = window.confirm(isCoveredMode
+            ? "Kill switch will place reduce-only market close orders for all saved live option positions. Continue?"
+            : "Kill switch will place reduce-only market close orders for all saved live futures positions. Continue?");
         if (!confirmed) {
             return;
         }
@@ -2432,10 +2448,18 @@
     ids.closeImportModalButton?.addEventListener("click", closeImportModal);
     ids.applyImportedPositionsButton?.addEventListener("click", function () {
         void applyImportedPositions().then(function (objResult) {
-            setStatus(ids.pageStatus, objResult?.message || "Imported live futures positions saved.", "success");
+            setStatus(
+                ids.pageStatus,
+                objResult?.message || (isCoveredMode ? "Imported live option positions saved." : "Imported live futures positions saved."),
+                "success"
+            );
             return Promise.all([loadAccountSummary(), loadEvents()]);
         }).catch(function (error) {
-            setStatus(ids.importStatus, error instanceof Error ? error.message : "Unable to import live futures positions.", "danger");
+            setStatus(
+                ids.importStatus,
+                error instanceof Error ? error.message : (isCoveredMode ? "Unable to import live option positions." : "Unable to import live futures positions."),
+                "danger"
+            );
         });
     });
     ids.openPositionsBody?.addEventListener("click", function (event) {
@@ -2560,7 +2584,11 @@
     }).then(function () {
         return loadPageForCurrentTarget();
     }).catch(function (error) {
-        setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to load live futures page.", "danger");
+        setStatus(
+            ids.pageStatus,
+            error instanceof Error ? error.message : (isCoveredMode ? "Unable to load covered options page." : "Unable to load live futures page."),
+            "danger"
+        );
     });
 
     startConnectionPolling();

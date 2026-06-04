@@ -404,7 +404,7 @@
                                 <path d="M21 3v6h-6" />
                             </svg>
                         </button>
-                        <button class="rolling-demo-icon-btn sell" type="button" id="btnRollingDualFuturesKillSwitch" title="Kill switch to close live legs" aria-label="Kill switch to close live legs">
+                        <button class="rolling-demo-icon-btn sell" type="button" id="btnRollingDualFuturesKillSwitch" title="Kill switch to close live option legs" aria-label="Kill switch to close live option legs">
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M12 2v10" />
                                 <path d="M6.2 6.2a8 8 0 1 0 11.3 0" />
@@ -434,7 +434,7 @@
                         </thead>
                         <tbody id="rollingDualFuturesOpenPositionsBody">
                             <tr>
-                                <td colspan="14" class="rolling-demo-empty">Select an API profile and import existing live positions from Delta Exchange.</td>
+                                <td colspan="14" class="rolling-demo-empty">Select an API profile and load live covered-option positions from Delta Exchange.</td>
                             </tr>
                         </tbody>
                     </table>
@@ -608,7 +608,7 @@
         <div class="rolling-live-modal-head">
             <div>
                 <h2 class="rolling-live-modal-title">Import Existing Positions</h2>
-                <p class="app-copy">Pick one or more open Delta Exchange futures positions to mirror in the live grid.</p>
+                <p class="app-copy">Pick one or more open Delta Exchange option positions to mirror in the live grid.</p>
             </div>
             <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesCloseImportModal" title="Close import dialog" aria-label="Close import dialog">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -619,7 +619,7 @@
         </div>
         <div class="rolling-live-status" id="rollingDualFuturesImportStatus"></div>
         <div class="rolling-live-import-list" id="rollingDualFuturesImportList">
-            <div class="rolling-demo-event-empty">Select an API profile to load open live futures positions.</div>
+            <div class="rolling-demo-event-empty">Select an API profile to load open live option positions.</div>
         </div>
         <div class="rolling-live-modal-actions">
             <button class="rolling-demo-btn primary" type="button" id="btnRollingDualFuturesApplyImportedPositions">Import Selected</button>

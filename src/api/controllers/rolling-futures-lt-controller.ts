@@ -109,6 +109,8 @@ interface DeltaActiveOrderRow {
     size?: number | string | null;
     unfilled_size?: number | string | null;
     product_symbol?: string | null;
+    side?: string | null;
+    reduce_only?: boolean | null;
     [key: string]: unknown;
 }
 
@@ -121,6 +123,7 @@ const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
 const gFutureLimitRetryDelayMs = 5000;
 const gFutureLimitRetryCount = 5;
 const gOptionReentryPendingMs = 5000;
+const gCoveredOptionReEntryRetryMs = 60 * 1000;
 const gProfitClosePauseAfterOptionRuleMs = 15000;
 const gProfitCloseReEntryCooldownMs = 5 * 60 * 1000;
 const gProfitCloseConfirmationMs = 5 * 60 * 1000;
@@ -1395,6 +1398,34 @@ function getTrackedOptionMetadata(pPosition: RollingFuturesLtImportedPositionRec
         : {};
 }
 
+function hasTrackedOptionRowLeg(
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pRowIndex: 1 | 2,
+    pLegSide: "ce" | "pe"
+): boolean {
+    return listTrackedOpenOptionPositions(pTrackedPositions).some((objPosition) => {
+        const objMetadata = getTrackedOptionMetadata(objPosition);
+        return normalizeOptionRowIndex(objPosition.strategyCode, objMetadata.rowIndex) === pRowIndex
+            && getTrackedOptionLegSide(objPosition.contractName) === pLegSide;
+    });
+}
+
+function getTrackedOptionRowLegTotalQty(
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pRowIndex: 1 | 2,
+    pLegSide: "ce" | "pe"
+): number {
+    return listTrackedOpenOptionPositions(pTrackedPositions).reduce((pSum, objPosition) => {
+        const objMetadata = getTrackedOptionMetadata(objPosition);
+        const bMatchesRowLeg = normalizeOptionRowIndex(objPosition.strategyCode, objMetadata.rowIndex) === pRowIndex
+            && getTrackedOptionLegSide(objPosition.contractName) === pLegSide;
+        if (!bMatchesRowLeg) {
+            return pSum;
+        }
+        return pSum + Math.max(0, Math.floor(Number(objPosition.qty || 0)));
+    }, 0);
+}
+
 function getTrackedFutureRealizedPnl(pPosition: RollingFuturesLtImportedPositionRecord): number {
     if (!isFutureContractSymbol(pPosition.contractName)) {
         return 0;
@@ -2359,6 +2390,78 @@ async function getDeltaErrorLogDescriptor(pError: unknown): Promise<{
     };
 }
 
+async function classifyCoveredOptionReEntryFailure(pError: unknown): Promise<{
+    type: "connection" | "insufficient_margin" | "other";
+    message: string;
+}> {
+    const objFriendly = await getFriendlyDeltaConnectionError(pError);
+    const vMessage = getErrorMessage(pError, "Unable to open covered option re-entry.");
+    const vNormalized = vMessage.toLowerCase();
+    if (objFriendly.state === "disconnected") {
+        return {
+            type: "connection",
+            message: objFriendly.message
+        };
+    }
+    if ((vNormalized.includes("insufficient") && vNormalized.includes("margin"))
+        || (vNormalized.includes("insufficient") && vNormalized.includes("balance"))
+        || vNormalized.includes("not enough balance")
+        || vNormalized.includes("not sufficient balance")) {
+        return {
+            type: "insufficient_margin",
+            message: vMessage
+        };
+    }
+    return {
+        type: "other",
+        message: vMessage
+    };
+}
+
+async function listOpenDeltaOrders(
+    pClient: any
+): Promise<DeltaActiveOrderRow[]> {
+    if (typeof pClient?.apis?.Orders?.getOrders !== "function") {
+        return [];
+    }
+    const objResponse = await pClient.apis.Orders.getOrders({
+        state: "open",
+        page_size: 100
+    });
+    const objPayload = readResponsePayload(objResponse);
+    return Array.isArray(objPayload.result) ? objPayload.result as DeltaActiveOrderRow[] : [];
+}
+
+async function cancelOpenCoveredOptionEntryOrdersForLeg(
+    pClient: any,
+    pSymbol: "BTC" | "ETH",
+    pLegSide: "ce" | "pe",
+    pAction: "buy" | "sell"
+): Promise<number> {
+    if (typeof pClient?.apis?.Orders?.cancelOrder !== "function") {
+        return 0;
+    }
+    const arrOpenOrders = await listOpenDeltaOrders(pClient);
+    const vPrefix = pLegSide === "pe" ? `P-${pSymbol}-` : `C-${pSymbol}-`;
+    const arrMatching = arrOpenOrders.filter((objOrder) => {
+        const vContract = String(objOrder.product_symbol || "").trim().toUpperCase();
+        const vOrderSide = String(objOrder.side || "").trim().toLowerCase();
+        return vContract.startsWith(vPrefix)
+            && vOrderSide === pAction
+            && !Boolean(objOrder.reduce_only)
+            && Math.max(0, Math.floor(Number(objOrder.unfilled_size ?? objOrder.size ?? 0))) > 0;
+    });
+    for (const objOrder of arrMatching) {
+        await pClient.apis.Orders.cancelOrder({
+            order: {
+                id: Number.isFinite(Number(objOrder.id)) ? Number(objOrder.id) : objOrder.id,
+                product_symbol: String(objOrder.product_symbol || "").trim()
+            }
+        });
+    }
+    return arrMatching.length;
+}
+
 async function resolveProfileId(req: Request, pStrategyCode: RollingFuturesLtStrategyCode): Promise<string> {
     const vQueryProfileId = String(req.query?.profileId || req.body?.profileId || "").trim();
     if (vQueryProfileId) {
@@ -3154,6 +3257,84 @@ function buildRuntimeStateWithPendingReEntry(
         reason: pReason,
         runAt: pRunAt
     };
+    return objState;
+}
+
+type CoveredPendingOptionReEntryState = {
+    dedupeKey: string;
+    rowIndex: 1 | 2;
+    legSide: "ce" | "pe";
+    action: "buy" | "sell";
+    qty: number;
+    reason: "sl" | "tp" | "expiry_cutoff" | "missing_leg";
+    targetDelta: number;
+    expiryMode: string;
+    expiryDate: string;
+    runAt: string;
+    scheduledAt: string;
+    attemptCount: number;
+    closedContractName: string;
+    lastError: string;
+};
+
+function getCoveredPendingOptionReEntriesState(
+    pRuntime: RollingFuturesLtRuntimeRecord | null
+): CoveredPendingOptionReEntryState[] {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    const arrPending = Array.isArray(objState.pendingCoveredOptionReEntries)
+        ? objState.pendingCoveredOptionReEntries as Array<Record<string, unknown>>
+        : [];
+    return arrPending.map((objEntry) => {
+        const vRowIndex = normalizeOptionRowIndex("covered-options", objEntry.rowIndex);
+        const vLegSide = String(objEntry.legSide || "").trim().toLowerCase() === "pe" ? "pe" : "ce";
+        const vAction = String(objEntry.action || "").trim().toLowerCase() === "buy" ? "buy" : "sell";
+        const vReason = String(objEntry.reason || "").trim().toLowerCase();
+        return {
+            dedupeKey: String(objEntry.dedupeKey || `${vRowIndex}:${vLegSide}`).trim() || `${vRowIndex}:${vLegSide}`,
+            rowIndex: vRowIndex,
+            legSide: vLegSide,
+            action: vAction,
+            qty: Math.max(1, Math.floor(Number(objEntry.qty || 1))),
+            reason: vReason === "sl" || vReason === "tp" || vReason === "expiry_cutoff" || vReason === "missing_leg"
+                ? vReason
+                : "missing_leg",
+            targetDelta: Math.max(0, Number(objEntry.targetDelta || 0)),
+            expiryMode: String(objEntry.expiryMode || "").trim(),
+            expiryDate: String(objEntry.expiryDate || "").trim(),
+            runAt: String(objEntry.runAt || "").trim(),
+            scheduledAt: String(objEntry.scheduledAt || "").trim(),
+            attemptCount: Math.max(0, Math.floor(Number(objEntry.attemptCount || 0))),
+            closedContractName: String(objEntry.closedContractName || "").trim(),
+            lastError: String(objEntry.lastError || "").trim()
+        } satisfies CoveredPendingOptionReEntryState;
+    }).filter((objEntry) => Boolean(objEntry.runAt) && Boolean(objEntry.scheduledAt));
+}
+
+function buildRuntimeStateWithCoveredPendingOptionReEntries(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pEntries: CoveredPendingOptionReEntryState[]
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    if (!Array.isArray(pEntries) || !pEntries.length) {
+        delete objState.pendingCoveredOptionReEntries;
+        return objState;
+    }
+    objState.pendingCoveredOptionReEntries = pEntries.map((objEntry) => ({
+        dedupeKey: objEntry.dedupeKey,
+        rowIndex: normalizeOptionRowIndex("covered-options", objEntry.rowIndex),
+        legSide: objEntry.legSide === "pe" ? "pe" : "ce",
+        action: objEntry.action === "buy" ? "buy" : "sell",
+        qty: Math.max(1, Math.floor(Number(objEntry.qty || 1))),
+        reason: objEntry.reason,
+        targetDelta: Math.max(0, Number(objEntry.targetDelta || 0)),
+        expiryMode: String(objEntry.expiryMode || "").trim(),
+        expiryDate: String(objEntry.expiryDate || "").trim(),
+        runAt: String(objEntry.runAt || "").trim(),
+        scheduledAt: String(objEntry.scheduledAt || "").trim(),
+        attemptCount: Math.max(0, Math.floor(Number(objEntry.attemptCount || 0))),
+        closedContractName: String(objEntry.closedContractName || "").trim(),
+        lastError: String(objEntry.lastError || "").trim()
+    }));
     return objState;
 }
 
@@ -5254,6 +5435,8 @@ async function openTrackedOptionReEntry(
         forceExpiryDate?: string;
         useRowAction?: boolean;
         useRowQty?: boolean;
+        forceLegSide?: "ce" | "pe";
+        forceTargetDelta?: number;
     }
 ): Promise<{
     position: RollingFuturesLtImportedPositionRecord;
@@ -5265,8 +5448,13 @@ async function openTrackedOptionReEntry(
     const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pMetadata.rowIndex);
     const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
     const vSymbol = normalizeSymbolValue(objUiState.symbol);
-    const vLegSide = getTrackedOptionLegSide(pClosedPosition.contractName);
-    const vTargetDelta = Math.max(0, Number(pMetadata.reEntryDelta || objRowState.reD || 0.53));
+    const vLegSide = pOptions?.forceLegSide === "pe"
+        ? "pe"
+        : (pOptions?.forceLegSide === "ce" ? "ce" : getTrackedOptionLegSide(pClosedPosition.contractName));
+    const vTargetDelta = Math.max(
+        0,
+        Number(pOptions?.forceTargetDelta ?? pMetadata.reEntryDelta ?? objRowState.reD ?? 0.53)
+    );
     const vExpiryDate = normalizeIsoDateOnly(pOptions?.forceExpiryDate) || String(objRowState.expiryDate || "").trim();
     const vOrderAction = pOptions?.useRowAction
         ? (String(objRowState.action || "sell").trim().toLowerCase() === "buy" ? "buy" as const : "sell" as const)
@@ -5378,6 +5566,370 @@ async function openTrackedOptionReEntry(
         orderPayload: objReEntryPayload,
         placedAt: vPlacedAtIso
     };
+}
+
+async function upsertCoveredPendingOptionReEntry(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pEntry: CoveredPendingOptionReEntryState
+): Promise<void> {
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const arrExisting = getCoveredPendingOptionReEntriesState(objRuntime);
+    const arrNext = [
+        ...arrExisting.filter((objExisting) => objExisting.dedupeKey !== pEntry.dedupeKey),
+        pEntry
+    ].sort((pLeft, pRight) => pLeft.dedupeKey.localeCompare(pRight.dedupeKey));
+    await saveRollingFuturesLtRuntime({
+        ...objRuntime,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        state: buildRuntimeStateWithCoveredPendingOptionReEntries(objRuntime, arrNext)
+    });
+}
+
+async function scheduleCoveredPendingOptionReEntry(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pProfile: RollingFuturesLtProfileRecord,
+    pRowIndex: 1 | 2,
+    pLegSide: "ce" | "pe",
+    pReason: "sl" | "tp" | "expiry_cutoff" | "missing_leg",
+    pOptions?: {
+        qty?: number;
+        action?: "buy" | "sell";
+        targetDelta?: number;
+        expiryMode?: string;
+        expiryDate?: string;
+        closedContractName?: string;
+        lastError?: string;
+        attemptCount?: number;
+    }
+): Promise<void> {
+    const objUiState = getMergedUiState(pProfile);
+    const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, pRowIndex);
+    const objEntry: CoveredPendingOptionReEntryState = {
+        dedupeKey: `${pRowIndex}:${pLegSide}`,
+        rowIndex: pRowIndex,
+        legSide: pLegSide,
+        action: pOptions?.action || objRowState.action,
+        qty: Math.max(1, Math.floor(Number(pOptions?.qty || objRowState.qty || 1))),
+        reason: pReason,
+        targetDelta: Math.max(0, Number(pOptions?.targetDelta ?? objRowState.reD ?? 0.53)),
+        expiryMode: String(pOptions?.expiryMode || objRowState.expiryMode || "").trim(),
+        expiryDate: String(pOptions?.expiryDate || objRowState.expiryDate || "").trim(),
+        runAt: new Date(Date.now() + gCoveredOptionReEntryRetryMs).toISOString(),
+        scheduledAt: new Date().toISOString(),
+        attemptCount: Math.max(0, Math.floor(Number(pOptions?.attemptCount || 0))),
+        closedContractName: String(pOptions?.closedContractName || "").trim(),
+        lastError: String(pOptions?.lastError || "").trim()
+    };
+    await upsertCoveredPendingOptionReEntry(pUserId, pStrategyCode, objEntry);
+}
+
+function buildCoveredReEntryPlaceholderPosition(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pRowIndex: 1 | 2,
+    pLegSide: "ce" | "pe",
+    pAction: "buy" | "sell",
+    pQty: number
+): RollingFuturesLtImportedPositionRecord {
+    return {
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        importId: `pending-${pRowIndex}-${pLegSide}`,
+        contractName: `${pLegSide === "pe" ? "P" : "C"}-PENDING`,
+        side: pAction.toUpperCase(),
+        qty: Math.max(1, Math.floor(Number(pQty || 1))),
+        entryPrice: 0,
+        markPrice: 0,
+        charges: 0,
+        pnl: 0,
+        margin: 0,
+        liquidationPrice: 0,
+        metadata: optionMetadataToRecord({
+            rowIndex: pRowIndex,
+            reEnterEnabled: true
+        }),
+        openedAt: "",
+        updatedAt: ""
+    };
+}
+
+async function processCoveredPendingOptionReEntries(
+    pUserId: string,
+    pSelectedApiProfileId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<RollingFuturesLtImportedPositionRecord[]> {
+    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    let arrSavedPositions = [...pTrackedPositions];
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const arrPending = getCoveredPendingOptionReEntriesState(objRuntime);
+    if (!arrPending.length) {
+        return arrSavedPositions;
+    }
+    const vNowMs = Date.now();
+    let arrNextPending = [...arrPending];
+    const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
+    const vSymbol = normalizeSymbolValue(getMergedUiState(pProfile).symbol);
+    for (const objPending of arrPending) {
+        const objRowState = getNormalizedOptionRowUiState(getMergedUiState(pProfile), pStrategyCode, objPending.rowIndex);
+        const vConfiguredQty = Math.max(1, Math.floor(Number(objRowState.qty || 1)));
+        const vCurrentOpenQty = getTrackedOptionRowLegTotalQty(arrSavedPositions, objPending.rowIndex, objPending.legSide);
+        if (vCurrentOpenQty > vConfiguredQty) {
+            arrNextPending = arrNextPending.filter((objEntry) => objEntry.dedupeKey !== objPending.dedupeKey);
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "engine_error",
+                "warning",
+                "Covered Leg Re-Entry Blocked",
+                `Row ${objPending.rowIndex} ${objPending.legSide.toUpperCase()} already has open quantity ${vCurrentOpenQty}, above configured Qty ${vConfiguredQty}. Pending re-entry was blocked.`,
+                {
+                    rowIndex: objPending.rowIndex,
+                    legSide: objPending.legSide,
+                    openQty: vCurrentOpenQty,
+                    configuredQty: vConfiguredQty,
+                    reason: "covered_option_reentry_blocked_qty_exceeded"
+                }
+            );
+            continue;
+        }
+        if (hasTrackedOptionRowLeg(arrSavedPositions, objPending.rowIndex, objPending.legSide)) {
+            arrNextPending = arrNextPending.filter((objEntry) => objEntry.dedupeKey !== objPending.dedupeKey);
+            continue;
+        }
+        const vRunAtMs = new Date(objPending.runAt).getTime();
+        if (!Number.isFinite(vRunAtMs) || vRunAtMs > vNowMs) {
+            continue;
+        }
+        const objMetadata: RollingFuturesLtOptionMetadata = {
+            rowIndex: objPending.rowIndex,
+            reEntryDelta: Math.max(0, Number(objPending.targetDelta || objRowState.reD || 0.53)),
+            takeProfitDelta: Math.max(0, Number(objRowState.tpD || 0)),
+            stopLossDelta: Math.max(0, Number(objRowState.slD || 0)),
+            reEnterEnabled: Boolean(objRowState.reEnter)
+        };
+        try {
+            const vCancelledCount = await cancelOpenCoveredOptionEntryOrdersForLeg(
+                client,
+                vSymbol,
+                objPending.legSide,
+                objPending.action
+            );
+            if (vCancelledCount > 0) {
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "manual_action",
+                    "info",
+                    "Pending Re-Entry Orders Cancelled",
+                    `Cancelled ${vCancelledCount} pending order${vCancelledCount === 1 ? "" : "s"} for row ${objPending.rowIndex} ${objPending.legSide.toUpperCase()} before retrying the missing covered leg.`,
+                    {
+                        rowIndex: objPending.rowIndex,
+                        legSide: objPending.legSide,
+                        reason: "covered_option_reentry_cancelled_pending"
+                    }
+                );
+            }
+            const objPlaceholderPosition = buildCoveredReEntryPlaceholderPosition(
+                pUserId,
+                pStrategyCode,
+                objPending.rowIndex,
+                objPending.legSide,
+                objPending.action,
+                objPending.qty
+            );
+            const objReEntry = await openTrackedOptionReEntry(
+                pUserId,
+                pStrategyCode,
+                pSelectedApiProfileId,
+                pProfile,
+                objPlaceholderPosition,
+                objMetadata,
+                objPending.reason === "tp" || objPending.reason === "expiry_cutoff" ? objPending.reason : "sl",
+                {
+                    forceLegSide: objPending.legSide,
+                    forceTargetDelta: objPending.targetDelta,
+                    forceExpiryDate: objPending.expiryDate,
+                    useRowAction: true,
+                    useRowQty: true
+                }
+            );
+            if (!objReEntry) {
+                continue;
+            }
+            if (hasTrackedOptionRowLeg(arrSavedPositions, objPending.rowIndex, objPending.legSide)) {
+                arrNextPending = arrNextPending.filter((objEntry) => objEntry.dedupeKey !== objPending.dedupeKey);
+                continue;
+            }
+            arrSavedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, [
+                ...arrSavedPositions,
+                objReEntry.position
+            ]);
+            arrNextPending = arrNextPending.filter((objEntry) => objEntry.dedupeKey !== objPending.dedupeKey);
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "reentry_opened",
+                "success",
+                "Covered Leg Re-Entry Opened",
+                `Recovered missing row ${objPending.rowIndex} ${objPending.legSide.toUpperCase()} leg after Delta connection returned.`,
+                {
+                    contractName: objReEntry.position.contractName,
+                    rowIndex: objPending.rowIndex,
+                    legSide: objPending.legSide,
+                    reason: "covered_option_reentry_retry_opened"
+                }
+            );
+        }
+        catch (objError) {
+            const objFailure = await classifyCoveredOptionReEntryFailure(objError);
+            if (objFailure.type === "connection") {
+                arrNextPending = arrNextPending.map((objEntry) => objEntry.dedupeKey !== objPending.dedupeKey
+                    ? objEntry
+                    : {
+                        ...objEntry,
+                        runAt: new Date(Date.now() + gCoveredOptionReEntryRetryMs).toISOString(),
+                        attemptCount: objEntry.attemptCount + 1,
+                        lastError: objFailure.message
+                    });
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "delta_exchange_error",
+                    "warning",
+                    "Covered Leg Re-Entry Deferred",
+                    `${objFailure.message} Retry for row ${objPending.rowIndex} ${objPending.legSide.toUpperCase()} is scheduled after 1 minute.`,
+                    {
+                        rowIndex: objPending.rowIndex,
+                        legSide: objPending.legSide,
+                        retryAt: new Date(Date.now() + gCoveredOptionReEntryRetryMs).toISOString(),
+                        reason: "covered_option_reentry_connection_retry"
+                    }
+                );
+                continue;
+            }
+            arrNextPending = arrNextPending.filter((objEntry) => objEntry.dedupeKey !== objPending.dedupeKey);
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                objFailure.type === "insufficient_margin" ? "engine_error" : "delta_exchange_error",
+                objFailure.type === "insufficient_margin" ? "warning" : "error",
+                objFailure.type === "insufficient_margin"
+                    ? "Covered Leg Re-Entry Skipped"
+                    : "Covered Leg Re-Entry Failed",
+                objFailure.type === "insufficient_margin"
+                    ? `${objFailure.message} No retry will be attempted for row ${objPending.rowIndex} ${objPending.legSide.toUpperCase()}.`
+                    : objFailure.message,
+                {
+                    rowIndex: objPending.rowIndex,
+                    legSide: objPending.legSide,
+                    reason: objFailure.type === "insufficient_margin"
+                        ? "covered_option_reentry_insufficient_margin"
+                        : "covered_option_reentry_failed"
+                }
+            );
+        }
+    }
+    const objLatestRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    await saveRollingFuturesLtRuntime({
+        ...objLatestRuntime,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        state: buildRuntimeStateWithCoveredPendingOptionReEntries(objLatestRuntime, arrNextPending)
+    });
+    return arrSavedPositions;
+}
+
+async function ensureCoveredConfiguredLegPresence(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<void> {
+    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    const objUiState = getMergedUiState(pProfile);
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const arrPending = getCoveredPendingOptionReEntriesState(objRuntime);
+    for (const vRowIndex of [1, 2] as const) {
+        const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
+        const arrRequiredLegs = objRowState.legs === "both"
+            ? ["ce", "pe"] as Array<"ce" | "pe">
+            : [objRowState.legs];
+        const vExistingCount = arrRequiredLegs.filter((vLegSide) => hasTrackedOptionRowLeg(pTrackedPositions, vRowIndex, vLegSide)).length;
+        if (vExistingCount <= 0) {
+            continue;
+        }
+        for (const vLegSide of arrRequiredLegs) {
+            if (hasTrackedOptionRowLeg(pTrackedPositions, vRowIndex, vLegSide)) {
+                continue;
+            }
+            const vDedupeKey = `${vRowIndex}:${vLegSide}`;
+            if (arrPending.some((objEntry) => objEntry.dedupeKey === vDedupeKey)) {
+                continue;
+            }
+            await scheduleCoveredPendingOptionReEntry(
+                pUserId,
+                pStrategyCode,
+                pProfile,
+                vRowIndex,
+                vLegSide,
+                "missing_leg"
+            );
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "manual_action",
+                "warning",
+                "Covered Leg Missing",
+                `Row ${vRowIndex} is configured as ${objRowState.legs.toUpperCase()} but ${vLegSide.toUpperCase()} is missing from open positions. Re-entry has been scheduled.`,
+                {
+                    rowIndex: vRowIndex,
+                    legSide: vLegSide,
+                    reason: "covered_option_missing_leg_scheduled"
+                }
+            );
+        }
+    }
+}
+
+async function validateCoveredOpenLegQtyLimits(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<void> {
+    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    const objUiState = getMergedUiState(pProfile);
+    for (const vRowIndex of [1, 2] as const) {
+        const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
+        const vConfiguredQty = Math.max(1, Math.floor(Number(objRowState.qty || 1)));
+        for (const vLegSide of ["ce", "pe"] as const) {
+            const vOpenQty = getTrackedOptionRowLegTotalQty(pTrackedPositions, vRowIndex, vLegSide);
+            if (vOpenQty <= vConfiguredQty) {
+                continue;
+            }
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "engine_error",
+                "warning",
+                "Covered Leg Quantity Exceeded",
+                `Row ${vRowIndex} ${vLegSide.toUpperCase()} open quantity is ${vOpenQty}, which is above configured Qty ${vConfiguredQty}. Auto re-entry for this row-leg will stay blocked until quantity is reduced manually.`,
+                {
+                    rowIndex: vRowIndex,
+                    legSide: vLegSide,
+                    openQty: vOpenQty,
+                    configuredQty: vConfiguredQty,
+                    reason: "covered_option_leg_qty_exceeded"
+                }
+            );
+        }
+    }
 }
 
 async function applyTriggeredOptionRule(
@@ -5504,26 +6056,26 @@ async function applyTriggeredOptionRule(
             )
         });
         const objRowState = getNormalizedOptionRowUiState(getMergedUiState(pProfile), pStrategyCode, objMetadata.rowIndex);
-        const objReEntry = await openTrackedOptionReEntry(
-            pUserId,
-            pStrategyCode,
-            pSelectedApiProfileId,
-            pProfile,
-            pPosition,
-            objMetadata,
-            pReason,
-            pReason === "expiry_cutoff" && isCoveredOptionsStrategy(pStrategyCode)
-                ? {
-                    forceExpiryDate: resolveCoveredCutoffReEntryExpiryDate(
-                        objRowState.expiryMode,
-                        getTrackedOptionResolvedExpiryDate(pPosition)
-                    ),
-                    useRowAction: true,
-                    useRowQty: true
-                }
-                : undefined
-        );
         try {
+            const objReEntry = await openTrackedOptionReEntry(
+                pUserId,
+                pStrategyCode,
+                pSelectedApiProfileId,
+                pProfile,
+                pPosition,
+                objMetadata,
+                pReason,
+                pReason === "expiry_cutoff" && isCoveredOptionsStrategy(pStrategyCode)
+                    ? {
+                        forceExpiryDate: resolveCoveredCutoffReEntryExpiryDate(
+                            objRowState.expiryMode,
+                            getTrackedOptionResolvedExpiryDate(pPosition)
+                        ),
+                        useRowAction: true,
+                        useRowQty: true
+                    }
+                    : undefined
+            );
             if (objReEntry) {
                 arrNextPositions = [...arrNextPositions, objReEntry.position];
                 const vResolvedReEntryCharge = await resolveOrderChargeFromDelta(
@@ -5563,6 +6115,76 @@ async function applyTriggeredOptionRule(
             else {
                 await incrementBrokerageRecoveryTotal(pUserId, pStrategyCode, vCloseCharge, arrNextPositions.length);
                 await incrementRecoveredTotalPnl(pUserId, pStrategyCode, vClosePnl, arrNextPositions.length);
+            }
+        }
+        catch (objError) {
+            if (isCoveredOptionsStrategy(pStrategyCode)) {
+                const objFailure = await classifyCoveredOptionReEntryFailure(objError);
+                if (objFailure.type === "connection") {
+                    await scheduleCoveredPendingOptionReEntry(
+                        pUserId,
+                        pStrategyCode,
+                        pProfile,
+                        normalizeOptionRowIndex(pStrategyCode, objMetadata.rowIndex),
+                        getTrackedOptionLegSide(pPosition.contractName),
+                        pReason,
+                        {
+                            qty: Math.max(1, Math.floor(Number(pPosition.qty || 1))),
+                            action: String(pPosition.side || "").trim().toUpperCase() === "BUY" ? "buy" : "sell",
+                            targetDelta: Math.max(0, Number(objMetadata.reEntryDelta || objRowState.reD || 0.53)),
+                            expiryMode: String(objRowState.expiryMode || "").trim(),
+                            expiryDate: pReason === "expiry_cutoff"
+                                ? resolveCoveredCutoffReEntryExpiryDate(
+                                    objRowState.expiryMode,
+                                    getTrackedOptionResolvedExpiryDate(pPosition)
+                                )
+                                : String(objRowState.expiryDate || "").trim(),
+                            closedContractName: pPosition.contractName,
+                            lastError: objFailure.message
+                        }
+                    );
+                    await incrementBrokerageRecoveryTotal(pUserId, pStrategyCode, vCloseCharge, arrNextPositions.length);
+                    await incrementRecoveredTotalPnl(pUserId, pStrategyCode, vClosePnl, arrNextPositions.length);
+                    await logFuturesEvent(
+                        pUserId,
+                        pStrategyCode,
+                        "delta_exchange_error",
+                        "warning",
+                        "Covered Leg Re-Entry Deferred",
+                        `${objFailure.message} Re-entry for row ${objRowState.rowIndex} ${getTrackedOptionLegSide(pPosition.contractName).toUpperCase()} will retry every 1 minute after connectivity recovers.`,
+                        {
+                            contractName: pPosition.contractName,
+                            rowIndex: objRowState.rowIndex,
+                            legSide: getTrackedOptionLegSide(pPosition.contractName),
+                            retryAt: new Date(Date.now() + gCoveredOptionReEntryRetryMs).toISOString(),
+                            reason: "covered_option_reentry_connection_retry"
+                        }
+                    );
+                }
+                else if (objFailure.type === "insufficient_margin") {
+                    await incrementBrokerageRecoveryTotal(pUserId, pStrategyCode, vCloseCharge, arrNextPositions.length);
+                    await incrementRecoveredTotalPnl(pUserId, pStrategyCode, vClosePnl, arrNextPositions.length);
+                    await logFuturesEvent(
+                        pUserId,
+                        pStrategyCode,
+                        "engine_error",
+                        "warning",
+                        "Covered Leg Re-Entry Skipped",
+                        `${objFailure.message} No retry will be attempted for ${pPosition.contractName}.`,
+                        {
+                            contractName: pPosition.contractName,
+                            rowIndex: objRowState.rowIndex,
+                            legSide: getTrackedOptionLegSide(pPosition.contractName),
+                            reason: "covered_option_reentry_insufficient_margin"
+                        }
+                    );
+                }
+                else {
+                    throw objError;
+                }
+            }
+            else {
+                throw objError;
             }
         }
         finally {
@@ -6557,6 +7179,24 @@ async function runAutoTraderCycle(
             "auto_trader_live_reconcile"
         );
         let arrSavedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrLivePositions);
+        if (isCoveredOptionsStrategy(pStrategyCode)) {
+            arrSavedPositions = await processCoveredPendingOptionReEntries(
+                pUserId,
+                vSelectedApiProfileId,
+                objProfile,
+                arrSavedPositions
+            );
+            await validateCoveredOpenLegQtyLimits(
+                pUserId,
+                objProfile,
+                arrSavedPositions
+            );
+            await ensureCoveredConfiguredLegPresence(
+                pUserId,
+                objProfile,
+                arrSavedPositions
+            );
+        }
         await processPendingOptionRecoveryRefresh(
             pUserId,
             pStrategyCode,
