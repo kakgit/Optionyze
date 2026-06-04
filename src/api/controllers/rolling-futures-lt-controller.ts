@@ -156,7 +156,7 @@ function shouldForceDualSurvivalTest(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode
 ): boolean {
-    if (!isDualRollingFuturesStrategy(pStrategyCode)) {
+    if (!isDualServerManagedStrategy(pStrategyCode)) {
         return false;
     }
     const vEnabled = String(process.env.FORCE_DUAL_SURVIVAL_TEST || "").trim().toLowerCase();
@@ -372,6 +372,10 @@ function isDualRollingFuturesStrategy(pStrategyCode: RollingFuturesLtStrategyCod
 
 function isCoveredOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
     return pStrategyCode === "covered-options";
+}
+
+function isDualServerManagedStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
+    return pStrategyCode === "rolling-futures-lt-dual";
 }
 
 function normalizeOptionRowIndex(
@@ -6470,7 +6474,7 @@ function setLocalSurvivalLeaseToken(pUserId: string, pStrategyCode: RollingFutur
 }
 
 function isDualLeaseManagedStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return isDualRollingFuturesStrategy(pStrategyCode);
+    return isDualServerManagedStrategy(pStrategyCode);
 }
 
 function getLocalStrategyLeaseToken(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): string {
@@ -6641,7 +6645,7 @@ async function syncDualStrategySurvivalState(
     pPositions: RollingFuturesLtImportedPositionRecord[],
     pStatus: "active" | "ended" = "active"
 ): Promise<void> {
-    if (!isDualRollingFuturesStrategy(pStrategyCode)) {
+    if (!isDualServerManagedStrategy(pStrategyCode)) {
         return;
     }
 
@@ -6719,7 +6723,7 @@ async function syncSurvivalStateDuringPrimaryOutage(
     pLastError = "",
     pOwnedSurvival: Awaited<ReturnType<typeof getSurvivalState>> | null = null
 ): Promise<void> {
-    if (!isDualRollingFuturesStrategy(pStrategyCode)) {
+    if (!isDualServerManagedStrategy(pStrategyCode)) {
         return;
     }
     const objSurvival = pOwnedSurvival || await getSurvivalState(pUserId, pStrategyCode);
