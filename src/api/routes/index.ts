@@ -15,12 +15,19 @@ import {
 } from "../controllers/users-controller";
 import { listSurvivalAdminRunningUsers } from "../controllers/survival-admin-controller";
 import {
+    emergencyStopDirectionalOptionsDemo,
+    closeDirectionalOptionsDemoPosition,
     emergencyStopStrategyFoPaper,
+    getDirectionalOptionsDemoStatus,
     getStrategyFoPaperProfile,
     getStrategyFoPaperStatus,
+    resetDirectionalOptionsDemo,
     resetStrategyFoPaper,
+    runDirectionalOptionsDemoCycle,
     saveStrategyFoPaperProfileController,
+    startDirectionalOptionsDemo,
     startStrategyFoPaper,
+    stopDirectionalOptionsDemo,
     stopStrategyFoPaper,
     runStrategyFoPaperCycle,
     validateStrategyFoPaperLogin
@@ -91,11 +98,13 @@ import {
 } from "../controllers/delta-api-controller";
 import type { RunnerManager } from "../../runners/runner-manager";
 import type { StrategyFoGreeksPaperService } from "../../strategies/strategy-fo-greeks-paper/service";
+import type { DirectionalOptionsDemoService } from "../../strategies/directional-options-demo/service";
 import { requireAdminApi, requireAuthApi, requireFreshPasswordApi, requireSurvivalAdminApi } from "../middleware/auth-middleware";
 
 export function createApiRouter(
     pRunnerManager: RunnerManager,
-    pStrategyFoPaperService: StrategyFoGreeksPaperService
+    pStrategyFoPaperService: StrategyFoGreeksPaperService,
+    pDirectionalOptionsDemoService: DirectionalOptionsDemoService
 ): Router {
     const objRouter = Router();
 
@@ -176,6 +185,28 @@ export function createApiRouter(
     });
     objRouter.post("/strategyfo/paper/emergency-stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await emergencyStopStrategyFoPaper(req, res, pStrategyFoPaperService);
+    });
+
+    objRouter.get("/directional-options-demo/status", requireAuthApi, requireFreshPasswordApi, (req, res) => {
+        getDirectionalOptionsDemoStatus(req, res, pDirectionalOptionsDemoService);
+    });
+    objRouter.post("/directional-options-demo/start", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await startDirectionalOptionsDemo(req, res, pDirectionalOptionsDemoService);
+    });
+    objRouter.post("/directional-options-demo/stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await stopDirectionalOptionsDemo(req, res, pDirectionalOptionsDemoService);
+    });
+    objRouter.post("/directional-options-demo/cycle", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await runDirectionalOptionsDemoCycle(req, res, pDirectionalOptionsDemoService);
+    });
+    objRouter.post("/directional-options-demo/reset", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await resetDirectionalOptionsDemo(req, res, pDirectionalOptionsDemoService);
+    });
+    objRouter.post("/directional-options-demo/positions/:positionId/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await closeDirectionalOptionsDemoPosition(req, res, pDirectionalOptionsDemoService);
+    });
+    objRouter.post("/directional-options-demo/emergency-stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await emergencyStopDirectionalOptionsDemo(req, res, pDirectionalOptionsDemoService);
     });
 
     objRouter.get("/rollingfutures-lt-dual/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {

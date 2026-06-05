@@ -1,0 +1,875 @@
+import crypto from "node:crypto";
+import { getDeltaApiProfile } from "../../storage/delta-api-profile-store";
+import {
+    deleteDirectionalOptionsDemoState,
+    loadDirectionalOptionsDemoStates,
+    saveDirectionalOptionsDemoState
+} from "../../storage/directional-options-demo-store";
+import { fetchSnapshot, selectOptionByDteDelta } from "../strategy-fo-greeks-paper/market-data";
+import type { MarketOptionSnapshot, MarketSnapshot } from "../strategy-fo-greeks-paper/types";
+import type {
+    DirectionalOptionsDemoConfig,
+    DirectionalOptionsDemoEvent,
+    DirectionalOptionsDemoPosition,
+    DirectionalOptionsDemoState,
+    DirectionalOptionsDemoStatus,
+    DirectionalSignalMetrics
+} from "./types";
+
+function clampNumber(value: unknown, min: number, max: number, fallbackValue: number): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return fallbackValue;
+    }
+    return Math.max(min, Math.min(max, parsed));
+}
+
+function average(values: number[]): number {
+    if (!values.length) {
+        return 0;
+    }
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function calcEma(values: number[], period: number): number {
+    if (!values.length) {
+        return 0;
+    }
+    const alpha = 2 / (Math.max(1, period) + 1);
+    let ema = values[0];
+    for (let index = 1; index < values.length; index += 1) {
+        ema = (values[index] * alpha) + (ema * (1 - alpha));
+    }
+    return ema;
+}
+
+function calcRsi(values: number[], period: number): number {
+    if (values.length < period + 1) {
+        return 50;
+    }
+    let gains = 0;
+    let losses = 0;
+    const startIndex = values.length - period;
+    for (let index = startIndex; index < values.length; index += 1) {
+        const change = values[index] - values[index - 1];
+        if (change >= 0) {
+            gains += change;
+        }
+        else {
+            losses += Math.abs(change);
+        }
+    }
+    if (losses === 0) {
+        return gains === 0 ? 50 : 100;
+    }
+    const rs = gains / losses;
+    return 100 - (100 / (1 + rs));
+}
+
+function addEvent(state: DirectionalOptionsDemoState, type: string, title: string, message: string): void {
+    const event: DirectionalOptionsDemoEvent = {
+        ts: new Date().toISOString(),
+        type,
+        title,
+        message
+    };
+    state.events.unshift(event);
+    state.events = state.events.slice(0, 100);
+}
+
+function buildDefaultConfig(): DirectionalOptionsDemoConfig {
+    return {
+        symbol: "BTCUSD",
+        underlying: "BTC",
+        presetKey: "btc_scalper",
+        loopSeconds: 8,
+        targetAbsDelta: 0.28,
+        entryDteMin: 1,
+        entryDteMax: 5,
+        baseContracts: 1,
+        maxContracts: 2,
+        bullishThreshold: 4,
+        bearishThreshold: 4,
+        minConfidence: 62,
+        takeProfitPct: 10,
+        stopLossPct: 7,
+        maxHoldCycles: 4,
+        cooldownCycles: 1,
+        emaFastPeriod: 4,
+        emaSlowPeriod: 9,
+        rsiPeriod: 6,
+        slopeLookback: 3,
+        neutralExitCycles: 2,
+        requireEmaAlignment: true,
+        requireRsiConfirmation: false,
+        preferredRegime: "any",
+        minVolatilityPct: 0.18,
+        maxSessionProfit: 40,
+        maxSessionLoss: 25,
+        maxConsecutiveLosses: 3
+    };
+}
+
+function normalizeConfig(input?: Partial<DirectionalOptionsDemoConfig>): DirectionalOptionsDemoConfig {
+    const defaults = buildDefaultConfig();
+    const symbol = String(input?.symbol || defaults.symbol).trim().toUpperCase() === "ETHUSD" ? "ETHUSD" : "BTCUSD";
+    const preferredRegime = String(input?.preferredRegime || defaults.preferredRegime).trim().toLowerCase();
+    return {
+        symbol,
+        underlying: symbol === "ETHUSD" ? "ETH" : "BTC",
+        presetKey: String(input?.presetKey || defaults.presetKey || "custom").trim() || "custom",
+        loopSeconds: clampNumber(input?.loopSeconds, 5, 300, defaults.loopSeconds),
+        targetAbsDelta: clampNumber(input?.targetAbsDelta, 0.05, 0.9, defaults.targetAbsDelta),
+        entryDteMin: clampNumber(input?.entryDteMin, 1, 60, defaults.entryDteMin),
+        entryDteMax: clampNumber(input?.entryDteMax, 1, 90, defaults.entryDteMax),
+        baseContracts: clampNumber(input?.baseContracts, 1, 20, defaults.baseContracts),
+        maxContracts: clampNumber(input?.maxContracts, 1, 50, defaults.maxContracts),
+        bullishThreshold: clampNumber(input?.bullishThreshold, 1, 10, defaults.bullishThreshold),
+        bearishThreshold: clampNumber(input?.bearishThreshold, 1, 10, defaults.bearishThreshold),
+        minConfidence: clampNumber(input?.minConfidence, 1, 100, defaults.minConfidence),
+        takeProfitPct: clampNumber(input?.takeProfitPct, 1, 200, defaults.takeProfitPct),
+        stopLossPct: clampNumber(input?.stopLossPct, 1, 100, defaults.stopLossPct),
+        maxHoldCycles: clampNumber(input?.maxHoldCycles, 1, 100, defaults.maxHoldCycles),
+        cooldownCycles: clampNumber(input?.cooldownCycles, 0, 50, defaults.cooldownCycles),
+        emaFastPeriod: clampNumber(input?.emaFastPeriod, 2, 50, defaults.emaFastPeriod),
+        emaSlowPeriod: clampNumber(input?.emaSlowPeriod, 3, 100, defaults.emaSlowPeriod),
+        rsiPeriod: clampNumber(input?.rsiPeriod, 2, 50, defaults.rsiPeriod),
+        slopeLookback: clampNumber(input?.slopeLookback, 1, 30, defaults.slopeLookback),
+        neutralExitCycles: clampNumber(input?.neutralExitCycles, 1, 50, defaults.neutralExitCycles),
+        requireEmaAlignment: input?.requireEmaAlignment !== false,
+        requireRsiConfirmation: Boolean(input?.requireRsiConfirmation),
+        preferredRegime: preferredRegime === "trend" || preferredRegime === "breakout" ? preferredRegime : "any",
+        minVolatilityPct: clampNumber(input?.minVolatilityPct, 0, 10, defaults.minVolatilityPct),
+        maxSessionProfit: clampNumber(input?.maxSessionProfit, 1, 1000000, defaults.maxSessionProfit),
+        maxSessionLoss: clampNumber(input?.maxSessionLoss, 1, 1000000, defaults.maxSessionLoss),
+        maxConsecutiveLosses: clampNumber(input?.maxConsecutiveLosses, 1, 20, defaults.maxConsecutiveLosses)
+    };
+}
+
+function createInitialState(userId: string): DirectionalOptionsDemoState {
+    return {
+        userId,
+        selectedApiProfileId: "",
+        profileLabel: "",
+        running: false,
+        isBusy: false,
+        timerRef: null,
+        cycleCount: 0,
+        startedAt: null,
+        stoppedAt: null,
+        lastCycleAt: null,
+        lastError: "",
+        apiKey: "",
+        apiSecret: "",
+        config: buildDefaultConfig(),
+        priceHistory: [],
+        openPositions: [],
+        closedPositions: [],
+        events: [],
+        lastSignal: null,
+        latestTicker: null,
+        cooldownUntilCycle: 0,
+        equityCurve: []
+    };
+}
+
+function toFetchSnapshotConfig(config: DirectionalOptionsDemoConfig): DirectionalOptionsDemoConfig {
+    return config;
+}
+
+function getLongEntryPrice(option: MarketOptionSnapshot): number {
+    return Number.isFinite(Number(option.bestAsk)) && Number(option.bestAsk) > 0
+        ? Number(option.bestAsk)
+        : Number(option.mark || 0);
+}
+
+function getLongExitPrice(option: MarketOptionSnapshot): number {
+    return Number.isFinite(Number(option.bestBid)) && Number(option.bestBid) > 0
+        ? Number(option.bestBid)
+        : Number(option.mark || 0);
+}
+
+function updateOpenMarks(state: DirectionalOptionsDemoState, snapshot: MarketSnapshot): void {
+    const optionsBySymbol = new Map<string, MarketOptionSnapshot>();
+    snapshot.options.forEach((option) => {
+        optionsBySymbol.set(option.symbol, option);
+    });
+    state.openPositions.forEach((position) => {
+        if (position.status !== "OPEN") {
+            return;
+        }
+        const option = optionsBySymbol.get(position.symbol);
+        if (!option) {
+            return;
+        }
+        position.markPrice = getLongExitPrice(option);
+        position.currentDelta = Number(option.delta || 0);
+        position.currentDte = Number(option.dte || position.currentDte || 0);
+        position.unrealizedPnl = (position.markPrice - position.entryPrice) * position.qty;
+    });
+}
+
+function computeSignal(history: number[], snapshot: MarketSnapshot, config: DirectionalOptionsDemoConfig): DirectionalSignalMetrics {
+    const latest = Number(snapshot.ticker.mark || snapshot.ticker.spot || 0);
+    const fastEma = calcEma(history, config.emaFastPeriod);
+    const slowEma = calcEma(history, config.emaSlowPeriod);
+    const rsi = calcRsi(history, config.rsiPeriod);
+    const slopeBase = history.length > config.slopeLookback
+        ? history[Math.max(0, history.length - 1 - config.slopeLookback)]
+        : latest;
+    const slopePct = slopeBase > 0 ? ((latest - slopeBase) / slopeBase) * 100 : 0;
+    const changes: number[] = [];
+    for (let index = 1; index < history.length; index += 1) {
+        const previous = history[index - 1];
+        const current = history[index];
+        if (previous > 0) {
+            changes.push(((current - previous) / previous) * 100);
+        }
+    }
+    const volatilityPct = average(changes.slice(-10).map((value) => Math.abs(value)));
+
+    let bullishScore = 0;
+    let bearishScore = 0;
+    const drivers: string[] = [];
+    const blockers: string[] = [];
+
+    if (fastEma > slowEma) {
+        bullishScore += 2;
+        drivers.push("Fast EMA is above slow EMA.");
+    }
+    else if (fastEma < slowEma) {
+        bearishScore += 2;
+        drivers.push("Fast EMA is below slow EMA.");
+    }
+
+    if (latest > fastEma) {
+        bullishScore += 1;
+    }
+    else if (latest < fastEma) {
+        bearishScore += 1;
+    }
+
+    if (slopePct >= 0.35) {
+        bullishScore += 2;
+        drivers.push(`Short-term slope is positive at ${slopePct.toFixed(2)}%.`);
+    }
+    else if (slopePct <= -0.35) {
+        bearishScore += 2;
+        drivers.push(`Short-term slope is negative at ${slopePct.toFixed(2)}%.`);
+    }
+
+    if (rsi >= 58) {
+        bullishScore += rsi >= 66 ? 2 : 1;
+        drivers.push(`RSI supports upside at ${rsi.toFixed(1)}.`);
+    }
+    else if (rsi <= 42) {
+        bearishScore += rsi <= 34 ? 2 : 1;
+        drivers.push(`RSI supports downside at ${rsi.toFixed(1)}.`);
+    }
+
+    const regime = volatilityPct >= 0.55 && Math.abs(slopePct) >= 0.35
+        ? "breakout"
+        : (Math.abs(fastEma - slowEma) > Math.max(1, latest * 0.0025)
+            ? "trend"
+            : (volatilityPct <= 0.16 ? "balanced" : "fade"));
+
+    if (regime === "breakout") {
+        if (slopePct > 0) {
+            bullishScore += 1;
+        }
+        else if (slopePct < 0) {
+            bearishScore += 1;
+        }
+    }
+
+    const edge = Math.abs(bullishScore - bearishScore);
+    const totalScore = bullishScore + bearishScore;
+    const confidence = totalScore > 0 ? Math.min(100, Math.round((edge / Math.max(1, totalScore + 2)) * 100)) : 0;
+    let bias: "bullish" | "bearish" | "neutral" = "neutral";
+    if (bullishScore >= config.bullishThreshold && bullishScore > bearishScore) {
+        bias = "bullish";
+    }
+    else if (bearishScore >= config.bearishThreshold && bearishScore > bullishScore) {
+        bias = "bearish";
+    }
+
+    if (config.requireEmaAlignment) {
+        if (bias === "bullish" && fastEma <= slowEma) {
+            blockers.push("Bullish setup blocked because EMA alignment is missing.");
+        }
+        if (bias === "bearish" && fastEma >= slowEma) {
+            blockers.push("Bearish setup blocked because EMA alignment is missing.");
+        }
+    }
+    if (config.requireRsiConfirmation) {
+        if (bias === "bullish" && rsi < 55) {
+            blockers.push("Bullish setup blocked because RSI confirmation is missing.");
+        }
+        if (bias === "bearish" && rsi > 45) {
+            blockers.push("Bearish setup blocked because RSI confirmation is missing.");
+        }
+    }
+    if (config.preferredRegime !== "any" && bias !== "neutral" && regime !== config.preferredRegime) {
+        blockers.push(`Preferred regime is ${config.preferredRegime}, but market is ${regime}.`);
+    }
+    if (volatilityPct < config.minVolatilityPct) {
+        blockers.push(`Volatility ${volatilityPct.toFixed(3)}% is below the scalper floor ${config.minVolatilityPct.toFixed(3)}%.`);
+    }
+    if (confidence < config.minConfidence) {
+        blockers.push(`Confidence ${confidence}% is below required ${config.minConfidence}%.`);
+    }
+    if (bias === "neutral") {
+        blockers.push("No directional edge yet.");
+    }
+
+    return {
+        emaFast: Number(fastEma.toFixed(2)),
+        emaSlow: Number(slowEma.toFixed(2)),
+        rsi: Number(rsi.toFixed(2)),
+        slopePct: Number(slopePct.toFixed(3)),
+        volatilityPct: Number(volatilityPct.toFixed(3)),
+        bullishScore,
+        bearishScore,
+        confidence,
+        bias,
+        regime,
+        drivers,
+        blockers,
+        suggestedAction: bias === "bullish" ? "buy_call" : (bias === "bearish" ? "buy_put" : "wait")
+    };
+}
+
+function closePosition(state: DirectionalOptionsDemoState, position: DirectionalOptionsDemoPosition, exitPrice: number, reason: string): void {
+    position.status = "CLOSED";
+    position.closePrice = exitPrice;
+    position.closedAt = new Date().toISOString();
+    position.closedCycle = state.cycleCount;
+    position.closeReason = reason;
+    position.realizedPnl = (exitPrice - position.entryPrice) * position.qty;
+    position.unrealizedPnl = 0;
+    state.closedPositions.unshift({ ...position });
+    state.closedPositions = state.closedPositions.slice(0, 200);
+    addEvent(state, "EXIT", position.symbol, `Closed ${position.optionType.toUpperCase()} paper trade because ${reason}.`);
+}
+
+function canEnterTrade(state: DirectionalOptionsDemoState, signal: DirectionalSignalMetrics): boolean {
+    if (signal.bias === "neutral" || signal.confidence < state.config.minConfidence) {
+        return false;
+    }
+    if (state.config.preferredRegime !== "any" && signal.regime !== state.config.preferredRegime) {
+        return false;
+    }
+    if (signal.volatilityPct < state.config.minVolatilityPct) {
+        return false;
+    }
+    if (state.config.requireEmaAlignment) {
+        if (signal.bias === "bullish" && signal.emaFast <= signal.emaSlow) {
+            return false;
+        }
+        if (signal.bias === "bearish" && signal.emaFast >= signal.emaSlow) {
+            return false;
+        }
+    }
+    if (state.config.requireRsiConfirmation) {
+        if (signal.bias === "bullish" && signal.rsi < 55) {
+            return false;
+        }
+        if (signal.bias === "bearish" && signal.rsi > 45) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function maybeClosePositions(state: DirectionalOptionsDemoState, signal: DirectionalSignalMetrics, snapshot: MarketSnapshot): void {
+    const optionsBySymbol = new Map<string, MarketOptionSnapshot>();
+    snapshot.options.forEach((option) => optionsBySymbol.set(option.symbol, option));
+    const remainingOpen: DirectionalOptionsDemoPosition[] = [];
+    for (const position of state.openPositions) {
+        if (position.status !== "OPEN") {
+            continue;
+        }
+        const option = optionsBySymbol.get(position.symbol);
+        const exitPrice = option ? getLongExitPrice(option) : position.markPrice;
+        const pnlPct = position.entryPrice > 0 ? ((exitPrice - position.entryPrice) / position.entryPrice) * 100 : 0;
+        const heldCycles = state.cycleCount - position.openedCycle;
+
+        if (pnlPct >= position.takeProfitPct) {
+            closePosition(state, position, exitPrice, `take profit ${pnlPct.toFixed(2)}%`);
+            state.cooldownUntilCycle = state.cycleCount + state.config.cooldownCycles;
+            continue;
+        }
+        if (pnlPct <= -position.stopLossPct) {
+            closePosition(state, position, exitPrice, `stop loss ${pnlPct.toFixed(2)}%`);
+            state.cooldownUntilCycle = state.cycleCount + state.config.cooldownCycles;
+            continue;
+        }
+        if (heldCycles >= state.config.maxHoldCycles) {
+            closePosition(state, position, exitPrice, "max hold cycles reached");
+            state.cooldownUntilCycle = state.cycleCount + 1;
+            continue;
+        }
+        if (signal.bias === "neutral" && heldCycles >= state.config.neutralExitCycles) {
+            closePosition(state, position, exitPrice, "signal turned neutral");
+            state.cooldownUntilCycle = state.cycleCount + 1;
+            continue;
+        }
+        if (position.optionType === "call" && signal.bias === "bearish" && signal.confidence >= state.config.minConfidence) {
+            closePosition(state, position, exitPrice, "opposite bearish signal");
+            state.cooldownUntilCycle = state.cycleCount + 1;
+            continue;
+        }
+        if (position.optionType === "put" && signal.bias === "bullish" && signal.confidence >= state.config.minConfidence) {
+            closePosition(state, position, exitPrice, "opposite bullish signal");
+            state.cooldownUntilCycle = state.cycleCount + 1;
+            continue;
+        }
+        position.markPrice = exitPrice;
+        position.unrealizedPnl = (position.markPrice - position.entryPrice) * position.qty;
+        remainingOpen.push(position);
+    }
+    state.openPositions = remainingOpen;
+}
+
+function maybeOpenPosition(state: DirectionalOptionsDemoState, signal: DirectionalSignalMetrics, snapshot: MarketSnapshot): void {
+    if (!canEnterTrade(state, signal)) {
+        return;
+    }
+    if (state.openPositions.some((position) => position.status === "OPEN")) {
+        return;
+    }
+    if (state.cycleCount < state.cooldownUntilCycle) {
+        return;
+    }
+
+    const optionType = signal.bias === "bullish" ? "call" : "put";
+    const selected = selectOptionByDteDelta(snapshot.options, {
+        type: optionType,
+        dteMin: state.config.entryDteMin,
+        dteMax: state.config.entryDteMax,
+        targetAbsDelta: state.config.targetAbsDelta
+    });
+    if (!selected) {
+        addEvent(state, "SKIP", "No contract", `No ${optionType.toUpperCase()} option matched the configured delta and DTE window.`);
+        return;
+    }
+    const entryPrice = getLongEntryPrice(selected);
+    if (!(entryPrice > 0)) {
+        addEvent(state, "SKIP", "Bad price", `Selected ${selected.symbol} has no valid entry price.`);
+        return;
+    }
+    const qtyBoost = signal.confidence >= 80 ? 1 : 0;
+    const qty = Math.max(state.config.baseContracts, Math.min(state.config.maxContracts, state.config.baseContracts + qtyBoost));
+    const position: DirectionalOptionsDemoPosition = {
+        id: crypto.randomUUID(),
+        symbol: selected.symbol,
+        optionType,
+        side: "buy",
+        qty,
+        entryPrice,
+        markPrice: getLongExitPrice(selected),
+        closePrice: null,
+        takeProfitPct: state.config.takeProfitPct,
+        stopLossPct: state.config.stopLossPct,
+        confidenceAtEntry: signal.confidence,
+        biasAtEntry: optionType === "call" ? "bullish" : "bearish",
+        regimeAtEntry: signal.regime,
+        entryDelta: Number(selected.delta || 0),
+        currentDelta: Number(selected.delta || 0),
+        entryDte: Number(selected.dte || 0),
+        currentDte: Number(selected.dte || 0),
+        realizedPnl: 0,
+        unrealizedPnl: 0,
+        status: "OPEN",
+        openedAt: new Date().toISOString(),
+        closedAt: null,
+        openedCycle: state.cycleCount,
+        closedCycle: null,
+        closeReason: ""
+    };
+    position.unrealizedPnl = (position.markPrice - position.entryPrice) * position.qty;
+    state.openPositions.push(position);
+    addEvent(state, "ENTRY", position.symbol, `Opened ${optionType.toUpperCase()} paper scalp at ${entryPrice.toFixed(2)} with confidence ${signal.confidence}%.`);
+}
+
+function calculateTotals(state: DirectionalOptionsDemoState): DirectionalOptionsDemoStatus["totals"] {
+    const unrealizedPnl = state.openPositions.reduce((sum, position) => sum + Number(position.unrealizedPnl || 0), 0);
+    const realizedPnl = state.closedPositions.reduce((sum, position) => sum + Number(position.realizedPnl || 0), 0);
+    const winningTrades = state.closedPositions.filter((position) => Number(position.realizedPnl || 0) > 0).length;
+    const losingTrades = state.closedPositions.filter((position) => Number(position.realizedPnl || 0) < 0).length;
+    const closedTrades = winningTrades + losingTrades;
+    const bestTrade = state.closedPositions.length
+        ? Math.max(...state.closedPositions.map((position) => Number(position.realizedPnl || 0)))
+        : 0;
+    const worstTrade = state.closedPositions.length
+        ? Math.min(...state.closedPositions.map((position) => Number(position.realizedPnl || 0)))
+        : 0;
+    const avgWin = winningTrades
+        ? state.closedPositions
+            .filter((position) => Number(position.realizedPnl || 0) > 0)
+            .reduce((sum, position) => sum + Number(position.realizedPnl || 0), 0) / winningTrades
+        : 0;
+    const avgLoss = losingTrades
+        ? state.closedPositions
+            .filter((position) => Number(position.realizedPnl || 0) < 0)
+            .reduce((sum, position) => sum + Number(position.realizedPnl || 0), 0) / losingTrades
+        : 0;
+
+    return {
+        openCount: state.openPositions.length,
+        closedCount: state.closedPositions.length,
+        unrealizedPnl: Number(unrealizedPnl.toFixed(2)),
+        realizedPnl: Number(realizedPnl.toFixed(2)),
+        totalPnl: Number((unrealizedPnl + realizedPnl).toFixed(2)),
+        winningTrades,
+        losingTrades,
+        winRatePct: Number((closedTrades > 0 ? (winningTrades / closedTrades) * 100 : 0).toFixed(2)),
+        avgWin: Number(avgWin.toFixed(2)),
+        avgLoss: Number(avgLoss.toFixed(2)),
+        bestTrade: Number(bestTrade.toFixed(2)),
+        worstTrade: Number(worstTrade.toFixed(2))
+    };
+}
+
+function countConsecutiveLosses(state: DirectionalOptionsDemoState): number {
+    let losses = 0;
+    for (const position of state.closedPositions) {
+        if (Number(position.realizedPnl || 0) < 0) {
+            losses += 1;
+            continue;
+        }
+        break;
+    }
+    return losses;
+}
+
+function appendEquityPoint(state: DirectionalOptionsDemoState): void {
+    const totals = calculateTotals(state);
+    state.equityCurve.push({
+        ts: new Date().toISOString(),
+        totalPnl: totals.totalPnl,
+        realizedPnl: totals.realizedPnl,
+        unrealizedPnl: totals.unrealizedPnl
+    });
+    state.equityCurve = state.equityCurve.slice(-160);
+}
+
+function buildGuidance(state: DirectionalOptionsDemoState): DirectionalOptionsDemoStatus["guidance"] {
+    const signal = state.lastSignal;
+    const totals = calculateTotals(state);
+    const consecutiveLosses = countConsecutiveLosses(state);
+    const guardrailReason = totals.totalPnl >= state.config.maxSessionProfit
+        ? `Session target hit at ${totals.totalPnl.toFixed(2)}.`
+        : (totals.totalPnl <= (-1 * state.config.maxSessionLoss)
+            ? `Session loss limit hit at ${totals.totalPnl.toFixed(2)}.`
+            : (consecutiveLosses >= state.config.maxConsecutiveLosses
+                ? `${consecutiveLosses} consecutive losing scalps reached.`
+                : ""));
+    const shouldStop = Boolean(guardrailReason) || Boolean(state.lastError);
+    const shouldStart = Boolean(signal)
+        && !shouldStop
+        && (signal ? canEnterTrade(state, signal) : false)
+        && state.openPositions.length === 0
+        && state.cycleCount >= state.cooldownUntilCycle;
+
+    const checklist: string[] = [];
+    checklist.push(`Preset: ${state.config.presetKey.replaceAll("_", " ").toUpperCase()}`);
+    checklist.push(`Confidence gate: ${state.config.minConfidence}%`);
+    checklist.push(`Regime gate: ${state.config.preferredRegime === "any" ? "trend or breakout bias accepted" : state.config.preferredRegime}`);
+    checklist.push(`Volatility floor: ${state.config.minVolatilityPct.toFixed(3)}%`);
+    checklist.push(`Session stop rules: +${state.config.maxSessionProfit} / -${state.config.maxSessionLoss} / ${state.config.maxConsecutiveLosses} losses`);
+
+    return {
+        shouldStart,
+        shouldStop,
+        modeLabel: "Scalper Demo",
+        startSummary: shouldStart && signal
+            ? `Start now. ${signal.bias.toUpperCase()} bias with ${signal.confidence}% confidence in ${signal.regime} regime.`
+            : (signal
+                ? `Wait. ${signal.bias === "neutral" ? "Bias is neutral." : `Need cleaner ${signal.bias} follow-through before starting.`}`
+                : "Wait for live rates and signal build-up before starting."),
+        stopSummary: shouldStop
+            ? (state.lastError ? `Stop now. Engine error: ${state.lastError}` : `Stop now. ${guardrailReason}`)
+            : "Keep running while the session guardrails stay intact.",
+        checklist
+    };
+}
+
+export class DirectionalOptionsDemoService {
+    private readonly stateByUserId = new Map<string, DirectionalOptionsDemoState>();
+
+    private getOrCreateState(userId: string): DirectionalOptionsDemoState {
+        const finalUserId = String(userId || "").trim() || "demo-paper";
+        let state = this.stateByUserId.get(finalUserId);
+        if (!state) {
+            state = createInitialState(finalUserId);
+            this.stateByUserId.set(finalUserId, state);
+        }
+        return state;
+    }
+
+    private startInterval(state: DirectionalOptionsDemoState): void {
+        if (state.timerRef) {
+            clearInterval(state.timerRef);
+        }
+        state.timerRef = setInterval(() => {
+            void this.runTick(state);
+        }, state.config.loopSeconds * 1000);
+    }
+
+    private async stopState(state: DirectionalOptionsDemoState, reason: string): Promise<void> {
+        if (state.timerRef) {
+            clearInterval(state.timerRef);
+            state.timerRef = null;
+        }
+        if (state.running) {
+            state.running = false;
+            state.stoppedAt = new Date().toISOString();
+            addEvent(state, "ENGINE", "Stopped", reason);
+        }
+    }
+
+    private async persistState(state: DirectionalOptionsDemoState): Promise<void> {
+        await saveDirectionalOptionsDemoState(state);
+    }
+
+    private async applySessionGuardrails(state: DirectionalOptionsDemoState): Promise<void> {
+        const totals = calculateTotals(state);
+        const consecutiveLosses = countConsecutiveLosses(state);
+        if (totals.totalPnl >= state.config.maxSessionProfit) {
+            await this.stopState(state, `Auto-stopped after hitting session profit target ${totals.totalPnl.toFixed(2)}.`);
+            return;
+        }
+        if (totals.totalPnl <= (-1 * state.config.maxSessionLoss)) {
+            await this.stopState(state, `Auto-stopped after hitting session loss limit ${totals.totalPnl.toFixed(2)}.`);
+            return;
+        }
+        if (consecutiveLosses >= state.config.maxConsecutiveLosses) {
+            await this.stopState(state, `Auto-stopped after ${consecutiveLosses} consecutive losing scalps.`);
+        }
+    }
+
+    public async hydrate(): Promise<void> {
+        const states = await loadDirectionalOptionsDemoStates();
+        for (const persistedState of states) {
+            const userId = String(persistedState.userId || "").trim();
+            if (!userId) {
+                continue;
+            }
+            const hydratedState: DirectionalOptionsDemoState = {
+                ...createInitialState(userId),
+                ...persistedState,
+                userId,
+                config: normalizeConfig(persistedState.config),
+                timerRef: null,
+                isBusy: false,
+                equityCurve: Array.isArray(persistedState.equityCurve) ? persistedState.equityCurve.slice(-160) : []
+            };
+            this.stateByUserId.set(userId, hydratedState);
+            if (hydratedState.running && hydratedState.apiKey && hydratedState.apiSecret) {
+                this.startInterval(hydratedState);
+                void this.runTick(hydratedState);
+            }
+        }
+    }
+
+    public getStatus(userId: string): DirectionalOptionsDemoStatus {
+        const state = this.getOrCreateState(userId);
+        return {
+            running: state.running,
+            selectedApiProfileId: state.selectedApiProfileId,
+            profileLabel: state.profileLabel,
+            cycleCount: state.cycleCount,
+            startedAt: state.startedAt,
+            stoppedAt: state.stoppedAt,
+            lastCycleAt: state.lastCycleAt,
+            lastError: state.lastError,
+            config: state.config,
+            latestTicker: state.latestTicker,
+            lastSignal: state.lastSignal,
+            openPositions: state.openPositions,
+            closedPositions: state.closedPositions.slice(0, 100),
+            events: state.events.slice(0, 60),
+            equityCurve: state.equityCurve.slice(-120),
+            guidance: buildGuidance(state),
+            totals: calculateTotals(state)
+        };
+    }
+
+    private async runTick(state: DirectionalOptionsDemoState): Promise<void> {
+        if (!state.running || state.isBusy) {
+            return;
+        }
+        state.isBusy = true;
+        try {
+            await this.executeCycle(state);
+            state.lastError = "";
+            await this.applySessionGuardrails(state);
+        }
+        catch (error) {
+            state.lastError = error instanceof Error ? error.message : String(error);
+            addEvent(state, "ERROR", "Cycle failed", state.lastError || "Directional paper cycle failed.");
+        }
+        finally {
+            appendEquityPoint(state);
+            state.isBusy = false;
+            await this.persistState(state);
+        }
+    }
+
+    private async executeCycle(state: DirectionalOptionsDemoState): Promise<void> {
+        const snapshot = await fetchSnapshot(state.apiKey, state.apiSecret, toFetchSnapshotConfig(state.config) as never);
+        const tickerMark = Number(snapshot.ticker.mark || snapshot.ticker.spot || 0);
+        if (!(tickerMark > 0)) {
+            throw new Error("Unable to read the latest ticker mark price.");
+        }
+        state.latestTicker = {
+            symbol: snapshot.ticker.symbol,
+            spot: Number(snapshot.ticker.spot || 0),
+            mark: tickerMark,
+            bestBid: snapshot.ticker.bestBid,
+            bestAsk: snapshot.ticker.bestAsk,
+            ts: snapshot.ts
+        };
+        state.priceHistory.push(tickerMark);
+        state.priceHistory = state.priceHistory.slice(-200);
+        updateOpenMarks(state, snapshot);
+        const signal = computeSignal(state.priceHistory, snapshot, state.config);
+        state.lastSignal = signal;
+        maybeClosePositions(state, signal, snapshot);
+        maybeOpenPosition(state, signal, snapshot);
+        state.cycleCount += 1;
+        state.lastCycleAt = new Date().toISOString();
+    }
+
+    public async start(userId: string, selectedApiProfileId: string, configInput?: Partial<DirectionalOptionsDemoConfig>): Promise<{ status: string; message: string }> {
+        const state = this.getOrCreateState(userId);
+        if (state.running) {
+            return { status: "warning", message: "Directional demo engine is already running." };
+        }
+        const profile = await getDeltaApiProfile(userId, selectedApiProfileId);
+        if (!profile) {
+            return { status: "warning", message: "Select a valid Delta API profile before starting the demo." };
+        }
+        state.selectedApiProfileId = profile.profileId;
+        state.profileLabel = profile.referenceName;
+        state.apiKey = profile.apiKey;
+        state.apiSecret = profile.apiSecret;
+        state.config = normalizeConfig(configInput);
+        state.running = true;
+        state.startedAt = state.startedAt || new Date().toISOString();
+        state.stoppedAt = null;
+        state.lastError = "";
+        addEvent(state, "ENGINE", "Started", `Directional scalper paper demo started with ${profile.referenceName}.`);
+        this.startInterval(state);
+        await this.persistState(state);
+        void this.runTick(state);
+        return { status: "success", message: "Directional options demo started." };
+    }
+
+    public async stop(userId: string, reason = "Manual stop"): Promise<{ status: string; message: string }> {
+        const state = this.getOrCreateState(userId);
+        await this.stopState(state, reason);
+        appendEquityPoint(state);
+        await this.persistState(state);
+        return { status: "success", message: "Directional options demo stopped." };
+    }
+
+    public async runSingleCycle(userId: string, selectedApiProfileId: string, configInput?: Partial<DirectionalOptionsDemoConfig>): Promise<{ status: string; message: string; data?: DirectionalOptionsDemoStatus }> {
+        const state = this.getOrCreateState(userId);
+        if (selectedApiProfileId) {
+            const profile = await getDeltaApiProfile(userId, selectedApiProfileId);
+            if (!profile) {
+                return { status: "warning", message: "Select a valid Delta API profile before running the demo cycle." };
+            }
+            state.selectedApiProfileId = profile.profileId;
+            state.profileLabel = profile.referenceName;
+            state.apiKey = profile.apiKey;
+            state.apiSecret = profile.apiSecret;
+        }
+        if (!state.apiKey || !state.apiSecret) {
+            return { status: "warning", message: "No market-data credentials are available for this demo user." };
+        }
+        state.config = normalizeConfig(configInput || state.config);
+        if (state.isBusy) {
+            return { status: "warning", message: "Directional demo cycle is already running." };
+        }
+        state.isBusy = true;
+        try {
+            await this.executeCycle(state);
+            state.lastError = "";
+            await this.applySessionGuardrails(state);
+            appendEquityPoint(state);
+            await this.persistState(state);
+            return { status: "success", message: "Directional demo cycle completed.", data: this.getStatus(userId) };
+        }
+        catch (error) {
+            state.lastError = error instanceof Error ? error.message : String(error);
+            addEvent(state, "ERROR", "Cycle failed", state.lastError || "Directional paper cycle failed.");
+            appendEquityPoint(state);
+            await this.persistState(state);
+            return { status: "danger", message: state.lastError };
+        }
+        finally {
+            state.isBusy = false;
+        }
+    }
+
+    public async emergencyStop(userId: string, reason: string): Promise<{ status: string; message: string }> {
+        const state = this.getOrCreateState(userId);
+        await this.stopState(state, reason || "Emergency stop");
+        const latestExitPrice = state.latestTicker?.mark || 0;
+        state.openPositions.forEach((position) => {
+            if (position.status === "OPEN") {
+                closePosition(state, position, position.markPrice || latestExitPrice, reason || "Emergency stop");
+            }
+        });
+        state.openPositions = state.openPositions.filter((position) => position.status === "OPEN");
+        appendEquityPoint(state);
+        await this.persistState(state);
+        return { status: "success", message: "Directional options demo emergency-stopped." };
+    }
+
+    public async manualClosePosition(userId: string, positionId: string): Promise<{ status: string; message: string; data?: DirectionalOptionsDemoStatus }> {
+        const state = this.getOrCreateState(userId);
+        const targetPosition = state.openPositions.find((position) => position.id === positionId && position.status === "OPEN");
+        if (!targetPosition) {
+            return { status: "warning", message: "Paper position not found or already closed.", data: this.getStatus(userId) };
+        }
+
+        let exitPrice = Number(targetPosition.markPrice || 0);
+        if (state.apiKey && state.apiSecret) {
+            const snapshot = await fetchSnapshot(state.apiKey, state.apiSecret, toFetchSnapshotConfig(state.config) as never);
+            const option = snapshot.options.find((row) => row.symbol === targetPosition.symbol);
+            if (option) {
+                exitPrice = getLongExitPrice(option);
+            }
+            state.latestTicker = {
+                symbol: snapshot.ticker.symbol,
+                spot: Number(snapshot.ticker.spot || 0),
+                mark: Number(snapshot.ticker.mark || snapshot.ticker.spot || 0),
+                bestBid: snapshot.ticker.bestBid,
+                bestAsk: snapshot.ticker.bestAsk,
+                ts: snapshot.ts
+            };
+        }
+
+        closePosition(state, targetPosition, exitPrice, "manual close from directional demo page");
+        state.openPositions = state.openPositions.filter((position) => position.id !== positionId);
+        state.cooldownUntilCycle = state.cycleCount + state.config.cooldownCycles;
+        await this.applySessionGuardrails(state);
+        appendEquityPoint(state);
+        await this.persistState(state);
+        return { status: "success", message: "Paper position closed.", data: this.getStatus(userId) };
+    }
+
+    public async reset(userId: string): Promise<{ status: string; message: string }> {
+        const state = this.getOrCreateState(userId);
+        if (state.timerRef) {
+            clearInterval(state.timerRef);
+        }
+        this.stateByUserId.set(userId, createInitialState(userId));
+        await deleteDirectionalOptionsDemoState(userId);
+        return { status: "success", message: "Directional options demo reset." };
+    }
+}

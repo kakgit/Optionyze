@@ -446,7 +446,10 @@ export async function getLiveOptionTicker(pContractSymbol: string): Promise<Roll
         return null;
     }
 
-    const vOptionSide = String(objRow.symbol).startsWith("P-") ? "PE" : "CE";
+    const vSymbol = String(objRow.symbol || "").trim().toUpperCase();
+    const vOptionSide = vSymbol.startsWith("P-") || vSymbol.includes("-P-") || vSymbol.endsWith("-P") || vSymbol.includes("PUT")
+        ? "PE"
+        : "CE";
     return {
         contractSymbol: String(objRow.symbol || "").trim(),
         optionSide: vOptionSide,

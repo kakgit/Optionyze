@@ -387,6 +387,14 @@ export async function ensurePostgresSchema(): Promise<void> {
     `);
 
     await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_directional_options_demo_state (
+            user_id TEXT PRIMARY KEY REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+
+    await objPool.query(`
         CREATE INDEX IF NOT EXISTS idx_optionyze_sessions_account_id
         ON optionyze_sessions(account_id);
     `);

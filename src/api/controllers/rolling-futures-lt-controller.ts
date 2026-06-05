@@ -1366,12 +1366,25 @@ function getDefaultManualTraderUiState(
 
 function isFutureContractSymbol(pValue: unknown): boolean {
     const vSymbol = String(pValue || "").trim().toUpperCase();
-    return Boolean(vSymbol) && !vSymbol.startsWith("C-") && !vSymbol.startsWith("P-");
+    return Boolean(vSymbol) && !inferTrackedOptionLegSide(vSymbol);
 }
 
 function isOptionContractSymbol(pValue: unknown): boolean {
-    const vSymbol = String(pValue || "").trim().toUpperCase();
-    return vSymbol.startsWith("C-") || vSymbol.startsWith("P-");
+    return Boolean(inferTrackedOptionLegSide(pValue));
+}
+
+function inferTrackedOptionLegSide(pContractName: unknown): "ce" | "pe" | "" {
+    const vSymbol = String(pContractName || "").trim().toUpperCase();
+    if (!vSymbol) {
+        return "";
+    }
+    if (vSymbol.startsWith("P-") || vSymbol.includes("-P-") || vSymbol.endsWith("-P") || vSymbol.includes("PUT")) {
+        return "pe";
+    }
+    if (vSymbol.startsWith("C-") || vSymbol.includes("-C-") || vSymbol.endsWith("-C") || vSymbol.includes("CALL")) {
+        return "ce";
+    }
+    return "";
 }
 
 function listTrackedOpenOptionPositions(
@@ -1393,7 +1406,11 @@ function isTrackedContractForSymbol(pContractName: unknown, pSymbol: string): bo
     const vContract = String(pContractName || "").trim().toUpperCase();
     const vSymbol = normalizeSymbolValue(pSymbol);
     return (isFutureContractSymbol(vContract) && vContract.startsWith(vSymbol))
-        || (isOptionContractSymbol(vContract) && (vContract.startsWith(`C-${vSymbol}-`) || vContract.startsWith(`P-${vSymbol}-`)));
+        || (isOptionContractSymbol(vContract) && (
+            vContract.startsWith(`C-${vSymbol}-`)
+            || vContract.startsWith(`P-${vSymbol}-`)
+            || vContract.startsWith(`${vSymbol}-`)
+        ));
 }
 
 function getTrackedOptionMetadata(pPosition: RollingFuturesLtImportedPositionRecord): RollingFuturesLtOptionMetadata {
@@ -1457,8 +1474,7 @@ function getSignedOptionBaseDelta(pContractName: unknown, pDeltaValue: unknown):
     if (!Number.isFinite(vMagnitude) || !(vMagnitude > 0)) {
         return 0;
     }
-    const vContractName = String(pContractName || "").trim().toUpperCase();
-    return vContractName.startsWith("P-") ? -vMagnitude : vMagnitude;
+    return inferTrackedOptionLegSide(pContractName) === "pe" ? -vMagnitude : vMagnitude;
 }
 
 function optionMetadataToRecord(pMetadata: RollingFuturesLtOptionMetadata): Record<string, unknown> {
@@ -1747,7 +1763,7 @@ function shouldTriggerTrackedOption(
 }
 
 function getTrackedOptionLegSide(pContractName: string): "ce" | "pe" {
-    return String(pContractName || "").trim().toUpperCase().startsWith("P-") ? "pe" : "ce";
+    return inferTrackedOptionLegSide(pContractName) === "pe" ? "pe" : "ce";
 }
 
 function getSelectedFuturePositionValue(
@@ -2446,11 +2462,11 @@ async function cancelOpenCoveredOptionEntryOrdersForLeg(
         return 0;
     }
     const arrOpenOrders = await listOpenDeltaOrders(pClient);
-    const vPrefix = pLegSide === "pe" ? `P-${pSymbol}-` : `C-${pSymbol}-`;
     const arrMatching = arrOpenOrders.filter((objOrder) => {
         const vContract = String(objOrder.product_symbol || "").trim().toUpperCase();
         const vOrderSide = String(objOrder.side || "").trim().toLowerCase();
-        return vContract.startsWith(vPrefix)
+        return isTrackedContractForSymbol(vContract, pSymbol)
+            && inferTrackedOptionLegSide(vContract) === pLegSide
             && vOrderSide === pAction
             && !Boolean(objOrder.reduce_only)
             && Math.max(0, Math.floor(Number(objOrder.unfilled_size ?? objOrder.size ?? 0))) > 0;
@@ -2902,7 +2918,7 @@ async function enrichTrackedOpenPositions(
             ));
         const vDisplayDeltaDirection = bIsFuture
             ? 1
-            : (vContractName.startsWith("P-") ? -1 : 1);
+            : (inferTrackedOptionLegSide(vContractName) === "pe" ? -1 : 1);
         const vDisplayDeltaSigned = vDisplayDeltaMagnitude * vDisplayDeltaDirection;
         const vDisplayThetaCurrentTotal = bIsFuture
             ? 0
@@ -5865,6 +5881,39 @@ async function ensureCoveredConfiguredLegPresence(
         const arrRequiredLegs = objRowState.legs === "both"
             ? ["ce", "pe"] as Array<"ce" | "pe">
             : [objRowState.legs];
+        const arrMissingLegs = arrRequiredLegs.filter((vLegSide) => !hasTrackedOptionRowLeg(pTrackedPositions, vRowIndex, vLegSide));
+        const arrPendingForRow = arrPending.filter((objEntry) => objEntry.rowIndex === vRowIndex);
+        const arrPendingLegSides = Array.from(new Set(arrPendingForRow.map((objEntry) => objEntry.legSide)));
+        const bAlternatingMissingLegDetected = arrMissingLegs.some((vLegSide) => !arrPendingLegSides.includes(vLegSide));
+        if (arrMissingLegs.length > 0 && (arrPendingLegSides.length > 1 || (arrPendingLegSides.length > 0 && bAlternatingMissingLegDetected))) {
+            const objSavedRuntime = await saveRollingFuturesLtRuntime({
+                ...objRuntime,
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                status: "stopped",
+                autoTraderEnabled: false,
+                selectedApiProfileId: String(objRuntime.selectedApiProfileId || pProfile.selectedApiProfileId || "").trim(),
+                currentSymbol: String(objUiState.symbol || "")
+            });
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "engine_stopped",
+                "error",
+                "Covered Re-Entry Churn Protection Triggered",
+                `Auto trader stopped because row ${vRowIndex} started alternating missing covered legs (${arrMissingLegs.map((vLegSide) => vLegSide.toUpperCase()).join(", ")}) while pending re-entry already existed for ${arrPendingLegSides.map((vLegSide) => vLegSide.toUpperCase()).join(", ")}. Review live positions before restarting.`,
+                {
+                    rowIndex: vRowIndex,
+                    missingLegs: arrMissingLegs,
+                    pendingLegs: arrPendingLegSides,
+                    symbol: objSavedRuntime.currentSymbol || "",
+                    reason: "covered_option_reentry_churn_protection"
+                }
+            );
+            stopAutoTraderCycle(pUserId, pStrategyCode);
+            await releaseDualStrategyLease(pUserId, pStrategyCode, true);
+            return;
+        }
         const vExistingCount = arrRequiredLegs.filter((vLegSide) => hasTrackedOptionRowLeg(pTrackedPositions, vRowIndex, vLegSide)).length;
         if (vExistingCount <= 0) {
             continue;
