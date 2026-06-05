@@ -5881,11 +5881,14 @@ async function ensureCoveredConfiguredLegPresence(
         const arrRequiredLegs = objRowState.legs === "both"
             ? ["ce", "pe"] as Array<"ce" | "pe">
             : [objRowState.legs];
+        const vExistingCount = arrRequiredLegs.filter((vLegSide) => hasTrackedOptionRowLeg(pTrackedPositions, vRowIndex, vLegSide)).length;
         const arrMissingLegs = arrRequiredLegs.filter((vLegSide) => !hasTrackedOptionRowLeg(pTrackedPositions, vRowIndex, vLegSide));
         const arrPendingForRow = arrPending.filter((objEntry) => objEntry.rowIndex === vRowIndex);
         const arrPendingLegSides = Array.from(new Set(arrPendingForRow.map((objEntry) => objEntry.legSide)));
         const bAlternatingMissingLegDetected = arrMissingLegs.some((vLegSide) => !arrPendingLegSides.includes(vLegSide));
-        if (arrMissingLegs.length > 0 && (arrPendingLegSides.length > 1 || (arrPendingLegSides.length > 0 && bAlternatingMissingLegDetected))) {
+        if (vExistingCount > 0
+            && arrMissingLegs.length > 0
+            && (arrPendingLegSides.length > 1 || (arrPendingLegSides.length > 0 && bAlternatingMissingLegDetected))) {
             const objSavedRuntime = await saveRollingFuturesLtRuntime({
                 ...objRuntime,
                 userId: pUserId,
@@ -5914,7 +5917,6 @@ async function ensureCoveredConfiguredLegPresence(
             await releaseDualStrategyLease(pUserId, pStrategyCode, true);
             return;
         }
-        const vExistingCount = arrRequiredLegs.filter((vLegSide) => hasTrackedOptionRowLeg(pTrackedPositions, vRowIndex, vLegSide)).length;
         if (vExistingCount <= 0) {
             continue;
         }
