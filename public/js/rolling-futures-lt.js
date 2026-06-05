@@ -332,7 +332,7 @@
                 newD: "0.53",
                 reD: "0.53",
                 tpD: "0.20",
-                slD: "2.00"
+                slD: "0.70"
             };
         }
         if (isCoveredMode && vRowIndex === 1) {
@@ -343,7 +343,7 @@
                 newD: "0.90",
                 reD: "0.90",
                 tpD: "2.00",
-                slD: "0.50"
+                slD: "0.70"
             };
         }
         return optionDefaults;

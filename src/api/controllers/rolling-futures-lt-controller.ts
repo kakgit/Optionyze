@@ -1240,7 +1240,7 @@ function getDefaultOptionRowUiState(
         objDefaults.newD = "0.90";
         objDefaults.reD = "0.90";
         objDefaults.tpD = "2.00";
-        objDefaults.slD = "0.50";
+        objDefaults.slD = "0.70";
     }
     if (isCoveredOptionsStrategy(pStrategyCode) && vRowIndex === 2) {
         objDefaults.action = "sell";
@@ -1248,7 +1248,7 @@ function getDefaultOptionRowUiState(
         objDefaults.newD = "0.53";
         objDefaults.reD = "0.53";
         objDefaults.tpD = "0.20";
-        objDefaults.slD = "2.00";
+        objDefaults.slD = "0.70";
     }
     return objDefaults;
 }
