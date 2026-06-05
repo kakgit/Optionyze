@@ -1345,24 +1345,61 @@
         }
     }
 
+    function buildCoveredStrategyRowPayload(rowIndex) {
+        const optionRowIndex = normalizeOptionRowIndex(rowIndex);
+        const rowNodes = getOptionRowNodes(optionRowIndex);
+        const vAction = String(rowNodes.action?.value || "").trim().toLowerCase();
+        const vLegSide = String(rowNodes.legs?.value || "").trim().toLowerCase();
+        const vExpiryMode = String(rowNodes.expiryMode?.value || "5").trim();
+        const vExpiryDate = String(rowNodes.expiryDate?.value || "").trim();
+        const vQty = Math.max(1, Math.floor(Number(rowNodes.qty?.value || 1)));
+        const vTargetDelta = Math.max(0, Number(rowNodes.newD?.value || 0.53));
+        const vSymbol = String(ids.symbol?.value || "BTC").trim().toUpperCase();
+
+        if (vAction !== "buy" && vAction !== "sell") {
+            throw new Error(`Select Buy or Sell in Action for row ${optionRowIndex} before executing the live strategy.`);
+        }
+        if (!vExpiryDate) {
+            throw new Error(`Select an expiry date for row ${optionRowIndex} before executing the live strategy.`);
+        }
+
+        return {
+            rowIndex: optionRowIndex,
+            action: vAction,
+            symbol: vSymbol,
+            legSide: vLegSide,
+            expiryMode: vExpiryMode,
+            expiryDate: vExpiryDate,
+            qty: vQty,
+            targetDelta: vTargetDelta
+        };
+    }
+
     async function executeCoveredStrategies() {
         if (!isCoveredMode) {
             return executeStrategy(1);
         }
 
-        const results = [];
-        for (const rowIndex of getSupportedOptionRowIndexes()) {
-            results.push(await executeStrategy(rowIndex));
+        await checkConnection();
+        if (!canUseLiveActions()) {
+            throw new Error("Delta connection is not healthy enough to execute the live covered strategy.");
         }
-        return {
-            status: "success",
-            message: `Exec Strategy placed live option order(s) for ${results.length} rows.`,
-            data: {
-                trackedOpenPositions: results[results.length - 1]?.data?.trackedOpenPositions || null,
-                neutralCheck: results[results.length - 1]?.data?.neutralCheck || {},
-                rowResults: results
-            }
-        };
+
+        await saveProfile();
+        execStrategyInFlight = true;
+        setButtonsEnabled();
+        try {
+            const rows = getSupportedOptionRowIndexes().map(function (rowIndex) {
+                return buildCoveredStrategyRowPayload(rowIndex);
+            });
+            return await postJson(`${endpointBase}/strategy/execute`, {
+                rows: rows
+            });
+        }
+        finally {
+            execStrategyInFlight = false;
+            setButtonsEnabled();
+        }
     }
 
     async function placeManualOption(action, legSide, rowIndex) {

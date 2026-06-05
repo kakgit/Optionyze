@@ -519,6 +519,105 @@ async function runExecStrategyPlacement(
     }
 }
 
+async function runCoveredExecStrategyBatchPlacement(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pSelectedApiProfileId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pInputs: Array<{
+        action: "buy" | "sell";
+        symbol: "BTC" | "ETH";
+        legSide: "ce" | "pe" | "both";
+        expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
+        expiryDate: string;
+        qty: number;
+        targetDelta: number;
+        rowIndex?: 1 | 2;
+    }>,
+    pReason: "exec_strategy" | "admin_exec_strategy"
+): Promise<{
+    profileLabel: string;
+    trackedOpenPositions: RollingFuturesLtImportedPositionRecord[];
+    contracts: Array<Record<string, unknown>>;
+    orders: Array<Record<string, unknown>>;
+    neutralCheck: {
+        mode: "none" | "delta" | "theta" | "gamma";
+        hedgePlaced: boolean;
+        totalDelta: number;
+        totalTheta: number;
+        threshold: number | null;
+    };
+}> {
+    const vLockKey = getManualFutureOrderLockKey(pUserId, pStrategyCode);
+    if (gAutoTraderCycleLocks.has(vLockKey)) {
+        throw new Error("The live auto trader is in the middle of a server cycle. Please wait a few seconds and try Exec Strategy again.");
+    }
+    if (gExecStrategyLocks.has(vLockKey)) {
+        throw new Error("Exec Strategy is already running for this page. Please wait for it to finish.");
+    }
+
+    gExecStrategyLocks.add(vLockKey);
+    try {
+        let objLastResult: Awaited<ReturnType<typeof executeStrategyPlacement>> | null = null;
+        const arrOrders: Array<Record<string, unknown>> = [];
+        const arrContracts: Array<Record<string, unknown>> = [];
+        for (const objInput of pInputs) {
+            objLastResult = await executeStrategyPlacement(
+                pUserId,
+                pStrategyCode,
+                pSelectedApiProfileId,
+                pProfile,
+                objInput
+            );
+            arrOrders.push(...objLastResult.orders);
+            arrContracts.push(...objLastResult.contracts);
+        }
+        if (!objLastResult) {
+            throw new Error("No covered strategy rows were supplied for execution.");
+        }
+
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "option_opened",
+            "success",
+            pReason === "admin_exec_strategy" ? "Admin Exec Strategy Started" : "Exec Strategy Started",
+            `Exec Strategy placed ${arrOrders.length} option order${arrOrders.length === 1 ? "" : "s"} across ${pInputs.length} covered row${pInputs.length === 1 ? "" : "s"} using ${objLastResult.profileLabel}.`,
+            {
+                symbol: pInputs[0]?.symbol || "",
+                qty: pInputs.reduce((pSum, objInput) => pSum + Math.max(0, Number(objInput.qty || 0)), 0),
+                rowCount: pInputs.length,
+                reason: pReason
+            }
+        );
+
+        return {
+            ...objLastResult,
+            orders: arrOrders,
+            contracts: arrContracts
+        };
+    }
+    catch (objError) {
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "engine_error",
+            "error",
+            pReason === "admin_exec_strategy" ? "Admin Exec Strategy Failed" : "Exec Strategy Failed",
+            getErrorMessage(objError, "Unable to execute the live covered strategy."),
+            {
+                symbol: pInputs[0]?.symbol || "",
+                rowCount: pInputs.length,
+                reason: pReason === "admin_exec_strategy" ? "admin_exec_strategy_error" : "exec_strategy_error"
+            }
+        );
+        throw objError;
+    }
+    finally {
+        gExecStrategyLocks.delete(vLockKey);
+    }
+}
+
 async function executePendingDualStrategyRequestByRecord(
     pRequest: {
         requestId: string;
@@ -9051,6 +9150,61 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
             data: objCheck.profile
         });
         return;
+    }
+
+    if (isCoveredOptionsStrategy(pStrategyCode) && Array.isArray(req.body?.rows)) {
+        const arrInputs = (req.body.rows as Array<Record<string, unknown>>).map((objRow) => {
+            const objInput = normalizeExecStrategyInput(
+                String(objRow.action || "").trim().toLowerCase(),
+                objRow.symbol || getMergedUiState(objProfile).symbol,
+                String(objRow.legSide || "").trim().toLowerCase(),
+                String(objRow.expiryMode || "5").trim(),
+                objRow.expiryDate,
+                objRow.qty || 1,
+                objRow.targetDelta || 0.53
+            );
+            objInput.rowIndex = normalizeOptionRowIndex(pStrategyCode, objRow.rowIndex);
+            return objInput;
+        }).filter((objInput) => Boolean(objInput.expiryDate));
+
+        if (!arrInputs.length) {
+            res.status(400).json({
+                status: "warning",
+                message: "At least one valid covered strategy row is required."
+            });
+            return;
+        }
+
+        try {
+            const objExecResult = await runCoveredExecStrategyBatchPlacement(
+                vUserId,
+                pStrategyCode,
+                vSelectedApiProfileId,
+                objProfile,
+                arrInputs,
+                "exec_strategy"
+            );
+
+            res.json({
+                status: "success",
+                message: `Exec Strategy placed ${objExecResult.orders.length} option order${objExecResult.orders.length === 1 ? "" : "s"} across ${arrInputs.length} covered rows.`,
+                data: {
+                    orders: objExecResult.orders,
+                    contracts: objExecResult.contracts,
+                    trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, objExecResult.trackedOpenPositions),
+                    neutralCheck: objExecResult.neutralCheck,
+                    rowCount: arrInputs.length
+                }
+            });
+            return;
+        }
+        catch (objError) {
+            res.status(500).json({
+                status: "danger",
+                message: getErrorMessage(objError, "Unable to execute the live covered strategy.")
+            });
+            return;
+        }
     }
 
     const vAction = String(req.body?.action || "").trim().toLowerCase();
