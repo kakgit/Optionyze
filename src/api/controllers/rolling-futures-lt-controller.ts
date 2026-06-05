@@ -561,13 +561,20 @@ async function runCoveredExecStrategyBatchPlacement(
         let objLastResult: Awaited<ReturnType<typeof executeStrategyPlacement>> | null = null;
         const arrOrders: Array<Record<string, unknown>> = [];
         const arrContracts: Array<Record<string, unknown>> = [];
+        const vStrategyStartedAt = new Date().toISOString();
+        await resetRecoveryMetrics(pUserId, pStrategyCode);
         for (const objInput of pInputs) {
             objLastResult = await executeStrategyPlacement(
                 pUserId,
                 pStrategyCode,
                 pSelectedApiProfileId,
                 pProfile,
-                objInput
+                objInput,
+                {
+                    strategyStartedAt: vStrategyStartedAt,
+                    skipRecoveryReset: true,
+                    skipNeutralityCheck: true
+                }
             );
             arrOrders.push(...objLastResult.orders);
             arrContracts.push(...objLastResult.contracts);
@@ -575,6 +582,39 @@ async function runCoveredExecStrategyBatchPlacement(
         if (!objLastResult) {
             throw new Error("No covered strategy rows were supplied for execution.");
         }
+
+        const objUiState = getMergedUiState(pProfile);
+        const objNeutralCheck = await applyServerSideNeutralityCheck(
+            pUserId,
+            pStrategyCode,
+            pSelectedApiProfileId,
+            objUiState,
+            pInputs[0]?.symbol || normalizeSymbolValue(objUiState.symbol),
+            objLastResult.trackedOpenPositions,
+            null
+        );
+        if (objNeutralCheck.nextRuntimeState) {
+            const objRuntimeAfterExec = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+                || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+            await saveRollingFuturesLtRuntime({
+                ...objRuntimeAfterExec,
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                selectedApiProfileId: pSelectedApiProfileId,
+                currentSymbol: pInputs[0]?.symbol || normalizeSymbolValue(objUiState.symbol),
+                state: {
+                    ...((objRuntimeAfterExec.state || {}) as Record<string, unknown>),
+                    ...objNeutralCheck.nextRuntimeState
+                }
+            });
+        }
+        await syncDualStrategySurvivalState(
+            pUserId,
+            pStrategyCode,
+            pSelectedApiProfileId,
+            objNeutralCheck.trackedOpenPositions,
+            "active"
+        );
 
         await logFuturesEvent(
             pUserId,
@@ -593,8 +633,16 @@ async function runCoveredExecStrategyBatchPlacement(
 
         return {
             ...objLastResult,
+            trackedOpenPositions: objNeutralCheck.trackedOpenPositions,
             orders: arrOrders,
-            contracts: arrContracts
+            contracts: arrContracts,
+            neutralCheck: {
+                mode: objNeutralCheck.mode,
+                hedgePlaced: objNeutralCheck.hedgePlaced,
+                totalDelta: objNeutralCheck.totalDelta,
+                totalTheta: objNeutralCheck.totalTheta,
+                threshold: objNeutralCheck.threshold
+            }
         };
     }
     catch (objError) {
@@ -5284,6 +5332,11 @@ async function executeStrategyPlacement(
         qty: number;
         targetDelta: number;
         rowIndex?: 1 | 2;
+    },
+    pOptions?: {
+        strategyStartedAt?: string;
+        skipRecoveryReset?: boolean;
+        skipNeutralityCheck?: boolean;
     }
 ): Promise<{
     profileLabel: string;
@@ -5299,8 +5352,10 @@ async function executeStrategyPlacement(
     };
 }> {
     const { client, profile } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
-    const vStrategyStartedAt = new Date().toISOString();
-    await resetRecoveryMetrics(pUserId, pStrategyCode);
+    const vStrategyStartedAt = String(pOptions?.strategyStartedAt || new Date().toISOString()).trim() || new Date().toISOString();
+    if (!pOptions?.skipRecoveryReset) {
+        await resetRecoveryMetrics(pUserId, pStrategyCode);
+    }
     const objRuntimeBeforeExec = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const objRunState = await ensureActiveStrategyRun(pUserId, pStrategyCode, vStrategyStartedAt);
     await saveRollingFuturesLtRuntime({
@@ -5369,6 +5424,15 @@ async function executeStrategyPlacement(
             const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
             if (!(vAbsoluteDelta <= pInput.targetDelta)) {
                 throw new Error(`The selected ${vOptionSide} contract delta ${vAbsoluteDelta.toFixed(2)} exceeded New D ${pInput.targetDelta.toFixed(2)}.`);
+            }
+            const objImmediateRuleDecision = shouldTriggerTrackedOption(
+                pInput.action.toUpperCase(),
+                vAbsoluteDelta,
+                Number(objOptionMetadata.takeProfitDelta || 0.25),
+                Number(objOptionMetadata.stopLossDelta || 0.65)
+            );
+            if (objImmediateRuleDecision.shouldAct) {
+                throw new Error(`The selected ${vOptionSide} contract delta ${vAbsoluteDelta.toFixed(2)} already violates the configured ${objImmediateRuleDecision.reason.toUpperCase()} rule for row ${vRowIndex}. Adjust New D / SL / TP before executing.`);
             }
 
             const vClientOrderId = await allocateStrategyClientOrderId(pUserId, pStrategyCode, "EN");
@@ -5457,15 +5521,25 @@ async function executeStrategyPlacement(
             arrEntryCharges.reduce((pSum, vValue) => pSum + Number(vValue || 0), 0),
             arrInitialSaved.length
         );
-        const objNeutralCheck = await applyServerSideNeutralityCheck(
-            pUserId,
-            pStrategyCode,
-                pSelectedApiProfileId,
-                objUiState,
-                pInput.symbol,
-                arrInitialSaved,
-                null
-            );
+        const objNeutralCheck = pOptions?.skipNeutralityCheck
+            ? {
+                trackedOpenPositions: arrInitialSaved,
+                hedgePlaced: false,
+                totalDelta: 0,
+                totalTheta: 0,
+                mode: "none" as const,
+                threshold: null,
+                nextRuntimeState: null
+            }
+            : await applyServerSideNeutralityCheck(
+                pUserId,
+                pStrategyCode,
+                    pSelectedApiProfileId,
+                    objUiState,
+                    pInput.symbol,
+                    arrInitialSaved,
+                    null
+                );
         if (objNeutralCheck.nextRuntimeState) {
             const objRuntimeAfterExec = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
                 || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
@@ -5510,6 +5584,29 @@ async function executeStrategyPlacement(
         }
         throw objError;
     }
+}
+
+async function updateStrategyClosedFromDateAfterExec(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pProfile: RollingFuturesLtProfileRecord,
+    pTrackedOpenPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<void> {
+    const objFirstOpenedOption = pTrackedOpenPositions
+        .filter((objPosition) => isOptionContractSymbol(objPosition.contractName))
+        .sort((pLeft, pRight) => new Date(String(pLeft.openedAt || "")).getTime() - new Date(String(pRight.openedAt || "")).getTime())[0];
+    if (!objFirstOpenedOption?.openedAt) {
+        return;
+    }
+    await saveRollingFuturesLtProfile({
+        ...pProfile,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        uiState: {
+            ...getMergedUiState(pProfile),
+            closedFromDate: formatDeltaUiDateTimeLocalString(objFirstOpenedOption.openedAt)
+        }
+    });
 }
 
 async function closeTrackedPositionOnDelta(
@@ -9184,6 +9281,12 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
                 arrInputs,
                 "exec_strategy"
             );
+            await updateStrategyClosedFromDateAfterExec(
+                vUserId,
+                pStrategyCode,
+                objProfile,
+                objExecResult.trackedOpenPositions
+            );
 
             res.json({
                 status: "success",
@@ -9301,6 +9404,12 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
             objProfile,
             objExecInput,
             "exec_strategy"
+        );
+        await updateStrategyClosedFromDateAfterExec(
+            vUserId,
+            pStrategyCode,
+            objProfile,
+            objExecResult.trackedOpenPositions
         );
 
         res.json({
