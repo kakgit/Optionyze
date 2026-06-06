@@ -42,6 +42,11 @@ export interface RollingOptionsPtDeLiveOptionContract {
     usedNextDayFallback: boolean;
 }
 
+function parseFiniteOrNaN(pValue: unknown): number {
+    const vNum = Number(pValue);
+    return Number.isFinite(vNum) ? vNum : Number.NaN;
+}
+
 function parseNumber(pValue: unknown, pFallback = 0): number {
     const vNum = Number(pValue);
     return Number.isFinite(vNum) ? vNum : pFallback;
@@ -421,10 +426,10 @@ export async function findBestLiveOptionContract(
                 markPrice: vMarkPrice,
                 bestBid: Number.isFinite(parseNumber(objRow.quotes?.best_bid, NaN)) ? parseNumber(objRow.quotes?.best_bid, NaN) : null,
                 bestAsk: Number.isFinite(parseNumber(objRow.quotes?.best_ask, NaN)) ? parseNumber(objRow.quotes?.best_ask, NaN) : null,
-                delta: parseNumber(objRow.greeks?.delta, 0),
-                gamma: parseNumber(objRow.greeks?.gamma, 0),
-                theta: parseNumber(objRow.greeks?.theta, 0),
-                vega: parseNumber(objRow.greeks?.vega, 0),
+                delta: parseFiniteOrNaN(objRow.greeks?.delta),
+                gamma: parseFiniteOrNaN(objRow.greeks?.gamma),
+                theta: parseFiniteOrNaN(objRow.greeks?.theta),
+                vega: parseFiniteOrNaN(objRow.greeks?.vega),
                 expiryDate: objCandidate.expiryDate,
                 requestedExpiryDate: pConfig.expiryDate,
                 usedNextDayFallback: objCandidate.usedNextDayFallback
@@ -457,10 +462,10 @@ export async function getLiveOptionTicker(pContractSymbol: string): Promise<Roll
         markPrice: parseNumber(objRow.mark_price, 0),
         bestBid: Number.isFinite(parseNumber(objRow.quotes?.best_bid, NaN)) ? parseNumber(objRow.quotes?.best_bid, NaN) : null,
         bestAsk: Number.isFinite(parseNumber(objRow.quotes?.best_ask, NaN)) ? parseNumber(objRow.quotes?.best_ask, NaN) : null,
-        delta: parseNumber(objRow.greeks?.delta, 0),
-        gamma: parseNumber(objRow.greeks?.gamma, 0),
-        theta: parseNumber(objRow.greeks?.theta, 0),
-        vega: parseNumber(objRow.greeks?.vega, 0),
+        delta: parseFiniteOrNaN(objRow.greeks?.delta),
+        gamma: parseFiniteOrNaN(objRow.greeks?.gamma),
+        theta: parseFiniteOrNaN(objRow.greeks?.theta),
+        vega: parseFiniteOrNaN(objRow.greeks?.vega),
         expiryDate: "",
         requestedExpiryDate: "",
         usedNextDayFallback: false

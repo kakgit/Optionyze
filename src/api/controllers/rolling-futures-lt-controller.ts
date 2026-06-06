@@ -1384,18 +1384,18 @@ function getDefaultOptionRowUiState(
     if (isCoveredOptionsStrategy(pStrategyCode) && vRowIndex === 1) {
         objDefaults.action = "buy";
         objDefaults.expiryMode = "6";
-        objDefaults.newD = "0.90";
-        objDefaults.reD = "0.90";
-        objDefaults.tpD = "2.00";
-        objDefaults.slD = "0.70";
+        objDefaults.newD = "0.63";
+        objDefaults.reD = "0.63";
+        objDefaults.tpD = "0.82";
+        objDefaults.slD = "0.42";
     }
     if (isCoveredOptionsStrategy(pStrategyCode) && vRowIndex === 2) {
         objDefaults.action = "sell";
-        objDefaults.expiryMode = "2";
-        objDefaults.newD = "0.53";
-        objDefaults.reD = "0.53";
+        objDefaults.expiryMode = "4";
+        objDefaults.newD = "0.43";
+        objDefaults.reD = "0.43";
         objDefaults.tpD = "0.20";
-        objDefaults.slD = "0.70";
+        objDefaults.slD = "0.63";
     }
     return objDefaults;
 }
@@ -1476,10 +1476,10 @@ function getDefaultManualTraderUiState(
         onlyDeltaNeutral: false,
         rangeDeltaNeutral: false,
         gammaAwareNeutral: false,
-        closeNetProfitBrokerage: bIsDual,
+        closeNetProfitBrokerage: false,
         brokerageMultiplier: "10",
         reEnterBrok: bIsDual,
-        closeBlockedMargin: bIsDual,
+        closeBlockedMargin: false,
         blockedMarginPct: bIsDual ? "10" : "20",
         reEnterBlock: bIsDual,
         telegramAlertTypes: [
@@ -6507,8 +6507,9 @@ async function findTriggeredTrackedOptions(
             continue;
         }
         const objTicker = await getLiveOptionTicker(String(objPosition.contractName || "").trim());
-        const vCurrentDelta = Math.abs(Number(objTicker?.delta || 0));
-        if (!Number.isFinite(vCurrentDelta)) {
+        const vRawCurrentDelta = Number(objTicker?.delta);
+        const vCurrentDelta = Math.abs(vRawCurrentDelta);
+        if (!Number.isFinite(vCurrentDelta) || !(vCurrentDelta > 0)) {
             continue;
         }
         const objMetadata = getTrackedOptionMetadata(objPosition);
