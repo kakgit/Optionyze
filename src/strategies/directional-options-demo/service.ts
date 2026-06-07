@@ -216,6 +216,14 @@ function calculatePositionPnl(side: "buy" | "sell", entryPrice: number, exitPric
     return signedMove * qty;
 }
 
+function getPositionActionKey(position: Pick<DirectionalOptionsDemoPosition, "side" | "optionType">): string {
+    return `${position.side}_${position.optionType}`;
+}
+
+function getSignalActionKey(signal: Pick<DirectionalSignalMetrics, "suggestedAction">): string {
+    return String(signal.suggestedAction || "wait");
+}
+
 function updateOpenMarks(state: DirectionalOptionsDemoState, snapshot: MarketSnapshot): void {
     const optionsBySymbol = new Map<string, MarketOptionSnapshot>();
     snapshot.options.forEach((option) => {
@@ -320,7 +328,7 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
     else {
         rangeScore += 1;
     }
-    if (rsi >= 62 || rsi <= 38) {
+    if (rsi >= 65 || rsi <= 35) {
         rangeScore += 1;
     }
 
@@ -328,7 +336,7 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
     if (trendScore >= rangeScore + 2) {
         regime = "trend";
     }
-    else if (rangeScore >= trendScore + 2) {
+    else if (rangeScore >= trendScore + 3) {
         regime = "range";
     }
 
@@ -341,12 +349,12 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
         }
     }
     else if (regime === "range") {
-        if (rsi <= 38) {
-            bullishScore += rsi <= 32 ? 3 : 2;
+        if (rsi <= 35) {
+            bullishScore += rsi <= 30 ? 3 : 2;
             drivers.push(`Range bounce setup forming with RSI ${rsi.toFixed(1)} near the lower edge.`);
         }
-        else if (rsi >= 62) {
-            bearishScore += rsi >= 68 ? 3 : 2;
+        else if (rsi >= 65) {
+            bearishScore += rsi >= 70 ? 3 : 2;
             drivers.push(`Range fade setup forming with RSI ${rsi.toFixed(1)} near the upper edge.`);
         }
         else {
@@ -395,6 +403,9 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
     }
     if (regime === "unclear") {
         blockers.push("Regime is unclear. Wait for either trend expansion or a cleaner range edge.");
+    }
+    if (regime === "range" && confidence < Math.max(config.minConfidence, 72)) {
+        blockers.push(`Range confidence ${confidence}% is below the stricter range requirement ${Math.max(config.minConfidence, 72)}%.`);
     }
 
     let suggestedAction: DirectionalSignalMetrics["suggestedAction"] = "wait";
@@ -479,7 +490,41 @@ function canEnterTrade(state: DirectionalOptionsDemoState, signal: DirectionalSi
             return false;
         }
     }
+    if (signal.regime === "range") {
+        if (signal.rangeScore < signal.trendScore + 3) {
+            return false;
+        }
+        if (signal.confidence < Math.max(state.config.minConfidence, 72)) {
+            return false;
+        }
+        if (!(signal.rsi <= 35 || signal.rsi >= 65)) {
+            return false;
+        }
+    }
     return true;
+}
+
+function shouldBlockRecentRangeReentry(state: DirectionalOptionsDemoState, signal: DirectionalSignalMetrics): boolean {
+    if (signal.regime !== "range") {
+        return false;
+    }
+    const lastClosed = state.closedPositions[0];
+    if (!lastClosed) {
+        return false;
+    }
+    const isChurnExit = lastClosed.closeReason === "signal turned neutral" || lastClosed.closeReason === "max hold cycles reached";
+    if (!isChurnExit) {
+        return false;
+    }
+    const sameAction = getPositionActionKey(lastClosed) === getSignalActionKey(signal);
+    if (!sameAction) {
+        return false;
+    }
+    const cyclesSinceClose = state.cycleCount - Number(lastClosed.closedCycle || 0);
+    if (cyclesSinceClose > Math.max(3, state.config.cooldownCycles + 1)) {
+        return false;
+    }
+    return signal.confidence < Math.max(state.config.minConfidence + 6, Number(lastClosed.confidenceAtEntry || 0) + 4);
 }
 
 function maybeClosePositions(state: DirectionalOptionsDemoState, signal: DirectionalSignalMetrics, snapshot: MarketSnapshot): void {
@@ -508,16 +553,16 @@ function maybeClosePositions(state: DirectionalOptionsDemoState, signal: Directi
         }
         if (heldCycles >= state.config.maxHoldCycles) {
             closePosition(state, position, exitPrice, "max hold cycles reached");
-            state.cooldownUntilCycle = state.cycleCount + 1;
+            state.cooldownUntilCycle = state.cycleCount + (position.side === "sell" ? Math.max(2, state.config.cooldownCycles + 1) : 1);
             continue;
         }
         if (signal.bias === "neutral" && heldCycles >= state.config.neutralExitCycles) {
             closePosition(state, position, exitPrice, "signal turned neutral");
-            state.cooldownUntilCycle = state.cycleCount + 1;
+            state.cooldownUntilCycle = state.cycleCount + (position.side === "sell" ? Math.max(2, state.config.cooldownCycles + 2) : 1);
             continue;
         }
         const currentAction = signal.suggestedAction;
-        const desiredAction = `${position.side}_${position.optionType}` as DirectionalSignalMetrics["suggestedAction"];
+        const desiredAction = getPositionActionKey(position) as DirectionalSignalMetrics["suggestedAction"];
         if (signal.confidence >= state.config.minConfidence && currentAction !== "wait" && desiredAction !== currentAction) {
             closePosition(state, position, exitPrice, "signal rotated to a different trade style");
             state.cooldownUntilCycle = state.cycleCount + 1;
@@ -548,6 +593,10 @@ function maybeOpenPosition(state: DirectionalOptionsDemoState, signal: Direction
 
     const suggestedAction = signal.suggestedAction;
     if (suggestedAction === "wait") {
+        return;
+    }
+    if (shouldBlockRecentRangeReentry(state, signal)) {
+        addEvent(state, "SKIP", "Range re-entry blocked", `Skipped ${suggestedAction.replaceAll("_", " ").toUpperCase()} because the last similar range trade exited too recently without stronger signal improvement.`);
         return;
     }
     const optionType = suggestedAction.endsWith("put") ? "put" : "call";
@@ -599,6 +648,20 @@ function maybeOpenPosition(state: DirectionalOptionsDemoState, signal: Direction
     position.unrealizedPnl = calculatePositionPnl(position.side, position.entryPrice, position.markPrice, position.qty);
     state.openPositions.push(position);
     addEvent(state, "ENTRY", position.symbol, `Opened ${side.toUpperCase()} ${optionType.toUpperCase()} paper scalp at ${entryPrice.toFixed(2)} with confidence ${signal.confidence}% in ${signal.regime} regime.`);
+}
+
+function flattenOpenPositionsForGuardrail(state: DirectionalOptionsDemoState, reason: string): void {
+    if (!state.openPositions.length) {
+        return;
+    }
+    const currentOpen = [...state.openPositions];
+    state.openPositions = [];
+    currentOpen.forEach((position) => {
+        if (position.status !== "OPEN") {
+            return;
+        }
+        closePosition(state, position, Number(position.markPrice || position.entryPrice || 0), reason);
+    });
 }
 
 function calculateTotals(state: DirectionalOptionsDemoState): DirectionalOptionsDemoStatus["totals"] {
@@ -747,14 +810,17 @@ export class DirectionalOptionsDemoService {
         const totals = calculateTotals(state);
         const consecutiveLosses = countConsecutiveLosses(state);
         if (totals.totalPnl >= state.config.maxSessionProfit) {
+            flattenOpenPositionsForGuardrail(state, "session profit guardrail stop");
             await this.stopState(state, `Auto-stopped after hitting session profit target ${totals.totalPnl.toFixed(2)}.`);
             return;
         }
         if (totals.totalPnl <= (-1 * state.config.maxSessionLoss)) {
+            flattenOpenPositionsForGuardrail(state, "session loss guardrail stop");
             await this.stopState(state, `Auto-stopped after hitting session loss limit ${totals.totalPnl.toFixed(2)}.`);
             return;
         }
         if (consecutiveLosses >= state.config.maxConsecutiveLosses) {
+            flattenOpenPositionsForGuardrail(state, "consecutive loss guardrail stop");
             await this.stopState(state, `Auto-stopped after ${consecutiveLosses} consecutive losing scalps.`);
         }
     }
