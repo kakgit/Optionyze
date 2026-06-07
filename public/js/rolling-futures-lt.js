@@ -482,7 +482,8 @@
             return currentDate;
         }
         if (modeValue === "4") {
-            return getFutureFriday(currentDate, currentDate.getDay() >= 1 ? 1 : 0);
+            const weeklyFridayOffset = (currentDate.getDay() >= 1 && currentDate.getDay() <= 5) ? 1 : 0;
+            return getFutureFriday(currentDate, weeklyFridayOffset);
         }
         if (modeValue === "5") {
             const biWeeklyCandidate = getFutureFriday(currentDate, 1);
@@ -1035,7 +1036,10 @@
     }
 
     async function resetManualTraderDefaults() {
-        applyUiState(getDefaultUiState());
+        const defaultState = getDefaultUiState();
+        defaultState.closedFromDate = String(ids.closedFromDate?.value || "").trim();
+        defaultState.closedToDate = String(ids.closedToDate?.value || "").trim();
+        applyUiState(defaultState);
         applySymbolDefaults();
         applyExpiryModeDefaults(true);
         await saveProfile();
@@ -1329,6 +1333,8 @@
         setButtonsEnabled();
         try {
             return await postJson(`${endpointBase}/strategy/execute`, {
+                selectedApiProfileId: String(ids.apiProfile?.value || selectedApiProfileId || "").trim(),
+                uiState: getUiState(),
                 rowIndex: optionRowIndex,
                 action: vAction,
                 symbol: vSymbol,
@@ -1393,6 +1399,8 @@
                 return buildCoveredStrategyRowPayload(rowIndex);
             });
             return await postJson(`${endpointBase}/strategy/execute`, {
+                selectedApiProfileId: String(ids.apiProfile?.value || selectedApiProfileId || "").trim(),
+                uiState: getUiState(),
                 rows: rows
             });
         }

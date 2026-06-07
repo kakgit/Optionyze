@@ -748,21 +748,6 @@ async function executePendingDualStrategyRequestByRecord(
         objExecInput,
         "admin_exec_strategy"
     );
-    const objFirstOpenedOption = objExecResult.trackedOpenPositions
-        .filter((objPosition) => isOptionContractSymbol(objPosition.contractName))
-        .sort((pLeft, pRight) => new Date(String(pLeft.openedAt || "")).getTime() - new Date(String(pRight.openedAt || "")).getTime())[0];
-    if (objFirstOpenedOption?.openedAt) {
-        await saveRollingFuturesLtProfile({
-            ...objProfile,
-            userId: pRequest.accountId,
-            strategyCode: vStrategyCode,
-            selectedApiProfileId: vSelectedApiProfileId,
-            uiState: {
-                ...getMergedUiState(objProfile),
-                closedFromDate: formatDeltaUiDateTimeLocalString(objFirstOpenedOption.openedAt)
-            }
-        });
-    }
     return objExecResult;
 }
 
@@ -1210,7 +1195,8 @@ function resolveRollingFuturesExpiryDateByModeFromBaseDate(pExpiryMode: string, 
         return formatIsoDateFromParts(objDate.getUTCFullYear(), objDate.getUTCMonth(), objDate.getUTCDate());
     }
     if (vMode === "4") {
-        const objWeekly = getFutureFridayUtc(objDate, objDate.getUTCDay() >= 1 ? 1 : 0);
+        const vWeeklyFridayOffset = (objDate.getUTCDay() >= 1 && objDate.getUTCDay() <= 5) ? 1 : 0;
+        const objWeekly = getFutureFridayUtc(objDate, vWeeklyFridayOffset);
         return formatIsoDateFromParts(objWeekly.getUTCFullYear(), objWeekly.getUTCMonth(), objWeekly.getUTCDate());
     }
     if (vMode === "5") {
@@ -9224,7 +9210,16 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
         });
         return;
     }
-    const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+    let objProfile = await readLiveProfile(vUserId, pStrategyCode);
+    if (req.body?.uiState && typeof req.body.uiState === "object") {
+        objProfile = await saveRollingFuturesLtProfile(normalizeProfileSaveInput(vUserId, pStrategyCode, {
+            ...objProfile,
+            selectedApiProfileId: String(req.body?.selectedApiProfileId || objProfile.selectedApiProfileId || "").trim(),
+            uiState: req.body.uiState as Record<string, unknown>,
+            connectionStatus: objProfile.connectionStatus
+        }));
+        await ensureRuntimeProfileSelection(vUserId, pStrategyCode, objProfile.selectedApiProfileId);
+    }
     const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
     if (!vSelectedApiProfileId) {
         res.status(400).json({ status: "warning", message: "Select an API profile before executing the live strategy." });
@@ -9282,12 +9277,14 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
                 arrInputs,
                 "exec_strategy"
             );
-            await updateStrategyClosedFromDateAfterExec(
-                vUserId,
-                pStrategyCode,
-                objProfile,
-                objExecResult.trackedOpenPositions
-            );
+            if (!Boolean(req.body?.suppressClosedFromDateUpdate)) {
+                await updateStrategyClosedFromDateAfterExec(
+                    vUserId,
+                    pStrategyCode,
+                    objProfile,
+                    objExecResult.trackedOpenPositions
+                );
+            }
 
             res.json({
                 status: "success",
@@ -9406,12 +9403,14 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
             objExecInput,
             "exec_strategy"
         );
-        await updateStrategyClosedFromDateAfterExec(
-            vUserId,
-            pStrategyCode,
-            objProfile,
-            objExecResult.trackedOpenPositions
-        );
+        if (!Boolean(req.body?.suppressClosedFromDateUpdate)) {
+            await updateStrategyClosedFromDateAfterExec(
+                vUserId,
+                pStrategyCode,
+                objProfile,
+                objExecResult.trackedOpenPositions
+            );
+        }
 
         res.json({
             status: "success",
