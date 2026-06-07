@@ -22,7 +22,7 @@ export interface DirectionalOptionsDemoConfig {
     neutralExitCycles: number;
     requireEmaAlignment: boolean;
     requireRsiConfirmation: boolean;
-    preferredRegime: "trend" | "breakout" | "any";
+    preferredRegime: "trend" | "range" | "any";
     minVolatilityPct: number;
     maxSessionProfit: number;
     maxSessionLoss: number;
@@ -37,19 +37,22 @@ export interface DirectionalSignalMetrics {
     volatilityPct: number;
     bullishScore: number;
     bearishScore: number;
+    trendScore: number;
+    rangeScore: number;
     confidence: number;
     bias: "bullish" | "bearish" | "neutral";
-    regime: "trend" | "breakout" | "balanced" | "fade";
+    regime: "trend" | "range" | "unclear";
     drivers: string[];
     blockers: string[];
-    suggestedAction: "buy_call" | "buy_put" | "wait";
+    suggestedAction: "buy_call" | "buy_put" | "sell_call" | "sell_put" | "wait";
+    tradeStyle: "buy_option" | "sell_option" | "wait";
 }
 
 export interface DirectionalOptionsDemoPosition {
     id: string;
     symbol: string;
     optionType: "call" | "put";
-    side: "buy";
+    side: "buy" | "sell";
     qty: number;
     entryPrice: number;
     markPrice: number;

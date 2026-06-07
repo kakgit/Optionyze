@@ -87,26 +87,26 @@ function buildDefaultConfig(): DirectionalOptionsDemoConfig {
         entryDteMin: 1,
         entryDteMax: 5,
         baseContracts: 1,
-        maxContracts: 2,
-        bullishThreshold: 4,
-        bearishThreshold: 4,
-        minConfidence: 62,
-        takeProfitPct: 10,
-        stopLossPct: 7,
-        maxHoldCycles: 4,
-        cooldownCycles: 1,
+        maxContracts: 1,
+        bullishThreshold: 5,
+        bearishThreshold: 5,
+        minConfidence: 70,
+        takeProfitPct: 8,
+        stopLossPct: 5,
+        maxHoldCycles: 3,
+        cooldownCycles: 2,
         emaFastPeriod: 4,
         emaSlowPeriod: 9,
         rsiPeriod: 6,
         slopeLookback: 3,
-        neutralExitCycles: 2,
+        neutralExitCycles: 1,
         requireEmaAlignment: true,
-        requireRsiConfirmation: false,
+        requireRsiConfirmation: true,
         preferredRegime: "any",
-        minVolatilityPct: 0.18,
-        maxSessionProfit: 40,
-        maxSessionLoss: 25,
-        maxConsecutiveLosses: 3
+        minVolatilityPct: 0.2,
+        maxSessionProfit: 30,
+        maxSessionLoss: 15,
+        maxConsecutiveLosses: 2
     };
 }
 
@@ -138,7 +138,7 @@ function normalizeConfig(input?: Partial<DirectionalOptionsDemoConfig>): Directi
         neutralExitCycles: clampNumber(input?.neutralExitCycles, 1, 50, defaults.neutralExitCycles),
         requireEmaAlignment: input?.requireEmaAlignment !== false,
         requireRsiConfirmation: Boolean(input?.requireRsiConfirmation),
-        preferredRegime: preferredRegime === "trend" || preferredRegime === "breakout" ? preferredRegime : "any",
+        preferredRegime: preferredRegime === "trend" || preferredRegime === "range" ? preferredRegime : "any",
         minVolatilityPct: clampNumber(input?.minVolatilityPct, 0, 10, defaults.minVolatilityPct),
         maxSessionProfit: clampNumber(input?.maxSessionProfit, 1, 1000000, defaults.maxSessionProfit),
         maxSessionLoss: clampNumber(input?.maxSessionLoss, 1, 1000000, defaults.maxSessionLoss),
@@ -189,6 +189,33 @@ function getLongExitPrice(option: MarketOptionSnapshot): number {
         : Number(option.mark || 0);
 }
 
+function getShortEntryPrice(option: MarketOptionSnapshot): number {
+    return Number.isFinite(Number(option.bestBid)) && Number(option.bestBid) > 0
+        ? Number(option.bestBid)
+        : Number(option.mark || 0);
+}
+
+function getShortExitPrice(option: MarketOptionSnapshot): number {
+    return Number.isFinite(Number(option.bestAsk)) && Number(option.bestAsk) > 0
+        ? Number(option.bestAsk)
+        : Number(option.mark || 0);
+}
+
+function getEntryPrice(option: MarketOptionSnapshot, side: "buy" | "sell"): number {
+    return side === "sell" ? getShortEntryPrice(option) : getLongEntryPrice(option);
+}
+
+function getExitPrice(option: MarketOptionSnapshot, side: "buy" | "sell"): number {
+    return side === "sell" ? getShortExitPrice(option) : getLongExitPrice(option);
+}
+
+function calculatePositionPnl(side: "buy" | "sell", entryPrice: number, exitPrice: number, qty: number): number {
+    const signedMove = side === "sell"
+        ? (entryPrice - exitPrice)
+        : (exitPrice - entryPrice);
+    return signedMove * qty;
+}
+
 function updateOpenMarks(state: DirectionalOptionsDemoState, snapshot: MarketSnapshot): void {
     const optionsBySymbol = new Map<string, MarketOptionSnapshot>();
     snapshot.options.forEach((option) => {
@@ -202,10 +229,10 @@ function updateOpenMarks(state: DirectionalOptionsDemoState, snapshot: MarketSna
         if (!option) {
             return;
         }
-        position.markPrice = getLongExitPrice(option);
+        position.markPrice = getExitPrice(option, position.side);
         position.currentDelta = Number(option.delta || 0);
         position.currentDte = Number(option.dte || position.currentDte || 0);
-        position.unrealizedPnl = (position.markPrice - position.entryPrice) * position.qty;
+        position.unrealizedPnl = calculatePositionPnl(position.side, position.entryPrice, position.markPrice, position.qty);
     });
 }
 
@@ -267,18 +294,63 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
         drivers.push(`RSI supports downside at ${rsi.toFixed(1)}.`);
     }
 
-    const regime = volatilityPct >= 0.55 && Math.abs(slopePct) >= 0.35
-        ? "breakout"
-        : (Math.abs(fastEma - slowEma) > Math.max(1, latest * 0.0025)
-            ? "trend"
-            : (volatilityPct <= 0.16 ? "balanced" : "fade"));
+    let trendScore = 0;
+    let rangeScore = 0;
+    const emaSpreadPct = latest > 0 ? (Math.abs(fastEma - slowEma) / latest) * 100 : 0;
+    const absSlopePct = Math.abs(slopePct);
 
-    if (regime === "breakout") {
+    if (emaSpreadPct >= 0.18) {
+        trendScore += emaSpreadPct >= 0.32 ? 2 : 1;
+    }
+    else {
+        rangeScore += 1;
+    }
+    if (absSlopePct >= 0.24) {
+        trendScore += absSlopePct >= 0.42 ? 2 : 1;
+    }
+    else {
+        rangeScore += 1;
+    }
+    if (volatilityPct >= Math.max(config.minVolatilityPct, 0.2)) {
+        trendScore += volatilityPct >= 0.38 ? 2 : 1;
+    }
+    else if (volatilityPct <= Math.max(0.08, config.minVolatilityPct * 0.9)) {
+        rangeScore += 2;
+    }
+    else {
+        rangeScore += 1;
+    }
+    if (rsi >= 62 || rsi <= 38) {
+        rangeScore += 1;
+    }
+
+    let regime: "trend" | "range" | "unclear" = "unclear";
+    if (trendScore >= rangeScore + 2) {
+        regime = "trend";
+    }
+    else if (rangeScore >= trendScore + 2) {
+        regime = "range";
+    }
+
+    if (regime === "trend") {
         if (slopePct > 0) {
             bullishScore += 1;
         }
         else if (slopePct < 0) {
             bearishScore += 1;
+        }
+    }
+    else if (regime === "range") {
+        if (rsi <= 38) {
+            bullishScore += rsi <= 32 ? 3 : 2;
+            drivers.push(`Range bounce setup forming with RSI ${rsi.toFixed(1)} near the lower edge.`);
+        }
+        else if (rsi >= 62) {
+            bearishScore += rsi >= 68 ? 3 : 2;
+            drivers.push(`Range fade setup forming with RSI ${rsi.toFixed(1)} near the upper edge.`);
+        }
+        else {
+            blockers.push("Range regime detected, but price is not stretched enough for a clean fade.");
         }
     }
 
@@ -293,7 +365,7 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
         bias = "bearish";
     }
 
-    if (config.requireEmaAlignment) {
+    if (config.requireEmaAlignment && regime === "trend") {
         if (bias === "bullish" && fastEma <= slowEma) {
             blockers.push("Bullish setup blocked because EMA alignment is missing.");
         }
@@ -301,7 +373,7 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
             blockers.push("Bearish setup blocked because EMA alignment is missing.");
         }
     }
-    if (config.requireRsiConfirmation) {
+    if (config.requireRsiConfirmation && regime === "trend") {
         if (bias === "bullish" && rsi < 55) {
             blockers.push("Bullish setup blocked because RSI confirmation is missing.");
         }
@@ -312,7 +384,7 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
     if (config.preferredRegime !== "any" && bias !== "neutral" && regime !== config.preferredRegime) {
         blockers.push(`Preferred regime is ${config.preferredRegime}, but market is ${regime}.`);
     }
-    if (volatilityPct < config.minVolatilityPct) {
+    if (regime === "trend" && volatilityPct < config.minVolatilityPct) {
         blockers.push(`Volatility ${volatilityPct.toFixed(3)}% is below the scalper floor ${config.minVolatilityPct.toFixed(3)}%.`);
     }
     if (confidence < config.minConfidence) {
@@ -320,6 +392,32 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
     }
     if (bias === "neutral") {
         blockers.push("No directional edge yet.");
+    }
+    if (regime === "unclear") {
+        blockers.push("Regime is unclear. Wait for either trend expansion or a cleaner range edge.");
+    }
+
+    let suggestedAction: DirectionalSignalMetrics["suggestedAction"] = "wait";
+    let tradeStyle: DirectionalSignalMetrics["tradeStyle"] = "wait";
+    if (regime === "trend") {
+        if (bias === "bullish") {
+            suggestedAction = "buy_call";
+            tradeStyle = "buy_option";
+        }
+        else if (bias === "bearish") {
+            suggestedAction = "buy_put";
+            tradeStyle = "buy_option";
+        }
+    }
+    else if (regime === "range") {
+        if (bias === "bullish") {
+            suggestedAction = "sell_put";
+            tradeStyle = "sell_option";
+        }
+        else if (bias === "bearish") {
+            suggestedAction = "sell_call";
+            tradeStyle = "sell_option";
+        }
     }
 
     return {
@@ -330,12 +428,15 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
         volatilityPct: Number(volatilityPct.toFixed(3)),
         bullishScore,
         bearishScore,
+        trendScore,
+        rangeScore,
         confidence,
         bias,
         regime,
         drivers,
         blockers,
-        suggestedAction: bias === "bullish" ? "buy_call" : (bias === "bearish" ? "buy_put" : "wait")
+        suggestedAction,
+        tradeStyle
     };
 }
 
@@ -345,24 +446,24 @@ function closePosition(state: DirectionalOptionsDemoState, position: Directional
     position.closedAt = new Date().toISOString();
     position.closedCycle = state.cycleCount;
     position.closeReason = reason;
-    position.realizedPnl = (exitPrice - position.entryPrice) * position.qty;
+    position.realizedPnl = calculatePositionPnl(position.side, position.entryPrice, exitPrice, position.qty);
     position.unrealizedPnl = 0;
     state.closedPositions.unshift({ ...position });
     state.closedPositions = state.closedPositions.slice(0, 200);
-    addEvent(state, "EXIT", position.symbol, `Closed ${position.optionType.toUpperCase()} paper trade because ${reason}.`);
+    addEvent(state, "EXIT", position.symbol, `Closed ${position.side.toUpperCase()} ${position.optionType.toUpperCase()} paper trade because ${reason}.`);
 }
 
 function canEnterTrade(state: DirectionalOptionsDemoState, signal: DirectionalSignalMetrics): boolean {
-    if (signal.bias === "neutral" || signal.confidence < state.config.minConfidence) {
+    if (signal.bias === "neutral" || signal.confidence < state.config.minConfidence || signal.regime === "unclear") {
         return false;
     }
     if (state.config.preferredRegime !== "any" && signal.regime !== state.config.preferredRegime) {
         return false;
     }
-    if (signal.volatilityPct < state.config.minVolatilityPct) {
+    if (signal.regime === "trend" && signal.volatilityPct < state.config.minVolatilityPct) {
         return false;
     }
-    if (state.config.requireEmaAlignment) {
+    if (state.config.requireEmaAlignment && signal.regime === "trend") {
         if (signal.bias === "bullish" && signal.emaFast <= signal.emaSlow) {
             return false;
         }
@@ -370,7 +471,7 @@ function canEnterTrade(state: DirectionalOptionsDemoState, signal: DirectionalSi
             return false;
         }
     }
-    if (state.config.requireRsiConfirmation) {
+    if (state.config.requireRsiConfirmation && signal.regime === "trend") {
         if (signal.bias === "bullish" && signal.rsi < 55) {
             return false;
         }
@@ -390,8 +491,9 @@ function maybeClosePositions(state: DirectionalOptionsDemoState, signal: Directi
             continue;
         }
         const option = optionsBySymbol.get(position.symbol);
-        const exitPrice = option ? getLongExitPrice(option) : position.markPrice;
-        const pnlPct = position.entryPrice > 0 ? ((exitPrice - position.entryPrice) / position.entryPrice) * 100 : 0;
+        const exitPrice = option ? getExitPrice(option, position.side) : position.markPrice;
+        const realizedMove = calculatePositionPnl(position.side, position.entryPrice, exitPrice, 1);
+        const pnlPct = position.entryPrice > 0 ? (realizedMove / position.entryPrice) * 100 : 0;
         const heldCycles = state.cycleCount - position.openedCycle;
 
         if (pnlPct >= position.takeProfitPct) {
@@ -414,18 +516,20 @@ function maybeClosePositions(state: DirectionalOptionsDemoState, signal: Directi
             state.cooldownUntilCycle = state.cycleCount + 1;
             continue;
         }
-        if (position.optionType === "call" && signal.bias === "bearish" && signal.confidence >= state.config.minConfidence) {
-            closePosition(state, position, exitPrice, "opposite bearish signal");
+        const currentAction = signal.suggestedAction;
+        const desiredAction = `${position.side}_${position.optionType}` as DirectionalSignalMetrics["suggestedAction"];
+        if (signal.confidence >= state.config.minConfidence && currentAction !== "wait" && desiredAction !== currentAction) {
+            closePosition(state, position, exitPrice, "signal rotated to a different trade style");
             state.cooldownUntilCycle = state.cycleCount + 1;
             continue;
         }
-        if (position.optionType === "put" && signal.bias === "bullish" && signal.confidence >= state.config.minConfidence) {
-            closePosition(state, position, exitPrice, "opposite bullish signal");
+        if (signal.regime !== "unclear" && position.regimeAtEntry !== signal.regime && heldCycles >= 1) {
+            closePosition(state, position, exitPrice, "market regime changed");
             state.cooldownUntilCycle = state.cycleCount + 1;
             continue;
         }
         position.markPrice = exitPrice;
-        position.unrealizedPnl = (position.markPrice - position.entryPrice) * position.qty;
+        position.unrealizedPnl = calculatePositionPnl(position.side, position.entryPrice, position.markPrice, position.qty);
         remainingOpen.push(position);
     }
     state.openPositions = remainingOpen;
@@ -442,7 +546,12 @@ function maybeOpenPosition(state: DirectionalOptionsDemoState, signal: Direction
         return;
     }
 
-    const optionType = signal.bias === "bullish" ? "call" : "put";
+    const suggestedAction = signal.suggestedAction;
+    if (suggestedAction === "wait") {
+        return;
+    }
+    const optionType = suggestedAction.endsWith("put") ? "put" : "call";
+    const side = suggestedAction.startsWith("sell") ? "sell" : "buy";
     const selected = selectOptionByDteDelta(snapshot.options, {
         type: optionType,
         dteMin: state.config.entryDteMin,
@@ -453,7 +562,7 @@ function maybeOpenPosition(state: DirectionalOptionsDemoState, signal: Direction
         addEvent(state, "SKIP", "No contract", `No ${optionType.toUpperCase()} option matched the configured delta and DTE window.`);
         return;
     }
-    const entryPrice = getLongEntryPrice(selected);
+    const entryPrice = getEntryPrice(selected, side);
     if (!(entryPrice > 0)) {
         addEvent(state, "SKIP", "Bad price", `Selected ${selected.symbol} has no valid entry price.`);
         return;
@@ -464,10 +573,10 @@ function maybeOpenPosition(state: DirectionalOptionsDemoState, signal: Direction
         id: crypto.randomUUID(),
         symbol: selected.symbol,
         optionType,
-        side: "buy",
+        side,
         qty,
         entryPrice,
-        markPrice: getLongExitPrice(selected),
+        markPrice: getExitPrice(selected, side),
         closePrice: null,
         takeProfitPct: state.config.takeProfitPct,
         stopLossPct: state.config.stopLossPct,
@@ -487,9 +596,9 @@ function maybeOpenPosition(state: DirectionalOptionsDemoState, signal: Direction
         closedCycle: null,
         closeReason: ""
     };
-    position.unrealizedPnl = (position.markPrice - position.entryPrice) * position.qty;
+    position.unrealizedPnl = calculatePositionPnl(position.side, position.entryPrice, position.markPrice, position.qty);
     state.openPositions.push(position);
-    addEvent(state, "ENTRY", position.symbol, `Opened ${optionType.toUpperCase()} paper scalp at ${entryPrice.toFixed(2)} with confidence ${signal.confidence}%.`);
+    addEvent(state, "ENTRY", position.symbol, `Opened ${side.toUpperCase()} ${optionType.toUpperCase()} paper scalp at ${entryPrice.toFixed(2)} with confidence ${signal.confidence}% in ${signal.regime} regime.`);
 }
 
 function calculateTotals(state: DirectionalOptionsDemoState): DirectionalOptionsDemoStatus["totals"] {
@@ -575,18 +684,19 @@ function buildGuidance(state: DirectionalOptionsDemoState): DirectionalOptionsDe
     const checklist: string[] = [];
     checklist.push(`Preset: ${state.config.presetKey.replaceAll("_", " ").toUpperCase()}`);
     checklist.push(`Confidence gate: ${state.config.minConfidence}%`);
-    checklist.push(`Regime gate: ${state.config.preferredRegime === "any" ? "trend or breakout bias accepted" : state.config.preferredRegime}`);
+    checklist.push(`Regime gate: ${state.config.preferredRegime === "any" ? "trend or range accepted" : state.config.preferredRegime}`);
     checklist.push(`Volatility floor: ${state.config.minVolatilityPct.toFixed(3)}%`);
     checklist.push(`Session stop rules: +${state.config.maxSessionProfit} / -${state.config.maxSessionLoss} / ${state.config.maxConsecutiveLosses} losses`);
+    checklist.push("Trend regime buys options. Range regime sells options. Unclear regime waits.");
 
     return {
         shouldStart,
         shouldStop,
-        modeLabel: "Scalper Demo",
+        modeLabel: "Regime-Aware Scalper",
         startSummary: shouldStart && signal
-            ? `Start now. ${signal.bias.toUpperCase()} bias with ${signal.confidence}% confidence in ${signal.regime} regime.`
+            ? `Start now. ${signal.bias.toUpperCase()} bias with ${signal.confidence}% confidence in ${signal.regime} regime using ${signal.tradeStyle.replaceAll("_", " ")} flow.`
             : (signal
-                ? `Wait. ${signal.bias === "neutral" ? "Bias is neutral." : `Need cleaner ${signal.bias} follow-through before starting.`}`
+                ? `Wait. ${signal.regime === "unclear" ? "Regime is unclear." : (signal.bias === "neutral" ? "Bias is neutral." : `Need cleaner ${signal.bias} follow-through before starting.`)}`
                 : "Wait for live rates and signal build-up before starting."),
         stopSummary: shouldStop
             ? (state.lastError ? `Stop now. Engine error: ${state.lastError}` : `Stop now. ${guardrailReason}`)

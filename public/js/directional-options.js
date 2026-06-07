@@ -9,26 +9,26 @@
             entryDteMin: 1,
             entryDteMax: 5,
             baseContracts: 1,
-            maxContracts: 2,
-            cooldownCycles: 1,
-            bullishThreshold: 4,
-            bearishThreshold: 4,
-            minConfidence: 62,
+            maxContracts: 1,
+            cooldownCycles: 2,
+            bullishThreshold: 5,
+            bearishThreshold: 5,
+            minConfidence: 70,
             slopeLookback: 3,
             emaFastPeriod: 4,
             emaSlowPeriod: 9,
             rsiPeriod: 6,
             requireEmaAlignment: true,
-            requireRsiConfirmation: false,
-            takeProfitPct: 10,
-            stopLossPct: 7,
-            maxHoldCycles: 4,
-            neutralExitCycles: 2,
+            requireRsiConfirmation: true,
+            takeProfitPct: 8,
+            stopLossPct: 5,
+            maxHoldCycles: 3,
+            neutralExitCycles: 1,
             preferredRegime: "any",
-            minVolatilityPct: 0.18,
-            maxSessionProfit: 40,
-            maxSessionLoss: 25,
-            maxConsecutiveLosses: 3
+            minVolatilityPct: 0.2,
+            maxSessionProfit: 30,
+            maxSessionLoss: 15,
+            maxConsecutiveLosses: 2
         },
         eth_scalper: {
             symbol: "ETHUSD",
@@ -39,26 +39,26 @@
             entryDteMin: 1,
             entryDteMax: 5,
             baseContracts: 1,
-            maxContracts: 2,
-            cooldownCycles: 1,
-            bullishThreshold: 4,
-            bearishThreshold: 4,
-            minConfidence: 60,
+            maxContracts: 1,
+            cooldownCycles: 2,
+            bullishThreshold: 5,
+            bearishThreshold: 5,
+            minConfidence: 68,
             slopeLookback: 3,
             emaFastPeriod: 4,
             emaSlowPeriod: 9,
             rsiPeriod: 6,
             requireEmaAlignment: true,
-            requireRsiConfirmation: false,
-            takeProfitPct: 11,
-            stopLossPct: 7,
-            maxHoldCycles: 4,
-            neutralExitCycles: 2,
+            requireRsiConfirmation: true,
+            takeProfitPct: 8,
+            stopLossPct: 5,
+            maxHoldCycles: 3,
+            neutralExitCycles: 1,
             preferredRegime: "any",
-            minVolatilityPct: 0.2,
-            maxSessionProfit: 35,
-            maxSessionLoss: 22,
-            maxConsecutiveLosses: 3
+            minVolatilityPct: 0.22,
+            maxSessionProfit: 28,
+            maxSessionLoss: 14,
+            maxConsecutiveLosses: 2
         },
         breakout_hunter: {
             symbol: "BTCUSD",
@@ -69,31 +69,31 @@
             entryDteMin: 1,
             entryDteMax: 4,
             baseContracts: 1,
-            maxContracts: 2,
-            cooldownCycles: 1,
-            bullishThreshold: 5,
-            bearishThreshold: 5,
-            minConfidence: 68,
+            maxContracts: 1,
+            cooldownCycles: 2,
+            bullishThreshold: 6,
+            bearishThreshold: 6,
+            minConfidence: 74,
             slopeLookback: 2,
             emaFastPeriod: 3,
             emaSlowPeriod: 8,
             rsiPeriod: 5,
             requireEmaAlignment: true,
             requireRsiConfirmation: true,
-            takeProfitPct: 12,
-            stopLossPct: 6,
+            takeProfitPct: 9,
+            stopLossPct: 4.5,
             maxHoldCycles: 3,
             neutralExitCycles: 1,
-            preferredRegime: "breakout",
-            minVolatilityPct: 0.28,
-            maxSessionProfit: 45,
-            maxSessionLoss: 22,
+            preferredRegime: "trend",
+            minVolatilityPct: 0.3,
+            maxSessionProfit: 32,
+            maxSessionLoss: 14,
             maxConsecutiveLosses: 2
         }
     };
 
     const activeUser = document.getElementById("directionalDemoActiveUser");
-    const storageKey = `optionyze.directional-demo.config.v3.${String(activeUser?.textContent || "demo-paper").trim() || "demo-paper"}`;
+    const storageKey = `optionyze.directional-demo.config.v4.${String(activeUser?.textContent || "demo-paper").trim() || "demo-paper"}`;
     const ids = {
         preset: document.getElementById("directionalDemoPreset"),
         profileId: document.getElementById("directionalDemoProfileId"),
@@ -158,6 +158,8 @@
         rsiValue: document.getElementById("directionalDemoRsiValue"),
         slopeValue: document.getElementById("directionalDemoSlopeValue"),
         volatilityValue: document.getElementById("directionalDemoVolatilityValue"),
+        trendScoreValue: document.getElementById("directionalDemoTrendScoreValue"),
+        rangeScoreValue: document.getElementById("directionalDemoRangeScoreValue"),
         cycleCount: document.getElementById("directionalDemoCycleCount"),
         drivers: document.getElementById("directionalDemoDrivers"),
         blocks: document.getElementById("directionalDemoBlocks"),
@@ -434,7 +436,7 @@
         ids.bearishScore.textContent = String(signal.bearishScore ?? 0);
         ids.confidence.textContent = `${Number(signal.confidence || 0).toFixed(0)}%`;
         ids.bias.textContent = String(signal.bias || "neutral").replace(/^./, function (char) { return char.toUpperCase(); });
-        ids.regime.textContent = String(signal.regime || "balanced").replace(/^./, function (char) { return char.toUpperCase(); });
+        ids.regime.textContent = String(signal.regime || "unclear").replace(/^./, function (char) { return char.toUpperCase(); });
         ids.action.textContent = String(signal.suggestedAction || "wait").replaceAll("_", " ");
         ids.openCount.textContent = String(totals.openCount || 0);
         ids.winRate.textContent = `${fmt(totals.winRatePct, 0)}%`;
@@ -453,6 +455,8 @@
         ids.rsiValue.textContent = fmt(signal.rsi, 2);
         ids.slopeValue.textContent = `${fmt(signal.slopePct, 3)}%`;
         ids.volatilityValue.textContent = `${fmt(signal.volatilityPct, 3)}%`;
+        ids.trendScoreValue.textContent = String(signal.trendScore ?? "-");
+        ids.rangeScoreValue.textContent = String(signal.rangeScore ?? "-");
         ids.cycleCount.textContent = String(data.cycleCount || 0);
 
         renderList(ids.drivers, signal.drivers, "No drivers yet.");
@@ -464,6 +468,7 @@
             const rowId = escapeHtml(row.id || "");
             return `<tr>
                 <td>${escapeHtml(String(row.optionType || "").toUpperCase())}</td>
+                <td>${escapeHtml(String(row.side || "").toUpperCase())}</td>
                 <td>${escapeHtml(row.symbol || "")}</td>
                 <td>${escapeHtml(row.qty || 0)}</td>
                 <td>${fmt(row.entryPrice, 2)}</td>
@@ -474,11 +479,12 @@
                 <td>${escapeHtml(row.openedAt || "")}</td>
                 <td><button type="button" class="directional-demo-close-btn" data-position-id="${rowId}">Close</button></td>
             </tr>`;
-        }, "No paper positions yet.", 10);
+        }, "No paper positions yet.", 11);
 
         renderTable(ids.closedPositionsBody, data.closedPositions, function (row) {
             return `<tr>
                 <td>${escapeHtml(String(row.optionType || "").toUpperCase())}</td>
+                <td>${escapeHtml(String(row.side || "").toUpperCase())}</td>
                 <td>${escapeHtml(row.symbol || "")}</td>
                 <td>${escapeHtml(row.qty || 0)}</td>
                 <td>${fmt(row.entryPrice, 2)}</td>
@@ -487,7 +493,7 @@
                 <td>${fmt(row.realizedPnl, 2)}</td>
                 <td>${escapeHtml(row.closedAt || "")}</td>
             </tr>`;
-        }, "No closed paper positions yet.", 8);
+        }, "No closed paper positions yet.", 9);
 
         const events = Array.isArray(data.events) ? data.events : [];
         ids.eventsLog.innerHTML = events.length

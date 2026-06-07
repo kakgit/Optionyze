@@ -179,7 +179,7 @@
                         <select id="directionalDemoPreferredRegime">
                             <option value="any">Any</option>
                             <option value="trend">Trend</option>
-                            <option value="breakout">Breakout</option>
+                            <option value="range">Range</option>
                         </select>
                     </div>
                     <div class="directional-demo-field">
@@ -355,6 +355,14 @@
                         <strong id="directionalDemoVolatilityValue">-</strong>
                     </div>
                     <div class="directional-demo-output-item">
+                        <span>Trend Score</span>
+                        <strong id="directionalDemoTrendScoreValue">-</strong>
+                    </div>
+                    <div class="directional-demo-output-item">
+                        <span>Range Score</span>
+                        <strong id="directionalDemoRangeScoreValue">-</strong>
+                    </div>
+                    <div class="directional-demo-output-item">
                         <span>Cycle Count</span>
                         <strong id="directionalDemoCycleCount">0</strong>
                     </div>
@@ -380,6 +388,7 @@
                         <thead>
                             <tr>
                                 <th>Type</th>
+                                <th>Side</th>
                                 <th>Symbol</th>
                                 <th>Qty</th>
                                 <th>Entry</th>
@@ -392,7 +401,7 @@
                             </tr>
                         </thead>
                         <tbody id="directionalDemoOpenPositionsBody">
-                            <tr><td colspan="10" class="directional-demo-empty">No paper positions yet.</td></tr>
+                            <tr><td colspan="11" class="directional-demo-empty">No paper positions yet.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -409,6 +418,7 @@
                         <thead>
                             <tr>
                                 <th>Type</th>
+                                <th>Side</th>
                                 <th>Symbol</th>
                                 <th>Qty</th>
                                 <th>Entry</th>
