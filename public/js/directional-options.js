@@ -26,9 +26,9 @@
             neutralExitCycles: 1,
             preferredRegime: "any",
             minVolatilityPct: 0.2,
-            maxSessionProfit: 30,
-            maxSessionLoss: 15,
-            maxConsecutiveLosses: 2
+            maxSessionProfit: 60,
+            maxSessionLoss: 35,
+            maxConsecutiveLosses: 3
         },
         eth_scalper: {
             symbol: "ETHUSD",
@@ -56,9 +56,9 @@
             neutralExitCycles: 1,
             preferredRegime: "any",
             minVolatilityPct: 0.22,
-            maxSessionProfit: 28,
-            maxSessionLoss: 14,
-            maxConsecutiveLosses: 2
+            maxSessionProfit: 50,
+            maxSessionLoss: 30,
+            maxConsecutiveLosses: 3
         },
         breakout_hunter: {
             symbol: "BTCUSD",
@@ -86,9 +86,9 @@
             neutralExitCycles: 1,
             preferredRegime: "trend",
             minVolatilityPct: 0.3,
-            maxSessionProfit: 32,
-            maxSessionLoss: 14,
-            maxConsecutiveLosses: 2
+            maxSessionProfit: 65,
+            maxSessionLoss: 28,
+            maxConsecutiveLosses: 3
         }
     };
 

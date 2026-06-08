@@ -104,9 +104,9 @@ function buildDefaultConfig(): DirectionalOptionsDemoConfig {
         requireRsiConfirmation: true,
         preferredRegime: "any",
         minVolatilityPct: 0.2,
-        maxSessionProfit: 30,
-        maxSessionLoss: 15,
-        maxConsecutiveLosses: 2
+        maxSessionProfit: 60,
+        maxSessionLoss: 35,
+        maxConsecutiveLosses: 3
     };
 }
 
@@ -730,10 +730,11 @@ function buildGuidance(state: DirectionalOptionsDemoState): DirectionalOptionsDe
     const signal = state.lastSignal;
     const totals = calculateTotals(state);
     const consecutiveLosses = countConsecutiveLosses(state);
-    const guardrailReason = totals.totalPnl >= state.config.maxSessionProfit
-        ? `Session target hit at ${totals.totalPnl.toFixed(2)}.`
-        : (totals.totalPnl <= (-1 * state.config.maxSessionLoss)
-            ? `Session loss limit hit at ${totals.totalPnl.toFixed(2)}.`
+    const realizedPnl = Number(totals.realizedPnl || 0);
+    const guardrailReason = realizedPnl >= state.config.maxSessionProfit
+        ? `Session target hit at realized PnL ${realizedPnl.toFixed(2)}.`
+        : (realizedPnl <= (-1 * state.config.maxSessionLoss)
+            ? `Session loss limit hit at realized PnL ${realizedPnl.toFixed(2)}.`
             : (consecutiveLosses >= state.config.maxConsecutiveLosses
                 ? `${consecutiveLosses} consecutive losing scalps reached.`
                 : ""));
@@ -749,7 +750,7 @@ function buildGuidance(state: DirectionalOptionsDemoState): DirectionalOptionsDe
     checklist.push(`Confidence gate: ${state.config.minConfidence}%`);
     checklist.push(`Regime gate: ${state.config.preferredRegime === "any" ? "trend or range accepted" : state.config.preferredRegime}`);
     checklist.push(`Volatility floor: ${state.config.minVolatilityPct.toFixed(3)}%`);
-    checklist.push(`Session stop rules: +${state.config.maxSessionProfit} / -${state.config.maxSessionLoss} / ${state.config.maxConsecutiveLosses} losses`);
+    checklist.push(`Session stop rules use realized PnL: +${state.config.maxSessionProfit} / -${state.config.maxSessionLoss} / ${state.config.maxConsecutiveLosses} losses`);
     checklist.push("Trend regime buys options. Range regime sells options. Unclear regime waits.");
 
     return {
@@ -809,14 +810,15 @@ export class DirectionalOptionsDemoService {
     private async applySessionGuardrails(state: DirectionalOptionsDemoState): Promise<void> {
         const totals = calculateTotals(state);
         const consecutiveLosses = countConsecutiveLosses(state);
-        if (totals.totalPnl >= state.config.maxSessionProfit) {
+        const realizedPnl = Number(totals.realizedPnl || 0);
+        if (realizedPnl >= state.config.maxSessionProfit) {
             flattenOpenPositionsForGuardrail(state, "session profit guardrail stop");
-            await this.stopState(state, `Auto-stopped after hitting session profit target ${totals.totalPnl.toFixed(2)}.`);
+            await this.stopState(state, `Auto-stopped after hitting realized profit target ${realizedPnl.toFixed(2)}.`);
             return;
         }
-        if (totals.totalPnl <= (-1 * state.config.maxSessionLoss)) {
+        if (realizedPnl <= (-1 * state.config.maxSessionLoss)) {
             flattenOpenPositionsForGuardrail(state, "session loss guardrail stop");
-            await this.stopState(state, `Auto-stopped after hitting session loss limit ${totals.totalPnl.toFixed(2)}.`);
+            await this.stopState(state, `Auto-stopped after hitting realized loss limit ${realizedPnl.toFixed(2)}.`);
             return;
         }
         if (consecutiveLosses >= state.config.maxConsecutiveLosses) {
