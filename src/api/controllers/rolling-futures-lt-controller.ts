@@ -1195,7 +1195,7 @@ function resolveRollingFuturesExpiryDateByModeFromBaseDate(pExpiryMode: string, 
         return formatIsoDateFromParts(objDate.getUTCFullYear(), objDate.getUTCMonth(), objDate.getUTCDate());
     }
     if (vMode === "4") {
-        const vWeeklyFridayOffset = (objDate.getUTCDay() >= 1 && objDate.getUTCDay() <= 5) ? 1 : 0;
+        const vWeeklyFridayOffset = (objDate.getUTCDay() >= 3 && objDate.getUTCDay() <= 5) ? 1 : 0;
         const objWeekly = getFutureFridayUtc(objDate, vWeeklyFridayOffset);
         return formatIsoDateFromParts(objWeekly.getUTCFullYear(), objWeekly.getUTCMonth(), objWeekly.getUTCDate());
     }

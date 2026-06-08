@@ -482,7 +482,7 @@
             return currentDate;
         }
         if (modeValue === "4") {
-            const weeklyFridayOffset = (currentDate.getDay() >= 1 && currentDate.getDay() <= 5) ? 1 : 0;
+            const weeklyFridayOffset = (currentDate.getDay() >= 3 && currentDate.getDay() <= 5) ? 1 : 0;
             return getFutureFriday(currentDate, weeklyFridayOffset);
         }
         if (modeValue === "5") {
