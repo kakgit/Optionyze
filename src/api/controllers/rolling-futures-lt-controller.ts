@@ -1118,7 +1118,7 @@ function getBlockedMarginUsd(pRow: DeltaWalletBalanceRow | null): number {
     const vBalance = toFiniteNumber(pRow.balance ?? pRow.wallet_balance, 0);
     const vAvailableBalance = getAvailableBalanceUsd(pRow);
     const vUnrealizedCashflow = getUnrealizedCashflowUsd(pRow);
-    return Math.max(0, (vBalance - vUnrealizedCashflow) - vAvailableBalance);
+    return Math.max(0, (vBalance + vUnrealizedCashflow) - vAvailableBalance);
 }
 
 function getTotalBalanceUsd(pRow: DeltaWalletBalanceRow | null): number {
