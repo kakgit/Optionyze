@@ -110,6 +110,7 @@
         autoConfirmLiveActions: document.getElementById("chkRollingFuturesAutoConfirmLiveActions"),
         recalculateTotalPnlButton: document.getElementById(`btn${idPrefix}RecalculateTotalPnl`),
         importButton: document.getElementById(`btn${idPrefix}ImportPositions`),
+        clearOpenPositionsButton: document.getElementById(`btn${idPrefix}ClearOpenPositions`),
         refreshOpenPositionsButton: document.getElementById(`btn${idPrefix}RefreshOpenPositions`),
         killSwitchButton: document.getElementById(`btn${idPrefix}KillSwitch`),
         openPositionsBody: document.getElementById(`${prefix}OpenPositionsBody`),
@@ -222,6 +223,18 @@
         const month = String(dateValue.getMonth() + 1).padStart(2, "0");
         const day = String(dateValue.getDate()).padStart(2, "0");
         return `${year}-${month}-${day}`;
+    }
+
+    function formatDateTimeInputValue(dateValue) {
+        if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) {
+            return "";
+        }
+        const year = String(dateValue.getFullYear());
+        const month = String(dateValue.getMonth() + 1).padStart(2, "0");
+        const day = String(dateValue.getDate()).padStart(2, "0");
+        const hour = String(dateValue.getHours()).padStart(2, "0");
+        const minute = String(dateValue.getMinutes()).padStart(2, "0");
+        return `${year}-${month}-${day}T${hour}:${minute}`;
     }
 
     function applyBadgeTone(node, tone) {
@@ -1713,6 +1726,10 @@
         return postJson(`${endpointBase}/open-positions/delete`, { importId: importId });
     }
 
+    async function clearSavedOpenPositions() {
+        return postJson(`${endpointBase}/open-positions/clear`, {});
+    }
+
     async function reconcileOpenPositions() {
         const objResult = await postJson(`${endpointBase}/open-positions/reconcile`, {});
         renderOpenPositions(objResult?.data);
@@ -1973,7 +1990,25 @@
                 ? "Select at least one live option position to import."
                 : "Select at least one live futures position to import.");
         }
+        const oldestOpenedAt = selectedRows.reduce(function (oldest, row) {
+            const currentOpenedAt = new Date(String(row?.openedAt || ""));
+            if (!(currentOpenedAt instanceof Date) || Number.isNaN(currentOpenedAt.getTime())) {
+                return oldest;
+            }
+            if (!oldest || Number.isNaN(oldest.getTime()) || currentOpenedAt.getTime() < oldest.getTime()) {
+                return currentOpenedAt;
+            }
+            return oldest;
+        }, null);
         const objResult = await saveImportedPositions(selectedRows);
+        if (ids.closedFromDate instanceof HTMLInputElement) {
+            const vClosedFromDate = formatDateTimeInputValue(oldestOpenedAt);
+            if (vClosedFromDate) {
+                ids.closedFromDate.value = vClosedFromDate;
+                queueProfileSave();
+                queueClosedPositionsRefresh();
+            }
+        }
         closeImportModal();
         return objResult;
     }
@@ -2610,6 +2645,26 @@
                 error instanceof Error ? error.message : (isCoveredMode ? "Unable to import live option positions." : "Unable to import live futures positions."),
                 "danger"
             );
+        });
+    });
+    ids.clearOpenPositionsButton?.addEventListener("click", function () {
+        const confirmed = window.confirm("Clear all imported open positions from the Open Positions section only? No Delta Exchange close order will be placed.");
+        if (!confirmed) {
+            return;
+        }
+        void clearSavedOpenPositions().then(function (objResult) {
+            setStatus(
+                ids.pageStatus,
+                objResult?.message || "All imported open positions were cleared locally.",
+                "warning"
+            );
+            return Promise.all([
+                loadSavedOpenPositions(),
+                loadAccountSummary().catch(function () { return undefined; }),
+                loadEvents().catch(function () { return undefined; })
+            ]);
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to clear imported open positions.", "danger");
         });
     });
     ids.openPositionsBody?.addEventListener("click", function (event) {

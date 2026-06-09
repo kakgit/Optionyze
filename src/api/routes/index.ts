@@ -80,7 +80,8 @@ import {
     saveCoveredOptionsOpenPositions,
     saveCoveredOptionsProfile,
     saveRollingFuturesLtDualOpenPositions,
-    saveRollingFuturesLtDualProfile
+    saveRollingFuturesLtDualProfile,
+    clearCoveredOptionsOpenPositions
 } from "../controllers/rolling-futures-lt-controller";
 import {
     createDeltaApiProfileController,
@@ -325,6 +326,9 @@ export function createApiRouter(
     });
     objRouter.post("/covered-options/open-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await deleteCoveredOptionsOpenPosition(req, res);
+    });
+    objRouter.post("/covered-options/open-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearCoveredOptionsOpenPositions(req, res);
     });
     objRouter.post("/covered-options/open-positions/reconcile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await reconcileCoveredOptionsOpenPositions(req, res);

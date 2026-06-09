@@ -339,6 +339,7 @@ interface RollingFuturesLtOptionMetadata {
     rowIndex?: number;
     baseDelta?: number;
     baseTheta?: number;
+    manualTraderDelta?: number;
     takeProfitDelta?: number;
     stopLossDelta?: number;
     reEntryDelta?: number;
@@ -1092,15 +1093,36 @@ function toFiniteNumber(pValue: unknown, pFallback = 0): number {
     return Number.isFinite(vNumber) ? vNumber : pFallback;
 }
 
+function getWalletBalanceRowScore(pRow: DeltaWalletBalanceRow | null): number {
+    if (!pRow) {
+        return 0;
+    }
+    const arrValues: unknown[] = [
+        pRow.balance,
+        pRow.wallet_balance,
+        pRow.available_balance,
+        pRow.total_margin,
+        pRow.blocked_margin,
+        pRow.position_margin,
+        pRow.order_margin,
+        pRow.unrealized_cashflow,
+        pRow.unrealised_cashflow,
+        pRow.unrealized_pnl,
+        pRow.unrealised_pnl
+    ];
+    return arrValues.reduce<number>((pSum, pValue) => pSum + Math.abs(toFiniteNumber(pValue, 0)), 0);
+}
+
 function pickUsdBalanceRow(pRows: DeltaWalletBalanceRow[]): DeltaWalletBalanceRow | null {
     const arrPriority = ["USD", "USDT"];
-    for (const vAsset of arrPriority) {
-        const objRow = pRows.find((pRow) => String(pRow.asset_symbol || pRow.symbol || "").trim().toUpperCase() === vAsset) || null;
-        if (objRow) {
-            return objRow;
+    const arrPreferred = pRows.filter((pRow) => arrPriority.includes(String(pRow.asset_symbol || pRow.symbol || "").trim().toUpperCase()));
+    const arrCandidates = arrPreferred.length ? arrPreferred : pRows;
+    return arrCandidates.reduce<DeltaWalletBalanceRow | null>((pBest, pRow) => {
+        if (!pBest) {
+            return pRow;
         }
-    }
-    return pRows[0] || null;
+        return getWalletBalanceRowScore(pRow) > getWalletBalanceRowScore(pBest) ? pRow : pBest;
+    }, null);
 }
 
 function getAvailableBalanceUsd(pRow: DeltaWalletBalanceRow | null): number {
@@ -1134,7 +1156,11 @@ function getBlockedMarginUsd(pRow: DeltaWalletBalanceRow | null): number {
     const vBalance = toFiniteNumber(pRow.balance ?? pRow.wallet_balance, 0);
     const vAvailableBalance = getAvailableBalanceUsd(pRow);
     const vUnrealizedCashflow = getUnrealizedCashflowUsd(pRow);
-    return Math.max(0, (vBalance + vUnrealizedCashflow) - vAvailableBalance);
+    const vBalanceMinusAvailable = Math.max(0, vBalance - vAvailableBalance);
+    const vBalancePlusCashflowMinusAvailable = Math.max(0, (vBalance + vUnrealizedCashflow) - vAvailableBalance);
+    return vAvailableBalance > vBalance
+        ? vBalancePlusCashflowMinusAvailable
+        : vBalanceMinusAvailable;
 }
 
 function getTotalBalanceUsd(pRow: DeltaWalletBalanceRow | null): number {
@@ -1651,6 +1677,7 @@ function optionMetadataToRecord(pMetadata: RollingFuturesLtOptionMetadata): Reco
         rowIndex: pMetadata.rowIndex,
         baseDelta: pMetadata.baseDelta,
         baseTheta: pMetadata.baseTheta,
+        manualTraderDelta: pMetadata.manualTraderDelta,
         takeProfitDelta: pMetadata.takeProfitDelta,
         stopLossDelta: pMetadata.stopLossDelta,
         reEntryDelta: pMetadata.reEntryDelta,
@@ -1663,15 +1690,9 @@ function optionMetadataToRecord(pMetadata: RollingFuturesLtOptionMetadata): Reco
     };
 }
 
-function isImportedObservationOnlyPosition(pPosition: RollingFuturesLtImportedPositionRecord): boolean {
-    const objMetadata = pPosition.metadata && typeof pPosition.metadata === "object"
-        ? pPosition.metadata as Record<string, unknown>
-        : {};
-    return Boolean(objMetadata.importedObservationOnly);
-}
-
 function markPositionsAsImportedObservationOnly(
-    pPositions: RollingFuturesLtImportedPositionRecord[]
+    pPositions: RollingFuturesLtImportedPositionRecord[],
+    pUiState: Record<string, unknown>
 ): RollingFuturesLtImportedPositionRecord[] {
     const vImportedAtIso = new Date().toISOString();
     return pPositions.map((objPosition) => {
@@ -1679,10 +1700,23 @@ function markPositionsAsImportedObservationOnly(
             ? objPosition.metadata as Record<string, unknown>
             : {};
         if (isOptionContractSymbol(objPosition.contractName)) {
+            const vRowIndex = isCoveredOptionsStrategy(objPosition.strategyCode)
+                ? normalizeOptionRowIndex(
+                    objPosition.strategyCode,
+                    objMetadata.rowIndex || (String(objPosition.side || "").trim().toUpperCase() === "SELL" ? 2 : 1)
+                )
+                : normalizeOptionRowIndex(objPosition.strategyCode, objMetadata.rowIndex);
+            const objRowState = getNormalizedOptionRowUiState(pUiState, objPosition.strategyCode, vRowIndex);
             return {
                 ...objPosition,
                 metadata: optionMetadataToRecord({
                     ...getTrackedOptionMetadata(objPosition),
+                    rowIndex: vRowIndex,
+                    manualTraderDelta: getSignedOptionBaseDelta(objPosition.contractName, Number(objRowState.newD || 0)),
+                    takeProfitDelta: Number(objRowState.tpD || 0),
+                    stopLossDelta: Number(objRowState.slD || 0),
+                    reEntryDelta: Number(objRowState.reD || 0),
+                    reEnterEnabled: Boolean(objRowState.reEnter),
                     importedObservationOnly: true,
                     importedAt: String(objMetadata.importedAt || vImportedAtIso).trim() || vImportedAtIso
                 })
@@ -1697,35 +1731,6 @@ function markPositionsAsImportedObservationOnly(
             }
         };
     });
-}
-
-async function logImportedObservationCloseBlocked(
-    pUserId: string,
-    pStrategyCode: RollingFuturesLtStrategyCode,
-    pPosition: RollingFuturesLtImportedPositionRecord,
-    pReason: "sl" | "tp" | "expiry_cutoff" | "profit_close",
-    pCurrentDelta?: number
-): Promise<void> {
-    const vReasonLabel = pReason === "sl"
-        ? "SL"
-        : (pReason === "tp" ? "TP" : (pReason === "expiry_cutoff" ? "expiry cutoff" : "profit-close rule"));
-    const vDeltaText = Number.isFinite(Number(pCurrentDelta))
-        ? ` at delta ${Math.abs(Number(pCurrentDelta || 0)).toFixed(3)}`
-        : "";
-    await logFuturesEvent(
-        pUserId,
-        pStrategyCode,
-        "engine_error",
-        "warning",
-        "Imported Position Close Blocked",
-        `Observation-only imported position ${pPosition.contractName} would have been closed by ${vReasonLabel}${vDeltaText}, but no order was placed.`,
-        {
-            contractName: pPosition.contractName,
-            qty: pPosition.qty,
-            currentDelta: Number.isFinite(Number(pCurrentDelta)) ? Number(Math.abs(Number(pCurrentDelta || 0)).toFixed(4)) : undefined,
-            reason: `imported_observe_only_${pReason}_blocked`
-        }
-    );
 }
 
 function parseOptionExpiryDateFromContractName(pContractName: unknown): string {
@@ -3163,17 +3168,15 @@ async function enrichTrackedOpenPositions(
         const vLotSize = getLotSizeForSymbol(vPositionSymbol);
         const vUnderlyingPrice = Number(objUnderlyingPriceBySymbol.get(vPositionSymbol) || 0);
         const vThetaPerContractScaled = Number.isFinite(vThetaRaw) ? (vThetaRaw * (bIsFuture ? 1 : vLotSize)) : 0;
-        const vDisplayDeltaMagnitude = bIsFuture
+        const vDisplayDeltaSigned = bIsFuture
             ? 1
-            : Math.max(0, Number(
-                Number.isFinite(Number(objMetadata.baseDelta))
-                    ? Math.abs(Number(objMetadata.baseDelta))
-                    : (Number.isFinite(vDeltaRaw) ? Math.abs(vDeltaRaw) : 0)
-            ));
-        const vDisplayDeltaDirection = bIsFuture
-            ? 1
-            : (inferTrackedOptionLegSide(vContractName) === "pe" ? -1 : 1);
-        const vDisplayDeltaSigned = vDisplayDeltaMagnitude * vDisplayDeltaDirection;
+            : (
+                Number.isFinite(Number(objMetadata.manualTraderDelta))
+                    ? Number(objMetadata.manualTraderDelta)
+                    : (Number.isFinite(Number(objMetadata.baseDelta))
+                        ? Number(objMetadata.baseDelta)
+                        : (inferTrackedOptionLegSide(vContractName) === "pe" ? -Math.abs(vDeltaRaw) : Math.abs(vDeltaRaw)))
+            );
         const vDisplayThetaCurrentTotal = bIsFuture
             ? 0
             : Math.abs(Number.isFinite(vThetaRaw) ? vThetaRaw : 0);
@@ -6769,7 +6772,6 @@ async function findTriggeredTrackedOptions(
         if (!isOptionContractSymbol(objPosition.contractName)) {
             continue;
         }
-        const bImportedObservationOnly = isImportedObservationOnlyPosition(objPosition);
         const vResolvedExpiryDate = getTrackedOptionResolvedExpiryDate(objPosition);
         if (
             isCoveredOptionsStrategy(objPosition.strategyCode)
@@ -6777,15 +6779,6 @@ async function findTriggeredTrackedOptions(
             && vResolvedExpiryDate === objCurrentDeltaTime.date
             && isDeltaUiTimeAtOrAfter(16, 0)
         ) {
-            if (bImportedObservationOnly) {
-                await logImportedObservationCloseBlocked(
-                    String(objPosition.userId || ""),
-                    objPosition.strategyCode,
-                    objPosition,
-                    "expiry_cutoff"
-                );
-                continue;
-            }
             arrTriggered.push({
                 position: objPosition,
                 currentDelta: 0,
@@ -6816,16 +6809,6 @@ async function findTriggeredTrackedOptions(
                 : Number(objMetadata.stopLossDelta || 0.65)
         );
         if (objDecision.shouldAct && objDecision.reason) {
-            if (bImportedObservationOnly) {
-                await logImportedObservationCloseBlocked(
-                    String(objPosition.userId || ""),
-                    objPosition.strategyCode,
-                    objPosition,
-                    objDecision.reason,
-                    vCurrentDelta
-                );
-                continue;
-            }
             arrTriggered.push({
                 position: objPosition,
                 currentDelta: vCurrentDelta,
@@ -8198,103 +8181,79 @@ async function runAutoTraderCycle(
         }
 
         if (!bRestartCloseProtectionActive && !bProfitClosePauseActive && bProfitCloseConfirmed && objProfitRule.triggered && arrSavedPositions.length) {
-            if (arrSavedPositions.some(isImportedObservationOnlyPosition)) {
-                await logFuturesEvent(
-                    pUserId,
-                    pStrategyCode,
-                    "engine_error",
-                    "warning",
-                    "Imported Position Close Blocked",
-                    `Observation-only imported positions would have been closed by the ${objProfitRule.reason === "brokerage" ? "brokerage" : "blocked-margin"} profit-close rule, but no order was placed.`,
-                    {
-                        thresholdValue: objProfitRule.thresholdValue,
-                        reason: objProfitRule.reason === "brokerage"
-                            ? "imported_observe_only_brokerage_profit_close_blocked"
-                            : "imported_observe_only_blockmargin_profit_close_blocked"
-                    }
-                );
-                await saveRollingFuturesLtRuntime({
-                    ...objRuntimeBeforeProfitRule,
-                    userId: pUserId,
-                    strategyCode: pStrategyCode,
-                    state: buildRuntimeStateWithProfitClosePending(objRuntimeBeforeProfitRule, "", 0, "")
-                });
-            }
-            else {
-                const objClosed = await closeTrackedPositionsOnDelta(
+            const objClosed = await closeTrackedPositionsOnDelta(
+                pUserId,
+                pStrategyCode,
+                vSelectedApiProfileId,
+                arrSavedPositions
+            );
+            const bQueueDualReEntry = isDualRollingFuturesStrategy(pStrategyCode) && objProfitRule.reEnterEnabled;
+            let vQueuedReEntryMessage = "";
+            if (bQueueDualReEntry) {
+                const objPostCloseSummary = await fetchAccountSummarySnapshot(pUserId, vSelectedApiProfileId, vSymbol);
+                const objQueueResult = await queueDualPendingExecStrategyRequest(
                     pUserId,
                     pStrategyCode,
                     vSelectedApiProfileId,
-                    arrSavedPositions
-                );
-                const bQueueDualReEntry = isDualRollingFuturesStrategy(pStrategyCode) && objProfitRule.reEnterEnabled;
-                let vQueuedReEntryMessage = "";
-                if (bQueueDualReEntry) {
-                    const objPostCloseSummary = await fetchAccountSummarySnapshot(pUserId, vSelectedApiProfileId, vSymbol);
-                    const objQueueResult = await queueDualPendingExecStrategyRequest(
-                        pUserId,
-                        pStrategyCode,
-                        vSelectedApiProfileId,
-                        objUiState as Record<string, unknown>,
-                        objProfitRule.reason === "brokerage"
-                            ? "brokerage_profit_reentry"
-                            : "blocked_margin_profit_reentry",
-                        objProfitRule.reason === "brokerage"
-                            ? "brokerage_profit_trigger_request"
-                            : "blockmargin_profit_trigger_request",
-                        objPostCloseSummary.availableBalance
-                    );
-                    vQueuedReEntryMessage = objQueueResult.message;
-                }
-                const vRunAt = objProfitRule.reEnterEnabled && !isDualRollingFuturesStrategy(pStrategyCode)
-                    ? new Date(Date.now() + gProfitCloseReEntryCooldownMs).toISOString()
-                    : "";
-                await logFuturesEvent(
-                    pUserId,
-                    pStrategyCode,
-                    "future_closed",
-                    "success",
+                    objUiState as Record<string, unknown>,
                     objProfitRule.reason === "brokerage"
-                        ? "Brokerage Profit Target Closed All Positions"
-                        : "Blocked Margin Profit Target Closed All Positions",
-                    bQueueDualReEntry
-                        ? `${objProfitRule.message} ${vQueuedReEntryMessage}`
-                        : (objProfitRule.reEnterEnabled
-                            ? `${objProfitRule.message} Re-entry scheduled after 5 minutes.`
-                            : objProfitRule.message),
-                    {
-                        qty: objClosed.closedPositions.length,
-                        thresholdValue: objProfitRule.thresholdValue,
-                        reason: objProfitRule.reason === "brokerage"
-                            ? "brokerage_profit_close_all"
-                            : "blockmargin_profit_close_all"
-                    }
+                        ? "brokerage_profit_reentry"
+                        : "blocked_margin_profit_reentry",
+                    objProfitRule.reason === "brokerage"
+                        ? "brokerage_profit_trigger_request"
+                        : "blockmargin_profit_trigger_request",
+                    objPostCloseSummary.availableBalance
                 );
-                const objLatestRuntimeAfterClose = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
-                if (objLatestRuntimeAfterClose?.autoTraderEnabled && String(objLatestRuntimeAfterClose.status || "").trim().toLowerCase() === "running") {
-                    await saveRollingFuturesLtRuntime({
-                        ...objLatestRuntimeAfterClose,
-                        userId: pUserId,
-                        strategyCode: pStrategyCode,
-                        status: "running",
-                        autoTraderEnabled: true,
-                        selectedApiProfileId: vSelectedApiProfileId,
-                        currentSymbol: vSymbol,
-                        lastSignal: "PROFIT_EXIT",
-                        lastCycleAt: new Date().toISOString(),
-                        lastError: "",
-                        state: buildRuntimeStateWithPendingReEntry(
-                            {
-                                ...objLatestRuntimeAfterClose,
-                                state: buildRuntimeStateWithProfitClosePending(objLatestRuntimeAfterClose, "", 0, "")
-                            },
-                            objProfitRule.reEnterEnabled && !isDualRollingFuturesStrategy(pStrategyCode) ? objProfitRule.reason : "",
-                            vRunAt
-                        )
-                    });
-                }
-                return;
+                vQueuedReEntryMessage = objQueueResult.message;
             }
+            const vRunAt = objProfitRule.reEnterEnabled && !isDualRollingFuturesStrategy(pStrategyCode)
+                ? new Date(Date.now() + gProfitCloseReEntryCooldownMs).toISOString()
+                : "";
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "future_closed",
+                "success",
+                objProfitRule.reason === "brokerage"
+                    ? "Brokerage Profit Target Closed All Positions"
+                    : "Blocked Margin Profit Target Closed All Positions",
+                bQueueDualReEntry
+                    ? `${objProfitRule.message} ${vQueuedReEntryMessage}`
+                    : (objProfitRule.reEnterEnabled
+                        ? `${objProfitRule.message} Re-entry scheduled after 5 minutes.`
+                        : objProfitRule.message),
+                {
+                    qty: objClosed.closedPositions.length,
+                    thresholdValue: objProfitRule.thresholdValue,
+                    reason: objProfitRule.reason === "brokerage"
+                        ? "brokerage_profit_close_all"
+                        : "blockmargin_profit_close_all"
+                }
+            );
+            const objLatestRuntimeAfterClose = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+            if (objLatestRuntimeAfterClose?.autoTraderEnabled && String(objLatestRuntimeAfterClose.status || "").trim().toLowerCase() === "running") {
+                await saveRollingFuturesLtRuntime({
+                    ...objLatestRuntimeAfterClose,
+                    userId: pUserId,
+                    strategyCode: pStrategyCode,
+                    status: "running",
+                    autoTraderEnabled: true,
+                    selectedApiProfileId: vSelectedApiProfileId,
+                    currentSymbol: vSymbol,
+                    lastSignal: "PROFIT_EXIT",
+                    lastCycleAt: new Date().toISOString(),
+                    lastError: "",
+                    state: buildRuntimeStateWithPendingReEntry(
+                        {
+                            ...objLatestRuntimeAfterClose,
+                            state: buildRuntimeStateWithProfitClosePending(objLatestRuntimeAfterClose, "", 0, "")
+                        },
+                        objProfitRule.reEnterEnabled && !isDualRollingFuturesStrategy(pStrategyCode) ? objProfitRule.reason : "",
+                        vRunAt
+                    )
+                });
+            }
+            return;
         }
 
         const objNeutralCheck = await applyServerSideNeutralityCheck(
@@ -9001,7 +8960,7 @@ async function saveOpenPositionsInternal(req: Request, res: Response, pStrategyC
         metadata: objRow.metadata && typeof objRow.metadata === "object" ? objRow.metadata as Record<string, unknown> : undefined,
         openedAt: String(objRow.openedAt || "").trim(),
         updatedAt: ""
-    })), vBaseDelta), vBaseDelta));
+    })), vBaseDelta), vBaseDelta), objUiState);
     const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, arrPrepared);
     const objOpenPositions = await buildOpenPositionsPayload(vUserId, pStrategyCode, arrSaved);
     const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
@@ -9056,6 +9015,33 @@ async function deleteOpenPositionInternal(req: Request, res: Response, pStrategy
     });
 }
 
+async function clearOpenPositionsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
+    const vUserId = getAccountId(req);
+    const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+    await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, []);
+    await clearActiveStrategyRun(vUserId, pStrategyCode);
+    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (vSelectedApiProfileId && isDualRollingFuturesStrategy(pStrategyCode)) {
+        await syncDualStrategySurvivalState(vUserId, pStrategyCode, vSelectedApiProfileId, [], "ended");
+    }
+    await logFuturesEvent(
+        vUserId,
+        pStrategyCode,
+        "manual_action",
+        "warning",
+        "Imported Open Positions Cleared",
+        "All imported open positions were removed from the Open Positions section only. No Delta Exchange close order was placed.",
+        { qty: 0, reason: "imported_positions_cleared_local_only" }
+    );
+    res.json({
+        status: "success",
+        message: "All imported open positions were cleared locally.",
+        data: {
+            trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode)
+        }
+    });
+}
+
 async function reconcileOpenPositionsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
     const vProfileId = await resolveProfileId(req, pStrategyCode);
@@ -9080,7 +9066,8 @@ async function reconcileOpenPositionsInternal(req: Request, res: Response, pStra
             vUserId,
             pStrategyCode,
             markPositionsAsImportedObservationOnly(
-                await applyImportedOptionBaseGreeks(applyImportedBaseDelta(arrPositions, vBaseDelta), vBaseDelta)
+                await applyImportedOptionBaseGreeks(applyImportedBaseDelta(arrPositions, vBaseDelta), vBaseDelta),
+                objUiState
             )
         );
         await syncDualStrategySurvivalState(
@@ -11380,6 +11367,9 @@ export async function saveCoveredOptionsOpenPositions(req: Request, res: Respons
 }
 export async function deleteCoveredOptionsOpenPosition(req: Request, res: Response): Promise<void> {
     await deleteOpenPositionInternal(req, res, "covered-options");
+}
+export async function clearCoveredOptionsOpenPositions(req: Request, res: Response): Promise<void> {
+    await clearOpenPositionsInternal(req, res, "covered-options");
 }
 export async function reconcileCoveredOptionsOpenPositions(req: Request, res: Response): Promise<void> {
     await reconcileOpenPositionsInternal(req, res, "covered-options");
