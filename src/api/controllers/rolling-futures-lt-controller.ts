@@ -1940,6 +1940,21 @@ function getSelectedFuturePositionValue(
     }, 0);
 }
 
+function getTrackedPositionMarginTotal(
+    pRows: DeltaPositionRow[],
+    pSelectedSymbol: string
+): number {
+    const vSymbol = normalizeSymbolValue(pSelectedSymbol);
+    return pRows.reduce((pSum, pRow) => {
+        const vContractSymbol = String(pRow.product_symbol || pRow.symbol || "").trim().toUpperCase();
+        const vQty = Math.abs(toFiniteNumber(pRow.net_size ?? pRow.size, 0));
+        if (!(vQty > 0) || !isTrackedContractForSymbol(vContractSymbol, vSymbol)) {
+            return pSum;
+        }
+        return pSum + Math.max(0, toFiniteNumber(pRow.margin, 0));
+    }, 0);
+}
+
 function mapLivePosition(
     pRow: DeltaPositionRow,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -2967,7 +2982,9 @@ async function fetchAccountSummarySnapshot(
         ? objPositionsPayload.result as DeltaPositionRow[]
         : (objPositionsPayload.result ? [objPositionsPayload.result as DeltaPositionRow] : []);
     const vAvailableBalance = getAvailableBalanceUsd(objUsdRow);
-    const vBlockedMargin = getBlockedMarginUsd(objUsdRow);
+    const vWalletBlockedMargin = getBlockedMarginUsd(objUsdRow);
+    const vTrackedPositionMargin = getTrackedPositionMarginTotal(arrPositions, pSymbol);
+    const vBlockedMargin = Math.max(vWalletBlockedMargin, vTrackedPositionMargin);
     const vTotalBalance = getTotalBalanceUsd(objUsdRow);
     const vLivePrice = Number(objMarketSnapshot?.futuresPrice || 0);
     const vOneLotValue = Number.isFinite(vLivePrice) && vLivePrice > 0 ? vLivePrice * vLotSize : Number.NaN;
