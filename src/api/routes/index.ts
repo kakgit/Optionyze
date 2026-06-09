@@ -17,20 +17,11 @@ import { listSurvivalAdminRunningUsers } from "../controllers/survival-admin-con
 import {
     emergencyStopDirectionalOptionsDemo,
     closeDirectionalOptionsDemoPosition,
-    emergencyStopStrategyFoPaper,
     getDirectionalOptionsDemoStatus,
-    getStrategyFoPaperProfile,
-    getStrategyFoPaperStatus,
     resetDirectionalOptionsDemo,
-    resetStrategyFoPaper,
     runDirectionalOptionsDemoCycle,
-    saveStrategyFoPaperProfileController,
     startDirectionalOptionsDemo,
-    startStrategyFoPaper,
     stopDirectionalOptionsDemo,
-    stopStrategyFoPaper,
-    runStrategyFoPaperCycle,
-    validateStrategyFoPaperLogin
 } from "../controllers/strategyfo-paper-controller";
 import {
     calculateCoveredOptionsRecommendedStartQty,
@@ -97,13 +88,11 @@ import {
     updateDeltaApiProfileController
 } from "../controllers/delta-api-controller";
 import type { RunnerManager } from "../../runners/runner-manager";
-import type { StrategyFoGreeksPaperService } from "../../strategies/strategy-fo-greeks-paper/service";
 import type { DirectionalOptionsDemoService } from "../../strategies/directional-options-demo/service";
 import { requireAdminApi, requireAuthApi, requireFreshPasswordApi, requireSurvivalAdminApi } from "../middleware/auth-middleware";
 
 export function createApiRouter(
     pRunnerManager: RunnerManager,
-    pStrategyFoPaperService: StrategyFoGreeksPaperService,
     pDirectionalOptionsDemoService: DirectionalOptionsDemoService
 ): Router {
     const objRouter = Router();
@@ -157,34 +146,6 @@ export function createApiRouter(
     });
     objRouter.post("/account/delta-api-profiles/:profileId/test-login", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await testDeltaApiProfileLoginController(req, res);
-    });
-
-    objRouter.get("/strategyfo/paper/status", requireAuthApi, requireFreshPasswordApi, (req, res) => {
-        getStrategyFoPaperStatus(req, res, pStrategyFoPaperService);
-    });
-    objRouter.get("/strategyfo/paper/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await getStrategyFoPaperProfile(req, res);
-    });
-    objRouter.post("/strategyfo/paper/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await saveStrategyFoPaperProfileController(req, res);
-    });
-    objRouter.post("/strategyfo/paper/validate-login", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await validateStrategyFoPaperLogin(req, res);
-    });
-    objRouter.post("/strategyfo/paper/start", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await startStrategyFoPaper(req, res, pStrategyFoPaperService);
-    });
-    objRouter.post("/strategyfo/paper/stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await stopStrategyFoPaper(req, res, pStrategyFoPaperService);
-    });
-    objRouter.post("/strategyfo/paper/cycle", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await runStrategyFoPaperCycle(req, res, pStrategyFoPaperService);
-    });
-    objRouter.post("/strategyfo/paper/reset", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await resetStrategyFoPaper(req, res, pStrategyFoPaperService);
-    });
-    objRouter.post("/strategyfo/paper/emergency-stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await emergencyStopStrategyFoPaper(req, res, pStrategyFoPaperService);
     });
 
     objRouter.get("/directional-options-demo/status", requireAuthApi, requireFreshPasswordApi, (req, res) => {

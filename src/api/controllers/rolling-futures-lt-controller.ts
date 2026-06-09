@@ -66,6 +66,10 @@ interface DeltaWalletBalanceRow {
     blocked_margin?: number | string | null;
     position_margin?: number | string | null;
     order_margin?: number | string | null;
+    unrealized_cashflow?: number | string | null;
+    unrealised_cashflow?: number | string | null;
+    unrealized_pnl?: number | string | null;
+    unrealised_pnl?: number | string | null;
     [key: string]: unknown;
 }
 
@@ -1090,16 +1094,31 @@ function getAvailableBalanceUsd(pRow: DeltaWalletBalanceRow | null): number {
     return toFiniteNumber(pRow.available_balance ?? pRow.wallet_balance ?? pRow.balance, 0);
 }
 
+function getUnrealizedCashflowUsd(pRow: DeltaWalletBalanceRow | null): number {
+    if (!pRow) {
+        return 0;
+    }
+    return toFiniteNumber(
+        pRow.unrealized_cashflow
+        ?? pRow.unrealised_cashflow
+        ?? pRow.unrealized_pnl
+        ?? pRow.unrealised_pnl,
+        0
+    );
+}
+
 function getBlockedMarginUsd(pRow: DeltaWalletBalanceRow | null): number {
     if (!pRow) {
         return 0;
     }
     const vExplicitBlocked = toFiniteNumber(pRow.blocked_margin ?? pRow.position_margin ?? pRow.order_margin, Number.NaN);
     if (Number.isFinite(vExplicitBlocked)) {
-        return vExplicitBlocked;
+        return Math.max(0, vExplicitBlocked);
     }
     const vBalance = toFiniteNumber(pRow.balance ?? pRow.wallet_balance, 0);
-    return Math.max(0, vBalance - getAvailableBalanceUsd(pRow));
+    const vAvailableBalance = getAvailableBalanceUsd(pRow);
+    const vUnrealizedCashflow = getUnrealizedCashflowUsd(pRow);
+    return Math.max(0, (vBalance - vUnrealizedCashflow) - vAvailableBalance);
 }
 
 function getTotalBalanceUsd(pRow: DeltaWalletBalanceRow | null): number {

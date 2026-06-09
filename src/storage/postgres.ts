@@ -138,25 +138,6 @@ export async function ensurePostgresSchema(): Promise<void> {
     `);
 
     await objPool.query(`
-        CREATE TABLE IF NOT EXISTS optionyze_strategyfo_paper_profiles (
-            user_id TEXT PRIMARY KEY,
-            api_key TEXT NOT NULL DEFAULT '',
-            api_secret TEXT NOT NULL DEFAULT '',
-            telegram_bot_token TEXT NOT NULL DEFAULT '',
-            telegram_chat_id TEXT NOT NULL DEFAULT '',
-            reference_name TEXT NOT NULL DEFAULT '',
-            auto_trader_enabled BOOLEAN NOT NULL DEFAULT false,
-            ui_state JSONB NOT NULL DEFAULT '{}'::jsonb,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-    `);
-
-    await objPool.query(`
-        ALTER TABLE optionyze_strategyfo_paper_profiles
-        ADD COLUMN IF NOT EXISTS reference_name TEXT NOT NULL DEFAULT '';
-    `);
-
-    await objPool.query(`
         CREATE TABLE IF NOT EXISTS optionyze_accounts (
             account_id TEXT PRIMARY KEY,
             full_name TEXT NOT NULL,

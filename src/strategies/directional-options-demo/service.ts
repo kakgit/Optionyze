@@ -5,8 +5,8 @@ import {
     loadDirectionalOptionsDemoStates,
     saveDirectionalOptionsDemoState
 } from "../../storage/directional-options-demo-store";
-import { fetchSnapshot, selectOptionByDteDelta } from "../strategy-fo-greeks-paper/market-data";
-import type { MarketOptionSnapshot, MarketSnapshot } from "../strategy-fo-greeks-paper/types";
+import { fetchSnapshot, selectOptionByDteDelta } from "./market-data";
+import type { DirectionalMarketOptionSnapshot as MarketOptionSnapshot, DirectionalMarketSnapshot as MarketSnapshot } from "./market-data";
 import type {
     DirectionalOptionsDemoConfig,
     DirectionalOptionsDemoEvent,

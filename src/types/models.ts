@@ -1,4 +1,4 @@
-export type StrategyType = "covered-call-live" | "strategy-fo-greeks-paper" | "rolling-options-pt-de" | "rolling-options-lt-de";
+export type StrategyType = "covered-call-live" | "rolling-options-pt-de" | "rolling-options-lt-de";
 export type BrokerType = "delta-exchange";
 
 export interface CoveredCallConfig {
@@ -20,23 +20,6 @@ export interface CoveredCallConfig {
     optionPnl: number;
 }
 
-export interface StrategyFoGreeksPaperConfig {
-    underlyingSymbol: "BTC" | "ETH" | string;
-    lotSize: number;
-    optionOrderType: "limit_order" | "market_order";
-    futureOrderType: "limit_order" | "market_order";
-    renkoFeedEnabled: boolean;
-    renkoFeedStepPoints: number;
-    renkoFeedPriceSource: "mark_price" | "spot_price" | "best_bid" | "best_ask";
-    renkoBuyPatterns: string[];
-    renkoSellPatterns: string[];
-    renkoSideSwitch: "-1" | "true" | "false";
-    autoTraderEnabled: boolean;
-    negativeDeltaThreshold: number;
-    positiveDeltaThreshold: number;
-    thetaModePercent: number;
-}
-
 export interface UserRecord {
     userId: string;
     name: string;
@@ -51,7 +34,7 @@ export interface UserRecord {
     apiSecret?: string;
     telegramBotToken?: string;
     telegramChatId?: string;
-    strategyConfig?: CoveredCallConfig | StrategyFoGreeksPaperConfig | Record<string, unknown>;
+    strategyConfig?: CoveredCallConfig | Record<string, unknown>;
 }
 
 export interface AccountRecord {

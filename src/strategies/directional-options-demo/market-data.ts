@@ -1,6 +1,32 @@
 const DeltaRestClient = require("delta-rest-client");
 
-import type { MarketOptionSnapshot, MarketSnapshot, StrategyFoGreeksPaperConfig } from "./types";
+export interface DirectionalMarketOptionSnapshot {
+    productId: string | number | null;
+    symbol: string;
+    type: "put" | "call";
+    expiry: string;
+    dte: number;
+    strike: number | null;
+    delta: number | null;
+    gamma: number;
+    theta: number;
+    vega: number;
+    bestBid: number | null;
+    bestAsk: number | null;
+    mark: number | null;
+}
+
+export interface DirectionalMarketSnapshot {
+    ticker: {
+        symbol: string;
+        spot: number;
+        mark: number;
+        bestBid: number | null;
+        bestAsk: number | null;
+    };
+    options: DirectionalMarketOptionSnapshot[];
+    ts: string;
+}
 
 function toNumber(pValue: unknown, pFallback: number | null = null): number | null {
     const vNumber = Number(pValue);
@@ -155,30 +181,24 @@ function getCandidateExpiriesFromProducts(pProducts: Record<string, unknown>[]):
     return Array.from(objSet).sort((pLeft, pRight) => parseDateAny(pLeft) - parseDateAny(pRight));
 }
 
-async function fetchTicker(pSymbol: string): Promise<MarketSnapshot["ticker"]> {
-    try {
-        const objResponse = await fetchJson(`https://api.india.delta.exchange/v2/tickers/${pSymbol}`);
-        const objResult = (objResponse.result || {}) as Record<string, unknown>;
-        const objQuotes = (objResult.quotes || {}) as Record<string, unknown>;
-        return {
-            symbol: pSymbol,
-            spot: Number(toNumber(objResult.spot_price, 0) || 0),
-            mark: Number(toNumber(objResult.mark_price, toNumber(objResult.spot_price, 0)) || 0),
-            bestBid: toNumber(objQuotes.best_bid, null),
-            bestAsk: toNumber(objQuotes.best_ask, null)
-        };
-    }
-    catch (objError) {
-        const vMessage = objError instanceof Error ? objError.message : "Ticker fetch failed";
-        throw new Error(`ticker_fetch_failed: ${vMessage}`);
-    }
+async function fetchTicker(pSymbol: string): Promise<DirectionalMarketSnapshot["ticker"]> {
+    const objResponse = await fetchJson(`https://api.india.delta.exchange/v2/tickers/${pSymbol}`);
+    const objResult = (objResponse.result || {}) as Record<string, unknown>;
+    const objQuotes = (objResult.quotes || {}) as Record<string, unknown>;
+    return {
+        symbol: pSymbol,
+        spot: Number(toNumber(objResult.spot_price, 0) || 0),
+        mark: Number(toNumber(objResult.mark_price, toNumber(objResult.spot_price, 0)) || 0),
+        bestBid: toNumber(objQuotes.best_bid, null),
+        bestAsk: toNumber(objQuotes.best_ask, null)
+    };
 }
 
 async function fetchOptionChain(
     pApiKey: string,
     pApiSecret: string,
     pUnderlying: string
-): Promise<MarketOptionSnapshot[]> {
+): Promise<DirectionalMarketOptionSnapshot[]> {
     const objClient = await new DeltaRestClient(pApiKey, pApiSecret);
     const objProducts = await fetchOptionProducts(pUnderlying);
     let objExpiries = getCandidateExpiriesFromProducts(objProducts);
@@ -244,21 +264,21 @@ async function fetchOptionChain(
                 bestBid: toNumber(objQuotes.best_bid ?? objRow.best_bid, null),
                 bestAsk: toNumber(objQuotes.best_ask ?? objRow.best_ask, null),
                 mark: toNumber(objRow.close ?? objQuotes.mark_price ?? objRow.mark_price, null)
-            } as MarketOptionSnapshot;
+            } as DirectionalMarketOptionSnapshot;
         })
-        .filter((objRow): objRow is MarketOptionSnapshot => !!objRow)
+        .filter((objRow): objRow is DirectionalMarketOptionSnapshot => !!objRow)
         .filter((objRow) => Number.isFinite(objRow.dte) && objRow.dte > 0 && !!objRow.symbol);
 }
 
 export function selectOptionByDteDelta(
-    pOptions: MarketOptionSnapshot[],
+    pOptions: DirectionalMarketOptionSnapshot[],
     pCriteria: {
         type: "put" | "call";
         dteMin: number;
         dteMax: number;
         targetAbsDelta: number;
     }
-): MarketOptionSnapshot | null {
+): DirectionalMarketOptionSnapshot | null {
     const { type: vType, dteMin: vDteMin, dteMax: vDteMax, targetAbsDelta: vTargetAbsDelta } = pCriteria;
     let objCandidates = pOptions.filter((objOption) =>
         objOption.type === vType &&
@@ -294,8 +314,8 @@ export function selectOptionByDteDelta(
 export async function fetchSnapshot(
     pApiKey: string,
     pApiSecret: string,
-    pConfig: StrategyFoGreeksPaperConfig
-): Promise<MarketSnapshot> {
+    pConfig: { symbol: string; underlying: string; }
+): Promise<DirectionalMarketSnapshot> {
     const [objTicker, objOptions] = await Promise.all([
         fetchTicker(pConfig.symbol),
         fetchOptionChain(pApiKey, pApiSecret, pConfig.underlying)

@@ -4,7 +4,7 @@ import { getPostgresPool, isPostgresConfigured } from "./postgres";
 import type { ManagedUserRecord, StrategyType, UserRecord } from "../types/models";
 
 const gUsersFile = path.resolve(process.cwd(), "data", "users", "users.json");
-const gDefaultStrategyType: StrategyType = "strategy-fo-greeks-paper";
+const gDefaultStrategyType: StrategyType = "rolling-options-pt-de";
 const gDefaultExchange = "delta-exchange";
 
 interface UserRow {
@@ -223,7 +223,6 @@ export async function deleteManagedUserProfile(pAccountId: string): Promise<void
     }
 
     const objPool = getPostgresPool();
-    await objPool.query(`DELETE FROM optionyze_strategyfo_paper_profiles WHERE user_id = $1`, [pAccountId]);
     await objPool.query(`DELETE FROM optionyze_runner_states WHERE user_id = $1`, [pAccountId]);
     await objPool.query(`DELETE FROM optionyze_users WHERE user_id = $1`, [pAccountId]);
 }

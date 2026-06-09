@@ -9,13 +9,11 @@ import { RunnerManager } from "../runners/runner-manager";
 import { getServerId } from "../runtime/server-runtime";
 import { ensurePostgresSchema, isPostgresConfigured } from "../storage/postgres";
 import { ensureSurvivalPostgresSchema } from "../storage/survival-postgres";
-import { StrategyFoGreeksPaperService } from "../strategies/strategy-fo-greeks-paper/service";
 import { DirectionalOptionsDemoService } from "../strategies/directional-options-demo/service";
 import {
     renderCoveredOptionsPage,
     renderDirectionalOptionsPage,
-    renderRollingFuturesLiveDualPage,
-    renderStrategyFoPaperPage
+    renderRollingFuturesLiveDualPage
 } from "../api/controllers/strategyfo-paper-controller";
 import { recoverRollingFuturesLtAutoTraderCycles } from "../api/controllers/rolling-futures-lt-controller";
 import {
@@ -58,7 +56,6 @@ async function bootstrap(): Promise<void> {
     const app = express();
     const port = Number(process.env.PORT || 3001);
     const runnerManager = new RunnerManager();
-    const strategyFoPaperService = new StrategyFoGreeksPaperService(runnerManager);
     const directionalOptionsDemoService = new DirectionalOptionsDemoService();
 
     await ensurePostgresSchema();
@@ -115,8 +112,7 @@ async function bootstrap(): Promise<void> {
     app.post("/auth/change-password", requireAuthPage, async (req, res) => {
         await changePassword(req, res);
     });
-    app.get("/strategyfogreeks", requireAuthPage, requireFreshPasswordPage, renderStrategyFoPaperPage);
-    app.use("/api", createApiRouter(runnerManager, strategyFoPaperService, directionalOptionsDemoService));
+    app.use("/api", createApiRouter(runnerManager, directionalOptionsDemoService));
 
     app.listen(port, () => {
         console.log(`Optionyze server listening on port ${port} as ${getServerId()}`);
