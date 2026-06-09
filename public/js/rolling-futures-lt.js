@@ -107,6 +107,7 @@
         closeBlockedMargin: document.getElementById("chkRollingFuturesCloseBlockedMargin"),
         blockedMarginPct: document.getElementById("txtRollingFuturesBlockedMarginPct"),
         reEnterBlock: document.getElementById("chkRollingFuturesReEnterBlock"),
+        autoConfirmLiveActions: document.getElementById("chkRollingFuturesAutoConfirmLiveActions"),
         recalculateTotalPnlButton: document.getElementById(`btn${idPrefix}RecalculateTotalPnl`),
         importButton: document.getElementById(`btn${idPrefix}ImportPositions`),
         refreshOpenPositionsButton: document.getElementById(`btn${idPrefix}RefreshOpenPositions`),
@@ -125,6 +126,13 @@
         refreshEventsButton: document.getElementById(`btn${idPrefix}RefreshEvents`),
         clearEventsButton: document.getElementById(`btn${idPrefix}ClearEvents`),
         eventLog: document.getElementById(`${prefix}EventLog`),
+        confirmationEmpty: document.getElementById(`${prefix}ConfirmationEmpty`),
+        confirmationPanel: document.getElementById(`${prefix}ConfirmationPanel`),
+        confirmationTitle: document.getElementById(`${prefix}ConfirmationTitle`),
+        confirmationTime: document.getElementById(`${prefix}ConfirmationTime`),
+        confirmationMessage: document.getElementById(`${prefix}ConfirmationMessage`),
+        confirmActionButton: document.getElementById(`btn${idPrefix}ConfirmAction`),
+        rejectActionButton: document.getElementById(`btn${idPrefix}RejectAction`),
         telegramNotice: document.getElementById("rollingDualFuturesTelegramNotice"),
         telegramEventCheckboxes: Array.from(document.querySelectorAll(".rolling-demo-telegram-event")),
         importOverlay: document.getElementById(`${prefix}ImportOverlay`),
@@ -149,6 +157,7 @@
     let manualFutureOrderInFlight = false;
     let manualOptionOrderInFlight = false;
     let execStrategyInFlight = false;
+    let confirmationInFlight = false;
     let execStrategyEnabled = isDualLikeMode ? initialExecStrategyEnabled : true;
     let closedFiltersRefreshTimer = null;
     let adminRunningUsers = [];
@@ -162,6 +171,7 @@
     };
     let lastNeutralStatus = null;
     let lastRecoveryMetrics = null;
+    let pendingLiveConfirmation = null;
     const closedPositionsPageSize = 10;
 
     function escapeHtml(value) {
@@ -421,6 +431,7 @@
             closeBlockedMargin: false,
             blockedMarginPct: "10",
             reEnterBlock: true,
+            autoConfirmLiveActions: false,
             onlyDeltaNeutral: !isDualLikeMode && !isCoveredMode,
             rangeDeltaNeutral: isDualLikeMode && !isCoveredMode,
             gammaAwareNeutral: false,
@@ -902,6 +913,7 @@
         const objRuntime = runtime || {};
         runtimeStatus = String(objRuntime.status || "idle").trim() || "idle";
         autoTraderEnabled = Boolean(objRuntime.autoTraderEnabled);
+        pendingLiveConfirmation = objRuntime?.state?.pendingCoveredLiveConfirmation || null;
         if (ids.engineStatus) {
             ids.engineStatus.textContent = runtimeStatus.charAt(0).toUpperCase() + runtimeStatus.slice(1);
         }
@@ -925,7 +937,71 @@
             });
         }
         updateNeutralBadges(lastNeutralStatus);
+        renderPendingLiveConfirmation();
         setButtonsEnabled();
+    }
+
+    function renderPendingLiveConfirmation() {
+        if (!isCoveredMode) {
+            return;
+        }
+        const objPending = pendingLiveConfirmation && typeof pendingLiveConfirmation === "object"
+            ? pendingLiveConfirmation
+            : null;
+        if (!objPending) {
+            if (ids.confirmationEmpty) {
+                ids.confirmationEmpty.style.display = "";
+            }
+            if (ids.confirmationPanel) {
+                ids.confirmationPanel.style.display = "none";
+            }
+            return;
+        }
+        if (ids.confirmationEmpty) {
+            ids.confirmationEmpty.style.display = "none";
+        }
+        if (ids.confirmationPanel) {
+            ids.confirmationPanel.style.display = "";
+        }
+        if (ids.confirmationTitle) {
+            ids.confirmationTitle.textContent = String(objPending.title || "Pending Confirmation");
+        }
+        if (ids.confirmationTime) {
+            ids.confirmationTime.textContent = formatDateTimeDisplay(objPending.createdAt);
+        }
+        if (ids.confirmationMessage) {
+            ids.confirmationMessage.textContent = String(objPending.message || "");
+        }
+        if (ids.confirmActionButton instanceof HTMLButtonElement) {
+            ids.confirmActionButton.disabled = confirmationInFlight;
+        }
+        if (ids.rejectActionButton instanceof HTMLButtonElement) {
+            ids.rejectActionButton.disabled = confirmationInFlight;
+        }
+    }
+
+    async function confirmPendingLiveAction() {
+        confirmationInFlight = true;
+        renderPendingLiveConfirmation();
+        try {
+            return await postJson(`${endpointBase}/live-action/confirm`, {});
+        }
+        finally {
+            confirmationInFlight = false;
+            renderPendingLiveConfirmation();
+        }
+    }
+
+    async function rejectPendingLiveAction() {
+        confirmationInFlight = true;
+        renderPendingLiveConfirmation();
+        try {
+            return await postJson(`${endpointBase}/live-action/reject`, {});
+        }
+        finally {
+            confirmationInFlight = false;
+            renderPendingLiveConfirmation();
+        }
     }
 
     function clearAccountSummary() {
@@ -960,6 +1036,7 @@
             closeBlockedMargin: getCheckboxValue(ids.closeBlockedMargin, false),
             blockedMarginPct: getInputValue(ids.blockedMarginPct, "20"),
             reEnterBlock: getCheckboxValue(ids.reEnterBlock, false),
+            autoConfirmLiveActions: getCheckboxValue(ids.autoConfirmLiveActions, false),
             telegramAlertTypes: ids.telegramEventCheckboxes.filter(function (checkbox) {
                 return checkbox instanceof HTMLInputElement && checkbox.checked;
             }).map(function (checkbox) {
@@ -999,6 +1076,7 @@
             setCheckboxValue(ids.closeBlockedMargin, objUiState.closeBlockedMargin);
             setInputValue(ids.blockedMarginPct, objUiState.blockedMarginPct);
             setCheckboxValue(ids.reEnterBlock, objUiState.reEnterBlock);
+            setCheckboxValue(ids.autoConfirmLiveActions, objUiState.autoConfirmLiveActions);
             setInputValue(ids.closedFromDate, String(objUiState.closedFromDate || "").trim());
             setInputValue(ids.closedToDate, String(objUiState.closedToDate || "").trim());
             closedFiltersChanged = previousClosedFromDate !== String(ids.closedFromDate?.value || "").trim()
@@ -2019,7 +2097,8 @@
         ids.reEnterBrok,
         ids.closeBlockedMargin,
         ids.blockedMarginPct,
-        ids.reEnterBlock
+        ids.reEnterBlock,
+        ids.autoConfirmLiveActions
     ].forEach(function (node) {
         node?.addEventListener("change", queueProfileSave);
         if (node instanceof HTMLInputElement && node.type !== "checkbox") {
@@ -2113,6 +2192,32 @@
             setStatus(ids.pageStatus, "Delta connection checked.", "success");
         }).catch(function (error) {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to check Delta connection.", "danger");
+        });
+    });
+    ids.confirmActionButton?.addEventListener("click", function () {
+        void confirmPendingLiveAction().then(function (objResult) {
+            return Promise.all([
+                loadRuntimeStatus(),
+                loadAccountSummary().catch(function () { return undefined; }),
+                loadSavedOpenPositions().catch(function () { return undefined; }),
+                loadEvents().catch(function () { return undefined; })
+            ]).then(function () {
+                setStatus(ids.pageStatus, String(objResult?.message || "Live action confirmed."), "success");
+            });
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to confirm the live action.", "danger");
+        });
+    });
+    ids.rejectActionButton?.addEventListener("click", function () {
+        void rejectPendingLiveAction().then(function (objResult) {
+            return Promise.all([
+                loadRuntimeStatus(),
+                loadEvents().catch(function () { return undefined; })
+            ]).then(function () {
+                setStatus(ids.pageStatus, String(objResult?.message || "Live action rejected."), "warning");
+            });
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to reject the live action.", "danger");
         });
     });
     ids.autoTraderButton?.addEventListener("click", function () {

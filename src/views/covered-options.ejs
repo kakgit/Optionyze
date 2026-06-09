@@ -555,6 +555,32 @@
             <div class="rolling-demo-log-grid">
                 <div class="app-panel rolling-demo-card">
                     <div class="rolling-demo-card-head">
+                        <h2>Live Confirmation</h2>
+                    </div>
+                    <label class="rolling-demo-check rolling-demo-check-wide" for="chkRollingFuturesAutoConfirmLiveActions" style="margin-bottom:12px;">
+                        <input type="checkbox" id="chkRollingFuturesAutoConfirmLiveActions" />
+                        <span>Auto-confirm all covered live actions</span>
+                    </label>
+                    <div class="rolling-demo-notice" id="rollingDualFuturesConfirmationEmpty">
+                        No live action is waiting for confirmation.
+                    </div>
+                    <div id="rollingDualFuturesConfirmationPanel" style="display:none;">
+                        <div class="rolling-demo-event-card">
+                            <div class="rolling-demo-event-header">
+                                <strong id="rollingDualFuturesConfirmationTitle">Pending Confirmation</strong>
+                                <span id="rollingDualFuturesConfirmationTime" class="rolling-demo-event-time"></span>
+                            </div>
+                            <div id="rollingDualFuturesConfirmationMessage" class="rolling-demo-event-message"></div>
+                        </div>
+                        <div class="rolling-live-modal-actions" style="justify-content:flex-start; margin-top:12px;">
+                            <button class="rolling-demo-btn primary" type="button" id="btnRollingDualFuturesConfirmAction">Confirm</button>
+                            <button class="rolling-demo-btn warn" type="button" id="btnRollingDualFuturesRejectAction">Reject</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="app-panel rolling-demo-card">
+                    <div class="rolling-demo-card-head">
                         <h2>Telegram Alerts</h2>
                     </div>
                     <p class="app-copy">Alert preferences can follow the same strategy-level model as the paper page while live execution wiring is added server-side.</p>

@@ -41,6 +41,7 @@ import {
     enableCoveredOptionsAutoTrader,
     enableRollingFuturesLtDualAutoTrader,
     executeCoveredOptionsKillSwitch,
+    confirmCoveredOptionsLiveAction,
     executeCoveredOptionsManualFuture,
     executeCoveredOptionsManualOption,
     executeCoveredOptionsStrategy,
@@ -74,6 +75,7 @@ import {
     updateCoveredOptionsRecoveryMetrics,
     updateRollingFuturesLtDualRecoveryMetrics,
     reconcileCoveredOptionsOpenPositions,
+    rejectCoveredOptionsLiveAction,
     reconcileRollingFuturesLtDualOpenPositions,
     saveCoveredOptionsOpenPositions,
     saveCoveredOptionsProfile,
@@ -305,6 +307,12 @@ export function createApiRouter(
     });
     objRouter.post("/covered-options/strategy/execute", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await executeCoveredOptionsStrategy(req, res);
+    });
+    objRouter.post("/covered-options/live-action/confirm", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await confirmCoveredOptionsLiveAction(req, res);
+    });
+    objRouter.post("/covered-options/live-action/reject", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await rejectCoveredOptionsLiveAction(req, res);
     });
     objRouter.get("/covered-options/open-positions/importable", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getCoveredOptionsImportableOpenPositions(req, res);
