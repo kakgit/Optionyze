@@ -3039,7 +3039,7 @@ async function performRollingFuturesLtConnectionCheck(
                 currency: String(objUsdRow?.asset_symbol || objUsdRow?.symbol || "USD").toUpperCase(),
                 totalBalance: Number(getTotalBalanceUsd(objUsdRow).toFixed(2)),
                 availableBalance: Number(getAvailableBalanceUsd(objUsdRow).toFixed(2)),
-                blockedMargin: Number(objBlockedMarginDetails.blockedMargin.toFixed(2)),
+                blockedMargin: Number(vBlockedMarginDisplay.toFixed(2)),
                 blockedMarginDisplay: Number(vBlockedMarginDisplay.toFixed(2)),
                 blockedMarginHint: vBlockedMarginHint
             }
@@ -3205,12 +3205,12 @@ async function fetchAccountSummarySnapshot(
     const objBlockedMarginDetails = getBlockedMarginDisplayDetails(objUsdRow);
     const vTrackedPositionMargin = getTrackedPositionMarginTotal(arrPositions, pSymbol);
     const vTrackedPositiveUnrealizedPnl = getTrackedPositionPositiveUnrealizedPnlTotal(arrPositions, pSymbol);
-    const vBlockedMargin = Math.max(vWalletBlockedMargin, vTrackedPositionMargin);
     const vTrackedDisplayBlockedMargin = vTrackedPositionMargin + vTrackedPositiveUnrealizedPnl;
     const vBlockedMarginDisplay = Math.max(objBlockedMarginDetails.displayBlockedMargin, vTrackedDisplayBlockedMargin);
     const vBlockedMarginHint = vTrackedDisplayBlockedMargin > objBlockedMarginDetails.displayBlockedMargin && vTrackedDisplayBlockedMargin > 0
         ? `Position Margin ${vTrackedPositionMargin.toFixed(2)} + Unrealized PnL ${vTrackedPositiveUnrealizedPnl.toFixed(2)}`
         : objBlockedMarginDetails.hint;
+    const vBlockedMargin = vBlockedMarginDisplay;
     const vTotalBalance = getTotalBalanceUsd(objUsdRow);
     const vLivePrice = Number(objMarketSnapshot?.futuresPrice || 0);
     const vOneLotValue = Number.isFinite(vLivePrice) && vLivePrice > 0 ? vLivePrice * vLotSize : Number.NaN;
@@ -9130,7 +9130,6 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
             : (objPositionsPayload.result ? [objPositionsPayload.result as DeltaPositionRow] : []);
         const vAvailableBalance = getAvailableBalanceUsd(objUsdRow);
         const objBlockedMarginDetails = getBlockedMarginDisplayDetails(objUsdRow);
-        const vBlockedMargin = objBlockedMarginDetails.blockedMargin;
         const vTrackedPositionMargin = getTrackedPositionMarginTotal(arrPositions, vSelectedSymbol);
         const vTrackedPositiveUnrealizedPnl = getTrackedPositionPositiveUnrealizedPnlTotal(arrPositions, vSelectedSymbol);
         const vTrackedDisplayBlockedMargin = vTrackedPositionMargin + vTrackedPositiveUnrealizedPnl;
@@ -9138,6 +9137,7 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
         const vBlockedMarginHint = vTrackedDisplayBlockedMargin > objBlockedMarginDetails.displayBlockedMargin && vTrackedDisplayBlockedMargin > 0
             ? `Position Margin ${vTrackedPositionMargin.toFixed(2)} + Unrealized PnL ${vTrackedPositiveUnrealizedPnl.toFixed(2)}`
             : objBlockedMarginDetails.hint;
+        const vBlockedMargin = vBlockedMarginDisplay;
         const vTotalBalance = getTotalBalanceUsd(objUsdRow);
         const vLivePrice = Number(objMarketSnapshot?.futuresPrice || 0);
         const vOneLotValue = Number.isFinite(vLivePrice) && vLivePrice > 0 ? vLivePrice * vLotSize : Number.NaN;
