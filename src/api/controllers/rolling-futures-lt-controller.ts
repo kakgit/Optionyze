@@ -85,6 +85,12 @@ interface DeltaPositionRow {
     unrealized_pnl?: number | string | null;
     margin?: number | string | null;
     product_id?: number | string | null;
+    created_at?: string | number | null;
+    updated_at?: string | number | null;
+    opened_at?: string | number | null;
+    createdAt?: string | number | null;
+    updatedAt?: string | number | null;
+    openedAt?: string | number | null;
     [key: string]: unknown;
 }
 
@@ -2052,6 +2058,14 @@ function mapLivePosition(
 ): RollingFuturesLtImportedPositionRecord {
     const vNetSize = toFiniteNumber(pRow.net_size ?? pRow.size, 0);
     const vSide = vNetSize < 0 ? "SELL" : "BUY";
+    const vOpenedAt = normalizeDeltaTimestampToIso(
+        pRow.opened_at
+        ?? pRow.openedAt
+        ?? pRow.created_at
+        ?? pRow.createdAt
+        ?? pRow.updated_at
+        ?? pRow.updatedAt
+    ) || new Date().toISOString();
     return {
         userId: pUserId,
         strategyCode: pStrategyCode,
@@ -2069,9 +2083,49 @@ function mapLivePosition(
             realizedPnl: Number(toFiniteNumber(pRow.realized_pnl, 0).toFixed(4)),
             unrealizedPnl: Number(toFiniteNumber(pRow.unrealized_pnl, 0).toFixed(4))
         },
-        openedAt: new Date().toISOString(),
+        openedAt: vOpenedAt,
         updatedAt: new Date().toISOString()
     };
+}
+
+function normalizeDeltaTimestampToIso(pValue: unknown): string {
+    if (pValue === null || pValue === undefined) {
+        return "";
+    }
+
+    if (pValue instanceof Date) {
+        return Number.isNaN(pValue.getTime()) ? "" : pValue.toISOString();
+    }
+
+    if (typeof pValue === "number") {
+        if (!Number.isFinite(pValue) || pValue <= 0) {
+            return "";
+        }
+        const vEpochMs = pValue >= 1_000_000_000_000_000
+            ? Math.floor(pValue / 1000)
+            : (pValue >= 1_000_000_000_000 ? pValue : pValue * 1000);
+        const objDate = new Date(vEpochMs);
+        return Number.isNaN(objDate.getTime()) ? "" : objDate.toISOString();
+    }
+
+    const vRaw = String(pValue || "").trim();
+    if (!vRaw) {
+        return "";
+    }
+
+    if (/^\d+$/.test(vRaw)) {
+        const vNumeric = Number(vRaw);
+        if (Number.isFinite(vNumeric) && vNumeric > 0) {
+            return normalizeDeltaTimestampToIso(vNumeric);
+        }
+    }
+
+    const vEpochMs = Date.parse(vRaw);
+    if (Number.isNaN(vEpochMs)) {
+        return "";
+    }
+
+    return new Date(vEpochMs).toISOString();
 }
 
 function toEpochMicros(pDateValue: string, pEndOfMinute = false): number | null {
