@@ -2082,6 +2082,21 @@ function getTrackedPositionMarginTotal(
     }, 0);
 }
 
+function getTrackedPositionPositiveUnrealizedPnlTotal(
+    pRows: DeltaPositionRow[],
+    pSelectedSymbol: string
+): number {
+    const vSymbol = normalizeSymbolValue(pSelectedSymbol);
+    return pRows.reduce((pSum, pRow) => {
+        const vContractSymbol = String(pRow.product_symbol || pRow.symbol || "").trim().toUpperCase();
+        const vQty = Math.abs(toFiniteNumber(pRow.net_size ?? pRow.size, 0));
+        if (!(vQty > 0) || !isTrackedContractForSymbol(vContractSymbol, vSymbol)) {
+            return pSum;
+        }
+        return pSum + Math.max(0, toFiniteNumber(pRow.unrealized_pnl, 0));
+    }, 0);
+}
+
 function mapLivePosition(
     pRow: DeltaPositionRow,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -2948,6 +2963,7 @@ async function performRollingFuturesLtConnectionCheck(
     profile: RollingFuturesLtProfileRecord;
     summary: {
         currency: string;
+        totalBalance: number;
         availableBalance: number;
         blockedMargin: number;
         blockedMarginDisplay: number;
@@ -2977,10 +2993,22 @@ async function performRollingFuturesLtConnectionCheck(
 
     try {
         const { client, profile } = await getDeltaClientForAccountId(pUserId, vProfileId);
-        const objResponse = await client.apis.Wallet.getBalances();
-        const objPayload = readResponsePayload(objResponse);
+        const objPositionsApi = client.apis.Positions;
+        const [objWalletResponse, objPositionsResponse] = await Promise.all([
+            client.apis.Wallet.getBalances(),
+            typeof objPositionsApi?.getMarginedPositions === "function"
+                ? objPositionsApi.getMarginedPositions({})
+                : (typeof objPositionsApi?.getPositions === "function"
+                    ? objPositionsApi.getPositions({})
+                    : Promise.resolve(null))
+        ]);
+        const objPayload = readResponsePayload(objWalletResponse);
         const arrRows = Array.isArray(objPayload.result) ? objPayload.result as DeltaWalletBalanceRow[] : [];
         const objUsdRow = pickUsdBalanceRow(arrRows);
+        const objPositionsPayload = objPositionsResponse ? readResponsePayload(objPositionsResponse) : {};
+        const arrPositions = Array.isArray(objPositionsPayload.result)
+            ? objPositionsPayload.result as DeltaPositionRow[]
+            : (objPositionsPayload.result ? [objPositionsPayload.result as DeltaPositionRow] : []);
         const vOutboundIp = await getOutboundPublicIp();
         const objStatus: RollingFuturesLtConnectionStatus = {
             ...objProfile.connectionStatus,
@@ -2992,6 +3020,15 @@ async function performRollingFuturesLtConnectionCheck(
             consecutiveFailures: 0
         };
         const objBlockedMarginDetails = getBlockedMarginDisplayDetails(objUsdRow);
+        const vTrackedPositionMargin = getTrackedPositionMarginTotal(arrPositions, "BTC")
+            + getTrackedPositionMarginTotal(arrPositions, "ETH");
+        const vTrackedPositiveUnrealizedPnl = getTrackedPositionPositiveUnrealizedPnlTotal(arrPositions, "BTC")
+            + getTrackedPositionPositiveUnrealizedPnlTotal(arrPositions, "ETH");
+        const vTrackedDisplayBlockedMargin = vTrackedPositionMargin + vTrackedPositiveUnrealizedPnl;
+        const vBlockedMarginDisplay = Math.max(objBlockedMarginDetails.displayBlockedMargin, vTrackedDisplayBlockedMargin);
+        const vBlockedMarginHint = vTrackedDisplayBlockedMargin > objBlockedMarginDetails.displayBlockedMargin && vTrackedDisplayBlockedMargin > 0
+            ? `Position Margin ${vTrackedPositionMargin.toFixed(2)} + Unrealized PnL ${vTrackedPositiveUnrealizedPnl.toFixed(2)}`
+            : objBlockedMarginDetails.hint;
         return {
             profile: await saveRollingFuturesLtProfile({
                 ...objProfile,
@@ -3000,10 +3037,11 @@ async function performRollingFuturesLtConnectionCheck(
             }),
             summary: {
                 currency: String(objUsdRow?.asset_symbol || objUsdRow?.symbol || "USD").toUpperCase(),
+                totalBalance: Number(getTotalBalanceUsd(objUsdRow).toFixed(2)),
                 availableBalance: Number(getAvailableBalanceUsd(objUsdRow).toFixed(2)),
                 blockedMargin: Number(objBlockedMarginDetails.blockedMargin.toFixed(2)),
-                blockedMarginDisplay: Number(objBlockedMarginDetails.displayBlockedMargin.toFixed(2)),
-                blockedMarginHint: objBlockedMarginDetails.hint
+                blockedMarginDisplay: Number(vBlockedMarginDisplay.toFixed(2)),
+                blockedMarginHint: vBlockedMarginHint
             }
         };
     }
@@ -3166,8 +3204,13 @@ async function fetchAccountSummarySnapshot(
     const vWalletBlockedMargin = getBlockedMarginUsd(objUsdRow);
     const objBlockedMarginDetails = getBlockedMarginDisplayDetails(objUsdRow);
     const vTrackedPositionMargin = getTrackedPositionMarginTotal(arrPositions, pSymbol);
+    const vTrackedPositiveUnrealizedPnl = getTrackedPositionPositiveUnrealizedPnlTotal(arrPositions, pSymbol);
     const vBlockedMargin = Math.max(vWalletBlockedMargin, vTrackedPositionMargin);
-    const vBlockedMarginDisplay = Math.max(objBlockedMarginDetails.displayBlockedMargin, vTrackedPositionMargin);
+    const vTrackedDisplayBlockedMargin = vTrackedPositionMargin + vTrackedPositiveUnrealizedPnl;
+    const vBlockedMarginDisplay = Math.max(objBlockedMarginDetails.displayBlockedMargin, vTrackedDisplayBlockedMargin);
+    const vBlockedMarginHint = vTrackedDisplayBlockedMargin > objBlockedMarginDetails.displayBlockedMargin && vTrackedDisplayBlockedMargin > 0
+        ? `Position Margin ${vTrackedPositionMargin.toFixed(2)} + Unrealized PnL ${vTrackedPositiveUnrealizedPnl.toFixed(2)}`
+        : objBlockedMarginDetails.hint;
     const vTotalBalance = getTotalBalanceUsd(objUsdRow);
     const vLivePrice = Number(objMarketSnapshot?.futuresPrice || 0);
     const vOneLotValue = Number.isFinite(vLivePrice) && vLivePrice > 0 ? vLivePrice * vLotSize : Number.NaN;
@@ -3182,7 +3225,7 @@ async function fetchAccountSummarySnapshot(
         totalBalance: Number.isFinite(vTotalBalance) ? Number(vTotalBalance.toFixed(2)) : null,
         blockedMargin: Number.isFinite(vBlockedMargin) ? Number(vBlockedMargin.toFixed(2)) : null,
         blockedMarginDisplay: Number.isFinite(vBlockedMarginDisplay) ? Number(vBlockedMarginDisplay.toFixed(2)) : null,
-        blockedMarginHint: objBlockedMarginDetails.hint,
+        blockedMarginHint: vBlockedMarginHint,
         availableBalance: Number.isFinite(vAvailableBalance) ? Number(vAvailableBalance.toFixed(2)) : null,
         healthPct: Number.isFinite(vHealthPct) ? vHealthPct : null,
         profileLabel: profile.referenceName || profile.apiKey || "",
@@ -9088,6 +9131,13 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
         const vAvailableBalance = getAvailableBalanceUsd(objUsdRow);
         const objBlockedMarginDetails = getBlockedMarginDisplayDetails(objUsdRow);
         const vBlockedMargin = objBlockedMarginDetails.blockedMargin;
+        const vTrackedPositionMargin = getTrackedPositionMarginTotal(arrPositions, vSelectedSymbol);
+        const vTrackedPositiveUnrealizedPnl = getTrackedPositionPositiveUnrealizedPnlTotal(arrPositions, vSelectedSymbol);
+        const vTrackedDisplayBlockedMargin = vTrackedPositionMargin + vTrackedPositiveUnrealizedPnl;
+        const vBlockedMarginDisplay = Math.max(objBlockedMarginDetails.displayBlockedMargin, vTrackedDisplayBlockedMargin);
+        const vBlockedMarginHint = vTrackedDisplayBlockedMargin > objBlockedMarginDetails.displayBlockedMargin && vTrackedDisplayBlockedMargin > 0
+            ? `Position Margin ${vTrackedPositionMargin.toFixed(2)} + Unrealized PnL ${vTrackedPositiveUnrealizedPnl.toFixed(2)}`
+            : objBlockedMarginDetails.hint;
         const vTotalBalance = getTotalBalanceUsd(objUsdRow);
         const vLivePrice = Number(objMarketSnapshot?.futuresPrice || 0);
         const vOneLotValue = Number.isFinite(vLivePrice) && vLivePrice > 0 ? vLivePrice * vLotSize : Number.NaN;
@@ -9104,8 +9154,8 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
                 oneLotValue: Number.isFinite(vOneLotValue) ? Number(vOneLotValue.toFixed(2)) : null,
                 totalBalance: Number.isFinite(vTotalBalance) ? Number(vTotalBalance.toFixed(2)) : null,
                 blockedMargin: Number.isFinite(vBlockedMargin) ? Number(vBlockedMargin.toFixed(2)) : null,
-                blockedMarginDisplay: Number.isFinite(objBlockedMarginDetails.displayBlockedMargin) ? Number(objBlockedMarginDetails.displayBlockedMargin.toFixed(2)) : null,
-                blockedMarginHint: objBlockedMarginDetails.hint,
+                blockedMarginDisplay: Number.isFinite(vBlockedMarginDisplay) ? Number(vBlockedMarginDisplay.toFixed(2)) : null,
+                blockedMarginHint: vBlockedMarginHint,
                 availableBalance: Number.isFinite(vAvailableBalance) ? Number(vAvailableBalance.toFixed(2)) : null,
                 healthPct: Number.isFinite(vHealthPct) ? vHealthPct : null,
                 profileLabel: profile.referenceName || profile.apiKey || "",

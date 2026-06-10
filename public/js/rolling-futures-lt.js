@@ -1034,6 +1034,43 @@
         });
     }
 
+    function applyAccountSummaryData(objData) {
+        execStrategyEnabled = mode === "dual" ? Boolean(objData.execStrategy) : true;
+        if (ids.oneLotValue) {
+            ids.oneLotValue.textContent = fmtUsd(objData.oneLotValue);
+        }
+        if (ids.totalBalanceValue) {
+            ids.totalBalanceValue.textContent = fmtUsd(objData.totalBalance);
+        }
+        if (ids.blockedMarginValue) {
+            ids.blockedMarginValue.textContent = fmtUsd(
+                Number.isFinite(Number(objData.blockedMarginDisplay))
+                    ? objData.blockedMarginDisplay
+                    : objData.blockedMargin
+            );
+            const blockedMarginHint = String(objData.blockedMarginHint || "").trim();
+            if (blockedMarginHint) {
+                ids.blockedMarginValue.title = blockedMarginHint;
+            }
+            else {
+                ids.blockedMarginValue.removeAttribute("title");
+            }
+        }
+        if (ids.availableBalanceValue) {
+            ids.availableBalanceValue.textContent = fmtUsd(objData.availableBalance);
+        }
+        if (ids.healthValue) {
+            ids.healthValue.textContent = Number.isFinite(Number(objData.healthPct)) ? `${Number(objData.healthPct).toFixed(2)} %` : "-";
+        }
+        if (ids.profileLabel) {
+            ids.profileLabel.textContent = String(objData.profileLabel || "").trim() || "-";
+        }
+        if (ids.openCount) {
+            ids.openCount.textContent = Number.isFinite(Number(objData.openCount)) ? String(Math.max(0, Math.trunc(Number(objData.openCount)))) : "0";
+        }
+        setButtonsEnabled();
+    }
+
     function getUiState() {
         const state = {
             startQty: getInputValue(ids.startQty, "1"),
@@ -1339,6 +1376,25 @@
             selectedApiProfileId = String(objData.selectedApiProfileId || "").trim();
         }
         applyConnectionStatus(objData.connectionStatus || {});
+        if (objData.summary && typeof objData.summary === "object") {
+            applyAccountSummaryData({
+                totalBalance: objData.summary.totalBalance,
+                blockedMargin: objData.summary.blockedMargin,
+                blockedMarginDisplay: objData.summary.blockedMarginDisplay,
+                blockedMarginHint: objData.summary.blockedMarginHint,
+                availableBalance: objData.summary.availableBalance
+            });
+        }
+        return objResult;
+    }
+
+    async function refreshExchangeConnectionSection() {
+        const objResult = await checkConnection();
+        await Promise.all([
+            loadAccountSummary().catch(function () { return undefined; }),
+            loadClosedPositions().catch(function () { return undefined; }),
+            loadSavedOpenPositions().catch(function () { return undefined; })
+        ]);
         return objResult;
     }
 
@@ -1563,38 +1619,7 @@
         const query = new URLSearchParams();
         query.set("symbol", String(ids.symbol?.value || "BTC").trim().toUpperCase());
         const objResult = await getJson(`${endpointBase}/account-summary?${query.toString()}`);
-        const objData = objResult?.data || {};
-        execStrategyEnabled = mode === "dual" ? Boolean(objData.execStrategy) : true;
-        if (ids.oneLotValue) {
-            ids.oneLotValue.textContent = fmtUsd(objData.oneLotValue);
-        }
-        if (ids.totalBalanceValue) {
-            ids.totalBalanceValue.textContent = fmtUsd(objData.totalBalance);
-        }
-        if (ids.blockedMarginValue) {
-            ids.blockedMarginValue.textContent = fmtUsd(
-                Number.isFinite(Number(objData.blockedMarginDisplay))
-                    ? objData.blockedMarginDisplay
-                    : objData.blockedMargin
-            );
-            const blockedMarginHint = String(objData.blockedMarginHint || "").trim();
-            if (blockedMarginHint) {
-                ids.blockedMarginValue.title = blockedMarginHint;
-            }
-            else {
-                ids.blockedMarginValue.removeAttribute("title");
-            }
-        }
-        if (ids.availableBalanceValue) {
-            ids.availableBalanceValue.textContent = fmtUsd(objData.availableBalance);
-        }
-        if (ids.healthValue) {
-            ids.healthValue.textContent = Number.isFinite(Number(objData.healthPct)) ? `${Number(objData.healthPct).toFixed(2)} %` : "-";
-        }
-        if (ids.profileLabel) {
-            ids.profileLabel.textContent = String(objData.profileLabel || "").trim() || "-";
-        }
-        setButtonsEnabled();
+        applyAccountSummaryData(objResult?.data || {});
     }
 
     function getLtpBlinkClass(positionId, markPrice) {
@@ -2230,16 +2255,18 @@
         });
     });
     ids.checkConnectionButton?.addEventListener("click", function () {
-        void checkConnection().then(function () {
-            return Promise.all([
-                loadAccountSummary().catch(function () { return undefined; }),
-                loadClosedPositions().catch(function () { return undefined; }),
-                loadSavedOpenPositions().catch(function () { return undefined; })
-            ]);
-        }).then(function () {
+        if (ids.checkConnectionButton instanceof HTMLButtonElement) {
+            ids.checkConnectionButton.disabled = true;
+        }
+        setStatus(ids.pageStatus, "Refreshing Exchange Connection...", "info");
+        void refreshExchangeConnectionSection().then(function () {
             setStatus(ids.pageStatus, "Delta connection checked.", "success");
         }).catch(function (error) {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to check Delta connection.", "danger");
+        }).finally(function () {
+            if (ids.checkConnectionButton instanceof HTMLButtonElement) {
+                ids.checkConnectionButton.disabled = false;
+            }
         });
     });
     ids.confirmActionButton?.addEventListener("click", function () {
