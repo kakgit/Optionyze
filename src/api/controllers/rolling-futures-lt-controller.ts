@@ -2977,6 +2977,7 @@ function normalizeProfileSaveInput(
         closeBlockedMargin: normalizeBooleanValue(objUiState.closeBlockedMargin, Boolean(objDefaults.closeBlockedMargin)),
         blockedMarginPct: normalizeStringValue(objUiState.blockedMarginPct, String(objDefaults.blockedMarginPct)),
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
+        autoConfirmLiveActions: normalizeBooleanValue(objUiState.autoConfirmLiveActions, Boolean(objDefaults.autoConfirmLiveActions)),
         telegramAlertTypes: Array.from(new Set(arrTelegramPrefs)),
         closedFromDate: String(objUiState.closedFromDate || "").trim(),
         closedToDate: String(objUiState.closedToDate || "").trim()
