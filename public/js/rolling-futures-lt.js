@@ -18,6 +18,7 @@
         : (mode === "covered" ? "Covered Options" : (mode === "dual" ? "Dual Mode" : "Long Mode"));
     const isCoveredMode = mode === "covered";
     const isDualLikeMode = mode === "dual" || mode === "covered";
+    const deltaUiTimezoneOffsetMinutes = 5.5 * 60;
     const currentAccountId = String(document.body?.dataset?.currentAccountId || "").trim();
     const currentAccountIsAdmin = String(document.body?.dataset?.currentAccountAdmin || "").trim().toLowerCase() === "true";
     const currentAccountFullName = String(document.body?.dataset?.currentAccountFullName || "").trim();
@@ -229,11 +230,12 @@
         if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) {
             return "";
         }
-        const year = String(dateValue.getFullYear());
-        const month = String(dateValue.getMonth() + 1).padStart(2, "0");
-        const day = String(dateValue.getDate()).padStart(2, "0");
-        const hour = String(dateValue.getHours()).padStart(2, "0");
-        const minute = String(dateValue.getMinutes()).padStart(2, "0");
+        const objDeltaDate = new Date(dateValue.getTime() + (deltaUiTimezoneOffsetMinutes * 60 * 1000));
+        const year = String(objDeltaDate.getUTCFullYear());
+        const month = String(objDeltaDate.getUTCMonth() + 1).padStart(2, "0");
+        const day = String(objDeltaDate.getUTCDate()).padStart(2, "0");
+        const hour = String(objDeltaDate.getUTCHours()).padStart(2, "0");
+        const minute = String(objDeltaDate.getUTCMinutes()).padStart(2, "0");
         return `${year}-${month}-${day}T${hour}:${minute}`;
     }
 
@@ -417,12 +419,12 @@
     }
 
     function formatCurrentDateTimeLocalValue() {
-        const dateValue = new Date();
-        const yearValue = dateValue.getFullYear();
-        const monthValue = String(dateValue.getMonth() + 1).padStart(2, "0");
-        const dayValue = String(dateValue.getDate()).padStart(2, "0");
-        const hourValue = String(dateValue.getHours()).padStart(2, "0");
-        const minuteValue = String(dateValue.getMinutes()).padStart(2, "0");
+        const dateValue = new Date(Date.now() + (deltaUiTimezoneOffsetMinutes * 60 * 1000));
+        const yearValue = dateValue.getUTCFullYear();
+        const monthValue = String(dateValue.getUTCMonth() + 1).padStart(2, "0");
+        const dayValue = String(dateValue.getUTCDate()).padStart(2, "0");
+        const hourValue = String(dateValue.getUTCHours()).padStart(2, "0");
+        const minuteValue = String(dateValue.getUTCMinutes()).padStart(2, "0");
         return `${yearValue}-${monthValue}-${dayValue}T${hourValue}:${minuteValue}`;
     }
 
