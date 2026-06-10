@@ -176,6 +176,26 @@ export async function getAccountById(pAccountId: string): Promise<AccountRecord 
     return mapAccountRow(objResult.rows[0]);
 }
 
+export async function getAccountByTelegramChatId(pTelegramChatId: string): Promise<AccountRecord | null> {
+    if (!isPostgresConfigured()) {
+        return null;
+    }
+
+    const vTelegramChatId = String(pTelegramChatId || "").trim();
+    if (!vTelegramChatId) {
+        return null;
+    }
+
+    const objResult = await runPostgresQueryWithReconnect((pPool) => pPool.query<AccountRow>(`
+        SELECT account_id, full_name, email, mobile_no, telegram_chat_id, password_hash, is_active, is_admin, is_survival_admin, exec_strategy, must_change_password, created_at, updated_at
+        FROM optionyze_accounts
+        WHERE telegram_chat_id = $1
+        LIMIT 1
+    `, [vTelegramChatId]));
+
+    return mapAccountRow(objResult.rows[0]);
+}
+
 export async function updateAccount(pAccountId: string, pInput: UpdateAccountInput): Promise<AccountRecord> {
     if (!isPostgresConfigured()) {
         throw new Error("PostgreSQL is required for account updates.");

@@ -81,7 +81,8 @@ import {
     saveCoveredOptionsProfile,
     saveRollingFuturesLtDualOpenPositions,
     saveRollingFuturesLtDualProfile,
-    clearCoveredOptionsOpenPositions
+    clearCoveredOptionsOpenPositions,
+    handleTelegramWebhook
 } from "../controllers/rolling-futures-lt-controller";
 import {
     createDeltaApiProfileController,
@@ -101,6 +102,9 @@ export function createApiRouter(
     const objRouter = Router();
 
     objRouter.get("/health", getHealth);
+    objRouter.post("/telegram/webhook", async (req, res) => {
+        await handleTelegramWebhook(req, res);
+    });
     objRouter.get("/runners", requireAdminApi, async (req, res) => {
         await listRunnerStates(req, res, pRunnerManager);
     });

@@ -42,6 +42,7 @@ import {
 import { ensureBootstrapAdminAccount } from "../storage/accounts-store";
 import { cleanupExpiredSessions } from "../storage/sessions-store";
 import { cleanupExpiredSurvivalAdminSessions } from "../storage/survival-admin-store";
+import { ensureTelegramWebhookRegistered } from "../api/controllers/rolling-futures-lt-controller";
 import {
     renderSurvivalAdminDashboardPage,
     renderSurvivalAdminRunningUsersPage,
@@ -66,6 +67,7 @@ async function bootstrap(): Promise<void> {
     await runnerManager.hydrate();
     await recoverRollingFuturesLtAutoTraderCycles();
     await directionalOptionsDemoService.hydrate();
+    await ensureTelegramWebhookRegistered();
 
     app.set("view engine", "ejs");
     app.set("views", path.resolve(process.cwd(), "src", "views"));

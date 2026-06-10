@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import crypto from "node:crypto";
 const DeltaRestClient = require("delta-rest-client");
-import { getAccountById } from "../../storage/accounts-store";
+import { getAccountById, getAccountByTelegramChatId } from "../../storage/accounts-store";
 import { getDeltaApiProfile } from "../../storage/delta-api-profile-store";
 import {
     deleteRollingFuturesLtImportedPosition,
@@ -4116,6 +4116,44 @@ function isCoveredLiveAutoConfirmEnabled(pProfile: RollingFuturesLtProfileRecord
     return Boolean(getMergedUiState(pProfile).autoConfirmLiveActions);
 }
 
+function buildCoveredLiveConfirmationTelegramText(
+    pPending: CoveredLiveConfirmationState
+): string {
+    const arrLines = [
+        "Optionyze Live Confirmation",
+        "",
+        String(pPending.title || "Pending Confirmation"),
+        String(pPending.message || ""),
+        "",
+        "Reply with Confirm or Cancel, or tap the buttons below."
+    ];
+    return arrLines.join("\n");
+}
+
+async function sendCoveredLiveConfirmationTelegramPrompt(
+    pUserId: string,
+    pPending: CoveredLiveConfirmationState
+): Promise<void> {
+    const vBotToken = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
+    if (!vBotToken) {
+        return;
+    }
+    const objAccount = await getAccountById(pUserId);
+    const vTelegramChatId = String(objAccount?.telegramChatId || "").trim();
+    if (!vTelegramChatId) {
+        return;
+    }
+
+    const vActionId = String(pPending.actionId || "").trim();
+    const objReplyMarkup: TelegramInlineKeyboardMarkup = {
+        inline_keyboard: [[
+            { text: "Confirm", callback_data: `coa:c:${vActionId}` },
+            { text: "Cancel", callback_data: `coa:r:${vActionId}` }
+        ]]
+    };
+    await sendTelegramBotMessage(vBotToken, vTelegramChatId, buildCoveredLiveConfirmationTelegramText(pPending), objReplyMarkup);
+}
+
 async function requestCoveredLiveConfirmation(
     pUserId: string,
     pProfile: RollingFuturesLtProfileRecord,
@@ -4173,6 +4211,7 @@ async function requestCoveredLiveConfirmation(
             kind: objPending.kind
         }
     );
+    void sendCoveredLiveConfirmationTelegramPrompt(pUserId, objPending).catch(() => undefined);
     return "queued";
 }
 
@@ -4828,6 +4867,144 @@ async function sendFuturesTelegramForEvent(
                 chat_id: vTelegramChatId,
                 text: arrLines.join("\n")
             })
+        });
+    }
+        catch (_objError) {
+    }
+}
+
+type TelegramInlineKeyboardButton = {
+    text: string;
+    callback_data: string;
+};
+
+type TelegramInlineKeyboardMarkup = {
+    inline_keyboard: TelegramInlineKeyboardButton[][];
+};
+
+type TelegramChatMessage = {
+    chat: { id?: number | string | null };
+    message_id?: number | null;
+    text?: string | null;
+};
+
+type TelegramCallbackQuery = {
+    id?: string;
+    from?: { id?: number | string | null };
+    data?: string | null;
+    message?: TelegramChatMessage | null;
+};
+
+type TelegramUpdate = {
+    update_id?: number;
+    message?: TelegramChatMessage | null;
+    edited_message?: TelegramChatMessage | null;
+    callback_query?: TelegramCallbackQuery | null;
+};
+
+async function sendTelegramBotMessage(
+    pBotToken: string,
+    pChatId: string,
+    pText: string,
+    pReplyMarkup?: TelegramInlineKeyboardMarkup
+): Promise<boolean> {
+    if (!pBotToken || !pChatId || !pText) {
+        return false;
+    }
+
+    try {
+        const objResponse = await fetch(`https://api.telegram.org/bot${encodeURIComponent(pBotToken)}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                chat_id: pChatId,
+                text: pText,
+                ...(pReplyMarkup ? { reply_markup: pReplyMarkup } : {})
+            })
+        });
+        return objResponse.ok;
+    }
+    catch (_objError) {
+        return false;
+    }
+}
+
+async function answerTelegramCallbackQuery(
+    pBotToken: string,
+    pCallbackQueryId: string,
+    pText: string
+): Promise<void> {
+    if (!pBotToken || !pCallbackQueryId) {
+        return;
+    }
+
+    try {
+        await fetch(`https://api.telegram.org/bot${encodeURIComponent(pBotToken)}/answerCallbackQuery`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                callback_query_id: pCallbackQueryId,
+                text: pText
+            })
+        });
+    }
+    catch (_objError) {
+    }
+}
+
+async function editTelegramMessageText(
+    pBotToken: string,
+    pChatId: string,
+    pMessageId: number,
+    pText: string
+): Promise<void> {
+    if (!pBotToken || !pChatId || !(pMessageId > 0) || !pText) {
+        return;
+    }
+
+    try {
+        await fetch(`https://api.telegram.org/bot${encodeURIComponent(pBotToken)}/editMessageText`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                chat_id: pChatId,
+                message_id: pMessageId,
+                text: pText
+            })
+        });
+    }
+    catch (_objError) {
+    }
+}
+
+function getTelegramWebhookSecret(): string {
+    return String(process.env.TELEGRAM_WEBHOOK_SECRET || "").trim();
+}
+
+function getTelegramWebhookUrl(): string {
+    return String(process.env.TELEGRAM_WEBHOOK_URL || "").trim();
+}
+
+export async function ensureTelegramWebhookRegistered(): Promise<void> {
+    const vBotToken = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
+    const vWebhookUrl = getTelegramWebhookUrl();
+    if (!vBotToken || !vWebhookUrl) {
+        return;
+    }
+
+    const objBody: Record<string, unknown> = {
+        url: vWebhookUrl
+    };
+    const vSecret = getTelegramWebhookSecret();
+    if (vSecret) {
+        objBody.secret_token = vSecret;
+    }
+
+    try {
+        await fetch(`https://api.telegram.org/bot${encodeURIComponent(vBotToken)}/setWebhook`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(objBody)
         });
     }
     catch (_objError) {
@@ -6911,24 +7088,56 @@ async function clearCoveredLiveConfirmation(
     });
 }
 
-async function confirmCoveredLiveActionInternal(req: Request, res: Response): Promise<void> {
+type CoveredLiveActionDecision = "confirm" | "reject";
+
+type CoveredLiveActionResult = {
+    status: "success" | "warning" | "danger";
+    message: string;
+    data?: Record<string, unknown>;
+};
+
+async function processCoveredLiveActionDecision(
+    pUserId: string,
+    pDecision: CoveredLiveActionDecision,
+    pActionId = ""
+): Promise<CoveredLiveActionResult> {
     const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
-    const vUserId = getAccountId(req);
-    const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode)
-        || getDefaultRollingFuturesLtRuntime(vUserId, pStrategyCode);
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const objPending = getCoveredLiveConfirmationState(objRuntime);
     if (!objPending) {
-        res.status(400).json({ status: "warning", message: "No pending live confirmation was found." });
-        return;
+        return { status: "warning", message: "No pending live confirmation was found." };
     }
-    const objProfile = await readLiveProfile(vUserId, pStrategyCode);
-    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
-    if (!vSelectedApiProfileId) {
-        res.status(400).json({ status: "warning", message: "Select an API profile before confirming live actions." });
-        return;
+    const vExpectedActionId = String(pActionId || "").trim();
+    if (vExpectedActionId && String(objPending.actionId || "").trim() !== vExpectedActionId) {
+        return { status: "warning", message: "The live confirmation is no longer valid." };
     }
 
-    await clearCoveredLiveConfirmation(vUserId, pStrategyCode);
+    if (pDecision === "reject") {
+        await clearCoveredLiveConfirmation(pUserId, pStrategyCode);
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "manual_action",
+            "warning",
+            "Live Action Rejected",
+            `${objPending.title} was rejected by the user. No order was placed.`,
+            {
+                actionId: objPending.actionId,
+                kind: objPending.kind,
+                reason: "covered_confirmation_rejected"
+            }
+        );
+        return { status: "success", message: "Pending live action was rejected." };
+    }
+
+    const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        return { status: "warning", message: "Select an API profile before confirming live actions." };
+    }
+
+    await clearCoveredLiveConfirmation(pUserId, pStrategyCode);
 
     try {
         if (objPending.kind === "exec_batch") {
@@ -6951,7 +7160,7 @@ async function confirmCoveredLiveActionInternal(req: Request, res: Response): Pr
                 throw new Error("The pending Exec Strategy confirmation no longer has valid rows.");
             }
             const objExecResult = await runCoveredExecStrategyBatchPlacement(
-                vUserId,
+                pUserId,
                 pStrategyCode,
                 vSelectedApiProfileId,
                 objProfile,
@@ -6960,37 +7169,34 @@ async function confirmCoveredLiveActionInternal(req: Request, res: Response): Pr
             );
             if (!Boolean(objPending.payload.suppressClosedFromDateUpdate)) {
                 await updateStrategyClosedFromDateAfterExec(
-                    vUserId,
+                    pUserId,
                     pStrategyCode,
                     objProfile,
                     objExecResult.trackedOpenPositions
                 );
             }
-            res.json({ status: "success", message: "Covered Exec Strategy confirmed and executed.", data: objExecResult });
-            return;
+            return { status: "success", message: "Covered Exec Strategy confirmed and executed.", data: objExecResult };
         }
 
         if (objPending.kind === "option_rule_close") {
-            const arrSavedPositions = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
+            const arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
             const vImportId = String(objPending.payload.importId || "").trim();
             const vContractName = String(objPending.payload.contractName || "").trim();
             const vReason = String(objPending.payload.reason || "").trim().toLowerCase();
             const objPosition = arrSavedPositions.find((objRow) => String(objRow.importId || "").trim() === vImportId)
                 || arrSavedPositions.find((objRow) => String(objRow.contractName || "").trim() === vContractName);
             if (!objPosition) {
-                await logFuturesEvent(vUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", `${vContractName} is no longer in open positions. No order was placed.`, { reason: "covered_confirmation_position_missing" });
-                res.json({ status: "warning", message: "The position is no longer open. No order was placed." });
-                return;
+                await logFuturesEvent(pUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", `${vContractName} is no longer in open positions. No order was placed.`, { reason: "covered_confirmation_position_missing" });
+                return { status: "warning", message: "The position is no longer open. No order was placed." };
             }
             const arrTriggered = await findTriggeredTrackedOptions([objPosition], getMergedUiState(objProfile));
             const objTriggered = arrTriggered.find((objEntry) => objEntry.reason === vReason);
             if (!objTriggered) {
-                await logFuturesEvent(vUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", `The trigger for ${objPosition.contractName} no longer holds. No order was placed.`, { contractName: objPosition.contractName, reason: "covered_confirmation_trigger_cleared" });
-                res.json({ status: "warning", message: "The trigger is no longer valid. No order was placed." });
-                return;
+                await logFuturesEvent(pUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", `The trigger for ${objPosition.contractName} no longer holds. No order was placed.`, { contractName: objPosition.contractName, reason: "covered_confirmation_trigger_cleared" });
+                return { status: "warning", message: "The trigger is no longer valid. No order was placed." };
             }
             const arrNextPositions = await applyTriggeredOptionRule(
-                vUserId,
+                pUserId,
                 pStrategyCode,
                 vSelectedApiProfileId,
                 objProfile,
@@ -7001,78 +7207,164 @@ async function confirmCoveredLiveActionInternal(req: Request, res: Response): Pr
                 arrSavedPositions,
                 true
             );
-            res.json({
+            return {
                 status: "success",
                 message: `${objTriggered.reason.toUpperCase()} close confirmed and executed.`,
                 data: {
-                    trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, arrNextPositions)
+                    trackedOpenPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode, arrNextPositions)
                 }
-            });
-            return;
+            };
         }
 
         if (objPending.kind === "covered_reentry") {
-            const objRuntimeLatest = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode)
-                || getDefaultRollingFuturesLtRuntime(vUserId, pStrategyCode);
+            const objRuntimeLatest = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+                || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
             const arrPending = getCoveredPendingOptionReEntriesState(objRuntimeLatest);
             const vDedupeKey = String(objPending.payload.dedupeKey || "").trim();
             const objReEntry = arrPending.find((objEntry) => objEntry.dedupeKey === vDedupeKey);
             if (!objReEntry) {
-                await logFuturesEvent(vUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", "The covered re-entry request is no longer pending. No order was placed.", { reason: "covered_confirmation_reentry_missing" });
-                res.json({ status: "warning", message: "The covered re-entry is no longer pending." });
-                return;
+                await logFuturesEvent(pUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", "The covered re-entry request is no longer pending. No order was placed.", { reason: "covered_confirmation_reentry_missing" });
+                return { status: "warning", message: "The covered re-entry is no longer pending." };
             }
-            const bOpened = await executeCoveredPendingReEntryNow(vUserId, vSelectedApiProfileId, objProfile, objReEntry);
+            const bOpened = await executeCoveredPendingReEntryNow(pUserId, vSelectedApiProfileId, objProfile, objReEntry);
             if (!bOpened) {
-                await logFuturesEvent(vUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", "The covered re-entry condition is no longer valid. No order was placed.", { reason: "covered_confirmation_reentry_cleared" });
-                res.json({ status: "warning", message: "The covered re-entry is no longer valid." });
-                return;
+                await logFuturesEvent(pUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", "The covered re-entry condition is no longer valid. No order was placed.", { reason: "covered_confirmation_reentry_cleared" });
+                return { status: "warning", message: "The covered re-entry is no longer valid." };
             }
-            res.json({
+            return {
                 status: "success",
                 message: "Covered re-entry confirmed and executed.",
                 data: {
-                    trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode)
+                    trackedOpenPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode)
                 }
-            });
-            return;
+            };
         }
 
-        res.status(400).json({ status: "warning", message: "Unsupported live confirmation type." });
+        return { status: "warning", message: "Unsupported live confirmation type." };
     }
     catch (objError) {
-        res.status(500).json({
+        return {
             status: "danger",
             message: getErrorMessage(objError, "Unable to confirm the live action.")
-        });
+        };
     }
 }
 
-async function rejectCoveredLiveActionInternal(req: Request, res: Response): Promise<void> {
-    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
-    const vUserId = getAccountId(req);
-    const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode)
-        || getDefaultRollingFuturesLtRuntime(vUserId, pStrategyCode);
-    const objPending = getCoveredLiveConfirmationState(objRuntime);
-    if (!objPending) {
-        res.status(400).json({ status: "warning", message: "No pending live confirmation was found." });
+async function handleTelegramWebhookInternal(req: Request, res: Response): Promise<void> {
+    const vExpectedSecret = getTelegramWebhookSecret();
+    if (vExpectedSecret) {
+        const vProvidedSecret = String(req.header("x-telegram-bot-api-secret-token") || "").trim();
+        if (vProvidedSecret !== vExpectedSecret) {
+            res.status(403).json({ ok: false });
+            return;
+        }
+    }
+
+    const objUpdate = (req.body || {}) as TelegramUpdate;
+    const vBotToken = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
+    const objCallbackQuery = objUpdate.callback_query || null;
+    const objMessage = objUpdate.message || objUpdate.edited_message || null;
+    const objChatId = String(
+        objCallbackQuery?.message?.chat?.id
+        || objMessage?.chat?.id
+        || ""
+    ).trim();
+
+    if (!objChatId) {
+        res.json({ ok: true });
         return;
     }
-    await clearCoveredLiveConfirmation(vUserId, pStrategyCode);
-    await logFuturesEvent(
-        vUserId,
-        pStrategyCode,
-        "manual_action",
-        "warning",
-        "Live Action Rejected",
-        `${objPending.title} was rejected by the user. No order was placed.`,
-        {
-            actionId: objPending.actionId,
-            kind: objPending.kind,
-            reason: "covered_confirmation_rejected"
+
+    const objAccount = await getAccountByTelegramChatId(objChatId);
+    if (!objAccount?.accountId) {
+        if (objCallbackQuery?.id && vBotToken) {
+            await answerTelegramCallbackQuery(vBotToken, objCallbackQuery.id, "No account is linked to this Telegram chat.");
         }
+        res.json({ ok: true });
+        return;
+    }
+
+    const pUserId = objAccount.accountId;
+    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    const objPendingBefore = getCoveredLiveConfirmationState(
+        await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+            || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)
     );
-    res.json({ status: "success", message: "Pending live action was rejected." });
+
+    const objHandleAction = async (pDecision: CoveredLiveActionDecision, pActionId = ""): Promise<CoveredLiveActionResult> => {
+        return processCoveredLiveActionDecision(pUserId, pDecision, pActionId);
+    };
+
+    if (objCallbackQuery?.data) {
+        const vData = String(objCallbackQuery.data || "").trim();
+        const arrParts = vData.split(":");
+        if (arrParts.length >= 3 && arrParts[0] === "coa") {
+            const vDecision = arrParts[1] === "c" ? "confirm" : arrParts[1] === "r" ? "reject" : "";
+            const vActionId = String(arrParts[2] || "").trim();
+            if (vDecision) {
+                const objResult = await objHandleAction(vDecision, vActionId);
+                if (objCallbackQuery.id && vBotToken) {
+                    await answerTelegramCallbackQuery(vBotToken, objCallbackQuery.id, objResult.message);
+                }
+                const vTelegramMessageId = Number(objCallbackQuery.message?.message_id || 0);
+                if (vBotToken && objCallbackQuery.message?.chat?.id !== undefined && vTelegramMessageId > 0) {
+                    const arrReplyLines = [
+                        objPendingBefore ? buildCoveredLiveConfirmationTelegramText(objPendingBefore) : "Optionyze Live Confirmation",
+                        "",
+                        `Result: ${objResult.message}`
+                    ];
+                    await editTelegramMessageText(
+                        vBotToken,
+                        String(objCallbackQuery.message.chat.id),
+                        vTelegramMessageId,
+                        arrReplyLines.join("\n")
+                    );
+                }
+                res.json({ ok: true });
+                return;
+            }
+        }
+    }
+
+    const vText = String(objMessage?.text || "").trim().toLowerCase();
+    if (vText) {
+        if (["confirm", "confirmed", "yes", "y", "ok", "approve"].includes(vText)) {
+            const objResult = await objHandleAction("confirm");
+            if (vBotToken) {
+                await sendTelegramBotMessage(
+                    vBotToken,
+                    objChatId,
+                    `${objPendingBefore ? buildCoveredLiveConfirmationTelegramText(objPendingBefore) : "Optionyze Live Confirmation"}\n\nResult: ${objResult.message}`
+                );
+            }
+            res.json({ ok: true });
+            return;
+        }
+        if (["cancel", "cancelled", "canceled", "reject", "rejected", "no", "n", "stop"].includes(vText)) {
+            const objResult = await objHandleAction("reject");
+            if (vBotToken) {
+                await sendTelegramBotMessage(
+                    vBotToken,
+                    objChatId,
+                    `${objPendingBefore ? buildCoveredLiveConfirmationTelegramText(objPendingBefore) : "Optionyze Live Confirmation"}\n\nResult: ${objResult.message}`
+                );
+            }
+            res.json({ ok: true });
+            return;
+        }
+    }
+
+    res.json({ ok: true });
+}
+
+async function confirmCoveredLiveActionInternal(req: Request, res: Response): Promise<void> {
+    const objResult = await processCoveredLiveActionDecision(getAccountId(req), "confirm");
+    res.status(objResult.status === "danger" ? 500 : (objResult.status === "warning" ? 400 : 200)).json(objResult);
+}
+
+async function rejectCoveredLiveActionInternal(req: Request, res: Response): Promise<void> {
+    const objResult = await processCoveredLiveActionDecision(getAccountId(req), "reject");
+    res.status(objResult.status === "danger" ? 500 : (objResult.status === "warning" ? 400 : 200)).json(objResult);
 }
 
 async function getProfileInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
@@ -11355,6 +11647,9 @@ export async function confirmCoveredOptionsLiveAction(req: Request, res: Respons
 }
 export async function rejectCoveredOptionsLiveAction(req: Request, res: Response): Promise<void> {
     await rejectCoveredLiveActionInternal(req, res);
+}
+export async function handleTelegramWebhook(req: Request, res: Response): Promise<void> {
+    await handleTelegramWebhookInternal(req, res);
 }
 export async function getCoveredOptionsImportableOpenPositions(req: Request, res: Response): Promise<void> {
     await getImportableOpenPositionsInternal(req, res, "covered-options");
