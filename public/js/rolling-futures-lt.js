@@ -429,7 +429,6 @@
     }
 
     function getDefaultUiState() {
-        const closedFromDate = formatCurrentDateTimeLocalValue();
         const defaultState = {
             startQty: "1",
             symbol: "BTC",
@@ -459,7 +458,7 @@
                 "option_closed",
                 "sl_triggered"
             ],
-            closedFromDate: closedFromDate,
+            closedFromDate: "",
             closedToDate: ""
         };
         getSupportedOptionRowIndexes().forEach(function (rowIndex) {
@@ -929,6 +928,7 @@
         runtimeStatus = String(objRuntime.status || "idle").trim() || "idle";
         autoTraderEnabled = Boolean(objRuntime.autoTraderEnabled);
         pendingLiveConfirmation = objRuntime?.state?.pendingCoveredLiveConfirmation || null;
+        const strategyStartedAt = String(objRuntime?.state?.strategyStartedAt || "").trim();
         if (ids.engineStatus) {
             ids.engineStatus.textContent = runtimeStatus.charAt(0).toUpperCase() + runtimeStatus.slice(1);
         }
@@ -950,6 +950,12 @@
                 totalPnl: 0,
                 netPnl: 0
             });
+        }
+        if (ids.closedFromDate instanceof HTMLInputElement && !String(ids.closedFromDate.value || "").trim() && strategyStartedAt) {
+            const vClosedFromDate = formatDateTimeInputValue(new Date(strategyStartedAt));
+            if (vClosedFromDate) {
+                ids.closedFromDate.value = vClosedFromDate;
+            }
         }
         updateNeutralBadges(lastNeutralStatus);
         renderPendingLiveConfirmation();

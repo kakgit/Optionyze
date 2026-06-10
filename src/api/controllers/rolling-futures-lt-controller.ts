@@ -83,7 +83,14 @@ interface DeltaPositionRow {
     liquidation_price?: number | string | null;
     realized_pnl?: number | string | null;
     unrealized_pnl?: number | string | null;
+    unrealised_pnl?: number | string | null;
+    unrealized_cashflow?: number | string | null;
+    unrealised_cashflow?: number | string | null;
     margin?: number | string | null;
+    position_margin?: number | string | null;
+    initial_margin?: number | string | null;
+    maintenance_margin?: number | string | null;
+    order_margin?: number | string | null;
     product_id?: number | string | null;
     created_at?: string | number | null;
     updated_at?: string | number | null;
@@ -1157,9 +1164,15 @@ function getBlockedMarginUsd(pRow: DeltaWalletBalanceRow | null): number {
     if (!pRow) {
         return 0;
     }
-    const vExplicitBlocked = toFiniteNumber(pRow.blocked_margin ?? pRow.position_margin ?? pRow.order_margin, Number.NaN);
+    const vExplicitBlocked = toFiniteNumber(
+        pRow.blocked_margin
+        ?? pRow.portfolio_margin
+        ?? pRow.position_margin
+        ?? pRow.order_margin,
+        Number.NaN
+    );
     if (Number.isFinite(vExplicitBlocked)) {
-        return Math.max(0, vExplicitBlocked);
+        return Math.abs(vExplicitBlocked);
     }
     const vBalance = toFiniteNumber(pRow.balance ?? pRow.wallet_balance, 0);
     const vAvailableBalance = getAvailableBalanceUsd(pRow);
@@ -1550,7 +1563,6 @@ function getDefaultManualTraderUiState(
 ): Record<string, unknown> {
     const bIsShort = pStrategyCode === "rolling-futures-lt-short";
     const bIsDual = isDualRollingFuturesStrategy(pStrategyCode);
-    const vClosedFromDate = getCurrentDeltaUiDateTimeLocalString();
     const objState: Record<string, unknown> = {
         startQty: "1",
         symbol: "BTC",
@@ -1577,7 +1589,7 @@ function getDefaultManualTraderUiState(
             "option_closed",
             "sl_triggered"
         ],
-        closedFromDate: vClosedFromDate,
+        closedFromDate: "",
         closedToDate: ""
     };
     [1, ...(isCoveredOptionsStrategy(pStrategyCode) ? [2] : [])].forEach((vRowIndex) => {
@@ -2078,7 +2090,7 @@ function getTrackedPositionMarginTotal(
         if (!(vQty > 0) || !isTrackedContractForSymbol(vContractSymbol, vSymbol)) {
             return pSum;
         }
-        return pSum + Math.max(0, toFiniteNumber(pRow.margin, 0));
+        return pSum + Math.max(0, getDeltaPositionMarginValue(pRow));
     }, 0);
 }
 
@@ -2093,8 +2105,51 @@ function getTrackedPositionPositiveUnrealizedPnlTotal(
         if (!(vQty > 0) || !isTrackedContractForSymbol(vContractSymbol, vSymbol)) {
             return pSum;
         }
-        return pSum + Math.max(0, toFiniteNumber(pRow.unrealized_pnl, 0));
+        return pSum + Math.max(0, getDeltaPositionPositiveUnrealizedValue(pRow));
     }, 0);
+}
+
+function getDeltaPositionMarginValue(pRow: DeltaPositionRow): number {
+    const arrCandidates: unknown[] = [
+        pRow.margin,
+        pRow.position_margin,
+        pRow.initial_margin,
+        pRow.maintenance_margin,
+        pRow.order_margin,
+        (pRow as Record<string, unknown>).total_margin,
+        (pRow as Record<string, unknown>).premium_margin,
+        (pRow as Record<string, unknown>).span_margin,
+        (pRow as Record<string, unknown>).exposure_margin,
+        (pRow as Record<string, unknown>).blocked_margin
+    ];
+    for (const pValue of arrCandidates) {
+        const vNumber = toFiniteNumber(pValue, Number.NaN);
+        if (Number.isFinite(vNumber) && vNumber > 0) {
+            return vNumber;
+        }
+    }
+    return 0;
+}
+
+function getDeltaPositionPositiveUnrealizedValue(pRow: DeltaPositionRow): number {
+    return Math.max(0, getDeltaPositionUnrealizedValue(pRow));
+}
+
+function getDeltaPositionUnrealizedValue(pRow: DeltaPositionRow): number {
+    const arrCandidates: unknown[] = [
+        pRow.unrealized_cashflow,
+        pRow.unrealised_cashflow,
+        pRow.unrealized_pnl,
+        pRow.unrealised_pnl,
+        (pRow as Record<string, unknown>).pnl
+    ];
+    for (const pValue of arrCandidates) {
+        const vNumber = toFiniteNumber(pValue, Number.NaN);
+        if (Number.isFinite(vNumber)) {
+            return vNumber;
+        }
+    }
+    return 0;
 }
 
 function mapLivePosition(
@@ -2123,12 +2178,12 @@ function mapLivePosition(
         entryPrice: toFiniteNumber(pRow.entry_price, 0),
         markPrice: toFiniteNumber(pRow.mark_price, 0),
         charges: 0,
-        pnl: Number((toFiniteNumber(pRow.realized_pnl, 0) + toFiniteNumber(pRow.unrealized_pnl, 0)).toFixed(2)),
-        margin: toFiniteNumber(pRow.margin, 0),
+        pnl: Number((toFiniteNumber(pRow.realized_pnl, 0) + getDeltaPositionUnrealizedValue(pRow)).toFixed(2)),
+        margin: getDeltaPositionMarginValue(pRow),
         liquidationPrice: toFiniteNumber(pRow.liquidation_price, 0),
         metadata: {
             realizedPnl: Number(toFiniteNumber(pRow.realized_pnl, 0).toFixed(4)),
-            unrealizedPnl: Number(toFiniteNumber(pRow.unrealized_pnl, 0).toFixed(4))
+            unrealizedPnl: Number(getDeltaPositionUnrealizedValue(pRow).toFixed(4))
         },
         openedAt: vOpenedAt,
         updatedAt: new Date().toISOString()
@@ -3024,11 +3079,11 @@ async function performRollingFuturesLtConnectionCheck(
             + getTrackedPositionMarginTotal(arrPositions, "ETH");
         const vTrackedPositiveUnrealizedPnl = getTrackedPositionPositiveUnrealizedPnlTotal(arrPositions, "BTC")
             + getTrackedPositionPositiveUnrealizedPnlTotal(arrPositions, "ETH");
-        const vTrackedDisplayBlockedMargin = vTrackedPositionMargin + vTrackedPositiveUnrealizedPnl;
-        const vBlockedMarginDisplay = Math.max(objBlockedMarginDetails.displayBlockedMargin, vTrackedDisplayBlockedMargin);
-        const vBlockedMarginHint = vTrackedDisplayBlockedMargin > objBlockedMarginDetails.displayBlockedMargin && vTrackedDisplayBlockedMargin > 0
-            ? `Position Margin ${vTrackedPositionMargin.toFixed(2)} + Unrealized PnL ${vTrackedPositiveUnrealizedPnl.toFixed(2)}`
-            : objBlockedMarginDetails.hint;
+        const vBaseBlockedMargin = Math.max(objBlockedMarginDetails.blockedMargin, vTrackedPositionMargin);
+        const vBlockedMarginDisplay = vBaseBlockedMargin + vTrackedPositiveUnrealizedPnl;
+        const vBlockedMarginHint = vTrackedPositiveUnrealizedPnl > 0
+            ? `Blocked ${vBaseBlockedMargin.toFixed(2)} + Unrealized PnL ${vTrackedPositiveUnrealizedPnl.toFixed(2)}`
+            : (vBaseBlockedMargin > 0 ? `Blocked ${vBaseBlockedMargin.toFixed(2)}` : objBlockedMarginDetails.hint);
         return {
             profile: await saveRollingFuturesLtProfile({
                 ...objProfile,
@@ -3205,11 +3260,11 @@ async function fetchAccountSummarySnapshot(
     const objBlockedMarginDetails = getBlockedMarginDisplayDetails(objUsdRow);
     const vTrackedPositionMargin = getTrackedPositionMarginTotal(arrPositions, pSymbol);
     const vTrackedPositiveUnrealizedPnl = getTrackedPositionPositiveUnrealizedPnlTotal(arrPositions, pSymbol);
-    const vTrackedDisplayBlockedMargin = vTrackedPositionMargin + vTrackedPositiveUnrealizedPnl;
-    const vBlockedMarginDisplay = Math.max(objBlockedMarginDetails.displayBlockedMargin, vTrackedDisplayBlockedMargin);
-    const vBlockedMarginHint = vTrackedDisplayBlockedMargin > objBlockedMarginDetails.displayBlockedMargin && vTrackedDisplayBlockedMargin > 0
-        ? `Position Margin ${vTrackedPositionMargin.toFixed(2)} + Unrealized PnL ${vTrackedPositiveUnrealizedPnl.toFixed(2)}`
-        : objBlockedMarginDetails.hint;
+    const vBaseBlockedMargin = Math.max(vWalletBlockedMargin, vTrackedPositionMargin);
+    const vBlockedMarginDisplay = vBaseBlockedMargin + vTrackedPositiveUnrealizedPnl;
+    const vBlockedMarginHint = vTrackedPositiveUnrealizedPnl > 0
+        ? `Blocked ${vBaseBlockedMargin.toFixed(2)} + Unrealized PnL ${vTrackedPositiveUnrealizedPnl.toFixed(2)}`
+        : (vBaseBlockedMargin > 0 ? `Blocked ${vBaseBlockedMargin.toFixed(2)}` : objBlockedMarginDetails.hint);
     const vBlockedMargin = vBlockedMarginDisplay;
     const vTotalBalance = getTotalBalanceUsd(objUsdRow);
     const vLivePrice = Number(objMarketSnapshot?.futuresPrice || 0);
@@ -3232,7 +3287,7 @@ async function fetchAccountSummarySnapshot(
         openCount: arrPositions.filter((objRow) => {
             const vContract = String(objRow.product_symbol || objRow.symbol || "").trim().toUpperCase();
             const vQty = Math.abs(toFiniteNumber(objRow.net_size ?? objRow.size, 0));
-            return isFutureContractSymbol(vContract) && vContract.startsWith(pSymbol) && vQty > 0;
+            return isTrackedContractForSymbol(vContract, pSymbol) && vQty > 0;
         }).length
     };
 }
@@ -4521,6 +4576,16 @@ function buildRuntimeStateWithStrategyStartedAt(
     }
     objState.strategyStartedAt = vStartedAt;
     return objState;
+}
+
+function getEarliestOpenedAtFromTrackedPositions(
+    pPositions: RollingFuturesLtImportedPositionRecord[]
+): string {
+    const arrCandidates = (Array.isArray(pPositions) ? pPositions : [])
+        .map((objPosition) => normalizeDeltaTimestampToIso(objPosition.openedAt))
+        .filter(Boolean)
+        .sort();
+    return arrCandidates[0] || "";
 }
 
 function getStrategyRunIdState(pRuntime: RollingFuturesLtRuntimeRecord | null): string {
@@ -9132,11 +9197,11 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
         const objBlockedMarginDetails = getBlockedMarginDisplayDetails(objUsdRow);
         const vTrackedPositionMargin = getTrackedPositionMarginTotal(arrPositions, vSelectedSymbol);
         const vTrackedPositiveUnrealizedPnl = getTrackedPositionPositiveUnrealizedPnlTotal(arrPositions, vSelectedSymbol);
-        const vTrackedDisplayBlockedMargin = vTrackedPositionMargin + vTrackedPositiveUnrealizedPnl;
-        const vBlockedMarginDisplay = Math.max(objBlockedMarginDetails.displayBlockedMargin, vTrackedDisplayBlockedMargin);
-        const vBlockedMarginHint = vTrackedDisplayBlockedMargin > objBlockedMarginDetails.displayBlockedMargin && vTrackedDisplayBlockedMargin > 0
-            ? `Position Margin ${vTrackedPositionMargin.toFixed(2)} + Unrealized PnL ${vTrackedPositiveUnrealizedPnl.toFixed(2)}`
-            : objBlockedMarginDetails.hint;
+        const vBaseBlockedMargin = Math.max(objBlockedMarginDetails.blockedMargin, vTrackedPositionMargin);
+        const vBlockedMarginDisplay = vBaseBlockedMargin + vTrackedPositiveUnrealizedPnl;
+        const vBlockedMarginHint = vTrackedPositiveUnrealizedPnl > 0
+            ? `Blocked ${vBaseBlockedMargin.toFixed(2)} + Unrealized PnL ${vTrackedPositiveUnrealizedPnl.toFixed(2)}`
+            : (vBaseBlockedMargin > 0 ? `Blocked ${vBaseBlockedMargin.toFixed(2)}` : objBlockedMarginDetails.hint);
         const vBlockedMargin = vBlockedMarginDisplay;
         const vTotalBalance = getTotalBalanceUsd(objUsdRow);
         const vLivePrice = Number(objMarketSnapshot?.futuresPrice || 0);
@@ -9145,7 +9210,6 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
         const vHealthPct = vAvailableBalance > 0 && vSelectedFuturePositionValue > 0
             ? Number(((vSelectedFuturePositionValue / vAvailableBalance) * 100).toFixed(2))
             : Number.NaN;
-
         res.json({
             status: "success",
             data: {
@@ -9162,7 +9226,7 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
                 openCount: arrPositions.filter((objRow) => {
                     const vContract = String(objRow.product_symbol || objRow.symbol || "").trim().toUpperCase();
                     const vQty = Math.abs(toFiniteNumber(objRow.net_size ?? objRow.size, 0));
-                    return isFutureContractSymbol(vContract) && vContract.startsWith(vSelectedSymbol) && vQty > 0;
+                    return isTrackedContractForSymbol(vContract, vSelectedSymbol) && vQty > 0;
                 }).length
             }
         });
@@ -10536,23 +10600,7 @@ async function recalculateAndPersistTotalPnl(
     openPositions: RollingFuturesLtOpenPositionsPayload;
     recalculated: RollingFuturesLtRecalculatedTotalPnl;
 }> {
-    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
-    let vStrategyStartedAt = getStrategyStartedAtState(objRuntime);
-    if (!vStrategyStartedAt) {
-        const objProfile = await readLiveProfile(pUserId, pStrategyCode);
-        const vClosedFromDate = String(getMergedUiState(objProfile).closedFromDate || "").trim();
-        const vBackfilledStartedAt = parseDeltaUiDateTimeLocalToIsoString(vClosedFromDate);
-        if (vBackfilledStartedAt) {
-            await saveRollingFuturesLtRuntime({
-                ...objRuntime,
-                userId: pUserId,
-                strategyCode: pStrategyCode,
-                state: buildRuntimeStateWithStrategyStartedAt(objRuntime, vBackfilledStartedAt)
-            });
-            vStrategyStartedAt = vBackfilledStartedAt;
-        }
-    }
+    const vStrategyStartedAt = await resolveStableStrategyStartedAt(pUserId, pStrategyCode);
     if (!vStrategyStartedAt) {
         throw new Error("Strategy start date was not found. Start the strategy first, then recalculate Total PnL.");
     }
@@ -10569,6 +10617,42 @@ async function recalculateAndPersistTotalPnl(
         openPositions: objOpenPositions,
         recalculated: objRecalculated
     };
+}
+
+async function resolveStableStrategyStartedAt(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode
+): Promise<string> {
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    let vStrategyStartedAt = getStrategyStartedAtState(objRuntime);
+    if (vStrategyStartedAt) {
+        return vStrategyStartedAt;
+    }
+
+    const objSurvival = await getSurvivalState(pUserId, pStrategyCode).catch(() => null);
+    vStrategyStartedAt = String(objSurvival?.strategyStartedAt || "").trim();
+    if (vStrategyStartedAt) {
+        await saveRollingFuturesLtRuntime({
+            ...objRuntime,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithStrategyStartedAt(objRuntime, vStrategyStartedAt)
+        });
+        return vStrategyStartedAt;
+    }
+
+    const arrTrackedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    vStrategyStartedAt = getEarliestOpenedAtFromTrackedPositions(arrTrackedPositions);
+    if (vStrategyStartedAt) {
+        await saveRollingFuturesLtRuntime({
+            ...objRuntime,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithStrategyStartedAt(objRuntime, vStrategyStartedAt)
+        });
+    }
+    return vStrategyStartedAt;
 }
 
 async function getEventsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
@@ -10806,24 +10890,7 @@ async function resolveStrategyStartedAtForRecoveryRefresh(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode
 ): Promise<string> {
-    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
-    let vStrategyStartedAt = getStrategyStartedAtState(objRuntime);
-    if (!vStrategyStartedAt) {
-        const objProfile = await readLiveProfile(pUserId, pStrategyCode);
-        const vClosedFromDate = String(getMergedUiState(objProfile).closedFromDate || "").trim();
-        const vBackfilledStartedAt = parseDeltaUiDateTimeLocalToIsoString(vClosedFromDate);
-        if (vBackfilledStartedAt) {
-            await saveRollingFuturesLtRuntime({
-                ...objRuntime,
-                userId: pUserId,
-                strategyCode: pStrategyCode,
-                state: buildRuntimeStateWithStrategyStartedAt(objRuntime, vBackfilledStartedAt)
-            });
-            vStrategyStartedAt = vBackfilledStartedAt;
-        }
-    }
-    return vStrategyStartedAt;
+    return resolveStableStrategyStartedAt(pUserId, pStrategyCode);
 }
 
 async function recalculateAndPersistRecoveryMetricsFromClosedHistory(
