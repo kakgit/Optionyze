@@ -376,6 +376,8 @@ interface RollingFuturesLtAccountSummarySnapshot {
     oneLotValue: number | null;
     totalBalance: number | null;
     blockedMargin: number | null;
+    blockedMarginDisplay: number | null;
+    blockedMarginHint: string;
     availableBalance: number | null;
     healthPct: number | null;
     profileLabel: string;
@@ -1167,6 +1169,36 @@ function getBlockedMarginUsd(pRow: DeltaWalletBalanceRow | null): number {
     return vAvailableBalance > vBalance
         ? vBalancePlusCashflowMinusAvailable
         : vBalanceMinusAvailable;
+}
+
+function getBlockedMarginDisplayDetails(pRow: DeltaWalletBalanceRow | null): {
+    blockedMargin: number;
+    displayBlockedMargin: number;
+    hint: string;
+} {
+    const vBlockedMargin = getBlockedMarginUsd(pRow);
+    if (!pRow) {
+        return {
+            blockedMargin: vBlockedMargin,
+            displayBlockedMargin: vBlockedMargin,
+            hint: ""
+        };
+    }
+
+    const vUnrealizedCashflow = Math.max(0, getUnrealizedCashflowUsd(pRow));
+    if (vUnrealizedCashflow > 0) {
+        return {
+            blockedMargin: vBlockedMargin,
+            displayBlockedMargin: vBlockedMargin + vUnrealizedCashflow,
+            hint: `Blocked ${vBlockedMargin.toFixed(2)} + Unrealized Cashflow ${vUnrealizedCashflow.toFixed(2)}`
+        };
+    }
+
+    return {
+        blockedMargin: vBlockedMargin,
+        displayBlockedMargin: vBlockedMargin,
+        hint: vBlockedMargin > 0 ? `Blocked ${vBlockedMargin.toFixed(2)}` : ""
+    };
 }
 
 function getTotalBalanceUsd(pRow: DeltaWalletBalanceRow | null): number {
@@ -2918,6 +2950,8 @@ async function performRollingFuturesLtConnectionCheck(
         currency: string;
         availableBalance: number;
         blockedMargin: number;
+        blockedMarginDisplay: number;
+        blockedMarginHint: string;
     } | null;
 }> {
     const objProfile = await readLiveProfile(pUserId, pStrategyCode);
@@ -2957,6 +2991,7 @@ async function performRollingFuturesLtConnectionCheck(
             lastSuccessAt: vNow,
             consecutiveFailures: 0
         };
+        const objBlockedMarginDetails = getBlockedMarginDisplayDetails(objUsdRow);
         return {
             profile: await saveRollingFuturesLtProfile({
                 ...objProfile,
@@ -2966,7 +3001,9 @@ async function performRollingFuturesLtConnectionCheck(
             summary: {
                 currency: String(objUsdRow?.asset_symbol || objUsdRow?.symbol || "USD").toUpperCase(),
                 availableBalance: Number(getAvailableBalanceUsd(objUsdRow).toFixed(2)),
-                blockedMargin: Number(getBlockedMarginUsd(objUsdRow).toFixed(2))
+                blockedMargin: Number(objBlockedMarginDetails.blockedMargin.toFixed(2)),
+                blockedMarginDisplay: Number(objBlockedMarginDetails.displayBlockedMargin.toFixed(2)),
+                blockedMarginHint: objBlockedMarginDetails.hint
             }
         };
     }
@@ -3127,8 +3164,10 @@ async function fetchAccountSummarySnapshot(
         : (objPositionsPayload.result ? [objPositionsPayload.result as DeltaPositionRow] : []);
     const vAvailableBalance = getAvailableBalanceUsd(objUsdRow);
     const vWalletBlockedMargin = getBlockedMarginUsd(objUsdRow);
+    const objBlockedMarginDetails = getBlockedMarginDisplayDetails(objUsdRow);
     const vTrackedPositionMargin = getTrackedPositionMarginTotal(arrPositions, pSymbol);
     const vBlockedMargin = Math.max(vWalletBlockedMargin, vTrackedPositionMargin);
+    const vBlockedMarginDisplay = Math.max(objBlockedMarginDetails.displayBlockedMargin, vTrackedPositionMargin);
     const vTotalBalance = getTotalBalanceUsd(objUsdRow);
     const vLivePrice = Number(objMarketSnapshot?.futuresPrice || 0);
     const vOneLotValue = Number.isFinite(vLivePrice) && vLivePrice > 0 ? vLivePrice * vLotSize : Number.NaN;
@@ -3142,6 +3181,8 @@ async function fetchAccountSummarySnapshot(
         oneLotValue: Number.isFinite(vOneLotValue) ? Number(vOneLotValue.toFixed(2)) : null,
         totalBalance: Number.isFinite(vTotalBalance) ? Number(vTotalBalance.toFixed(2)) : null,
         blockedMargin: Number.isFinite(vBlockedMargin) ? Number(vBlockedMargin.toFixed(2)) : null,
+        blockedMarginDisplay: Number.isFinite(vBlockedMarginDisplay) ? Number(vBlockedMarginDisplay.toFixed(2)) : null,
+        blockedMarginHint: objBlockedMarginDetails.hint,
         availableBalance: Number.isFinite(vAvailableBalance) ? Number(vAvailableBalance.toFixed(2)) : null,
         healthPct: Number.isFinite(vHealthPct) ? vHealthPct : null,
         profileLabel: profile.referenceName || profile.apiKey || "",
@@ -9045,7 +9086,8 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
             ? objPositionsPayload.result as DeltaPositionRow[]
             : (objPositionsPayload.result ? [objPositionsPayload.result as DeltaPositionRow] : []);
         const vAvailableBalance = getAvailableBalanceUsd(objUsdRow);
-        const vBlockedMargin = getBlockedMarginUsd(objUsdRow);
+        const objBlockedMarginDetails = getBlockedMarginDisplayDetails(objUsdRow);
+        const vBlockedMargin = objBlockedMarginDetails.blockedMargin;
         const vTotalBalance = getTotalBalanceUsd(objUsdRow);
         const vLivePrice = Number(objMarketSnapshot?.futuresPrice || 0);
         const vOneLotValue = Number.isFinite(vLivePrice) && vLivePrice > 0 ? vLivePrice * vLotSize : Number.NaN;
@@ -9062,6 +9104,8 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
                 oneLotValue: Number.isFinite(vOneLotValue) ? Number(vOneLotValue.toFixed(2)) : null,
                 totalBalance: Number.isFinite(vTotalBalance) ? Number(vTotalBalance.toFixed(2)) : null,
                 blockedMargin: Number.isFinite(vBlockedMargin) ? Number(vBlockedMargin.toFixed(2)) : null,
+                blockedMarginDisplay: Number.isFinite(objBlockedMarginDetails.displayBlockedMargin) ? Number(objBlockedMarginDetails.displayBlockedMargin.toFixed(2)) : null,
+                blockedMarginHint: objBlockedMarginDetails.hint,
                 availableBalance: Number.isFinite(vAvailableBalance) ? Number(vAvailableBalance.toFixed(2)) : null,
                 healthPct: Number.isFinite(vHealthPct) ? vHealthPct : null,
                 profileLabel: profile.referenceName || profile.apiKey || "",

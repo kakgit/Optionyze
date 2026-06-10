@@ -1572,7 +1572,18 @@
             ids.totalBalanceValue.textContent = fmtUsd(objData.totalBalance);
         }
         if (ids.blockedMarginValue) {
-            ids.blockedMarginValue.textContent = fmtUsd(objData.blockedMargin);
+            ids.blockedMarginValue.textContent = fmtUsd(
+                Number.isFinite(Number(objData.blockedMarginDisplay))
+                    ? objData.blockedMarginDisplay
+                    : objData.blockedMargin
+            );
+            const blockedMarginHint = String(objData.blockedMarginHint || "").trim();
+            if (blockedMarginHint) {
+                ids.blockedMarginValue.title = blockedMarginHint;
+            }
+            else {
+                ids.blockedMarginValue.removeAttribute("title");
+            }
         }
         if (ids.availableBalanceValue) {
             ids.availableBalanceValue.textContent = fmtUsd(objData.availableBalance);
