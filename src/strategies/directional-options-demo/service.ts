@@ -16,6 +16,10 @@ import type {
     DirectionalSignalMetrics
 } from "./types";
 
+const gOptionBrokeragePct = 0.01;
+const gOptionPremiumCapPct = 3.5;
+const gBrokerageGstMultiplier = 1.18;
+
 function clampNumber(value: unknown, min: number, max: number, fallbackValue: number): number {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) {
@@ -229,6 +233,10 @@ function toFetchSnapshotConfig(config: DirectionalOptionsDemoConfig): Directiona
     return config;
 }
 
+function getUnderlyingLotSize(underlying: unknown): number {
+    return String(underlying || "").trim().toUpperCase() === "ETH" ? 0.01 : 0.001;
+}
+
 function getPaperReferencePrice(option: MarketOptionSnapshot): number {
     const mark = Number(option.mark || 0);
     if (Number.isFinite(mark) && mark > 0) {
@@ -263,6 +271,25 @@ function calculatePositionPnl(side: "buy" | "sell", entryPrice: number, exitPric
     return signedMove * qty;
 }
 
+function estimateOptionCharges(
+    underlying: unknown,
+    qty: number,
+    optionPrice: number,
+    underlyingPrice: number
+): number {
+    const lotSize = getUnderlyingLotSize(underlying);
+    const safeQty = Math.max(0, Number(qty || 0));
+    const safeOptionPrice = Math.max(0, Number(optionPrice || 0));
+    const safeUnderlyingPrice = Math.max(0, Number(underlyingPrice || 0));
+    if (!(lotSize > 0) || !(safeQty > 0) || !(safeOptionPrice > 0) || !(safeUnderlyingPrice > 0)) {
+        return 0;
+    }
+    const orderNotional = safeQty * lotSize * safeUnderlyingPrice;
+    const tradingFee = (orderNotional * gOptionBrokeragePct) / 100;
+    const premiumCap = ((safeQty * lotSize * safeOptionPrice) * gOptionPremiumCapPct) / 100;
+    return Number((Math.min(tradingFee, premiumCap) * gBrokerageGstMultiplier).toFixed(4));
+}
+
 function getPositionActionKey(position: Pick<DirectionalOptionsDemoPosition, "side" | "optionType">): string {
     return `${position.side}_${position.optionType}`;
 }
@@ -273,6 +300,7 @@ function getSignalActionKey(signal: Pick<DirectionalSignalMetrics, "suggestedAct
 
 function updateOpenMarks(state: DirectionalOptionsDemoState, snapshot: MarketSnapshot): void {
     const optionsBySymbol = new Map<string, MarketOptionSnapshot>();
+    const underlyingPrice = Number(snapshot.ticker.mark || snapshot.ticker.spot || 0);
     snapshot.options.forEach((option) => {
         optionsBySymbol.set(option.symbol, option);
     });
@@ -287,7 +315,10 @@ function updateOpenMarks(state: DirectionalOptionsDemoState, snapshot: MarketSna
         position.markPrice = getExitPrice(option, position.side);
         position.currentDelta = Number(option.delta || 0);
         position.currentDte = Number(option.dte || position.currentDte || 0);
-        position.unrealizedPnl = calculatePositionPnl(position.side, position.entryPrice, position.markPrice, position.qty);
+        position.exitCharges = estimateOptionCharges(state.config.underlying, position.qty, position.markPrice, underlyingPrice);
+        position.totalCharges = Number((Number(position.entryCharges || 0) + position.exitCharges).toFixed(4));
+        position.grossUnrealizedPnl = Number(calculatePositionPnl(position.side, position.entryPrice, position.markPrice, position.qty).toFixed(2));
+        position.unrealizedPnl = Number((position.grossUnrealizedPnl - position.totalCharges).toFixed(2));
     });
 }
 
@@ -507,12 +538,19 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
 }
 
 function closePosition(state: DirectionalOptionsDemoState, position: DirectionalOptionsDemoPosition, exitPrice: number, reason: string): void {
+    const underlyingPrice = Number(state.latestTicker?.mark || state.latestTicker?.spot || 0);
+    const exitCharges = estimateOptionCharges(state.config.underlying, position.qty, exitPrice, underlyingPrice);
+    const grossRealizedPnl = calculatePositionPnl(position.side, position.entryPrice, exitPrice, position.qty);
     position.status = "CLOSED";
     position.closePrice = exitPrice;
     position.closedAt = new Date().toISOString();
     position.closedCycle = state.cycleCount;
     position.closeReason = reason;
-    position.realizedPnl = calculatePositionPnl(position.side, position.entryPrice, exitPrice, position.qty);
+    position.exitCharges = exitCharges;
+    position.totalCharges = Number((Number(position.entryCharges || 0) + exitCharges).toFixed(4));
+    position.grossRealizedPnl = Number(grossRealizedPnl.toFixed(2));
+    position.realizedPnl = Number((grossRealizedPnl - position.totalCharges).toFixed(2));
+    position.grossUnrealizedPnl = 0;
     position.unrealizedPnl = 0;
     state.closedPositions.unshift({ ...position });
     state.closedPositions = state.closedPositions.slice(0, 200);
@@ -587,18 +625,23 @@ function maybeClosePositions(state: DirectionalOptionsDemoState, signal: Directi
     const optionsBySymbol = new Map<string, MarketOptionSnapshot>();
     snapshot.options.forEach((option) => optionsBySymbol.set(option.symbol, option));
     const remainingOpen: DirectionalOptionsDemoPosition[] = [];
+    const underlyingPrice = Number(snapshot.ticker.mark || snapshot.ticker.spot || 0);
     for (const position of state.openPositions) {
         if (position.status !== "OPEN") {
             continue;
         }
         const option = optionsBySymbol.get(position.symbol);
         const exitPrice = option ? getExitPrice(option, position.side) : position.markPrice;
+        const grossPnl = calculatePositionPnl(position.side, position.entryPrice, exitPrice, position.qty);
+        const estimatedExitCharges = estimateOptionCharges(state.config.underlying, position.qty, exitPrice, underlyingPrice);
+        const totalCharges = Number((Number(position.entryCharges || 0) + estimatedExitCharges).toFixed(4));
+        const netPnl = grossPnl - totalCharges;
         const realizedMove = calculatePositionPnl(position.side, position.entryPrice, exitPrice, 1);
         const pnlPct = position.entryPrice > 0 ? (realizedMove / position.entryPrice) * 100 : 0;
         const heldCycles = state.cycleCount - position.openedCycle;
         const isRangeSellPosition = position.side === "sell" && position.regimeAtEntry === "range";
         const effectiveMaxHoldCycles = isRangeSellPosition
-            ? Math.max(state.config.maxHoldCycles * 2, 20)
+            ? Math.max(state.config.maxHoldCycles * 2, 24)
             : state.config.maxHoldCycles;
         const vNeutralExitCycles = position.side === "sell"
             ? Math.max(state.config.neutralExitCycles + 2, 5)
@@ -606,8 +649,16 @@ function maybeClosePositions(state: DirectionalOptionsDemoState, signal: Directi
         const rangeSellNeutralExitCycles = isRangeSellPosition
             ? Math.max(state.config.neutralExitCycles + 6, 10)
             : vNeutralExitCycles;
+        const minNetProfitFloor = isRangeSellPosition
+            ? Math.max(totalCharges * 2, 4)
+            : Math.max(totalCharges, 1);
+        const currentAction = signal.suggestedAction;
+        const desiredAction = getPositionActionKey(position) as DirectionalSignalMetrics["suggestedAction"];
 
-        if (pnlPct >= position.takeProfitPct) {
+        const takeProfitPct = isRangeSellPosition
+            ? Math.max(position.takeProfitPct + 6, 22)
+            : position.takeProfitPct;
+        if (pnlPct >= takeProfitPct) {
             closePosition(state, position, exitPrice, `take profit ${pnlPct.toFixed(2)}%`);
             state.cooldownUntilCycle = state.cycleCount + state.config.cooldownCycles;
             continue;
@@ -618,20 +669,27 @@ function maybeClosePositions(state: DirectionalOptionsDemoState, signal: Directi
             continue;
         }
         if (heldCycles >= effectiveMaxHoldCycles) {
+            if (isRangeSellPosition && netPnl >= minNetProfitFloor && currentAction === desiredAction && signal.regime === "range") {
+                position.markPrice = exitPrice;
+                position.exitCharges = estimatedExitCharges;
+                position.totalCharges = totalCharges;
+                position.grossUnrealizedPnl = Number(grossPnl.toFixed(2));
+                position.unrealizedPnl = Number(netPnl.toFixed(2));
+                remainingOpen.push(position);
+                continue;
+            }
             closePosition(state, position, exitPrice, "max hold cycles reached");
             state.cooldownUntilCycle = state.cycleCount + (position.side === "sell" ? Math.max(2, state.config.cooldownCycles + 1) : 1);
             continue;
         }
         const shouldExitNeutral = isRangeSellPosition
-            ? heldCycles >= rangeSellNeutralExitCycles && (pnlPct >= 4 || heldCycles >= effectiveMaxHoldCycles - 2)
+            ? heldCycles >= rangeSellNeutralExitCycles && (netPnl >= minNetProfitFloor || heldCycles >= effectiveMaxHoldCycles - 2)
             : heldCycles >= vNeutralExitCycles;
         if (signal.bias === "neutral" && shouldExitNeutral) {
             closePosition(state, position, exitPrice, "signal turned neutral");
             state.cooldownUntilCycle = state.cycleCount + (position.side === "sell" ? Math.max(2, state.config.cooldownCycles + 2) : 1);
             continue;
         }
-        const currentAction = signal.suggestedAction;
-        const desiredAction = getPositionActionKey(position) as DirectionalSignalMetrics["suggestedAction"];
         const rotationMinHoldCycles = isRangeSellPosition
             ? Math.max(state.config.neutralExitCycles + 2, 5)
             : 1;
@@ -660,7 +718,10 @@ function maybeClosePositions(state: DirectionalOptionsDemoState, signal: Directi
             continue;
         }
         position.markPrice = exitPrice;
-        position.unrealizedPnl = calculatePositionPnl(position.side, position.entryPrice, position.markPrice, position.qty);
+        position.exitCharges = estimatedExitCharges;
+        position.totalCharges = totalCharges;
+        position.grossUnrealizedPnl = Number(grossPnl.toFixed(2));
+        position.unrealizedPnl = Number(netPnl.toFixed(2));
         remainingOpen.push(position);
     }
     state.openPositions = remainingOpen;
@@ -704,6 +765,11 @@ function maybeOpenPosition(state: DirectionalOptionsDemoState, signal: Direction
     }
     const qtyBoost = signal.confidence >= 80 ? 1 : 0;
     const qty = Math.max(state.config.baseContracts, Math.min(state.config.maxContracts, state.config.baseContracts + qtyBoost));
+    const underlyingPrice = Number(snapshot.ticker.mark || snapshot.ticker.spot || 0);
+    const entryCharges = estimateOptionCharges(state.config.underlying, qty, entryPrice, underlyingPrice);
+    const exitPrice = getExitPrice(selected, side);
+    const exitCharges = estimateOptionCharges(state.config.underlying, qty, exitPrice, underlyingPrice);
+    const grossUnrealizedPnl = calculatePositionPnl(side, entryPrice, exitPrice, qty);
     const position: DirectionalOptionsDemoPosition = {
         id: crypto.randomUUID(),
         symbol: selected.symbol,
@@ -722,8 +788,13 @@ function maybeOpenPosition(state: DirectionalOptionsDemoState, signal: Direction
         currentDelta: Number(selected.delta || 0),
         entryDte: Number(selected.dte || 0),
         currentDte: Number(selected.dte || 0),
+        entryCharges,
+        exitCharges,
+        totalCharges: Number((entryCharges + exitCharges).toFixed(4)),
+        grossRealizedPnl: 0,
+        grossUnrealizedPnl: Number(grossUnrealizedPnl.toFixed(2)),
         realizedPnl: 0,
-        unrealizedPnl: 0,
+        unrealizedPnl: Number((grossUnrealizedPnl - entryCharges - exitCharges).toFixed(2)),
         status: "OPEN",
         openedAt: new Date().toISOString(),
         closedAt: null,
@@ -731,7 +802,6 @@ function maybeOpenPosition(state: DirectionalOptionsDemoState, signal: Direction
         closedCycle: null,
         closeReason: ""
     };
-    position.unrealizedPnl = calculatePositionPnl(position.side, position.entryPrice, position.markPrice, position.qty);
     state.openPositions.push(position);
     addEvent(state, "ENTRY", position.symbol, `Opened ${side.toUpperCase()} ${optionType.toUpperCase()} paper scalp at ${entryPrice.toFixed(2)} with confidence ${signal.confidence}% in ${signal.regime} regime.`);
 }
@@ -751,6 +821,10 @@ function flattenOpenPositionsForGuardrail(state: DirectionalOptionsDemoState, re
 }
 
 function calculateTotals(state: DirectionalOptionsDemoState): DirectionalOptionsDemoStatus["totals"] {
+    const totalCharges = state.openPositions.reduce((sum, position) => sum + Number(position.totalCharges || 0), 0)
+        + state.closedPositions.reduce((sum, position) => sum + Number(position.totalCharges || 0), 0);
+    const grossUnrealizedPnl = state.openPositions.reduce((sum, position) => sum + Number(position.grossUnrealizedPnl || 0), 0);
+    const grossRealizedPnl = state.closedPositions.reduce((sum, position) => sum + Number(position.grossRealizedPnl || 0), 0);
     const unrealizedPnl = state.openPositions.reduce((sum, position) => sum + Number(position.unrealizedPnl || 0), 0);
     const realizedPnl = state.closedPositions.reduce((sum, position) => sum + Number(position.realizedPnl || 0), 0);
     const winningTrades = state.closedPositions.filter((position) => Number(position.realizedPnl || 0) > 0).length;
@@ -776,6 +850,9 @@ function calculateTotals(state: DirectionalOptionsDemoState): DirectionalOptions
     return {
         openCount: state.openPositions.length,
         closedCount: state.closedPositions.length,
+        totalCharges: Number(totalCharges.toFixed(4)),
+        grossUnrealizedPnl: Number(grossUnrealizedPnl.toFixed(2)),
+        grossRealizedPnl: Number(grossRealizedPnl.toFixed(2)),
         unrealizedPnl: Number(unrealizedPnl.toFixed(2)),
         realizedPnl: Number(realizedPnl.toFixed(2)),
         totalPnl: Number((unrealizedPnl + realizedPnl).toFixed(2)),
@@ -818,9 +895,9 @@ function buildGuidance(state: DirectionalOptionsDemoState): DirectionalOptionsDe
     const consecutiveLosses = countConsecutiveLosses(state);
     const realizedPnl = Number(totals.realizedPnl || 0);
     const guardrailReason = realizedPnl >= state.config.maxSessionProfit
-        ? `Session target hit at realized PnL ${realizedPnl.toFixed(2)}.`
+        ? `Session target hit at realized net PnL ${realizedPnl.toFixed(2)}.`
         : (realizedPnl <= (-1 * state.config.maxSessionLoss)
-            ? `Session loss limit hit at realized PnL ${realizedPnl.toFixed(2)}.`
+            ? `Session loss limit hit at realized net PnL ${realizedPnl.toFixed(2)}.`
             : (consecutiveLosses >= state.config.maxConsecutiveLosses
                 ? `${consecutiveLosses} consecutive losing scalps reached.`
                 : ""));
@@ -836,7 +913,7 @@ function buildGuidance(state: DirectionalOptionsDemoState): DirectionalOptionsDe
     checklist.push(`Confidence gate: ${state.config.minConfidence}%`);
     checklist.push(`Regime gate: ${state.config.preferredRegime === "any" ? "trend or range accepted" : state.config.preferredRegime}`);
     checklist.push(`Volatility floor: ${state.config.minVolatilityPct.toFixed(3)}%`);
-    checklist.push(`Session stop rules use realized PnL: +${state.config.maxSessionProfit} / -${state.config.maxSessionLoss} / ${state.config.maxConsecutiveLosses} losses`);
+    checklist.push(`Session stop rules use realized net PnL after estimated charges: +${state.config.maxSessionProfit} / -${state.config.maxSessionLoss} / ${state.config.maxConsecutiveLosses} losses`);
     checklist.push("Trend regime buys options. Range regime sells options. Unclear regime waits.");
 
     return {
@@ -899,12 +976,12 @@ export class DirectionalOptionsDemoService {
         const realizedPnl = Number(totals.realizedPnl || 0);
         if (realizedPnl >= state.config.maxSessionProfit) {
             flattenOpenPositionsForGuardrail(state, "session profit guardrail stop");
-            await this.stopState(state, `Auto-stopped after hitting realized profit target ${realizedPnl.toFixed(2)}.`);
+            await this.stopState(state, `Auto-stopped after hitting realized net profit target ${realizedPnl.toFixed(2)}.`);
             return;
         }
         if (realizedPnl <= (-1 * state.config.maxSessionLoss)) {
             flattenOpenPositionsForGuardrail(state, "session loss guardrail stop");
-            await this.stopState(state, `Auto-stopped after hitting realized loss limit ${realizedPnl.toFixed(2)}.`);
+            await this.stopState(state, `Auto-stopped after hitting realized net loss limit ${realizedPnl.toFixed(2)}.`);
             return;
         }
         if (consecutiveLosses >= state.config.maxConsecutiveLosses) {

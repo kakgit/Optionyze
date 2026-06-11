@@ -286,7 +286,11 @@
                 <strong id="directionalDemoWorstTrade">0.00</strong>
             </div>
             <div class="app-panel directional-demo-panel directional-demo-summary-card">
-                <span class="directional-demo-summary-label">Total PnL</span>
+                <span class="directional-demo-summary-label">Total Charges</span>
+                <strong id="directionalDemoTotalCharges">0.0000</strong>
+            </div>
+            <div class="app-panel directional-demo-panel directional-demo-summary-card">
+                <span class="directional-demo-summary-label">Net PnL</span>
                 <strong id="directionalDemoTotalPnl">0.00</strong>
             </div>
         </section>
@@ -324,7 +328,7 @@
                 <div class="directional-demo-chart-wrap">
                     <svg id="directionalDemoEquityChart" viewBox="0 0 600 220" preserveAspectRatio="none" aria-label="Directional equity curve"></svg>
                 </div>
-                <div class="directional-demo-meta">Tracks realized plus unrealized paper PnL during the current demo session.</div>
+                <div class="directional-demo-meta">Tracks realized plus unrealized net paper PnL after estimated charges during the current demo session.</div>
             </div>
         </section>
 
@@ -395,13 +399,14 @@
                                 <th>Mark</th>
                                 <th>Delta</th>
                                 <th>DTE</th>
-                                <th>Unrealized</th>
+                                <th>Charges</th>
+                                <th>Net PnL</th>
                                 <th>Opened</th>
                                 <th>Action</th>
                             </tr>
                         </thead>
                         <tbody id="directionalDemoOpenPositionsBody">
-                            <tr><td colspan="11" class="directional-demo-empty">No paper positions yet.</td></tr>
+                            <tr><td colspan="12" class="directional-demo-empty">No paper positions yet.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -424,12 +429,13 @@
                                 <th>Entry</th>
                                 <th>Exit</th>
                                 <th>Reason</th>
-                                <th>Realized</th>
+                                <th>Charges</th>
+                                <th>Net PnL</th>
                                 <th>Closed</th>
                             </tr>
                         </thead>
                         <tbody id="directionalDemoClosedPositionsBody">
-                            <tr><td colspan="8" class="directional-demo-empty">No closed paper positions yet.</td></tr>
+                            <tr><td colspan="10" class="directional-demo-empty">No closed paper positions yet.</td></tr>
                         </tbody>
                     </table>
                 </div>

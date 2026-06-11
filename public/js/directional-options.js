@@ -145,6 +145,7 @@
         avgLoss: document.getElementById("directionalDemoAvgLoss"),
         bestTrade: document.getElementById("directionalDemoBestTrade"),
         worstTrade: document.getElementById("directionalDemoWorstTrade"),
+        totalCharges: document.getElementById("directionalDemoTotalCharges"),
         totalPnl: document.getElementById("directionalDemoTotalPnl"),
         modeLabel: document.getElementById("directionalDemoModeLabel"),
         startAdvice: document.getElementById("directionalDemoStartAdvice"),
@@ -444,6 +445,7 @@
         ids.avgLoss.textContent = fmt(totals.avgLoss, 2);
         ids.bestTrade.textContent = fmt(totals.bestTrade, 2);
         ids.worstTrade.textContent = fmt(totals.worstTrade, 2);
+        ids.totalCharges.textContent = fmt(totals.totalCharges, 4);
         ids.totalPnl.textContent = fmt(totals.totalPnl, 2);
         ids.modeLabel.textContent = String(guidance.modeLabel || "Scalper Demo");
         ids.startAdvice.textContent = guidance.shouldStart ? "Start Now" : "Wait";
@@ -475,11 +477,12 @@
                 <td>${fmt(row.markPrice, 2)}</td>
                 <td>${fmt(row.currentDelta, 3)}</td>
                 <td>${fmt(row.currentDte, 2)}</td>
+                <td>${fmt(row.totalCharges, 4)}</td>
                 <td>${fmt(row.unrealizedPnl, 2)}</td>
                 <td>${escapeHtml(row.openedAt || "")}</td>
                 <td><button type="button" class="directional-demo-close-btn" data-position-id="${rowId}">Close</button></td>
             </tr>`;
-        }, "No paper positions yet.", 11);
+        }, "No paper positions yet.", 12);
 
         renderTable(ids.closedPositionsBody, data.closedPositions, function (row) {
             return `<tr>
@@ -490,10 +493,11 @@
                 <td>${fmt(row.entryPrice, 2)}</td>
                 <td>${fmt(row.closePrice, 2)}</td>
                 <td>${escapeHtml(row.closeReason || "")}</td>
+                <td>${fmt(row.totalCharges, 4)}</td>
                 <td>${fmt(row.realizedPnl, 2)}</td>
                 <td>${escapeHtml(row.closedAt || "")}</td>
             </tr>`;
-        }, "No closed paper positions yet.", 9);
+        }, "No closed paper positions yet.", 10);
 
         const events = Array.isArray(data.events) ? data.events : [];
         ids.eventsLog.innerHTML = events.length

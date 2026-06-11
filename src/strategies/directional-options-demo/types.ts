@@ -66,6 +66,11 @@ export interface DirectionalOptionsDemoPosition {
     currentDelta: number;
     entryDte: number;
     currentDte: number;
+    entryCharges: number;
+    exitCharges: number;
+    totalCharges: number;
+    grossRealizedPnl: number;
+    grossUnrealizedPnl: number;
     realizedPnl: number;
     unrealizedPnl: number;
     status: "OPEN" | "CLOSED";
@@ -147,6 +152,9 @@ export interface DirectionalOptionsDemoStatus {
     totals: {
         openCount: number;
         closedCount: number;
+        totalCharges: number;
+        grossUnrealizedPnl: number;
+        grossRealizedPnl: number;
         unrealizedPnl: number;
         realizedPnl: number;
         totalPnl: number;
