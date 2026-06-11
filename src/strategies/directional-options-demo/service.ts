@@ -602,9 +602,15 @@ function maybeClosePositions(state: DirectionalOptionsDemoState, signal: Directi
         const pnlPct = position.entryPrice > 0 ? (realizedMove / position.entryPrice) * 100 : 0;
         const heldCycles = state.cycleCount - position.openedCycle;
         const isRangeSellPosition = position.side === "sell" && position.regimeAtEntry === "range";
+        const effectiveMaxHoldCycles = isRangeSellPosition
+            ? Math.max(state.config.maxHoldCycles * 2, 20)
+            : state.config.maxHoldCycles;
         const vNeutralExitCycles = position.side === "sell"
             ? Math.max(state.config.neutralExitCycles + 2, 5)
             : state.config.neutralExitCycles;
+        const rangeSellNeutralExitCycles = isRangeSellPosition
+            ? Math.max(state.config.neutralExitCycles + 6, 10)
+            : vNeutralExitCycles;
 
         if (pnlPct >= position.takeProfitPct) {
             closePosition(state, position, exitPrice, `take profit ${pnlPct.toFixed(2)}%`);
@@ -616,12 +622,15 @@ function maybeClosePositions(state: DirectionalOptionsDemoState, signal: Directi
             state.cooldownUntilCycle = state.cycleCount + state.config.cooldownCycles;
             continue;
         }
-        if (heldCycles >= state.config.maxHoldCycles) {
+        if (heldCycles >= effectiveMaxHoldCycles) {
             closePosition(state, position, exitPrice, "max hold cycles reached");
             state.cooldownUntilCycle = state.cycleCount + (position.side === "sell" ? Math.max(2, state.config.cooldownCycles + 1) : 1);
             continue;
         }
-        if (signal.bias === "neutral" && heldCycles >= vNeutralExitCycles) {
+        const shouldExitNeutral = isRangeSellPosition
+            ? heldCycles >= rangeSellNeutralExitCycles && (pnlPct >= 4 || heldCycles >= effectiveMaxHoldCycles - 2)
+            : heldCycles >= vNeutralExitCycles;
+        if (signal.bias === "neutral" && shouldExitNeutral) {
             closePosition(state, position, exitPrice, "signal turned neutral");
             state.cooldownUntilCycle = state.cycleCount + (position.side === "sell" ? Math.max(2, state.config.cooldownCycles + 2) : 1);
             continue;
