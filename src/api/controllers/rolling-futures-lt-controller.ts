@@ -3936,9 +3936,6 @@ function getProfitCloseRule(
     thresholdValue: number;
     reEnterEnabled: boolean;
 } {
-    if (isCoveredOptionsStrategy(pStrategyCode)) {
-        return { triggered: false, reason: "", message: "", thresholdValue: 0, reEnterEnabled: false };
-    }
     const vNetProfit = Number(pOpenPositions.recoveryMetrics?.netPnl || 0);
     if (!(vNetProfit > 0)) {
         return { triggered: false, reason: "", message: "", thresholdValue: 0, reEnterEnabled: false };
@@ -6245,18 +6242,23 @@ async function syncCoveredRecoveryMetricsFromClosedHistory(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pSelectedApiProfileId: string,
     pProfile: RollingFuturesLtProfileRecord,
-    pTrackedOpenPositions: RollingFuturesLtImportedPositionRecord[]
+    pTrackedOpenPositions: RollingFuturesLtImportedPositionRecord[],
+    pOptions?: {
+        preserveClosedFromDate?: boolean;
+    }
 ): Promise<RollingFuturesLtProfileRecord> {
     if (!isCoveredOptionsStrategy(pStrategyCode)) {
         return pProfile;
     }
 
-    const objProfileWithClosedFromDate = await updateStrategyClosedFromDateAfterExec(
-        pUserId,
-        pStrategyCode,
-        pProfile,
-        pTrackedOpenPositions
-    );
+    const objProfileWithClosedFromDate = pOptions?.preserveClosedFromDate
+        ? pProfile
+        : await updateStrategyClosedFromDateAfterExec(
+            pUserId,
+            pStrategyCode,
+            pProfile,
+            pTrackedOpenPositions
+        );
     const objUiState = getMergedUiState(objProfileWithClosedFromDate);
     const vClosedFromDate = String(objUiState.closedFromDate || "").trim();
     const vClosedFromDateIso = parseDeltaUiDateTimeLocalToIsoString(vClosedFromDate);
@@ -7680,14 +7682,34 @@ async function getProfileInternal(req: Request, res: Response, pStrategyCode: Ro
 async function saveProfileInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
     const objExisting = await readLiveProfile(vUserId, pStrategyCode);
+    const objExistingUiState = getMergedUiState(objExisting);
     const objIncoming = normalizeProfileSaveInput(vUserId, pStrategyCode, {
         ...objExisting,
         selectedApiProfileId: String(req.body?.selectedApiProfileId || objExisting.selectedApiProfileId || "").trim(),
         uiState: req.body?.uiState && typeof req.body.uiState === "object" ? req.body.uiState as Record<string, unknown> : objExisting.uiState,
         connectionStatus: objExisting.connectionStatus
     });
-    const objSaved = await saveRollingFuturesLtProfile(objIncoming);
+    let objSaved = await saveRollingFuturesLtProfile(objIncoming);
     await ensureRuntimeProfileSelection(vUserId, pStrategyCode, objSaved.selectedApiProfileId);
+    const objSavedUiState = getMergedUiState(objSaved);
+    const vClosedFromDateChanged = String(objExistingUiState.closedFromDate || "").trim() !== String(objSavedUiState.closedFromDate || "").trim();
+    if (
+        isCoveredOptionsStrategy(pStrategyCode)
+        && vClosedFromDateChanged
+        && String(objSaved.selectedApiProfileId || "").trim()
+    ) {
+        const arrTrackedOpenPositions = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
+        objSaved = await syncCoveredRecoveryMetricsFromClosedHistory(
+            vUserId,
+            pStrategyCode,
+            String(objSaved.selectedApiProfileId || "").trim(),
+            objSaved,
+            arrTrackedOpenPositions,
+            {
+                preserveClosedFromDate: true
+            }
+        );
+    }
     res.json({
         status: "success",
         message: `${gStrategyNames[pStrategyCode]} live profile saved.`,

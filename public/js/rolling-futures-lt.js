@@ -2217,14 +2217,21 @@
         checkbox.addEventListener("change", queueProfileSave);
     });
     ids.closedFromDate?.addEventListener("change", function () {
-        queueProfileSave();
-        void loadClosedPositions().catch(function (error) {
-            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to filter closed positions.", "danger");
+        void saveProfile().then(function () {
+            return Promise.all([
+                loadClosedPositions().catch(function () { return undefined; }),
+                loadSavedOpenPositions().catch(function () { return undefined; }),
+                loadRuntimeStatus().catch(function () { return undefined; }),
+                loadEvents().catch(function () { return undefined; })
+            ]);
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to update Closed Positions start date.", "danger");
         });
     });
     ids.closedToDate?.addEventListener("change", function () {
-        queueProfileSave();
-        void loadClosedPositions().catch(function (error) {
+        void saveProfile().then(function () {
+            return loadClosedPositions();
+        }).catch(function (error) {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to filter closed positions.", "danger");
         });
     });
