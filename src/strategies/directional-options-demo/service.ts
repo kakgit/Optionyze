@@ -229,36 +229,31 @@ function toFetchSnapshotConfig(config: DirectionalOptionsDemoConfig): Directiona
     return config;
 }
 
-function getLongEntryPrice(option: MarketOptionSnapshot): number {
-    return Number.isFinite(Number(option.bestAsk)) && Number(option.bestAsk) > 0
-        ? Number(option.bestAsk)
-        : Number(option.mark || 0);
-}
-
-function getLongExitPrice(option: MarketOptionSnapshot): number {
-    return Number.isFinite(Number(option.bestBid)) && Number(option.bestBid) > 0
-        ? Number(option.bestBid)
-        : Number(option.mark || 0);
-}
-
-function getShortEntryPrice(option: MarketOptionSnapshot): number {
-    return Number.isFinite(Number(option.bestBid)) && Number(option.bestBid) > 0
-        ? Number(option.bestBid)
-        : Number(option.mark || 0);
-}
-
-function getShortExitPrice(option: MarketOptionSnapshot): number {
-    return Number.isFinite(Number(option.bestAsk)) && Number(option.bestAsk) > 0
-        ? Number(option.bestAsk)
-        : Number(option.mark || 0);
+function getPaperReferencePrice(option: MarketOptionSnapshot): number {
+    const mark = Number(option.mark || 0);
+    if (Number.isFinite(mark) && mark > 0) {
+        return mark;
+    }
+    const bestBid = Number(option.bestBid || 0);
+    const bestAsk = Number(option.bestAsk || 0);
+    if (Number.isFinite(bestBid) && bestBid > 0 && Number.isFinite(bestAsk) && bestAsk > 0) {
+        return (bestBid + bestAsk) / 2;
+    }
+    if (Number.isFinite(bestBid) && bestBid > 0) {
+        return bestBid;
+    }
+    if (Number.isFinite(bestAsk) && bestAsk > 0) {
+        return bestAsk;
+    }
+    return 0;
 }
 
 function getEntryPrice(option: MarketOptionSnapshot, side: "buy" | "sell"): number {
-    return side === "sell" ? getShortEntryPrice(option) : getLongEntryPrice(option);
+    return getPaperReferencePrice(option);
 }
 
 function getExitPrice(option: MarketOptionSnapshot, side: "buy" | "sell"): number {
-    return side === "sell" ? getShortExitPrice(option) : getLongExitPrice(option);
+    return getPaperReferencePrice(option);
 }
 
 function calculatePositionPnl(side: "buy" | "sell", entryPrice: number, exitPrice: number, qty: number): number {
@@ -1111,7 +1106,7 @@ export class DirectionalOptionsDemoService {
             const snapshot = await fetchSnapshot(state.apiKey, state.apiSecret, toFetchSnapshotConfig(state.config) as never);
             const option = snapshot.options.find((row) => row.symbol === targetPosition.symbol);
             if (option) {
-                exitPrice = getLongExitPrice(option);
+                exitPrice = getExitPrice(option, targetPosition.side);
             }
             state.latestTicker = {
                 symbol: snapshot.ticker.symbol,
