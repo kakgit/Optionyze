@@ -6821,6 +6821,15 @@ async function ensureCoveredConfiguredLegPresence(
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
         || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const arrPending = getCoveredPendingOptionReEntriesState(objRuntime);
+    const arrPendingWithoutMissingLeg = arrPending.filter((objEntry) => objEntry.reason !== "missing_leg");
+    if (arrPendingWithoutMissingLeg.length !== arrPending.length) {
+        await saveRollingFuturesLtRuntime({
+            ...objRuntime,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithCoveredPendingOptionReEntries(objRuntime, arrPendingWithoutMissingLeg)
+        });
+    }
     for (const vRowIndex of [1, 2] as const) {
         const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
         const arrRequiredLegs = objRowState.legs === "both"
@@ -6828,7 +6837,7 @@ async function ensureCoveredConfiguredLegPresence(
             : [objRowState.legs];
         const vExistingCount = arrRequiredLegs.filter((vLegSide) => hasTrackedOptionRowLeg(pTrackedPositions, vRowIndex, vLegSide)).length;
         const arrMissingLegs = arrRequiredLegs.filter((vLegSide) => !hasTrackedOptionRowLeg(pTrackedPositions, vRowIndex, vLegSide));
-        const arrPendingForRow = arrPending.filter((objEntry) => objEntry.rowIndex === vRowIndex);
+        const arrPendingForRow = arrPendingWithoutMissingLeg.filter((objEntry) => objEntry.rowIndex === vRowIndex);
         const arrPendingLegSides = Array.from(new Set(arrPendingForRow.map((objEntry) => objEntry.legSide)));
         const bAlternatingMissingLegDetected = arrMissingLegs.some((vLegSide) => !arrPendingLegSides.includes(vLegSide));
         if (vExistingCount > 0
@@ -6864,36 +6873,6 @@ async function ensureCoveredConfiguredLegPresence(
         }
         if (vExistingCount <= 0) {
             continue;
-        }
-        for (const vLegSide of arrRequiredLegs) {
-            if (hasTrackedOptionRowLeg(pTrackedPositions, vRowIndex, vLegSide)) {
-                continue;
-            }
-            const vDedupeKey = `${vRowIndex}:${vLegSide}`;
-            if (arrPending.some((objEntry) => objEntry.dedupeKey === vDedupeKey)) {
-                continue;
-            }
-            await scheduleCoveredPendingOptionReEntry(
-                pUserId,
-                pStrategyCode,
-                pProfile,
-                vRowIndex,
-                vLegSide,
-                "missing_leg"
-            );
-            await logFuturesEvent(
-                pUserId,
-                pStrategyCode,
-                "manual_action",
-                "warning",
-                "Covered Leg Missing",
-                `Row ${vRowIndex} is configured as ${objRowState.legs.toUpperCase()} but ${vLegSide.toUpperCase()} is missing from open positions. Re-entry has been scheduled.`,
-                {
-                    rowIndex: vRowIndex,
-                    legSide: vLegSide,
-                    reason: "covered_option_missing_leg_scheduled"
-                }
-            );
         }
     }
 }
