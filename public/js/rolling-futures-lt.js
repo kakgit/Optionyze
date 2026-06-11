@@ -162,6 +162,7 @@
     let confirmationInFlight = false;
     let execStrategyEnabled = isDualLikeMode ? initialExecStrategyEnabled : true;
     let closedFiltersRefreshTimer = null;
+    let lastClosedPositionsRefreshAt = "";
     let adminRunningUsers = [];
     let targetUserId = currentAccountId;
     let currentTargetAccount = {
@@ -929,6 +930,7 @@
         autoTraderEnabled = Boolean(objRuntime.autoTraderEnabled);
         pendingLiveConfirmation = objRuntime?.state?.pendingCoveredLiveConfirmation || null;
         const strategyStartedAt = String(objRuntime?.state?.strategyStartedAt || "").trim();
+        const closedPositionsRefreshAt = String(objRuntime?.state?.closedPositionsRefreshAt || "").trim();
         if (ids.engineStatus) {
             ids.engineStatus.textContent = runtimeStatus.charAt(0).toUpperCase() + runtimeStatus.slice(1);
         }
@@ -956,6 +958,10 @@
             if (vClosedFromDate) {
                 ids.closedFromDate.value = vClosedFromDate;
             }
+        }
+        if (closedPositionsRefreshAt && closedPositionsRefreshAt !== lastClosedPositionsRefreshAt) {
+            lastClosedPositionsRefreshAt = closedPositionsRefreshAt;
+            queueClosedPositionsRefresh();
         }
         updateNeutralBadges(lastNeutralStatus);
         renderPendingLiveConfirmation();

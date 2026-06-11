@@ -3616,6 +3616,7 @@ async function buildOpenPositionsPayload(
     const objProfile = await readLiveProfile(pUserId, pStrategyCode);
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const objUiState = getMergedUiState(objProfile);
+    const bCoveredOptionsRecoveryBaseline = isCoveredOptionsStrategy(pStrategyCode);
     let arrPositions = pPositions || await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
     const objNormalizedBaseDeltaSigns = normalizeTrackedOptionBaseDeltaSigns(arrPositions);
     if (objNormalizedBaseDeltaSigns.changed) {
@@ -3631,9 +3632,11 @@ async function buildOpenPositionsPayload(
         && String(objRuntime?.status || "").trim().toLowerCase() === "running";
     const vRuntimeBrokerageTotal = getBrokerageRecoveryTotal(objRuntime);
     const vOpenPositionCharges = Number(objEnriched.totals.totalCharges || 0);
-    const vEffectiveBrokerageTotal = objEnriched.positions.length > 0
+    const vEffectiveBrokerageTotal = bCoveredOptionsRecoveryBaseline
+        ? Number(vRuntimeBrokerageTotal.toFixed(4))
+        : (objEnriched.positions.length > 0
         ? Math.max(vRuntimeBrokerageTotal, vOpenPositionCharges)
-        : vRuntimeBrokerageTotal;
+        : vRuntimeBrokerageTotal);
     const vRecoveredTotalPnl = getRecoveredTotalPnl(objRuntime);
     const objOpenPnlSnapshot = getOpenPnlSnapshotState(objRuntime);
     const arrCurrentPositionKeys = arrPositions.map((pPosition) => getTrackedPositionIdentityKey(pPosition));
@@ -3659,6 +3662,8 @@ async function buildOpenPositionsPayload(
     const vEffectiveOpenPnl = bSuspiciousOpenPnlZero
         ? Number(objOpenPnlSnapshot.totalPnl || 0)
         : vCurrentOpenPnl;
+    const vCoveredNetBrokerageBase = Number((vRuntimeBrokerageTotal + vOpenPositionCharges).toFixed(4));
+    const vCoveredNetPnl = Number((vRecoveredTotalPnl + vEffectiveOpenPnl - vCoveredNetBrokerageBase).toFixed(4));
     if (!arrCurrentPositionKeys.length) {
         if (objOpenPnlSnapshot.positionKeys.length) {
             await saveRollingFuturesLtRuntime({
@@ -3694,7 +3699,9 @@ async function buildOpenPositionsPayload(
         recoveryMetrics: {
             totalBrokerageToRecover: Number(vEffectiveBrokerageTotal.toFixed(4)),
             totalPnl: Number(vRecoveredTotalPnl.toFixed(4)),
-            netPnl: Number((vRecoveredTotalPnl + vEffectiveOpenPnl - vEffectiveBrokerageTotal).toFixed(4))
+            netPnl: bCoveredOptionsRecoveryBaseline
+                ? vCoveredNetPnl
+                : Number((vRecoveredTotalPnl + vEffectiveOpenPnl - vEffectiveBrokerageTotal).toFixed(4))
         }
     };
 }
@@ -3918,6 +3925,7 @@ function buildRuntimeStateWithRestartCloseProtection(
 }
 
 function getProfitCloseRule(
+    pStrategyCode: RollingFuturesLtStrategyCode,
     pUiState: Record<string, unknown>,
     pOpenPositions: RollingFuturesLtOpenPositionsPayload,
     pSummary: RollingFuturesLtAccountSummarySnapshot | null
@@ -3928,6 +3936,9 @@ function getProfitCloseRule(
     thresholdValue: number;
     reEnterEnabled: boolean;
 } {
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        return { triggered: false, reason: "", message: "", thresholdValue: 0, reEnterEnabled: false };
+    }
     const vNetProfit = Number(pOpenPositions.recoveryMetrics?.netPnl || 0);
     if (!(vNetProfit > 0)) {
         return { triggered: false, reason: "", message: "", thresholdValue: 0, reEnterEnabled: false };
@@ -4930,6 +4941,20 @@ function buildRuntimeStateWithRecoveredTotalPnl(
 ): Record<string, unknown> {
     const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
     objState.recoveredTotalPnl = Number(Number(pTotal || 0).toFixed(4));
+    return objState;
+}
+
+function buildRuntimeStateWithClosedPositionsRefreshAt(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pTriggeredAt: string
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    const vTriggeredAt = String(pTriggeredAt || "").trim();
+    if (!vTriggeredAt) {
+        delete objState.closedPositionsRefreshAt;
+        return objState;
+    }
+    objState.closedPositionsRefreshAt = vTriggeredAt;
     return objState;
 }
 
@@ -6197,14 +6222,14 @@ async function updateStrategyClosedFromDateAfterExec(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pProfile: RollingFuturesLtProfileRecord,
     pTrackedOpenPositions: RollingFuturesLtImportedPositionRecord[]
-): Promise<void> {
+): Promise<RollingFuturesLtProfileRecord> {
     const objFirstOpenedOption = pTrackedOpenPositions
         .filter((objPosition) => isOptionContractSymbol(objPosition.contractName))
         .sort((pLeft, pRight) => new Date(String(pLeft.openedAt || "")).getTime() - new Date(String(pRight.openedAt || "")).getTime())[0];
     if (!objFirstOpenedOption?.openedAt) {
-        return;
+        return pProfile;
     }
-    await saveRollingFuturesLtProfile({
+    return saveRollingFuturesLtProfile({
         ...pProfile,
         userId: pUserId,
         strategyCode: pStrategyCode,
@@ -6213,6 +6238,50 @@ async function updateStrategyClosedFromDateAfterExec(
             closedFromDate: formatDeltaUiDateTimeLocalString(objFirstOpenedOption.openedAt)
         }
     });
+}
+
+async function syncCoveredRecoveryMetricsFromClosedHistory(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pSelectedApiProfileId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pTrackedOpenPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<RollingFuturesLtProfileRecord> {
+    if (!isCoveredOptionsStrategy(pStrategyCode)) {
+        return pProfile;
+    }
+
+    const objProfileWithClosedFromDate = await updateStrategyClosedFromDateAfterExec(
+        pUserId,
+        pStrategyCode,
+        pProfile,
+        pTrackedOpenPositions
+    );
+    const objUiState = getMergedUiState(objProfileWithClosedFromDate);
+    const vClosedFromDate = String(objUiState.closedFromDate || "").trim();
+    const vClosedFromDateIso = parseDeltaUiDateTimeLocalToIsoString(vClosedFromDate);
+    const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
+    let vClosedBrokerageTotal = 0;
+    let vClosedTotalPnl = 0;
+
+    if (vClosedFromDateIso && pSelectedApiProfileId) {
+        const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
+        const arrClosedRows = await fetchTrackedClosedOrderHistoryRows(client, vSelectedSymbol, vClosedFromDateIso);
+        vClosedBrokerageTotal = Number(arrClosedRows.reduce((pSum, pRow) => {
+            return pSum + toFiniteNumber(pRow.paid_commission, 0);
+        }, 0).toFixed(4));
+        vClosedTotalPnl = Number(arrClosedRows.reduce((pSum, pRow) => {
+            return pSum + toFiniteNumber(pRow.meta_data?.pnl, 0);
+        }, 0).toFixed(4));
+    }
+
+    await saveBrokerageRecoveryTotal(
+        pUserId,
+        pStrategyCode,
+        Number(vClosedBrokerageTotal.toFixed(4))
+    );
+    await saveRecoveredTotalPnl(pUserId, pStrategyCode, vClosedTotalPnl);
+    return objProfileWithClosedFromDate;
 }
 
 async function closeTrackedPositionOnDelta(
@@ -7129,6 +7198,19 @@ async function applyTriggeredOptionRule(
     }
     if (isDualRollingFuturesStrategy(pStrategyCode) && (pReason === "sl" || pReason === "tp")) {
         await attemptAutoExecuteNextPendingDualStrategyRequest(pReason, pUserId, pStrategyCode);
+    }
+    if (isCoveredOptionsStrategy(pStrategyCode) && (pReason === "sl" || pReason === "tp")) {
+        const objRuntimeAfterClose = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+            || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+        await saveRollingFuturesLtRuntime({
+            ...objRuntimeAfterClose,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithClosedPositionsRefreshAt(
+                objRuntimeAfterClose,
+                new Date().toISOString()
+            )
+        });
     }
     return arrSaved;
 }
@@ -8604,7 +8686,7 @@ async function runAutoTraderCycle(
             arrSavedPositions
         );
         const objSummary = await fetchAccountSummarySnapshot(pUserId, vSelectedApiProfileId, vSymbol);
-        const objProfitRule = getProfitCloseRule(objUiState, objOpenPositionsBeforeNeutrality, objSummary);
+        const objProfitRule = getProfitCloseRule(pStrategyCode, objUiState, objOpenPositionsBeforeNeutrality, objSummary);
         const bProfitCloseRuleEnabled = Boolean(objUiState.closeNetProfitBrokerage) || Boolean(objUiState.closeBlockedMargin);
         if (!bProfitCloseRuleEnabled && objProfitClosePending.reason) {
             await saveRollingFuturesLtRuntime({
@@ -9467,9 +9549,23 @@ async function saveOpenPositionsInternal(req: Request, res: Response, pStrategyC
         updatedAt: ""
     })), vBaseDelta), vBaseDelta), objUiState);
     const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, arrPrepared);
+    let objProfileForResponse = objProfile;
+    if (arrSaved.length && isCoveredOptionsStrategy(pStrategyCode) && objProfile.selectedApiProfileId) {
+        objProfileForResponse = await syncCoveredRecoveryMetricsFromClosedHistory(
+            vUserId,
+            pStrategyCode,
+            String(objProfile.selectedApiProfileId || "").trim(),
+            objProfile,
+            arrSaved
+        );
+    }
     const objOpenPositions = await buildOpenPositionsPayload(vUserId, pStrategyCode, arrSaved);
     const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
-    if (arrSaved.length > 0 && !(getBrokerageRecoveryTotal(objRuntime) > 0)) {
+    if (
+        arrSaved.length > 0
+        && !isCoveredOptionsStrategy(pStrategyCode)
+        && !(getBrokerageRecoveryTotal(objRuntime) > 0)
+    ) {
         await saveBrokerageRecoveryTotal(vUserId, pStrategyCode, Number(objOpenPositions.totals?.totalCharges || 0));
     }
     await logFuturesEvent(
@@ -9485,7 +9581,11 @@ async function saveOpenPositionsInternal(req: Request, res: Response, pStrategyC
             : (isCoveredOptionsStrategy(pStrategyCode)
                 ? "Cleared imported live positions from the open grid."
                 : "Cleared imported live futures positions from the open grid."),
-        { qty: arrSaved.length, reason: "imported_positions_saved" }
+        {
+            qty: arrSaved.length,
+            reason: "imported_positions_saved",
+            closedFromDate: String(getMergedUiState(objProfileForResponse).closedFromDate || "").trim()
+        }
     );
     res.json({
         status: "success",
@@ -9987,7 +10087,7 @@ async function executeManualFutureInternal(req: Request, res: Response, pStrateg
 
 async function executeManualOptionInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
-    const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+    let objProfile = await readLiveProfile(vUserId, pStrategyCode);
     const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
     if (!vSelectedApiProfileId) {
         res.status(400).json({ status: "warning", message: "Select an API profile before placing live option orders." });
@@ -10148,6 +10248,15 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
                 markPrice: Number(objContract.markPrice || 0)
             });
         await incrementBrokerageRecoveryTotal(vUserId, pStrategyCode, vEntryCharge, arrSaved.length);
+        if (isCoveredOptionsStrategy(pStrategyCode)) {
+            objProfile = await syncCoveredRecoveryMetricsFromClosedHistory(
+                vUserId,
+                pStrategyCode,
+                vSelectedApiProfileId,
+                objProfile,
+                arrSaved
+            );
+        }
 
         await logFuturesEvent(
             vUserId,
@@ -10311,10 +10420,11 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
                 arrInputs,
                 "exec_strategy"
             );
-            if (!Boolean(req.body?.suppressClosedFromDateUpdate)) {
-                await updateStrategyClosedFromDateAfterExec(
+            if (!Boolean(req.body?.suppressClosedFromDateUpdate) && isCoveredOptionsStrategy(pStrategyCode)) {
+                objProfile = await syncCoveredRecoveryMetricsFromClosedHistory(
                     vUserId,
                     pStrategyCode,
+                    vSelectedApiProfileId,
                     objProfile,
                     objExecResult.trackedOpenPositions
                 );
@@ -10438,12 +10548,23 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
             "exec_strategy"
         );
         if (!Boolean(req.body?.suppressClosedFromDateUpdate)) {
-            await updateStrategyClosedFromDateAfterExec(
-                vUserId,
-                pStrategyCode,
-                objProfile,
-                objExecResult.trackedOpenPositions
-            );
+            if (isCoveredOptionsStrategy(pStrategyCode)) {
+                objProfile = await syncCoveredRecoveryMetricsFromClosedHistory(
+                    vUserId,
+                    pStrategyCode,
+                    vSelectedApiProfileId,
+                    objProfile,
+                    objExecResult.trackedOpenPositions
+                );
+            }
+            else {
+                objProfile = await updateStrategyClosedFromDateAfterExec(
+                    vUserId,
+                    pStrategyCode,
+                    objProfile,
+                    objExecResult.trackedOpenPositions
+                );
+            }
         }
 
         res.json({
@@ -10814,6 +10935,15 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
 }
 
 async function updateRecoveryMetricsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        const objOpenPositions = await buildOpenPositionsPayload(getAccountId(req), pStrategyCode);
+        res.json({
+            status: "success",
+            message: "Recovery metrics are temporarily de-linked for covered options.",
+            data: objOpenPositions
+        });
+        return;
+    }
     const vUserId = getAccountId(req);
     const vBrokerageTotal = Math.max(0, Number(req.body?.totalBrokerageToRecover || 0));
     const vRecoveredPnl = Number(req.body?.totalPnl || 0);
@@ -10907,6 +11037,17 @@ async function recalculateAndPersistRecoveryMetricsFromClosedHistory(
         closedCount: number;
     };
 }> {
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        return {
+            openPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode),
+            recalculated: {
+                strategyStartedAt: "",
+                totalBrokerageToRecover: 0,
+                totalPnl: 0,
+                closedCount: 0
+            }
+        };
+    }
     type RecoveryRefreshTotals = {
         strategyStartedAt: string;
         totalBrokerageToRecover: number;
@@ -10956,6 +11097,9 @@ async function schedulePendingOptionRecoveryRefresh(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pReason: "sl" | "tp"
 ): Promise<void> {
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        return;
+    }
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
         || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const objPending = getPendingOptionRecoveryRefreshState(objRuntime);
@@ -10996,6 +11140,9 @@ async function processPendingOptionRecoveryRefresh(
     pSelectedApiProfileId: string,
     pRuntime: RollingFuturesLtRuntimeRecord | null
 ): Promise<void> {
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        return;
+    }
     const objRuntime = pRuntime || await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const objPending = getPendingOptionRecoveryRefreshState(objRuntime);
     if (!objPending.reason || !objPending.runAt) {
