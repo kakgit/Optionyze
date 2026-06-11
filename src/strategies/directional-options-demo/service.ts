@@ -88,61 +88,113 @@ function buildDefaultConfig(): DirectionalOptionsDemoConfig {
         entryDteMax: 5,
         baseContracts: 1,
         maxContracts: 1,
-        bullishThreshold: 5,
-        bearishThreshold: 5,
-        minConfidence: 70,
-        takeProfitPct: 8,
-        stopLossPct: 5,
-        maxHoldCycles: 3,
+        bullishThreshold: 4,
+        bearishThreshold: 4,
+        minConfidence: 46,
+        takeProfitPct: 18,
+        stopLossPct: 12,
+        maxHoldCycles: 12,
         cooldownCycles: 2,
-        emaFastPeriod: 4,
-        emaSlowPeriod: 9,
-        rsiPeriod: 6,
-        slopeLookback: 3,
-        neutralExitCycles: 1,
+        emaFastPeriod: 5,
+        emaSlowPeriod: 13,
+        rsiPeriod: 7,
+        slopeLookback: 4,
+        neutralExitCycles: 4,
         requireEmaAlignment: true,
-        requireRsiConfirmation: true,
+        requireRsiConfirmation: false,
         preferredRegime: "any",
-        minVolatilityPct: 0.2,
+        minVolatilityPct: 0.05,
         maxSessionProfit: 60,
         maxSessionLoss: 35,
         maxConsecutiveLosses: 3
     };
 }
 
+function getPresetBaseConfig(pPresetKey: string): Partial<DirectionalOptionsDemoConfig> {
+    if (pPresetKey === "eth_scalper") {
+        return {
+            symbol: "ETHUSD",
+            underlying: "ETH",
+            presetKey: "eth_scalper",
+            targetAbsDelta: 0.3,
+            bullishThreshold: 4,
+            bearishThreshold: 4,
+        minConfidence: 44,
+            takeProfitPct: 18,
+            stopLossPct: 12,
+            maxHoldCycles: 12,
+            emaFastPeriod: 5,
+            emaSlowPeriod: 13,
+            rsiPeriod: 7,
+            slopeLookback: 4,
+        neutralExitCycles: 4,
+            requireEmaAlignment: true,
+            requireRsiConfirmation: false,
+            preferredRegime: "any",
+            minVolatilityPct: 0.06,
+            maxSessionProfit: 50,
+            maxSessionLoss: 30,
+            maxConsecutiveLosses: 3
+        };
+    }
+
+    if (pPresetKey === "btc_scalper") {
+        return buildDefaultConfig();
+    }
+
+    return {};
+}
+
 function normalizeConfig(input?: Partial<DirectionalOptionsDemoConfig>): DirectionalOptionsDemoConfig {
     const defaults = buildDefaultConfig();
-    const symbol = String(input?.symbol || defaults.symbol).trim().toUpperCase() === "ETHUSD" ? "ETHUSD" : "BTCUSD";
-    const preferredRegime = String(input?.preferredRegime || defaults.preferredRegime).trim().toLowerCase();
+    const vPresetKey = String(input?.presetKey || defaults.presetKey || "custom").trim() || "custom";
+    const bLegacyScalperPreset = (vPresetKey === "btc_scalper" || vPresetKey === "eth_scalper")
+        && Number(input?.minConfidence || 0) >= 68
+        && Number(input?.bullishThreshold || 0) >= 5
+        && Number(input?.bearishThreshold || 0) >= 5
+        && Number(input?.emaFastPeriod || 0) <= 4
+        && Number(input?.emaSlowPeriod || 0) <= 9
+        && Number(input?.rsiPeriod || 0) <= 6
+        && Number(input?.maxHoldCycles || 0) <= 3
+        && Number(input?.minVolatilityPct || 0) >= 0.18;
+    const objInput = bLegacyScalperPreset
+        ? {
+            ...input,
+            ...getPresetBaseConfig(vPresetKey),
+            presetKey: vPresetKey
+        }
+        : input;
+    const symbol = String(objInput?.symbol || defaults.symbol).trim().toUpperCase() === "ETHUSD" ? "ETHUSD" : "BTCUSD";
+    const preferredRegime = String(objInput?.preferredRegime || defaults.preferredRegime).trim().toLowerCase();
     return {
         symbol,
         underlying: symbol === "ETHUSD" ? "ETH" : "BTC",
-        presetKey: String(input?.presetKey || defaults.presetKey || "custom").trim() || "custom",
-        loopSeconds: clampNumber(input?.loopSeconds, 5, 300, defaults.loopSeconds),
-        targetAbsDelta: clampNumber(input?.targetAbsDelta, 0.05, 0.9, defaults.targetAbsDelta),
-        entryDteMin: clampNumber(input?.entryDteMin, 1, 60, defaults.entryDteMin),
-        entryDteMax: clampNumber(input?.entryDteMax, 1, 90, defaults.entryDteMax),
-        baseContracts: clampNumber(input?.baseContracts, 1, 20, defaults.baseContracts),
-        maxContracts: clampNumber(input?.maxContracts, 1, 50, defaults.maxContracts),
-        bullishThreshold: clampNumber(input?.bullishThreshold, 1, 10, defaults.bullishThreshold),
-        bearishThreshold: clampNumber(input?.bearishThreshold, 1, 10, defaults.bearishThreshold),
-        minConfidence: clampNumber(input?.minConfidence, 1, 100, defaults.minConfidence),
-        takeProfitPct: clampNumber(input?.takeProfitPct, 1, 200, defaults.takeProfitPct),
-        stopLossPct: clampNumber(input?.stopLossPct, 1, 100, defaults.stopLossPct),
-        maxHoldCycles: clampNumber(input?.maxHoldCycles, 1, 100, defaults.maxHoldCycles),
-        cooldownCycles: clampNumber(input?.cooldownCycles, 0, 50, defaults.cooldownCycles),
-        emaFastPeriod: clampNumber(input?.emaFastPeriod, 2, 50, defaults.emaFastPeriod),
-        emaSlowPeriod: clampNumber(input?.emaSlowPeriod, 3, 100, defaults.emaSlowPeriod),
-        rsiPeriod: clampNumber(input?.rsiPeriod, 2, 50, defaults.rsiPeriod),
-        slopeLookback: clampNumber(input?.slopeLookback, 1, 30, defaults.slopeLookback),
-        neutralExitCycles: clampNumber(input?.neutralExitCycles, 1, 50, defaults.neutralExitCycles),
-        requireEmaAlignment: input?.requireEmaAlignment !== false,
-        requireRsiConfirmation: Boolean(input?.requireRsiConfirmation),
+        presetKey: String(objInput?.presetKey || defaults.presetKey || "custom").trim() || "custom",
+        loopSeconds: clampNumber(objInput?.loopSeconds, 5, 300, defaults.loopSeconds),
+        targetAbsDelta: clampNumber(objInput?.targetAbsDelta, 0.05, 0.9, defaults.targetAbsDelta),
+        entryDteMin: clampNumber(objInput?.entryDteMin, 1, 60, defaults.entryDteMin),
+        entryDteMax: clampNumber(objInput?.entryDteMax, 1, 90, defaults.entryDteMax),
+        baseContracts: clampNumber(objInput?.baseContracts, 1, 20, defaults.baseContracts),
+        maxContracts: clampNumber(objInput?.maxContracts, 1, 50, defaults.maxContracts),
+        bullishThreshold: clampNumber(objInput?.bullishThreshold, 1, 10, defaults.bullishThreshold),
+        bearishThreshold: clampNumber(objInput?.bearishThreshold, 1, 10, defaults.bearishThreshold),
+        minConfidence: clampNumber(objInput?.minConfidence, 1, 100, defaults.minConfidence),
+        takeProfitPct: clampNumber(objInput?.takeProfitPct, 1, 200, defaults.takeProfitPct),
+        stopLossPct: clampNumber(objInput?.stopLossPct, 1, 100, defaults.stopLossPct),
+        maxHoldCycles: clampNumber(objInput?.maxHoldCycles, 1, 100, defaults.maxHoldCycles),
+        cooldownCycles: clampNumber(objInput?.cooldownCycles, 0, 50, defaults.cooldownCycles),
+        emaFastPeriod: clampNumber(objInput?.emaFastPeriod, 2, 50, defaults.emaFastPeriod),
+        emaSlowPeriod: clampNumber(objInput?.emaSlowPeriod, 3, 100, defaults.emaSlowPeriod),
+        rsiPeriod: clampNumber(objInput?.rsiPeriod, 2, 50, defaults.rsiPeriod),
+        slopeLookback: clampNumber(objInput?.slopeLookback, 1, 30, defaults.slopeLookback),
+        neutralExitCycles: clampNumber(objInput?.neutralExitCycles, 1, 50, defaults.neutralExitCycles),
+        requireEmaAlignment: objInput?.requireEmaAlignment !== false,
+        requireRsiConfirmation: Boolean(objInput?.requireRsiConfirmation),
         preferredRegime: preferredRegime === "trend" || preferredRegime === "range" ? preferredRegime : "any",
-        minVolatilityPct: clampNumber(input?.minVolatilityPct, 0, 10, defaults.minVolatilityPct),
-        maxSessionProfit: clampNumber(input?.maxSessionProfit, 1, 1000000, defaults.maxSessionProfit),
-        maxSessionLoss: clampNumber(input?.maxSessionLoss, 1, 1000000, defaults.maxSessionLoss),
-        maxConsecutiveLosses: clampNumber(input?.maxConsecutiveLosses, 1, 20, defaults.maxConsecutiveLosses)
+        minVolatilityPct: clampNumber(objInput?.minVolatilityPct, 0, 10, defaults.minVolatilityPct),
+        maxSessionProfit: clampNumber(objInput?.maxSessionProfit, 1, 1000000, defaults.maxSessionProfit),
+        maxSessionLoss: clampNumber(objInput?.maxSessionLoss, 1, 1000000, defaults.maxSessionLoss),
+        maxConsecutiveLosses: clampNumber(objInput?.maxConsecutiveLosses, 1, 20, defaults.maxConsecutiveLosses)
     };
 }
 
@@ -284,12 +336,12 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
         bearishScore += 1;
     }
 
-    if (slopePct >= 0.35) {
-        bullishScore += 2;
+    if (slopePct >= 0.08) {
+        bullishScore += slopePct >= 0.18 ? 2 : 1;
         drivers.push(`Short-term slope is positive at ${slopePct.toFixed(2)}%.`);
     }
-    else if (slopePct <= -0.35) {
-        bearishScore += 2;
+    else if (slopePct <= -0.08) {
+        bearishScore += slopePct <= -0.18 ? 2 : 1;
         drivers.push(`Short-term slope is negative at ${slopePct.toFixed(2)}%.`);
     }
 
@@ -307,22 +359,22 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
     const emaSpreadPct = latest > 0 ? (Math.abs(fastEma - slowEma) / latest) * 100 : 0;
     const absSlopePct = Math.abs(slopePct);
 
-    if (emaSpreadPct >= 0.18) {
-        trendScore += emaSpreadPct >= 0.32 ? 2 : 1;
+    if (emaSpreadPct >= 0.05) {
+        trendScore += emaSpreadPct >= 0.12 ? 2 : 1;
     }
     else {
         rangeScore += 1;
     }
-    if (absSlopePct >= 0.24) {
-        trendScore += absSlopePct >= 0.42 ? 2 : 1;
+    if (absSlopePct >= 0.08) {
+        trendScore += absSlopePct >= 0.18 ? 2 : 1;
     }
     else {
         rangeScore += 1;
     }
-    if (volatilityPct >= Math.max(config.minVolatilityPct, 0.2)) {
-        trendScore += volatilityPct >= 0.38 ? 2 : 1;
+    if (volatilityPct >= Math.max(config.minVolatilityPct, 0.05)) {
+        trendScore += volatilityPct >= 0.12 ? 2 : 1;
     }
-    else if (volatilityPct <= Math.max(0.08, config.minVolatilityPct * 0.9)) {
+    else if (volatilityPct <= Math.max(0.02, config.minVolatilityPct * 0.7)) {
         rangeScore += 2;
     }
     else {
@@ -333,10 +385,10 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
     }
 
     let regime: "trend" | "range" | "unclear" = "unclear";
-    if (trendScore >= rangeScore + 2) {
+    if (trendScore >= rangeScore + 1) {
         regime = "trend";
     }
-    else if (rangeScore >= trendScore + 3) {
+    else if (rangeScore >= trendScore + 2) {
         regime = "range";
     }
 
@@ -349,12 +401,12 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
         }
     }
     else if (regime === "range") {
-        if (rsi <= 35) {
-            bullishScore += rsi <= 30 ? 3 : 2;
+        if (rsi <= 40) {
+            bullishScore += rsi <= 34 ? 3 : 2;
             drivers.push(`Range bounce setup forming with RSI ${rsi.toFixed(1)} near the lower edge.`);
         }
-        else if (rsi >= 65) {
-            bearishScore += rsi >= 70 ? 3 : 2;
+        else if (rsi >= 60) {
+            bearishScore += rsi >= 66 ? 3 : 2;
             drivers.push(`Range fade setup forming with RSI ${rsi.toFixed(1)} near the upper edge.`);
         }
         else {
@@ -364,7 +416,15 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
 
     const edge = Math.abs(bullishScore - bearishScore);
     const totalScore = bullishScore + bearishScore;
-    const confidence = totalScore > 0 ? Math.min(100, Math.round((edge / Math.max(1, totalScore + 2)) * 100)) : 0;
+    const dominantScore = Math.max(bullishScore, bearishScore);
+    const confidence = totalScore > 0
+        ? Math.min(100, Math.round(
+            ((edge / Math.max(1, totalScore)) * 45)
+            + (dominantScore * 6)
+            + (regime === "trend" ? Math.min(10, trendScore * 2) : 0)
+            + (regime === "range" ? Math.min(10, rangeScore * 2) : 0)
+        ))
+        : 0;
     let bias: "bullish" | "bearish" | "neutral" = "neutral";
     if (bullishScore >= config.bullishThreshold && bullishScore > bearishScore) {
         bias = "bullish";
@@ -382,10 +442,10 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
         }
     }
     if (config.requireRsiConfirmation && regime === "trend") {
-        if (bias === "bullish" && rsi < 55) {
+        if (bias === "bullish" && rsi < 52) {
             blockers.push("Bullish setup blocked because RSI confirmation is missing.");
         }
-        if (bias === "bearish" && rsi > 45) {
+        if (bias === "bearish" && rsi > 48) {
             blockers.push("Bearish setup blocked because RSI confirmation is missing.");
         }
     }
@@ -404,8 +464,8 @@ function computeSignal(history: number[], snapshot: MarketSnapshot, config: Dire
     if (regime === "unclear") {
         blockers.push("Regime is unclear. Wait for either trend expansion or a cleaner range edge.");
     }
-    if (regime === "range" && confidence < Math.max(config.minConfidence, 72)) {
-        blockers.push(`Range confidence ${confidence}% is below the stricter range requirement ${Math.max(config.minConfidence, 72)}%.`);
+    if (regime === "range" && confidence < Math.max(config.minConfidence, 45)) {
+        blockers.push(`Range confidence ${confidence}% is below the stricter range requirement ${Math.max(config.minConfidence, 45)}%.`);
     }
 
     let suggestedAction: DirectionalSignalMetrics["suggestedAction"] = "wait";
@@ -465,6 +525,7 @@ function closePosition(state: DirectionalOptionsDemoState, position: Directional
 }
 
 function canEnterTrade(state: DirectionalOptionsDemoState, signal: DirectionalSignalMetrics): boolean {
+    const vRangeMinConfidence = Math.max(state.config.minConfidence + 12, 58);
     if (signal.bias === "neutral" || signal.confidence < state.config.minConfidence || signal.regime === "unclear") {
         return false;
     }
@@ -483,10 +544,10 @@ function canEnterTrade(state: DirectionalOptionsDemoState, signal: DirectionalSi
         }
     }
     if (state.config.requireRsiConfirmation && signal.regime === "trend") {
-        if (signal.bias === "bullish" && signal.rsi < 55) {
+        if (signal.bias === "bullish" && signal.rsi < 52) {
             return false;
         }
-        if (signal.bias === "bearish" && signal.rsi > 45) {
+        if (signal.bias === "bearish" && signal.rsi > 48) {
             return false;
         }
     }
@@ -494,10 +555,10 @@ function canEnterTrade(state: DirectionalOptionsDemoState, signal: DirectionalSi
         if (signal.rangeScore < signal.trendScore + 3) {
             return false;
         }
-        if (signal.confidence < Math.max(state.config.minConfidence, 72)) {
+        if (signal.confidence < vRangeMinConfidence) {
             return false;
         }
-        if (!(signal.rsi <= 35 || signal.rsi >= 65)) {
+        if (!(signal.rsi <= 32 || signal.rsi >= 68)) {
             return false;
         }
     }
@@ -521,10 +582,10 @@ function shouldBlockRecentRangeReentry(state: DirectionalOptionsDemoState, signa
         return false;
     }
     const cyclesSinceClose = state.cycleCount - Number(lastClosed.closedCycle || 0);
-    if (cyclesSinceClose > Math.max(3, state.config.cooldownCycles + 1)) {
+    if (cyclesSinceClose > Math.max(5, state.config.cooldownCycles + 3)) {
         return false;
     }
-    return signal.confidence < Math.max(state.config.minConfidence + 6, Number(lastClosed.confidenceAtEntry || 0) + 4);
+    return signal.confidence < Math.max(state.config.minConfidence + 14, Number(lastClosed.confidenceAtEntry || 0) + 8);
 }
 
 function maybeClosePositions(state: DirectionalOptionsDemoState, signal: DirectionalSignalMetrics, snapshot: MarketSnapshot): void {
@@ -540,6 +601,10 @@ function maybeClosePositions(state: DirectionalOptionsDemoState, signal: Directi
         const realizedMove = calculatePositionPnl(position.side, position.entryPrice, exitPrice, 1);
         const pnlPct = position.entryPrice > 0 ? (realizedMove / position.entryPrice) * 100 : 0;
         const heldCycles = state.cycleCount - position.openedCycle;
+        const isRangeSellPosition = position.side === "sell" && position.regimeAtEntry === "range";
+        const vNeutralExitCycles = position.side === "sell"
+            ? Math.max(state.config.neutralExitCycles + 2, 5)
+            : state.config.neutralExitCycles;
 
         if (pnlPct >= position.takeProfitPct) {
             closePosition(state, position, exitPrice, `take profit ${pnlPct.toFixed(2)}%`);
@@ -556,19 +621,36 @@ function maybeClosePositions(state: DirectionalOptionsDemoState, signal: Directi
             state.cooldownUntilCycle = state.cycleCount + (position.side === "sell" ? Math.max(2, state.config.cooldownCycles + 1) : 1);
             continue;
         }
-        if (signal.bias === "neutral" && heldCycles >= state.config.neutralExitCycles) {
+        if (signal.bias === "neutral" && heldCycles >= vNeutralExitCycles) {
             closePosition(state, position, exitPrice, "signal turned neutral");
             state.cooldownUntilCycle = state.cycleCount + (position.side === "sell" ? Math.max(2, state.config.cooldownCycles + 2) : 1);
             continue;
         }
         const currentAction = signal.suggestedAction;
         const desiredAction = getPositionActionKey(position) as DirectionalSignalMetrics["suggestedAction"];
-        if (signal.confidence >= state.config.minConfidence && currentAction !== "wait" && desiredAction !== currentAction) {
+        const rotationMinHoldCycles = isRangeSellPosition
+            ? Math.max(state.config.neutralExitCycles + 2, 5)
+            : 1;
+        const rotationMinConfidence = isRangeSellPosition
+            ? Math.max(state.config.minConfidence + 14, 62)
+            : state.config.minConfidence;
+        const allowRotationExit = isRangeSellPosition
+            ? signal.regime === "trend" && heldCycles >= rotationMinHoldCycles
+            : true;
+        if (
+            signal.confidence >= rotationMinConfidence
+            && currentAction !== "wait"
+            && desiredAction !== currentAction
+            && allowRotationExit
+        ) {
             closePosition(state, position, exitPrice, "signal rotated to a different trade style");
             state.cooldownUntilCycle = state.cycleCount + 1;
             continue;
         }
-        if (signal.regime !== "unclear" && position.regimeAtEntry !== signal.regime && heldCycles >= 1) {
+        const allowRegimeExit = isRangeSellPosition
+            ? signal.regime === "trend" && heldCycles >= rotationMinHoldCycles
+            : heldCycles >= 1;
+        if (signal.regime !== "unclear" && position.regimeAtEntry !== signal.regime && allowRegimeExit) {
             closePosition(state, position, exitPrice, "market regime changed");
             state.cooldownUntilCycle = state.cycleCount + 1;
             continue;

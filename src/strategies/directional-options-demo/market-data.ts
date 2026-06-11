@@ -129,11 +129,23 @@ function getDefaultCandidateExpiries(): string[] {
 }
 
 async function fetchJson(pUrl: string): Promise<Record<string, unknown>> {
-    const objResponse = await fetch(pUrl);
-    if (!objResponse.ok) {
-        throw new Error(`${objResponse.status} ${objResponse.statusText}`);
+    let vLastError: Error | null = null;
+    for (let vAttempt = 0; vAttempt < 3; vAttempt += 1) {
+        try {
+            const objResponse = await fetch(pUrl);
+            if (!objResponse.ok) {
+                throw new Error(`${objResponse.status} ${objResponse.statusText}`);
+            }
+            return await objResponse.json() as Record<string, unknown>;
+        }
+        catch (objError) {
+            vLastError = objError instanceof Error ? objError : new Error(String(objError));
+            if (vAttempt < 2) {
+                await new Promise((resolve) => setTimeout(resolve, 300 * (vAttempt + 1)));
+            }
+        }
     }
-    return await objResponse.json() as Record<string, unknown>;
+    throw vLastError || new Error("fetch_failed");
 }
 
 async function fetchOptionProducts(pUnderlying: string): Promise<Record<string, unknown>[]> {
