@@ -4587,6 +4587,24 @@ function buildRuntimeStateWithStrategyStartedAt(
     return objState;
 }
 
+function getClosedFromDateManualLockState(pRuntime: RollingFuturesLtRuntimeRecord | null): boolean {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    return Boolean(objState.closedFromDateManualLock);
+}
+
+function buildRuntimeStateWithClosedFromDateManualLock(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pLocked: boolean
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    if (!pLocked) {
+        delete objState.closedFromDateManualLock;
+        return objState;
+    }
+    objState.closedFromDateManualLock = true;
+    return objState;
+}
+
 function getEarliestOpenedAtFromTrackedPositions(
     pPositions: RollingFuturesLtImportedPositionRecord[]
 ): string {
@@ -4779,7 +4797,8 @@ async function clearActiveStrategyRun(
         strategyCode: pStrategyCode,
         state: {
             ...buildRuntimeStateWithStrategyStartedAt(objRuntime, ""),
-            ...buildRuntimeStateWithStrategyRun(objRuntime, {})
+            ...buildRuntimeStateWithStrategyRun(objRuntime, {}),
+            ...buildRuntimeStateWithClosedFromDateManualLock(objRuntime, false)
         }
     });
 }
@@ -5992,6 +6011,7 @@ async function executeStrategyPlacement(
         strategyCode: pStrategyCode,
         state: {
             ...buildRuntimeStateWithProfitClosePending(objRuntimeBeforeExec, "", 0, ""),
+            ...buildRuntimeStateWithClosedFromDateManualLock(objRunState.runtime, false),
             ...buildRuntimeStateWithStrategyStartedAt(objRunState.runtime, vStrategyStartedAt),
             ...buildRuntimeStateWithStrategyRun(objRunState.runtime, {
                 strategyRunId: objRunState.strategyRunId,
@@ -6251,7 +6271,10 @@ async function syncCoveredRecoveryMetricsFromClosedHistory(
         return pProfile;
     }
 
-    const objProfileWithClosedFromDate = pOptions?.preserveClosedFromDate
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const bPreserveClosedFromDate = Boolean(pOptions?.preserveClosedFromDate)
+        || getClosedFromDateManualLockState(objRuntime);
+    const objProfileWithClosedFromDate = bPreserveClosedFromDate
         ? pProfile
         : await updateStrategyClosedFromDateAfterExec(
             pUserId,
@@ -7662,6 +7685,7 @@ async function saveProfileInternal(req: Request, res: Response, pStrategyCode: R
     const vUserId = getAccountId(req);
     const objExisting = await readLiveProfile(vUserId, pStrategyCode);
     const objExistingUiState = getMergedUiState(objExisting);
+    const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
     const objIncoming = normalizeProfileSaveInput(vUserId, pStrategyCode, {
         ...objExisting,
         selectedApiProfileId: String(req.body?.selectedApiProfileId || objExisting.selectedApiProfileId || "").trim(),
@@ -7677,6 +7701,14 @@ async function saveProfileInternal(req: Request, res: Response, pStrategyCode: R
         && vClosedFromDateChanged
         && String(objSaved.selectedApiProfileId || "").trim()
     ) {
+        if (objRuntime && getStrategyStartedAtState(objRuntime)) {
+            await saveRollingFuturesLtRuntime({
+                ...objRuntime,
+                userId: vUserId,
+                strategyCode: pStrategyCode,
+                state: buildRuntimeStateWithClosedFromDateManualLock(objRuntime, true)
+            });
+        }
         const arrTrackedOpenPositions = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
         objSaved = await syncCoveredRecoveryMetricsFromClosedHistory(
             vUserId,
@@ -9557,7 +9589,10 @@ async function saveOpenPositionsInternal(req: Request, res: Response, pStrategyC
             pStrategyCode,
             String(objProfile.selectedApiProfileId || "").trim(),
             objProfile,
-            arrSaved
+            arrSaved,
+            {
+                preserveClosedFromDate: true
+            }
         );
     }
     const objOpenPositions = await buildOpenPositionsPayload(vUserId, pStrategyCode, arrSaved);

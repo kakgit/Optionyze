@@ -2054,11 +2054,20 @@
         if (ids.closedFromDate instanceof HTMLInputElement) {
             const vClosedFromDate = formatDateTimeInputValue(oldestOpenedAt);
             if (vClosedFromDate) {
-                ids.closedFromDate.value = vClosedFromDate;
-                queueProfileSave();
-                queueClosedPositionsRefresh();
+                const shouldApplyImportedClosedFromDate = !isCoveredMode
+                    || window.confirm(`Change Closed Positions Start Date to ${vClosedFromDate.replace("T", " ")} based on the earliest imported live position?`);
+                if (shouldApplyImportedClosedFromDate) {
+                    ids.closedFromDate.value = vClosedFromDate;
+                    await saveProfile();
+                }
             }
         }
+        await Promise.all([
+            loadClosedPositions().catch(function () { return undefined; }),
+            loadSavedOpenPositions().catch(function () { return undefined; }),
+            loadRuntimeStatus().catch(function () { return undefined; }),
+            loadEvents().catch(function () { return undefined; })
+        ]);
         closeImportModal();
         return objResult;
     }
