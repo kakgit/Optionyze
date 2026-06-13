@@ -10971,15 +10971,6 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
 }
 
 async function updateRecoveryMetricsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
-    if (isCoveredOptionsStrategy(pStrategyCode)) {
-        const objOpenPositions = await buildOpenPositionsPayload(getAccountId(req), pStrategyCode);
-        res.json({
-            status: "success",
-            message: "Recovery metrics are temporarily de-linked for covered options.",
-            data: objOpenPositions
-        });
-        return;
-    }
     const vUserId = getAccountId(req);
     const vBrokerageTotal = Math.max(0, Number(req.body?.totalBrokerageToRecover || 0));
     const vRecoveredPnl = Number(req.body?.totalPnl || 0);
