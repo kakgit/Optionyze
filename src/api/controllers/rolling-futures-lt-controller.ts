@@ -30,6 +30,11 @@ import {
     saveRollingOptionsEvent
 } from "../../storage/rolling-options-pt-de-event-store";
 import {
+    appendOptionsScalperPaperClosedPositions,
+    listOptionsScalperPaperClosedPositions,
+    type OptionsScalperPaperClosedPositionRecord
+} from "../../storage/options-scalper-paper-store";
+import {
     createPendingStrategyExecutionRequest,
     deletePendingStrategyExecutionRequest,
     getPendingStrategyExecutionRequestById,
@@ -135,7 +140,8 @@ const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
     "rolling-futures-lt-long": "Long Rolling Futures",
     "rolling-futures-lt-short": "Short Rolling Futures",
     "rolling-futures-lt-dual": "Dual Rolling Futures",
-    "covered-options": "Covered Options"
+    "covered-options": "Covered Options",
+    "options-scalper": "Options-Scalper"
 };
 const gFutureLimitRetryDelayMs = 5000;
 const gFutureLimitRetryCount = 5;
@@ -406,6 +412,14 @@ function isDualRollingFuturesStrategy(pStrategyCode: RollingFuturesLtStrategyCod
     return pStrategyCode === "rolling-futures-lt-dual" || pStrategyCode === "covered-options";
 }
 
+function isCoveredLikeStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
+    return pStrategyCode === "covered-options" || pStrategyCode === "options-scalper";
+}
+
+function isOptionsScalperStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
+    return pStrategyCode === "options-scalper";
+}
+
 function isCoveredOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
     return pStrategyCode === "covered-options";
 }
@@ -418,7 +432,7 @@ function normalizeOptionRowIndex(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pValue: unknown
 ): 1 | 2 {
-    return isCoveredOptionsStrategy(pStrategyCode) && Number(pValue) === 2 ? 2 : 1;
+    return isCoveredLikeStrategy(pStrategyCode) && Number(pValue) === 2 ? 2 : 1;
 }
 
 function isDualExecStrategyAllowed(pStrategyCode: RollingFuturesLtStrategyCode, pExecStrategy: boolean | null | undefined): boolean {
@@ -1479,7 +1493,7 @@ function getDefaultOptionRowUiState(
         slD: bIsDual ? "0.50" : "0.65",
         reEnter: true
     };
-    if (isCoveredOptionsStrategy(pStrategyCode) && vRowIndex === 1) {
+    if (isCoveredLikeStrategy(pStrategyCode) && vRowIndex === 1) {
         objDefaults.action = "buy";
         objDefaults.expiryMode = "6";
         objDefaults.newD = "0.63";
@@ -1487,7 +1501,7 @@ function getDefaultOptionRowUiState(
         objDefaults.tpD = "0.82";
         objDefaults.slD = "0.42";
     }
-    if (isCoveredOptionsStrategy(pStrategyCode) && vRowIndex === 2) {
+    if (isCoveredLikeStrategy(pStrategyCode) && vRowIndex === 2) {
         objDefaults.action = "sell";
         objDefaults.expiryMode = "4";
         objDefaults.newD = "0.43";
@@ -1592,7 +1606,7 @@ function getDefaultManualTraderUiState(
         closedFromDate: "",
         closedToDate: ""
     };
-    [1, ...(isCoveredOptionsStrategy(pStrategyCode) ? [2] : [])].forEach((vRowIndex) => {
+    [1, ...(isCoveredLikeStrategy(pStrategyCode) ? [2] : [])].forEach((vRowIndex) => {
         const objKeys = getOptionRowStateKeys(pStrategyCode, vRowIndex);
         const objDefaults = getDefaultOptionRowUiState(pStrategyCode, vRowIndex);
         objState[objKeys.action] = objDefaults.action;
@@ -1750,7 +1764,7 @@ function markPositionsAsImportedObservationOnly(
             ? objPosition.metadata as Record<string, unknown>
             : {};
         if (isOptionContractSymbol(objPosition.contractName)) {
-            const vRowIndex = isCoveredOptionsStrategy(objPosition.strategyCode)
+            const vRowIndex = isCoveredLikeStrategy(objPosition.strategyCode)
                 ? normalizeOptionRowIndex(
                     objPosition.strategyCode,
                     objMetadata.rowIndex || (String(objPosition.side || "").trim().toUpperCase() === "SELL" ? 2 : 1)
@@ -2335,6 +2349,132 @@ function mapLiveClosedPosition(pRow: DeltaOrderHistoryRow, pIndex: number) {
         startAt: vCreatedAt,
         endAt: vUpdatedAt,
         orderType: formatOrderType(pRow.meta_data?.order_type)
+    };
+}
+
+function mapOptionsScalperPaperClosedPosition(
+    pRow: OptionsScalperPaperClosedPositionRecord,
+    pIndex: number
+) {
+    return {
+        rowId: String(pRow.closeId || `paper-close-${pIndex}`),
+        symbol: String(pRow.contractName || "-"),
+        side: String(pRow.side || "-").trim().toUpperCase(),
+        qty: Number(pRow.qty || 0),
+        buyPrice: Number.isFinite(Number(pRow.buyPrice)) ? Number(pRow.buyPrice) : null,
+        sellPrice: Number.isFinite(Number(pRow.sellPrice)) ? Number(pRow.sellPrice) : null,
+        charges: Number(pRow.charges || 0),
+        pnl: Number(pRow.pnl || 0),
+        startAt: String(pRow.startAt || "").trim(),
+        endAt: String(pRow.endAt || "").trim(),
+        orderType: "paper"
+    };
+}
+
+function filterPaperClosedPositionsByRange(
+    pRows: OptionsScalperPaperClosedPositionRecord[],
+    pFromDateValue: string,
+    pToDateValue: string
+): OptionsScalperPaperClosedPositionRecord[] {
+    const vFromMs = pFromDateValue ? new Date(parseDeltaUiDateTimeLocalToIsoString(pFromDateValue)).getTime() : Number.NaN;
+    const vToMs = pToDateValue ? new Date(parseDeltaUiDateTimeLocalToIsoString(pToDateValue)).getTime() : Number.NaN;
+    return (Array.isArray(pRows) ? pRows : []).filter((objRow) => {
+        const vEndMs = new Date(String(objRow.endAt || objRow.startAt || "")).getTime();
+        if (!Number.isFinite(vEndMs)) {
+            return false;
+        }
+        if (Number.isFinite(vFromMs) && vEndMs < vFromMs) {
+            return false;
+        }
+        if (Number.isFinite(vToMs) && vEndMs > (vToMs + (59 * 1000) + 999)) {
+            return false;
+        }
+        return true;
+    });
+}
+
+async function syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord
+): Promise<RollingFuturesLtProfileRecord> {
+    const objUiState = getMergedUiState(pProfile);
+    const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
+    const arrRows = await listOptionsScalperPaperClosedPositions(pUserId, pProfile.strategyCode);
+    const arrFiltered = filterPaperClosedPositionsByRange(
+        arrRows.filter((objRow) => isTrackedContractForSymbol(objRow.contractName, vSelectedSymbol)),
+        String(objUiState.closedFromDate || "").trim(),
+        String(objUiState.closedToDate || "").trim()
+    );
+    const vBrokerageTotal = Number(arrFiltered.reduce((pSum, objRow) => pSum + Number(objRow.charges || 0), 0).toFixed(4));
+    const vTotalPnl = Number(arrFiltered.reduce((pSum, objRow) => pSum + Number(objRow.pnl || 0), 0).toFixed(4));
+    await saveBrokerageRecoveryTotal(pUserId, pProfile.strategyCode, vBrokerageTotal);
+    await saveRecoveredTotalPnl(pUserId, pProfile.strategyCode, vTotalPnl);
+    return pProfile;
+}
+
+async function refreshOptionsScalperPaperOpenPositions(
+    pPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<RollingFuturesLtImportedPositionRecord[]> {
+    const arrNext: RollingFuturesLtImportedPositionRecord[] = [];
+    for (const objPosition of Array.isArray(pPositions) ? pPositions : []) {
+        const objTicker = await getLiveOptionTicker(objPosition.contractName);
+        const vMarkPrice = Number(objTicker?.markPrice || objPosition.markPrice || objPosition.entryPrice || 0);
+        arrNext.push({
+            ...objPosition,
+            markPrice: vMarkPrice,
+            pnl: Number(estimateTrackedPositionPnl(objPosition, vMarkPrice).toFixed(4)),
+            updatedAt: new Date().toISOString(),
+            metadata: objPosition.metadata && typeof objPosition.metadata === "object"
+                ? {
+                    ...objPosition.metadata,
+                    liveDelta: Number.isFinite(Number(objTicker?.delta)) ? Number(objTicker?.delta) : objPosition.metadata.delta,
+                    liveTheta: Number.isFinite(Number(objTicker?.theta)) ? Number(objTicker?.theta) : objPosition.metadata.theta
+                }
+                : objPosition.metadata
+        });
+    }
+    return arrNext;
+}
+
+async function closeOptionsScalperPaperPosition(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pPosition: RollingFuturesLtImportedPositionRecord,
+    pExitPrice?: number,
+    pClosedAtIso?: string
+): Promise<OptionsScalperPaperClosedPositionRecord> {
+    const vClosedAtIso = String(pClosedAtIso || "").trim() || new Date().toISOString();
+    const vExitPrice = Number.isFinite(Number(pExitPrice))
+        ? Number(pExitPrice)
+        : Number((await getLiveOptionTicker(pPosition.contractName))?.markPrice || pPosition.markPrice || pPosition.entryPrice || 0);
+    const vCloseCharge = await estimateTrackedPositionCharge(pPosition, vExitPrice);
+    const vPnl = Number(estimateTrackedPositionPnl(pPosition, vExitPrice).toFixed(4));
+    const vTotalCharges = Number((Number(pPosition.charges || 0) + vCloseCharge).toFixed(4));
+    const vSide = String(pPosition.side || "").trim().toUpperCase();
+    return {
+        closeId: crypto.randomUUID(),
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        contractName: pPosition.contractName,
+        side: vSide,
+        qty: Number(pPosition.qty || 0),
+        buyPrice: vSide === "BUY" ? Number(pPosition.entryPrice || 0) : vExitPrice,
+        sellPrice: vSide === "SELL" ? Number(pPosition.entryPrice || 0) : vExitPrice,
+        charges: vTotalCharges,
+        pnl: vPnl,
+        startAt: String(pPosition.openedAt || "").trim() || vClosedAtIso,
+        endAt: vClosedAtIso,
+        metadata: pPosition.metadata && typeof pPosition.metadata === "object"
+            ? {
+                ...pPosition.metadata,
+                closePrice: vExitPrice,
+                closeCharge: vCloseCharge
+            }
+            : {
+                closePrice: vExitPrice,
+                closeCharge: vCloseCharge
+            },
+        updatedAt: vClosedAtIso
     };
 }
 
@@ -2932,7 +3072,7 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         closedFromDate: String(objUiState.closedFromDate || "").trim(),
         closedToDate: String(objUiState.closedToDate || "").trim()
     };
-    [1, ...(isCoveredOptionsStrategy(pProfile.strategyCode) ? [2] : [])].forEach((vRowIndex) => {
+    [1, ...(isCoveredLikeStrategy(pProfile.strategyCode) ? [2] : [])].forEach((vRowIndex) => {
         const objRowState = getNormalizedOptionRowUiState(objUiState, pProfile.strategyCode, vRowIndex);
         const objKeys = getOptionRowStateKeys(pProfile.strategyCode, vRowIndex);
         objMergedUiState[objKeys.action] = objRowState.action;
@@ -2982,7 +3122,7 @@ function normalizeProfileSaveInput(
         closedFromDate: String(objUiState.closedFromDate || "").trim(),
         closedToDate: String(objUiState.closedToDate || "").trim()
     };
-    [1, ...(isCoveredOptionsStrategy(pStrategyCode) ? [2] : [])].forEach((vRowIndex) => {
+    [1, ...(isCoveredLikeStrategy(pStrategyCode) ? [2] : [])].forEach((vRowIndex) => {
         const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
         const objKeys = getOptionRowStateKeys(pStrategyCode, vRowIndex);
         objNormalizedUiState[objKeys.action] = objRowState.action;
@@ -3466,7 +3606,7 @@ function buildNeutralStatus(
     pAutoTraderEnabled: boolean,
     pRuntime: RollingFuturesLtRuntimeRecord | null = null
 ): RollingFuturesLtNeutralStatus {
-    if (isCoveredOptionsStrategy(pStrategyCode)) {
+    if (isCoveredLikeStrategy(pStrategyCode)) {
         return {
             mode: "none",
             totalDelta: Number(Number(pTotals.totalDelta || 0).toFixed(6)),
@@ -3616,7 +3756,7 @@ async function buildOpenPositionsPayload(
     const objProfile = await readLiveProfile(pUserId, pStrategyCode);
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const objUiState = getMergedUiState(objProfile);
-    const bCoveredOptionsRecoveryBaseline = isCoveredOptionsStrategy(pStrategyCode);
+    const bCoveredOptionsRecoveryBaseline = isCoveredLikeStrategy(pStrategyCode);
     let arrPositions = pPositions || await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
     const objNormalizedBaseDeltaSigns = normalizeTrackedOptionBaseDeltaSigns(arrPositions);
     if (objNormalizedBaseDeltaSigns.changed) {
@@ -5450,8 +5590,8 @@ async function reconcileRemovedTrackedPositionsPnl(
         await incrementRecoveredTotalPnl(pUserId, pStrategyCode, vRecoveredPnlDelta, arrLive.length);
     }
 
-    const vSliceLabel = isCoveredOptionsStrategy(pStrategyCode) ? "tracked position slice" : "tracked futures slice";
-    const vTitle = isCoveredOptionsStrategy(pStrategyCode)
+    const vSliceLabel = isCoveredLikeStrategy(pStrategyCode) ? "tracked position slice" : "tracked futures slice";
+    const vTitle = isCoveredLikeStrategy(pStrategyCode)
         ? "Tracked Positions Realized During Reconciliation"
         : "Tracked Futures Realized During Reconciliation";
 
@@ -5535,7 +5675,7 @@ async function applyServerSideNeutralityCheck(
     threshold: number | null;
     nextRuntimeState: Record<string, unknown> | null;
 }> {
-    if (isCoveredOptionsStrategy(pStrategyCode)) {
+    if (isCoveredLikeStrategy(pStrategyCode)) {
         const objTotals = await calculateTrackedNeutralTotals(pTrackedPositions);
         return {
             trackedOpenPositions: pTrackedPositions,
@@ -5998,7 +6138,6 @@ async function executeStrategyPlacement(
         threshold: number | null;
     };
 }> {
-    const { client, profile } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const vStrategyStartedAt = String(pOptions?.strategyStartedAt || new Date().toISOString()).trim() || new Date().toISOString();
     if (!pOptions?.skipRecoveryReset) {
         await resetRecoveryMetrics(pUserId, pStrategyCode);
@@ -6024,9 +6163,86 @@ async function executeStrategyPlacement(
     const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
     const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pInput.rowIndex);
     const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
-    if (!isCoveredOptionsStrategy(pStrategyCode) && arrOpenOptions.length > 0) {
+    if (!isCoveredLikeStrategy(pStrategyCode) && arrOpenOptions.length > 0) {
         throw new Error(`An option position is already open (${arrOpenOptions[0].contractName}). Close the existing option before opening a new one.`);
     }
+    if (isOptionsScalperStrategy(pStrategyCode)) {
+        const arrOptionSides: Array<"ce" | "pe"> = pInput.legSide === "both"
+            ? ["ce", "pe"]
+            : [pInput.legSide === "pe" ? "pe" : "ce"];
+        const arrContracts: Array<Record<string, unknown>> = [];
+        const arrOrders: Array<Record<string, unknown>> = [];
+        const arrNewPositions: RollingFuturesLtImportedPositionRecord[] = [];
+        for (const vLegSide of arrOptionSides) {
+            if (hasTrackedOptionRowLeg(arrExisting, vRowIndex, vLegSide)) {
+                throw new Error(`Row ${vRowIndex} ${vLegSide.toUpperCase()} paper option is already open. Close it before executing again.`);
+            }
+            const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
+                pUserId,
+                pStrategyCode,
+                pProfile,
+                {
+                    action: pInput.action,
+                    symbol: pInput.symbol,
+                    legSide: vLegSide,
+                    expiryMode: pInput.expiryMode,
+                    expiryDate: pInput.expiryDate,
+                    qty: pInput.qty,
+                    targetDelta: pInput.targetDelta,
+                    rowIndex: vRowIndex,
+                    openedReason: "strategy_option_open"
+                }
+            );
+            arrNewPositions.push(objPaperOpen.position);
+            arrContracts.push(objPaperOpen.contract);
+            arrOrders.push({
+                order: objPaperOpen.order,
+                request: {
+                    product_symbol: objPaperOpen.position.contractName,
+                    size: pInput.qty,
+                    side: pInput.action,
+                    order_type: "paper_market_order"
+                }
+            });
+        }
+        const arrInitialSaved = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, [
+            ...arrExisting,
+            ...arrNewPositions
+        ]);
+        const objNeutralCheck = pOptions?.skipNeutralityCheck
+            ? {
+                trackedOpenPositions: arrInitialSaved,
+                hedgePlaced: false,
+                totalDelta: 0,
+                totalTheta: 0,
+                mode: "none" as const,
+                threshold: null,
+                nextRuntimeState: null
+            }
+            : await applyServerSideNeutralityCheck(
+                pUserId,
+                pStrategyCode,
+                pSelectedApiProfileId,
+                objUiState,
+                pInput.symbol,
+                arrInitialSaved,
+                null
+            );
+        return {
+            profileLabel: "Paper",
+            trackedOpenPositions: objNeutralCheck.trackedOpenPositions,
+            contracts: arrContracts,
+            orders: arrOrders,
+            neutralCheck: {
+                mode: objNeutralCheck.mode,
+                hedgePlaced: objNeutralCheck.hedgePlaced,
+                totalDelta: objNeutralCheck.totalDelta,
+                totalTheta: objNeutralCheck.totalTheta,
+                threshold: objNeutralCheck.threshold
+            }
+        };
+    }
+    const { client, profile } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(objUiState, "strategy_option_open", pStrategyCode, vRowIndex);
     const bIsDualStrategy = isDualRollingFuturesStrategy(pStrategyCode);
     const arrOptionSides: Array<"CE" | "PE"> = pInput.legSide === "both"
@@ -6257,6 +6473,146 @@ async function updateStrategyClosedFromDateAfterExec(
     });
 }
 
+async function buildOptionsScalperPaperOptionOpen(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pProfile: RollingFuturesLtProfileRecord,
+    pInput: {
+        action: "buy" | "sell";
+        symbol: "BTC" | "ETH";
+        legSide: "ce" | "pe";
+        expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
+        expiryDate: string;
+        qty: number;
+        targetDelta: number;
+        rowIndex?: 1 | 2;
+        openedReason: RollingFuturesLtOptionMetadata["openedReason"];
+        takeProfitDelta?: number;
+        stopLossDelta?: number;
+        reEntryDelta?: number;
+        reEnterEnabled?: boolean;
+    }
+): Promise<{
+    position: RollingFuturesLtImportedPositionRecord;
+    contract: Record<string, unknown>;
+    order: Record<string, unknown>;
+}> {
+    const objUiState = getMergedUiState(pProfile);
+    const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pInput.rowIndex);
+    const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
+    const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(objUiState, String(pInput.openedReason || "strategy_option_open"), pStrategyCode, vRowIndex);
+    const objConfig = {
+        symbol: pInput.symbol,
+        contractName: getContractNameForSymbol(pInput.symbol),
+        lotSize: getLotSizeForSymbol(pInput.symbol),
+        futureQty: 1,
+        futureOrderType: "market_order" as const,
+        action: pInput.action,
+        legSide: pInput.legSide,
+        expiryMode: pInput.expiryMode,
+        expiryDate: pInput.expiryDate,
+        optionQty: pInput.qty,
+        redOptionQtyPct: 100,
+        greenOptionQtyPct: 100,
+        newDelta: pInput.targetDelta,
+        reDelta: pInput.reEntryDelta ?? pInput.targetDelta,
+        deltaTakeProfit: Math.max(0, Number(pInput.takeProfitDelta ?? objOptionMetadata.takeProfitDelta ?? objRowState.tpD ?? 0.25)),
+        deltaStopLoss: Math.max(0, Number(pInput.stopLossDelta ?? objOptionMetadata.stopLossDelta ?? objRowState.slD ?? 0.65)),
+        reEnter: Boolean(pInput.reEnterEnabled ?? objOptionMetadata.reEnterEnabled),
+        addOneLotFuture: false,
+        renkoEnabled: false,
+        renkoStepPoints: 10,
+        renkoPriceSource: "spot_price" as const,
+        loopSeconds: 8
+    };
+    const objContract = await findBestLiveOptionContract(
+        objConfig,
+        pInput.legSide === "pe" ? "PE" : "CE",
+        pInput.targetDelta,
+        true
+    );
+    if (!objContract) {
+        throw new Error(`No live ${pInput.legSide.toUpperCase()} contract was found for ${pInput.symbol} with delta at or below ${pInput.targetDelta.toFixed(2)}.`);
+    }
+
+    const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
+    if (!(vAbsoluteDelta <= pInput.targetDelta)) {
+        throw new Error(`The selected ${pInput.legSide.toUpperCase()} contract delta ${vAbsoluteDelta.toFixed(2)} exceeded New D ${pInput.targetDelta.toFixed(2)}.`);
+    }
+    const vTakeProfitDelta = Math.max(0, Number(pInput.takeProfitDelta ?? objOptionMetadata.takeProfitDelta ?? objRowState.tpD ?? 0.25));
+    const vStopLossDelta = Math.max(0, Number(pInput.stopLossDelta ?? objOptionMetadata.stopLossDelta ?? objRowState.slD ?? 0.65));
+    const objImmediateRuleDecision = shouldTriggerTrackedOption(
+        pInput.action.toUpperCase(),
+        vAbsoluteDelta,
+        vTakeProfitDelta,
+        vStopLossDelta
+    );
+    if (objImmediateRuleDecision.shouldAct) {
+        throw new Error(`The selected ${pInput.legSide.toUpperCase()} contract delta ${vAbsoluteDelta.toFixed(2)} already violates the configured ${objImmediateRuleDecision.reason.toUpperCase()} rule for row ${vRowIndex}. Adjust New D / SL / TP before executing.`);
+    }
+
+    const vOpenedAtIso = new Date().toISOString();
+    const vEntryCharge = await estimateTrackedPositionCharge({
+        contractName: String(objContract.contractSymbol || "").trim(),
+        qty: pInput.qty,
+        entryPrice: Number(objContract.markPrice || 0),
+        markPrice: Number(objContract.markPrice || 0)
+    });
+    return {
+        position: {
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            importId: crypto.randomUUID(),
+            contractName: String(objContract.contractSymbol || "").trim(),
+            side: pInput.action.toUpperCase(),
+            qty: pInput.qty,
+            entryPrice: Number(objContract.markPrice || 0),
+            markPrice: Number(objContract.markPrice || 0),
+            charges: Number(vEntryCharge.toFixed(4)),
+            pnl: 0,
+            margin: 0,
+            liquidationPrice: 0,
+            metadata: optionMetadataToRecord({
+                ...objOptionMetadata,
+                rowIndex: vRowIndex,
+                takeProfitDelta: vTakeProfitDelta,
+                stopLossDelta: vStopLossDelta,
+                reEntryDelta: Math.max(0, Number(pInput.reEntryDelta ?? objOptionMetadata.reEntryDelta ?? objRowState.reD ?? pInput.targetDelta)),
+                reEnterEnabled: Boolean(pInput.reEnterEnabled ?? objOptionMetadata.reEnterEnabled),
+                openedReason: pInput.openedReason,
+                baseDelta: getSignedOptionBaseDelta(String(objContract.contractSymbol || "").trim(), vAbsoluteDelta),
+                baseTheta: Math.abs(Number(objContract.theta || 0)),
+                requestedExpiryDate: String(objContract.requestedExpiryDate || "").trim(),
+                resolvedExpiryDate: String(objContract.expiryDate || "").trim()
+            }),
+            openedAt: vOpenedAtIso,
+            updatedAt: vOpenedAtIso
+        },
+        contract: {
+            contractSymbol: objContract.contractSymbol,
+            optionSide: objContract.optionSide,
+            strike: objContract.strike,
+            delta: objContract.delta,
+            theta: objContract.theta,
+            markPrice: objContract.markPrice,
+            requestedExpiryDate: objContract.requestedExpiryDate,
+            resolvedExpiryDate: objContract.expiryDate,
+            usedNextDayExpiryFallback: objContract.usedNextDayFallback
+        },
+        order: {
+            id: crypto.randomUUID(),
+            product_symbol: objContract.contractSymbol,
+            size: pInput.qty,
+            side: pInput.action,
+            order_type: "paper_market_order",
+            average_fill_price: Number(objContract.markPrice || 0),
+            status: "filled",
+            isPaperTrade: true,
+            filled_at: vOpenedAtIso
+        }
+    };
+}
+
 async function syncCoveredRecoveryMetricsFromClosedHistory(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -6316,6 +6672,26 @@ async function closeTrackedPositionOnDelta(
     pPosition: RollingFuturesLtImportedPositionRecord,
     pOrderKind: "SL" | "TP" | "CL" = "CL"
 ) : Promise<{ payload: Record<string, unknown>; placedAt: string; realizedPnl: number | null; }> {
+    if (isOptionsScalperStrategy(pStrategyCode)) {
+        const objClosed = await closeOptionsScalperPaperPosition(pUserId, pStrategyCode, pPosition);
+        const vClosedAtIso = objClosed.endAt;
+        await appendOptionsScalperPaperClosedPositions(pUserId, pStrategyCode, [objClosed]);
+        await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
+            pUserId,
+            await readLiveProfile(pUserId, pStrategyCode)
+        );
+        return {
+            payload: {
+                id: crypto.randomUUID(),
+                product_symbol: pPosition.contractName,
+                average_fill_price: vClosedAtIso ? (objClosed.sellPrice ?? objClosed.buyPrice ?? 0) : 0,
+                order_type: "paper_market_order",
+                isPaperTrade: true
+            },
+            placedAt: vClosedAtIso,
+            realizedPnl: objClosed.pnl
+        };
+    }
     const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const vPlacedAtIso = new Date().toISOString();
     const vClientOrderId = await allocateStrategyClientOrderId(pUserId, pStrategyCode, pOrderKind);
@@ -6359,7 +6735,6 @@ async function openTrackedOptionReEntry(
     orderPayload: Record<string, unknown>;
     placedAt: string;
 } | null> {
-    const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const objUiState = getMergedUiState(pProfile);
     const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pMetadata.rowIndex);
     const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
@@ -6381,6 +6756,39 @@ async function openTrackedOptionReEntry(
     if (!(vTargetDelta > 0)) {
         return null;
     }
+
+    if (isOptionsScalperStrategy(pStrategyCode)) {
+        const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
+            pUserId,
+            pStrategyCode,
+            pProfile,
+            {
+                action: vOrderAction,
+                symbol: vSymbol,
+                legSide: vLegSide,
+                expiryMode: (["1", "2", "4", "5", "6", "7"].includes(String(objRowState.expiryMode || "5").trim())
+                    ? String(objRowState.expiryMode || "5").trim()
+                    : "5") as "1" | "2" | "4" | "5" | "6" | "7",
+                expiryDate: vExpiryDate,
+                qty: vOptionQty,
+                targetDelta: vTargetDelta,
+                rowIndex: vRowIndex,
+                openedReason: pReason === "sl"
+                    ? "sl_reentry"
+                    : (pReason === "tp" ? "tp_reentry" : "expiry_cutoff_reentry"),
+                takeProfitDelta: Math.max(0, Number(pMetadata.takeProfitDelta || objRowState.tpD || 0.25)),
+                stopLossDelta: Math.max(0, Number(pMetadata.stopLossDelta || objRowState.slD || 0.65)),
+                reEntryDelta: vTargetDelta,
+                reEnterEnabled: Boolean(pMetadata.reEnterEnabled)
+            }
+        );
+        return {
+            position: objPaperOpen.position,
+            orderPayload: objPaperOpen.order,
+            placedAt: String(objPaperOpen.order.filled_at || new Date().toISOString())
+        };
+    }
+    const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
 
     const objConfig = {
         symbol: vSymbol,
@@ -6917,7 +7325,7 @@ async function applyTriggeredOptionRule(
             kind: "option_rule_close",
             title: pReason === "sl" ? "Confirm SL Close" : (pReason === "tp" ? "Confirm TP Close" : "Confirm Expiry Close"),
             message: pReason === "expiry_cutoff"
-                ? `Covered option ${pPosition.contractName} reached the same-day expiry cutoff. Confirm to close it.`
+                ? `Covered option ${pPosition.contractName} is on its expiry date. Confirm to swap it into the next expiry.`
                 : `Covered option ${pPosition.contractName} hit ${pReason.toUpperCase()} at delta ${Math.abs(Number(pCurrentDelta || 0)).toFixed(3)}. Confirm to close it.`,
             payload: {
                 importId: pPosition.importId,
@@ -6968,8 +7376,8 @@ async function applyTriggeredOptionRule(
             pStrategyCode,
             "option_closed",
             "info",
-            "Same-Day Expiry Cutoff Closed",
-            `Closed same-day expiry option ${pPosition.contractName} at or after 4:00 PM Delta time.`,
+            "Expiry-Day Swap Closed",
+            `Closed expiry-day option ${pPosition.contractName} after midnight so it can be swapped into the next expiry before Delta's own expiry close.`,
             {
                 contractName: pPosition.contractName,
                 qty: pPosition.qty,
@@ -7013,6 +7421,88 @@ async function applyTriggeredOptionRule(
     );
     if (pReason === "sl" || pReason === "tp") {
         await schedulePendingOptionRecoveryRefresh(pUserId, pStrategyCode, pReason);
+    }
+
+    if (isOptionsScalperStrategy(pStrategyCode)) {
+        const vProfitClosePauseUntil = new Date(Date.now() + gProfitClosePauseAfterOptionRuleMs).toISOString();
+        const objRuntimeBeforeProfitPause = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+            || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+        await saveRollingFuturesLtRuntime({
+            ...objRuntimeBeforeProfitPause,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithProfitClosePause(
+                objRuntimeBeforeProfitPause,
+                vProfitClosePauseUntil
+            )
+        });
+        if (Boolean(objMetadata.reEnterEnabled)) {
+            try {
+                const objPaperRowState = getNormalizedOptionRowUiState(
+                    getMergedUiState(pProfile),
+                    pStrategyCode,
+                    objMetadata.rowIndex
+                );
+                const objReEntry = await openTrackedOptionReEntry(
+                    pUserId,
+                    pStrategyCode,
+                    pSelectedApiProfileId,
+                    pProfile,
+                    pPosition,
+                    objMetadata,
+                    pReason,
+                    pReason === "expiry_cutoff"
+                        ? {
+                            forceExpiryDate: resolveCoveredCutoffReEntryExpiryDate(
+                                objPaperRowState.expiryMode,
+                                getTrackedOptionResolvedExpiryDate(pPosition)
+                            ),
+                            useRowAction: true,
+                            useRowQty: true
+                        }
+                        : undefined
+                );
+                if (objReEntry) {
+                    arrNextPositions = [...arrNextPositions, objReEntry.position];
+                    await logFuturesEvent(
+                        pUserId,
+                        pStrategyCode,
+                        pReason === "expiry_cutoff" ? "option_opened" : "reentry_opened",
+                        "success",
+                        pReason === "expiry_cutoff" ? "Expiry Cutoff Paper Re-Entry Opened" : "Paper Option Re-Entry Opened",
+                        `Opened replacement paper option ${objReEntry.position.contractName} after ${pReason.toUpperCase()}.`,
+                        {
+                            contractName: objReEntry.position.contractName,
+                            qty: objReEntry.position.qty,
+                            reason: pReason
+                        }
+                    );
+                }
+            }
+            catch (objError) {
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "engine_error",
+                    "warning",
+                    "Paper Re-Entry Skipped",
+                    getErrorMessage(objError, "Unable to open the paper re-entry option."),
+                    {
+                        contractName: pPosition.contractName,
+                        reason: "paper_reentry_error"
+                    }
+                );
+            }
+        }
+        const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrNextPositions);
+        await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
+            pUserId,
+            await readLiveProfile(pUserId, pStrategyCode)
+        );
+        if (!arrSaved.length) {
+            await clearActiveStrategyRun(pUserId, pStrategyCode);
+        }
+        return arrSaved;
     }
 
     const vProfitClosePauseUntil = new Date(Date.now() + gProfitClosePauseAfterOptionRuleMs).toISOString();
@@ -7089,7 +7579,7 @@ async function applyTriggeredOptionRule(
                     "success",
                     pReason === "expiry_cutoff" ? "Expiry Cutoff Re-Entry Opened" : "Option Re-Entry Opened",
                     pReason === "expiry_cutoff"
-                        ? `Opened replacement option ${objReEntry.position.contractName} after same-day expiry cutoff using row ${objRowState.rowIndex} settings.`
+                        ? `Opened replacement option ${objReEntry.position.contractName} after expiry-day swap using row ${objRowState.rowIndex} settings.`
                         : `Opened replacement option ${objReEntry.position.contractName} after ${pReason.toUpperCase()} using Re D ${Number(objMetadata.reEntryDelta || 0).toFixed(2)}.`,
                     {
                         contractName: objReEntry.position.contractName,
@@ -7244,7 +7734,6 @@ async function findTriggeredTrackedOptions(
             isCoveredOptionsStrategy(objPosition.strategyCode)
             && vResolvedExpiryDate
             && vResolvedExpiryDate === objCurrentDeltaTime.date
-            && isDeltaUiTimeAtOrAfter(16, 0)
         ) {
             arrTriggered.push({
                 position: objPosition,
@@ -7296,6 +7785,31 @@ async function closeTrackedPositionsOnDelta(
     closedPositions: Array<Record<string, unknown>>;
     profileLabel: string;
 }> {
+    if (isOptionsScalperStrategy(pStrategyCode)) {
+        const arrClosedRows = await Promise.all((Array.isArray(pPositions) ? pPositions : []).map((objPosition) => {
+            return closeOptionsScalperPaperPosition(pUserId, pStrategyCode, objPosition);
+        }));
+        await appendOptionsScalperPaperClosedPositions(pUserId, pStrategyCode, arrClosedRows);
+        await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, []);
+        await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
+            pUserId,
+            await readLiveProfile(pUserId, pStrategyCode)
+        );
+        await clearActiveStrategyRun(pUserId, pStrategyCode);
+        return {
+            closedPositions: arrClosedRows.map((objRow) => ({
+                closeId: objRow.closeId,
+                contractName: objRow.contractName,
+                qty: objRow.qty,
+                order: {
+                    order_type: "paper_market_order",
+                    average_fill_price: objRow.sellPrice ?? objRow.buyPrice ?? 0,
+                    isPaperTrade: true
+                }
+            })),
+            profileLabel: "Paper"
+        };
+    }
     const { client, profile } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const arrCloseCharges: number[] = [];
     const arrClosePnls: number[] = [];
@@ -7696,11 +8210,7 @@ async function saveProfileInternal(req: Request, res: Response, pStrategyCode: R
     await ensureRuntimeProfileSelection(vUserId, pStrategyCode, objSaved.selectedApiProfileId);
     const objSavedUiState = getMergedUiState(objSaved);
     const vClosedFromDateChanged = String(objExistingUiState.closedFromDate || "").trim() !== String(objSavedUiState.closedFromDate || "").trim();
-    if (
-        isCoveredOptionsStrategy(pStrategyCode)
-        && vClosedFromDateChanged
-        && String(objSaved.selectedApiProfileId || "").trim()
-    ) {
+    if (vClosedFromDateChanged && String(objSaved.selectedApiProfileId || "").trim()) {
         if (objRuntime && getStrategyStartedAtState(objRuntime)) {
             await saveRollingFuturesLtRuntime({
                 ...objRuntime,
@@ -7709,17 +8219,22 @@ async function saveProfileInternal(req: Request, res: Response, pStrategyCode: R
                 state: buildRuntimeStateWithClosedFromDateManualLock(objRuntime, true)
             });
         }
-        const arrTrackedOpenPositions = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
-        objSaved = await syncCoveredRecoveryMetricsFromClosedHistory(
-            vUserId,
-            pStrategyCode,
-            String(objSaved.selectedApiProfileId || "").trim(),
-            objSaved,
-            arrTrackedOpenPositions,
-            {
-                preserveClosedFromDate: true
-            }
-        );
+        if (isCoveredOptionsStrategy(pStrategyCode)) {
+            const arrTrackedOpenPositions = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
+            objSaved = await syncCoveredRecoveryMetricsFromClosedHistory(
+                vUserId,
+                pStrategyCode,
+                String(objSaved.selectedApiProfileId || "").trim(),
+                objSaved,
+                arrTrackedOpenPositions,
+                {
+                    preserveClosedFromDate: true
+                }
+            );
+        }
+        else if (isOptionsScalperStrategy(pStrategyCode)) {
+            objSaved = await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(vUserId, objSaved);
+        }
     }
     res.json({
         status: "success",
@@ -8491,16 +9006,32 @@ async function runAutoTraderCycle(
             throw buildSimulatedPrimaryOutageError();
         }
 
-        const arrPreviouslySavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
-        const arrLivePositions = await fetchLiveFuturePositions(pUserId, pStrategyCode, vSelectedApiProfileId, vSymbol);
-        await reconcileRemovedTrackedPositionsPnl(
-            pUserId,
-            pStrategyCode,
-            arrPreviouslySavedPositions,
-            arrLivePositions,
-            "auto_trader_live_reconcile"
-        );
-        let arrSavedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrLivePositions);
+        let arrSavedPositions: RollingFuturesLtImportedPositionRecord[] = [];
+        if (isOptionsScalperStrategy(pStrategyCode)) {
+            arrSavedPositions = await replaceRollingFuturesLtImportedPositions(
+                pUserId,
+                pStrategyCode,
+                await refreshOptionsScalperPaperOpenPositions(
+                    await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode)
+                )
+            );
+            await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
+                pUserId,
+                objProfile
+            );
+        }
+        else {
+            const arrPreviouslySavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+            const arrLivePositions = await fetchLiveFuturePositions(pUserId, pStrategyCode, vSelectedApiProfileId, vSymbol);
+            await reconcileRemovedTrackedPositionsPnl(
+                pUserId,
+                pStrategyCode,
+                arrPreviouslySavedPositions,
+                arrLivePositions,
+                "auto_trader_live_reconcile"
+            );
+            arrSavedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrLivePositions);
+        }
         if (isCoveredOptionsStrategy(pStrategyCode)) {
             arrSavedPositions = await processCoveredPendingOptionReEntries(
                 pUserId,
@@ -8686,6 +9217,11 @@ async function runAutoTraderCycle(
                 objTriggeredOption.reason,
                 arrSavedPositions
             );
+            // Covered expiry-day swaps are processed one per cycle so margin release,
+            // re-entry and optional confirmations can settle before the next leg swaps.
+            if (isCoveredOptionsStrategy(pStrategyCode) && objTriggeredOption.reason === "expiry_cutoff") {
+                break;
+            }
         }
 
         const objRuntimeBeforeProfitRule = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
@@ -9541,7 +10077,7 @@ async function getImportableOpenPositionsInternal(req: Request, res: Response, p
         });
     }
     catch (objError) {
-        const vSubjectLabel = isCoveredOptionsStrategy(pStrategyCode) ? "positions" : "futures positions";
+        const vSubjectLabel = isCoveredLikeStrategy(pStrategyCode) ? "positions" : "futures positions";
         res.status(500).json({
             status: "danger",
             message: getErrorMessage(objError, `Unable to fetch Delta open ${vSubjectLabel}.`)
@@ -9599,7 +10135,7 @@ async function saveOpenPositionsInternal(req: Request, res: Response, pStrategyC
     const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
     if (
         arrSaved.length > 0
-        && !isCoveredOptionsStrategy(pStrategyCode)
+        && !isCoveredLikeStrategy(pStrategyCode)
         && !(getBrokerageRecoveryTotal(objRuntime) > 0)
     ) {
         await saveBrokerageRecoveryTotal(vUserId, pStrategyCode, Number(objOpenPositions.totals?.totalCharges || 0));
@@ -9609,13 +10145,13 @@ async function saveOpenPositionsInternal(req: Request, res: Response, pStrategyC
         pStrategyCode,
         "manual_action",
         "info",
-        isCoveredOptionsStrategy(pStrategyCode) ? "Imported Live Positions Updated" : "Imported Live Futures Updated",
+        isCoveredLikeStrategy(pStrategyCode) ? "Imported Positions Updated" : "Imported Live Futures Updated",
         arrSaved.length
-            ? (isCoveredOptionsStrategy(pStrategyCode)
-                ? `Saved ${arrSaved.length} imported live position${arrSaved.length === 1 ? "" : "s"} in the open grid.`
+            ? (isCoveredLikeStrategy(pStrategyCode)
+                ? `Saved ${arrSaved.length} imported position${arrSaved.length === 1 ? "" : "s"} in the open grid.`
                 : `Saved ${arrSaved.length} imported live futures position${arrSaved.length === 1 ? "" : "s"} in the open grid.`)
-            : (isCoveredOptionsStrategy(pStrategyCode)
-                ? "Cleared imported live positions from the open grid."
+            : (isCoveredLikeStrategy(pStrategyCode)
+                ? "Cleared imported positions from the open grid."
                 : "Cleared imported live futures positions from the open grid."),
         {
             qty: arrSaved.length,
@@ -9625,8 +10161,8 @@ async function saveOpenPositionsInternal(req: Request, res: Response, pStrategyC
     );
     res.json({
         status: "success",
-        message: isCoveredOptionsStrategy(pStrategyCode)
-            ? "Imported open positions saved."
+        message: isCoveredLikeStrategy(pStrategyCode)
+            ? "Imported positions saved."
             : "Imported open futures positions saved.",
         data: objOpenPositions
     });
@@ -9685,6 +10221,36 @@ async function clearOpenPositionsInternal(req: Request, res: Response, pStrategy
 
 async function reconcileOpenPositionsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
+    if (isOptionsScalperStrategy(pStrategyCode)) {
+        try {
+            const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
+            const arrRefreshed = await refreshOptionsScalperPaperOpenPositions(arrExisting);
+            const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, arrRefreshed);
+            const objOpenPositions = await buildOpenPositionsPayload(vUserId, pStrategyCode, arrSaved);
+            await logFuturesEvent(
+                vUserId,
+                pStrategyCode,
+                "manual_action",
+                "success",
+                "Paper Open Positions Refreshed",
+                `Refreshed ${arrSaved.length} paper option position${arrSaved.length === 1 ? "" : "s"} using live Delta market prices.`,
+                { qty: arrSaved.length, reason: "paper_open_positions_reconciled" }
+            );
+            res.json({
+                status: "success",
+                message: `Refreshed ${arrSaved.length} paper position${arrSaved.length === 1 ? "" : "s"}.`,
+                data: objOpenPositions
+            });
+            return;
+        }
+        catch (objError) {
+            res.status(500).json({
+                status: "danger",
+                message: getErrorMessage(objError, "Unable to refresh paper positions.")
+            });
+            return;
+        }
+    }
     const vProfileId = await resolveProfileId(req, pStrategyCode);
     if (!vProfileId) {
         res.status(400).json({ status: "warning", message: "API profile is required." });
@@ -9731,22 +10297,22 @@ async function reconcileOpenPositionsInternal(req: Request, res: Response, pStra
             pStrategyCode,
             "manual_action",
             "success",
-            isCoveredOptionsStrategy(pStrategyCode) ? "Open Positions Reconciled" : "Open Futures Reconciled",
-            isCoveredOptionsStrategy(pStrategyCode)
+            isCoveredLikeStrategy(pStrategyCode) ? "Open Positions Reconciled" : "Open Futures Reconciled",
+            isCoveredLikeStrategy(pStrategyCode)
                 ? `Refreshed ${arrSaved.length} live position${arrSaved.length === 1 ? "" : "s"} from Delta Exchange.`
                 : `Refreshed ${arrSaved.length} live futures position${arrSaved.length === 1 ? "" : "s"} from Delta Exchange.`,
             { qty: arrSaved.length, reason: "open_positions_reconciled" }
         );
         res.json({
             status: "success",
-            message: isCoveredOptionsStrategy(pStrategyCode)
+            message: isCoveredLikeStrategy(pStrategyCode)
                 ? `Reconciled ${arrSaved.length} live position${arrSaved.length === 1 ? "" : "s"} with Delta Exchange.`
                 : `Reconciled ${arrSaved.length} live futures position${arrSaved.length === 1 ? "" : "s"} with Delta Exchange.`,
             data: objOpenPositions
         });
     }
     catch (objError) {
-        const vSubjectLabel = isCoveredOptionsStrategy(pStrategyCode) ? "live positions" : "live futures positions";
+        const vSubjectLabel = isCoveredLikeStrategy(pStrategyCode) ? "live positions" : "live futures positions";
         res.status(500).json({
             status: "danger",
             message: getErrorMessage(objError, `Unable to refresh ${vSubjectLabel}.`)
@@ -9756,6 +10322,52 @@ async function reconcileOpenPositionsInternal(req: Request, res: Response, pStra
 
 async function closeImportedOpenPositionInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
+    if (isOptionsScalperStrategy(pStrategyCode)) {
+        const vImportId = String(req.body?.importId || "").trim();
+        const arrSaved = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
+        const objPosition = arrSaved.find((objRow) => String(objRow.importId || "").trim() === vImportId);
+        if (!objPosition) {
+            res.status(404).json({
+                status: "warning",
+                message: "Paper open position was not found."
+            });
+            return;
+        }
+        const objClosed = await closeOptionsScalperPaperPosition(vUserId, pStrategyCode, objPosition);
+        const arrRemaining = arrSaved.filter((objRow) => String(objRow.importId || "").trim() !== vImportId);
+        await appendOptionsScalperPaperClosedPositions(vUserId, pStrategyCode, [objClosed]);
+        await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, arrRemaining);
+        await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
+            vUserId,
+            await readLiveProfile(vUserId, pStrategyCode)
+        );
+        if (!arrRemaining.length) {
+            await clearActiveStrategyRun(vUserId, pStrategyCode);
+        }
+        await logFuturesEvent(
+            vUserId,
+            pStrategyCode,
+            "option_closed",
+            "success",
+            "Paper Position Closed",
+            `${objPosition.contractName} was moved from paper open positions to paper closed positions using live Delta exit price.`,
+            {
+                contractName: objPosition.contractName,
+                qty: objPosition.qty,
+                pnl: objClosed.pnl,
+                reason: "manual_paper_close"
+            }
+        );
+        res.json({
+            status: "success",
+            message: `${objPosition.contractName} paper position closed.`,
+            data: {
+                importId: vImportId,
+                trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, arrRemaining)
+            }
+        });
+        return;
+    }
     const objProfile = await readLiveProfile(vUserId, pStrategyCode);
     const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
     if (!vSelectedApiProfileId) {
@@ -9953,10 +10565,12 @@ async function closeImportedOpenPositionInternal(req: Request, res: Response, pS
 }
 
 async function executeManualFutureInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
-    if (isCoveredOptionsStrategy(pStrategyCode)) {
+    if (isCoveredLikeStrategy(pStrategyCode)) {
         res.status(400).json({
             status: "warning",
-            message: "Manual futures are disabled for Covered Options."
+            message: isOptionsScalperStrategy(pStrategyCode)
+                ? "Manual futures are disabled for Options-Scalper paper mode."
+                : "Manual futures are disabled for Covered Options."
         });
         return;
     }
@@ -10173,6 +10787,67 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
 
     gManualOptionOrderLocks.add(vLockKey);
     try {
+        if (isOptionsScalperStrategy(pStrategyCode)) {
+            const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
+            const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
+            if (arrOpenOptions.length > 0 && !hasTrackedOptionRowLeg(arrExisting, vRowIndex, vLegSide === "pe" ? "pe" : "ce")) {
+                throw new Error(`A paper option position is already open (${arrOpenOptions[0].contractName}). Close the existing option before placing another paper option.`);
+            }
+            if (hasTrackedOptionRowLeg(arrExisting, vRowIndex, vLegSide === "pe" ? "pe" : "ce")) {
+                throw new Error(`Row ${vRowIndex} ${vLegSide.toUpperCase()} paper option is already open. Close it before placing another one.`);
+            }
+            const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
+                vUserId,
+                pStrategyCode,
+                objProfile,
+                {
+                    action: vAction === "buy" ? "buy" : "sell",
+                    symbol: vSymbol,
+                    legSide: vLegSide === "pe" ? "pe" : "ce",
+                    expiryMode: ["1", "2", "4", "5", "6", "7"].includes(vExpiryMode) ? vExpiryMode : "5",
+                    expiryDate: vExpiryDate,
+                    qty: vQty,
+                    targetDelta: vTargetDelta,
+                    rowIndex: vRowIndex,
+                    openedReason: "manual_option_open"
+                }
+            );
+            const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, [
+                ...arrExisting,
+                objPaperOpen.position
+            ]);
+            await logFuturesEvent(
+                vUserId,
+                pStrategyCode,
+                "option_opened",
+                "success",
+                "Manual Paper Option Opened",
+                `${vAction.toUpperCase()} ${vLegSide.toUpperCase()} paper option opened using live Delta price feed.`,
+                {
+                    symbol: vSymbol,
+                    contractName: objPaperOpen.position.contractName,
+                    qty: vQty,
+                    targetDelta: vTargetDelta,
+                    rowIndex: vRowIndex,
+                    reason: "manual_paper_option"
+                }
+            );
+            res.json({
+                status: "success",
+                message: `${vAction.toUpperCase()} ${vLegSide.toUpperCase()} paper option opened.`,
+                data: {
+                    action: vAction,
+                    legSide: vLegSide,
+                    rowIndex: vRowIndex,
+                    qty: vQty,
+                    targetDelta: vTargetDelta,
+                    order: objPaperOpen.order,
+                    contract: objPaperOpen.contract,
+                    trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, arrSaved)
+                }
+            });
+            return;
+        }
         const { client, profile } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
         const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
         const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
@@ -10180,7 +10855,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
         if (!bIsDualStrategy && arrOpenOptions.length > 0) {
             throw new Error(`An option position is already open (${arrOpenOptions[0].contractName}). Close the existing option before placing another option order.`);
         }
-        if (bIsDualStrategy && !isCoveredOptionsStrategy(pStrategyCode) && hasTrackedOptionLeg(arrExisting, vLegSide === "pe" ? "pe" : "ce")) {
+        if (bIsDualStrategy && !isCoveredLikeStrategy(pStrategyCode) && hasTrackedOptionLeg(arrExisting, vLegSide === "pe" ? "pe" : "ce")) {
             throw new Error(`A ${vLegSide.toUpperCase()} option is already open. Close the existing ${vLegSide.toUpperCase()} leg before placing another one.`);
         }
         const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(getMergedUiState(objProfile), "manual_option_open", pStrategyCode, vRowIndex);
@@ -10405,7 +11080,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
         return;
     }
 
-    if (isCoveredOptionsStrategy(pStrategyCode) && Array.isArray(req.body?.rows)) {
+    if (isCoveredLikeStrategy(pStrategyCode) && Array.isArray(req.body?.rows)) {
         const arrInputs = (req.body.rows as Array<Record<string, unknown>>).map((objRow) => {
             const objInput = normalizeExecStrategyInput(
                 String(objRow.action || "").trim().toLowerCase(),
@@ -10456,19 +11131,30 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
                 arrInputs,
                 "exec_strategy"
             );
-            if (!Boolean(req.body?.suppressClosedFromDateUpdate) && isCoveredOptionsStrategy(pStrategyCode)) {
-                objProfile = await syncCoveredRecoveryMetricsFromClosedHistory(
-                    vUserId,
-                    pStrategyCode,
-                    vSelectedApiProfileId,
-                    objProfile,
-                    objExecResult.trackedOpenPositions
-                );
+            if (!Boolean(req.body?.suppressClosedFromDateUpdate)) {
+                if (isCoveredOptionsStrategy(pStrategyCode)) {
+                    objProfile = await syncCoveredRecoveryMetricsFromClosedHistory(
+                        vUserId,
+                        pStrategyCode,
+                        vSelectedApiProfileId,
+                        objProfile,
+                        objExecResult.trackedOpenPositions
+                    );
+                }
+                else if (isOptionsScalperStrategy(pStrategyCode)) {
+                    objProfile = await updateStrategyClosedFromDateAfterExec(
+                        vUserId,
+                        pStrategyCode,
+                        objProfile,
+                        objExecResult.trackedOpenPositions
+                    );
+                    await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(vUserId, objProfile);
+                }
             }
 
             res.json({
                 status: "success",
-                message: `Exec Strategy placed ${objExecResult.orders.length} option order${objExecResult.orders.length === 1 ? "" : "s"} across ${arrInputs.length} covered rows.`,
+            message: `${isOptionsScalperStrategy(pStrategyCode) ? "Paper Exec Strategy opened" : "Exec Strategy placed"} ${objExecResult.orders.length} option order${objExecResult.orders.length === 1 ? "" : "s"} across ${arrInputs.length} ${isOptionsScalperStrategy(pStrategyCode) ? "paper" : "covered"} rows.`,
                 data: {
                     orders: objExecResult.orders,
                     contracts: objExecResult.contracts,
@@ -10593,6 +11279,15 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
                     objExecResult.trackedOpenPositions
                 );
             }
+            else if (isOptionsScalperStrategy(pStrategyCode)) {
+                objProfile = await updateStrategyClosedFromDateAfterExec(
+                    vUserId,
+                    pStrategyCode,
+                    objProfile,
+                    objExecResult.trackedOpenPositions
+                );
+                await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(vUserId, objProfile);
+            }
             else {
                 objProfile = await updateStrategyClosedFromDateAfterExec(
                     vUserId,
@@ -10631,6 +11326,28 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
 }
 
 async function getClosedPositionsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
+    if (isOptionsScalperStrategy(pStrategyCode)) {
+        const vUserId = getAccountId(req);
+        const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+        const objUiState = getMergedUiState(objProfile);
+        const vSelectedSymbol = normalizeSymbolValue(req.query?.symbol || req.body?.symbol || objUiState.symbol);
+        const vFromDate = String(req.query?.fromDate || req.body?.fromDate || "").trim();
+        const vToDate = String(req.query?.toDate || req.body?.toDate || "").trim();
+        const arrRows = filterPaperClosedPositionsByRange(
+            (await listOptionsScalperPaperClosedPositions(vUserId, pStrategyCode))
+                .filter((objRow) => isTrackedContractForSymbol(objRow.contractName, vSelectedSymbol)),
+            vFromDate,
+            vToDate
+        ).map(mapOptionsScalperPaperClosedPosition);
+        res.json({
+            status: "success",
+            data: {
+                profileLabel: "Paper",
+                positions: arrRows
+            }
+        });
+        return;
+    }
     const vProfileId = await resolveProfileId(req, pStrategyCode);
     if (!vProfileId) {
         res.status(400).json({ status: "warning", message: "API profile is required." });
@@ -10848,6 +11565,39 @@ async function deleteEventInternal(req: Request, res: Response, pStrategyCode: R
 
 async function executeKillSwitchInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
+    if (isOptionsScalperStrategy(pStrategyCode)) {
+        const arrPositions = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
+        if (!arrPositions.length) {
+            res.json({
+                status: "success",
+                message: "No saved paper positions were open.",
+                data: {
+                    closedPositions: [],
+                    trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, [])
+                }
+            });
+            return;
+        }
+        const objClosed = await closeTrackedPositionsOnDelta(vUserId, pStrategyCode, "", arrPositions);
+        await logFuturesEvent(
+            vUserId,
+            pStrategyCode,
+            "engine_stopped",
+            "warning",
+            "Paper Kill Switch",
+            `Kill switch closed ${objClosed.closedPositions.length} paper position${objClosed.closedPositions.length === 1 ? "" : "s"} using live Delta prices.`,
+            { qty: objClosed.closedPositions.length, reason: "paper_kill_switch" }
+        );
+        res.json({
+            status: "success",
+            message: `Kill switch closed ${objClosed.closedPositions.length} paper position${objClosed.closedPositions.length === 1 ? "" : "s"}.`,
+            data: {
+                closedPositions: objClosed.closedPositions,
+                trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, [])
+            }
+        });
+        return;
+    }
     const objProfile = await readLiveProfile(vUserId, pStrategyCode);
     const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
     if (!vSelectedApiProfileId) {
@@ -11064,6 +11814,30 @@ async function recalculateAndPersistRecoveryMetricsFromClosedHistory(
         closedCount: number;
     };
 }> {
+    if (isOptionsScalperStrategy(pStrategyCode)) {
+        const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+        const objUiState = getMergedUiState(objProfile);
+        const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
+        const arrRows = filterPaperClosedPositionsByRange(
+            (await listOptionsScalperPaperClosedPositions(pUserId, pStrategyCode))
+                .filter((objRow) => isTrackedContractForSymbol(objRow.contractName, vSelectedSymbol)),
+            String(objUiState.closedFromDate || "").trim(),
+            String(objUiState.closedToDate || "").trim()
+        );
+        const vBrokerageTotal = Number(arrRows.reduce((pSum, objRow) => pSum + Number(objRow.charges || 0), 0).toFixed(4));
+        const vTotalPnl = Number(arrRows.reduce((pSum, objRow) => pSum + Number(objRow.pnl || 0), 0).toFixed(4));
+        await saveBrokerageRecoveryTotal(pUserId, pStrategyCode, vBrokerageTotal);
+        await saveRecoveredTotalPnl(pUserId, pStrategyCode, vTotalPnl);
+        return {
+            openPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode),
+            recalculated: {
+                strategyStartedAt: String(objUiState.closedFromDate || "").trim(),
+                totalBrokerageToRecover: vBrokerageTotal,
+                totalPnl: vTotalPnl,
+                closedCount: arrRows.length
+            }
+        };
+    }
     if (isCoveredOptionsStrategy(pStrategyCode)) {
         return {
             openPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode),
@@ -11125,6 +11899,13 @@ async function schedulePendingOptionRecoveryRefresh(
     pReason: "sl" | "tp"
 ): Promise<void> {
     if (isCoveredOptionsStrategy(pStrategyCode)) {
+        return;
+    }
+    if (isOptionsScalperStrategy(pStrategyCode)) {
+        await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
+            pUserId,
+            await readLiveProfile(pUserId, pStrategyCode)
+        );
         return;
     }
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
@@ -11234,6 +12015,24 @@ async function processPendingOptionRecoveryRefresh(
 
 async function recalculateRecoveryTotalPnlInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
+    if (isOptionsScalperStrategy(pStrategyCode)) {
+        try {
+            const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+            await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(vUserId, objProfile);
+            res.json({
+                status: "success",
+                message: "Total PnL recalculated from paper closed positions.",
+                data: await buildOpenPositionsPayload(vUserId, pStrategyCode)
+            });
+        }
+        catch (objError) {
+            res.status(500).json({
+                status: "danger",
+                message: getErrorMessage(objError, "Unable to recalculate Total PnL from paper closed positions.")
+            });
+        }
+        return;
+    }
     const objProfile = await readLiveProfile(vUserId, pStrategyCode);
     const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
     if (!vSelectedApiProfileId) {
@@ -11996,6 +12795,29 @@ export async function recalculateRollingFuturesLtDualRecoveryTotalPnl(req: Reque
     await recalculateRecoveryTotalPnlInternal(req, res, "rolling-futures-lt-dual");
 }
 
+async function respondOptionsScalperPaperActionNotReady(
+    req: Request,
+    res: Response,
+    pMessage: string
+): Promise<void> {
+    const vUserId = getAccountId(req);
+    await logFuturesEvent(
+        vUserId,
+        "options-scalper",
+        "manual_action",
+        "warning",
+        "Paper Action Not Wired Yet",
+        pMessage,
+        {
+            reason: "options_scalper_paper_action_not_wired"
+        }
+    );
+    res.status(400).json({
+        status: "warning",
+        message: pMessage
+    });
+}
+
 export async function getCoveredOptionsProfile(req: Request, res: Response): Promise<void> {
     await getProfileInternal(req, res, "covered-options");
 }
@@ -12082,4 +12904,95 @@ export async function updateCoveredOptionsRecoveryMetrics(req: Request, res: Res
 }
 export async function recalculateCoveredOptionsRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "covered-options");
+}
+
+export async function getOptionsScalperProfile(req: Request, res: Response): Promise<void> {
+    await getProfileInternal(req, res, "options-scalper");
+}
+export async function saveOptionsScalperProfile(req: Request, res: Response): Promise<void> {
+    await saveProfileInternal(req, res, "options-scalper");
+}
+export async function getOptionsScalperConnectionStatus(req: Request, res: Response): Promise<void> {
+    await getConnectionStatusInternal(req, res, "options-scalper");
+}
+export async function getOptionsScalperRuntimeStatus(req: Request, res: Response): Promise<void> {
+    await getRuntimeStatusInternal(req, res, "options-scalper");
+}
+export async function checkOptionsScalperConnection(req: Request, res: Response): Promise<void> {
+    await checkConnectionInternal(req, res, "options-scalper");
+}
+export async function enableOptionsScalperAutoTrader(req: Request, res: Response): Promise<void> {
+    await enableAutoTraderInternal(req, res, "options-scalper");
+}
+export async function disableOptionsScalperAutoTrader(req: Request, res: Response): Promise<void> {
+    await disableAutoTraderInternal(req, res, "options-scalper");
+}
+export async function getOptionsScalperAccountSummary(req: Request, res: Response): Promise<void> {
+    await getAccountSummaryInternal(req, res, "options-scalper");
+}
+export async function calculateOptionsScalperRecommendedStartQty(req: Request, res: Response): Promise<void> {
+    await calculateRecommendedStartQtyInternal(req, res, "options-scalper");
+}
+export async function executeOptionsScalperManualFuture(req: Request, res: Response): Promise<void> {
+    await respondOptionsScalperPaperActionNotReady(req, res, "Options-Scalper paper future entries are not wired yet.");
+}
+export async function executeOptionsScalperManualOption(req: Request, res: Response): Promise<void> {
+    await executeManualOptionInternal(req, res, "options-scalper");
+}
+export async function executeOptionsScalperStrategy(req: Request, res: Response): Promise<void> {
+    await executeStrategyInternal(req, res, "options-scalper");
+}
+export async function confirmOptionsScalperLiveAction(req: Request, res: Response): Promise<void> {
+    res.status(400).json({
+        status: "warning",
+        message: "Paper actions do not need confirmation on Options-Scalper."
+    });
+}
+export async function rejectOptionsScalperLiveAction(req: Request, res: Response): Promise<void> {
+    res.status(400).json({
+        status: "warning",
+        message: "Paper actions do not need confirmation on Options-Scalper."
+    });
+}
+export async function getOptionsScalperImportableOpenPositions(req: Request, res: Response): Promise<void> {
+    await getImportableOpenPositionsInternal(req, res, "options-scalper");
+}
+export async function getOptionsScalperOpenPositions(req: Request, res: Response): Promise<void> {
+    await getOpenPositionsInternal(req, res, "options-scalper");
+}
+export async function saveOptionsScalperOpenPositions(req: Request, res: Response): Promise<void> {
+    await saveOpenPositionsInternal(req, res, "options-scalper");
+}
+export async function deleteOptionsScalperOpenPosition(req: Request, res: Response): Promise<void> {
+    await deleteOpenPositionInternal(req, res, "options-scalper");
+}
+export async function clearOptionsScalperOpenPositions(req: Request, res: Response): Promise<void> {
+    await clearOpenPositionsInternal(req, res, "options-scalper");
+}
+export async function reconcileOptionsScalperOpenPositions(req: Request, res: Response): Promise<void> {
+    await reconcileOpenPositionsInternal(req, res, "options-scalper");
+}
+export async function closeOptionsScalperImportedOpenPosition(req: Request, res: Response): Promise<void> {
+    await closeImportedOpenPositionInternal(req, res, "options-scalper");
+}
+export async function getOptionsScalperClosedPositions(req: Request, res: Response): Promise<void> {
+    await getClosedPositionsInternal(req, res, "options-scalper");
+}
+export async function getOptionsScalperEvents(req: Request, res: Response): Promise<void> {
+    await getEventsInternal(req, res, "options-scalper");
+}
+export async function clearOptionsScalperEventsController(req: Request, res: Response): Promise<void> {
+    await clearEventsInternal(req, res, "options-scalper");
+}
+export async function deleteOptionsScalperEventController(req: Request, res: Response): Promise<void> {
+    await deleteEventInternal(req, res, "options-scalper");
+}
+export async function executeOptionsScalperKillSwitch(req: Request, res: Response): Promise<void> {
+    await executeKillSwitchInternal(req, res, "options-scalper");
+}
+export async function updateOptionsScalperRecoveryMetrics(req: Request, res: Response): Promise<void> {
+    await updateRecoveryMetricsInternal(req, res, "options-scalper");
+}
+export async function recalculateOptionsScalperRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
+    await recalculateRecoveryTotalPnlInternal(req, res, "options-scalper");
 }

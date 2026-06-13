@@ -12,6 +12,7 @@ import { ensureSurvivalPostgresSchema } from "../storage/survival-postgres";
 import { DirectionalOptionsDemoService } from "../strategies/directional-options-demo/service";
 import {
     renderCoveredOptionsPage,
+    renderOptionsScalperPage,
     renderDirectionalOptionsPage,
     renderRollingFuturesLiveDualPage
 } from "../api/controllers/strategyfo-paper-controller";
@@ -100,6 +101,7 @@ async function bootstrap(): Promise<void> {
     app.get("/dashboard", requireAuthPage, requireFreshPasswordPage, renderDashboardPage);
     app.get("/rollingfutures-lt-dual", requireAuthPage, requireFreshPasswordPage, renderRollingFuturesLiveDualPage);
     app.get("/covered-options", requireAuthPage, requireFreshPasswordPage, renderCoveredOptionsPage);
+    app.get("/options-scalper", requireAuthPage, requireFreshPasswordPage, renderOptionsScalperPage);
     app.get("/directional-options", requireAuthPage, requireFreshPasswordPage, renderDirectionalOptionsPage);
     app.get("/mngusers", requireAuthPage, requireFreshPasswordPage, requireAdminPage, renderMngUsersPage);
     app.get("/account/profile", requireAuthPage, renderMyProfilePage);

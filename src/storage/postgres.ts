@@ -247,6 +247,25 @@ export async function ensurePostgresSchema(): Promise<void> {
     `);
 
     await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_options_scalper_closed_positions (
+            close_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            strategy_code TEXT NOT NULL,
+            contract_name TEXT NOT NULL DEFAULT '',
+            side TEXT NOT NULL DEFAULT '',
+            qty NUMERIC NOT NULL DEFAULT 0,
+            buy_price NUMERIC NULL,
+            sell_price NUMERIC NULL,
+            charges NUMERIC NOT NULL DEFAULT 0,
+            pnl NUMERIC NOT NULL DEFAULT 0,
+            start_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            end_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+
+    await objPool.query(`
         CREATE TABLE IF NOT EXISTS optionyze_strategy_leases (
             user_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
             strategy_code TEXT NOT NULL,

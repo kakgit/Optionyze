@@ -25,26 +25,39 @@ import {
 } from "../controllers/strategyfo-paper-controller";
 import {
     calculateCoveredOptionsRecommendedStartQty,
+    calculateOptionsScalperRecommendedStartQty,
     checkRollingFuturesLtDualConnection,
     checkCoveredOptionsConnection,
+    checkOptionsScalperConnection,
     calculateRollingFuturesLtDualRecommendedStartQty,
     clearCoveredOptionsEventsController,
+    clearOptionsScalperEventsController,
     clearRollingFuturesLtDualEventsController,
     closeCoveredOptionsImportedOpenPosition,
+    closeOptionsScalperImportedOpenPosition,
     deleteRollingFuturesLtDualEventController,
     deleteCoveredOptionsEventController,
+    deleteOptionsScalperEventController,
     closeRollingFuturesLtDualImportedOpenPosition,
     deleteCoveredOptionsOpenPosition,
+    deleteOptionsScalperOpenPosition,
     deleteRollingFuturesLtDualOpenPosition,
     disableCoveredOptionsAutoTrader,
+    disableOptionsScalperAutoTrader,
     disableRollingFuturesLtDualAutoTrader,
     enableCoveredOptionsAutoTrader,
+    enableOptionsScalperAutoTrader,
     enableRollingFuturesLtDualAutoTrader,
     executeCoveredOptionsKillSwitch,
+    executeOptionsScalperKillSwitch,
     confirmCoveredOptionsLiveAction,
+    confirmOptionsScalperLiveAction,
     executeCoveredOptionsManualFuture,
     executeCoveredOptionsManualOption,
     executeCoveredOptionsStrategy,
+    executeOptionsScalperManualFuture,
+    executeOptionsScalperManualOption,
+    executeOptionsScalperStrategy,
     executeRollingFuturesLtDualKillSwitch,
     executeRollingFuturesLtDualManualFuture,
     executeRollingFuturesLtDualManualOption,
@@ -59,6 +72,14 @@ import {
     getCoveredOptionsOpenPositions,
     getCoveredOptionsProfile,
     getCoveredOptionsRuntimeStatus,
+    getOptionsScalperAccountSummary,
+    getOptionsScalperClosedPositions,
+    getOptionsScalperConnectionStatus,
+    getOptionsScalperEvents,
+    getOptionsScalperImportableOpenPositions,
+    getOptionsScalperOpenPositions,
+    getOptionsScalperProfile,
+    getOptionsScalperRuntimeStatus,
     getRollingFuturesLtDualAccountSummary,
     getRollingFuturesLtDualClosedPositions,
     getRollingFuturesLtDualConnectionStatus,
@@ -71,17 +92,24 @@ import {
     disableRollingFuturesLtDualSimulatedPrimaryOutageController,
     switchRollingFuturesLtDualBackToPrimaryController,
     recalculateCoveredOptionsRecoveryTotalPnl,
+    recalculateOptionsScalperRecoveryTotalPnl,
     recalculateRollingFuturesLtDualRecoveryTotalPnl,
     updateCoveredOptionsRecoveryMetrics,
+    updateOptionsScalperRecoveryMetrics,
     updateRollingFuturesLtDualRecoveryMetrics,
     reconcileCoveredOptionsOpenPositions,
+    reconcileOptionsScalperOpenPositions,
     rejectCoveredOptionsLiveAction,
+    rejectOptionsScalperLiveAction,
     reconcileRollingFuturesLtDualOpenPositions,
     saveCoveredOptionsOpenPositions,
     saveCoveredOptionsProfile,
+    saveOptionsScalperOpenPositions,
+    saveOptionsScalperProfile,
     saveRollingFuturesLtDualOpenPositions,
     saveRollingFuturesLtDualProfile,
     clearCoveredOptionsOpenPositions,
+    clearOptionsScalperOpenPositions,
     handleTelegramWebhook
 } from "../controllers/rolling-futures-lt-controller";
 import {
@@ -360,6 +388,91 @@ export function createApiRouter(
     });
     objRouter.post("/covered-options/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await clearCoveredOptionsEventsController(req, res);
+    });
+
+    objRouter.get("/options-scalper/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperProfile(req, res);
+    });
+    objRouter.post("/options-scalper/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveOptionsScalperProfile(req, res);
+    });
+    objRouter.get("/options-scalper/connection/status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperConnectionStatus(req, res);
+    });
+    objRouter.get("/options-scalper/runtime", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperRuntimeStatus(req, res);
+    });
+    objRouter.post("/options-scalper/connection/check", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await checkOptionsScalperConnection(req, res);
+    });
+    objRouter.post("/options-scalper/auto-trader/start", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await enableOptionsScalperAutoTrader(req, res);
+    });
+    objRouter.post("/options-scalper/auto-trader/stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await disableOptionsScalperAutoTrader(req, res);
+    });
+    objRouter.get("/options-scalper/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperAccountSummary(req, res);
+    });
+    objRouter.post("/options-scalper/start-qty/calculate", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await calculateOptionsScalperRecommendedStartQty(req, res);
+    });
+    objRouter.post("/options-scalper/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeOptionsScalperManualFuture(req, res);
+    });
+    objRouter.post("/options-scalper/manual/option", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeOptionsScalperManualOption(req, res);
+    });
+    objRouter.post("/options-scalper/strategy/execute", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeOptionsScalperStrategy(req, res);
+    });
+    objRouter.post("/options-scalper/live-action/confirm", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await confirmOptionsScalperLiveAction(req, res);
+    });
+    objRouter.post("/options-scalper/live-action/reject", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await rejectOptionsScalperLiveAction(req, res);
+    });
+    objRouter.get("/options-scalper/open-positions/importable", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperImportableOpenPositions(req, res);
+    });
+    objRouter.get("/options-scalper/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperOpenPositions(req, res);
+    });
+    objRouter.post("/options-scalper/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveOptionsScalperOpenPositions(req, res);
+    });
+    objRouter.post("/options-scalper/open-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteOptionsScalperOpenPosition(req, res);
+    });
+    objRouter.post("/options-scalper/open-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearOptionsScalperOpenPositions(req, res);
+    });
+    objRouter.post("/options-scalper/open-positions/reconcile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await reconcileOptionsScalperOpenPositions(req, res);
+    });
+    objRouter.post("/options-scalper/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await closeOptionsScalperImportedOpenPosition(req, res);
+    });
+    objRouter.post("/options-scalper/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeOptionsScalperKillSwitch(req, res);
+    });
+    objRouter.post("/options-scalper/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateOptionsScalperRecoveryMetrics(req, res);
+    });
+    objRouter.post("/options-scalper/metrics/recalculate-total-pnl", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await recalculateOptionsScalperRecoveryTotalPnl(req, res);
+    });
+    objRouter.get("/options-scalper/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperClosedPositions(req, res);
+    });
+    objRouter.get("/options-scalper/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperEvents(req, res);
+    });
+    objRouter.post("/options-scalper/events/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteOptionsScalperEventController(req, res);
+    });
+    objRouter.post("/options-scalper/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearOptionsScalperEventsController(req, res);
     });
 
     return objRouter;

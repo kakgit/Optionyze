@@ -39,6 +39,15 @@ export function renderCoveredOptionsPage(req: Request, res: Response): void {
     });
 }
 
+export function renderOptionsScalperPage(req: Request, res: Response): void {
+    res.render("options-scalper", {
+        pageTitle: "Options-Scalper - Paper | Optionyze",
+        currentAccount: req.authAccount,
+        defaultUserId: req.authAccount?.accountId || "demo-paper",
+        rollingTelegramEventTypes: gRollingFuturesTelegramEventTypes
+    });
+}
+
 export function renderDirectionalOptionsPage(req: Request, res: Response): void {
     res.render("directional-options", {
         pageTitle: "Directional Options - Demo | Optionyze",
