@@ -1717,6 +1717,14 @@
                     <td>LIVE</td>
                     <td>
                         <div class="rolling-demo-table-actions">
+                            <button class="rolling-demo-icon-btn rolling-live-swap-open-position" type="button" data-import-id="${escapeHtml(importId)}" title="Replace this position using Manual Trader settings" aria-label="Replace this position using Manual Trader settings">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M17 1v6h-6" />
+                                    <path d="M3 11a8 8 0 0 1 14-5l0 1" />
+                                    <path d="M7 23v-6h6" />
+                                    <path d="M21 13a8 8 0 0 1-14 5l0-1" />
+                                </svg>
+                            </button>
                             <button class="rolling-demo-icon-btn sell rolling-live-close-open-position" type="button" data-import-id="${escapeHtml(importId)}" title="Close this open position" aria-label="Close this open position">
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="M12 2v10" />
@@ -1792,6 +1800,13 @@
             contractName: row.contractName,
             side: row.side,
             qty: row.qty
+        });
+    }
+
+    async function swapImportedOpenPosition(row) {
+        return postJson(`${endpointBase}/open-positions/swap`, {
+            importId: row.importId,
+            contractName: row.contractName
         });
     }
 
@@ -2737,6 +2752,51 @@
     });
     ids.openPositionsBody?.addEventListener("click", function (event) {
         const target = event.target instanceof Element ? event.target : null;
+        const swapButton = target ? target.closest(".rolling-live-swap-open-position") : null;
+        if (swapButton instanceof HTMLButtonElement) {
+            const importId = String(swapButton.dataset.importId || "").trim();
+            const row = displayedPositions.find(function (item) {
+                return String(item?.importId || "").trim() === importId;
+            });
+            if (!row) {
+                setStatus(ids.pageStatus, "Unable to find the selected imported live position.", "danger");
+                return;
+            }
+            const confirmed = window.confirm(`Replace ${row.contractName || "this position"} on Delta Exchange now? This will close it and reopen the same leg using the current Manual Trader settings.`);
+            if (!confirmed) {
+                return;
+            }
+            void swapImportedOpenPosition(row).then(function (objResult) {
+                const vTone = String(objResult?.status || "").trim() === "warning" ? "warning" : "success";
+                const objData = objResult?.data || {};
+                const objCloseOrder = objData.closeOrder || {};
+                const objOpenOrder = objData.openOrder || {};
+                const vCloseOrderId = String(objCloseOrder.id || objCloseOrder.order_id || "").trim();
+                const vOpenOrderId = String(objOpenOrder.id || objOpenOrder.order_id || "").trim();
+                const arrOrderBits = [];
+                if (vCloseOrderId) {
+                    arrOrderBits.push(`Close Order ID: ${vCloseOrderId}`);
+                }
+                if (vOpenOrderId) {
+                    arrOrderBits.push(`Open Order ID: ${vOpenOrderId}`);
+                }
+                const vMessage = objResult?.message || "Live position swapped on Delta Exchange.";
+                const trackedPayload = objData.trackedOpenPositions || null;
+                setStatus(ids.pageStatus, arrOrderBits.length ? `${vMessage} ${arrOrderBits.join(" | ")}` : vMessage, vTone);
+                if (trackedPayload) {
+                    renderOpenPositions(trackedPayload);
+                }
+                return Promise.all([
+                    loadAccountSummary(),
+                    loadConnectionStatus(),
+                    refreshImportablePositionsSilently().catch(function () { return undefined; }),
+                    loadEvents().catch(function () { return undefined; })
+                ]);
+            }).catch(function (error) {
+                setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to replace imported live position.", "danger");
+            });
+            return;
+        }
         const closeButton = target ? target.closest(".rolling-live-close-open-position") : null;
         if (closeButton instanceof HTMLButtonElement) {
             const importId = String(closeButton.dataset.importId || "").trim();

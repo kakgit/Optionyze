@@ -373,7 +373,8 @@ interface RollingFuturesLtOptionMetadata {
 type CoveredLiveConfirmationKind =
     | "exec_batch"
     | "option_rule_close"
-    | "covered_reentry";
+    | "covered_reentry"
+    | "manual_swap";
 
 type CoveredLiveConfirmationState = {
     actionId: string;
@@ -8044,6 +8045,41 @@ async function processCoveredLiveActionDecision(
             };
         }
 
+        if (objPending.kind === "manual_swap") {
+            const arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+            const vImportId = String(objPending.payload.importId || "").trim();
+            const vContractName = String(objPending.payload.contractName || "").trim();
+            const objPosition = arrSavedPositions.find((objRow) => String(objRow.importId || "").trim() === vImportId)
+                || arrSavedPositions.find((objRow) => String(objRow.contractName || "").trim() === vContractName);
+            if (!objPosition) {
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "manual_action",
+                    "warning",
+                    "Live Confirmation Invalidated",
+                    `${vContractName || "The selected position"} is no longer in open positions. No order was placed.`,
+                    { reason: "covered_confirmation_swap_missing" }
+                );
+                return { status: "warning", message: "The position is no longer open. No swap was placed." };
+            }
+            const objSwapResult = await executeCoveredOpenPositionSwap(
+                pUserId,
+                vSelectedApiProfileId,
+                objProfile,
+                objPosition
+            );
+            return {
+                status: "success",
+                message: `Swap confirmed and executed for ${objSwapResult.reopenedContractName}.`,
+                data: {
+                    closeOrder: objSwapResult.closeOrder,
+                    openOrder: objSwapResult.openOrder,
+                    trackedOpenPositions: objSwapResult.trackedOpenPositions
+                }
+            };
+        }
+
         return { status: "warning", message: "Unsupported live confirmation type." };
     }
     catch (objError) {
@@ -10564,6 +10600,238 @@ async function closeImportedOpenPositionInternal(req: Request, res: Response, pS
     }
 }
 
+async function executeCoveredOpenPositionSwap(
+    pUserId: string,
+    pSelectedApiProfileId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pPosition: RollingFuturesLtImportedPositionRecord
+): Promise<{
+    trackedOpenPositions: RollingFuturesLtOpenPositionsPayload;
+    closedContractName: string;
+    reopenedContractName: string;
+    closeOrder: Record<string, unknown>;
+    openOrder: Record<string, unknown>;
+}> {
+    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
+    const objMetadata = getTrackedOptionMetadata(pPosition);
+    const objUiState = getMergedUiState(pProfile);
+    const vRowIndex = normalizeOptionRowIndex(
+        pStrategyCode,
+        objMetadata.rowIndex || (String(pPosition.side || "").trim().toUpperCase() === "SELL" ? 2 : 1)
+    );
+    const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
+    const vLegSide = getTrackedOptionLegSide(pPosition.contractName);
+    const vTargetDelta = Math.max(0, Number(objRowState.newD || 0.53));
+    if (!(vTargetDelta > 0)) {
+        throw new Error(`Row ${vRowIndex} New D must be greater than 0 before swapping ${pPosition.contractName}.`);
+    }
+
+    const arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    const objCurrentPosition = arrSavedPositions.find((objRow) => String(objRow.importId || "").trim() === String(pPosition.importId || "").trim())
+        || arrSavedPositions.find((objRow) => String(objRow.contractName || "").trim() === String(pPosition.contractName || "").trim());
+    if (!objCurrentPosition) {
+        throw new Error(`${pPosition.contractName} is no longer open in covered positions.`);
+    }
+
+    const objCloseResult = await closeTrackedPositionOnDelta(
+        pUserId,
+        pStrategyCode,
+        pSelectedApiProfileId,
+        objCurrentPosition,
+        "CL"
+    );
+    const vResolvedCloseCharge = await resolveOrderChargeFromDelta(
+        client,
+        objCurrentPosition.contractName,
+        objCloseResult.payload,
+        String(objCurrentPosition.side || "").trim().toUpperCase() === "BUY" ? "SELL" : "BUY",
+        Number(objCurrentPosition.qty || 0),
+        objCloseResult.placedAt
+    );
+    const vCloseCharge = vResolvedCloseCharge !== null
+        ? vResolvedCloseCharge
+        : await estimateTrackedPositionCharge(
+            objCurrentPosition,
+            Number(objCurrentPosition.markPrice || objCurrentPosition.entryPrice || 0)
+        );
+    const vClosePnl = Number.isFinite(Number(objCloseResult.realizedPnl))
+        ? Number(objCloseResult.realizedPnl)
+        : estimateTrackedPositionPnl(
+            objCurrentPosition,
+            Number(objCurrentPosition.markPrice || objCurrentPosition.entryPrice || 0)
+        );
+
+    const objReEntry = await openTrackedOptionReEntry(
+        pUserId,
+        pStrategyCode,
+        pSelectedApiProfileId,
+        pProfile,
+        objCurrentPosition,
+        {
+            ...objMetadata,
+            rowIndex: vRowIndex,
+            reEntryDelta: vTargetDelta,
+            reEnterEnabled: Boolean(objRowState.reEnter),
+            openedReason: "manual_option_open"
+        },
+        "tp",
+        {
+            useRowAction: true,
+            useRowQty: true,
+            forceLegSide: vLegSide,
+            forceTargetDelta: vTargetDelta,
+            forceExpiryDate: String(objRowState.expiryDate || "").trim()
+        }
+    );
+    if (!objReEntry) {
+        throw new Error(`No replacement ${vLegSide.toUpperCase()} contract was found from row ${vRowIndex} Manual Trader settings.`);
+    }
+
+    const vResolvedReEntryCharge = await resolveOrderChargeFromDelta(
+        client,
+        objReEntry.position.contractName,
+        objReEntry.orderPayload,
+        objReEntry.position.side,
+        Number(objReEntry.position.qty || 0),
+        objReEntry.placedAt
+    );
+    const vReEntryCharge = vResolvedReEntryCharge !== null
+        ? vResolvedReEntryCharge
+        : await estimateTrackedPositionCharge(objReEntry.position);
+
+    const arrNextPositions = [
+        ...arrSavedPositions.filter((objRow) => String(objRow.importId || "").trim() !== String(objCurrentPosition.importId || "").trim()),
+        objReEntry.position
+    ];
+    const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrNextPositions);
+    await incrementBrokerageRecoveryTotal(
+        pUserId,
+        pStrategyCode,
+        vCloseCharge + vReEntryCharge,
+        arrSaved.length
+    );
+    await incrementRecoveredTotalPnl(pUserId, pStrategyCode, vClosePnl, arrSaved.length);
+    await syncDualStrategySurvivalState(
+        pUserId,
+        pStrategyCode,
+        pSelectedApiProfileId,
+        arrSaved,
+        arrSaved.length ? "active" : "ended"
+    );
+    if (!arrSaved.length) {
+        await clearActiveStrategyRun(pUserId, pStrategyCode);
+    }
+
+    await logFuturesEvent(
+        pUserId,
+        pStrategyCode,
+        "future_closed",
+        "info",
+        "Covered Position Swapped",
+        `Swapped ${objCurrentPosition.contractName} into ${objReEntry.position.contractName} using row ${vRowIndex} Manual Trader settings.`,
+        {
+            closedContractName: objCurrentPosition.contractName,
+            reopenedContractName: objReEntry.position.contractName,
+            rowIndex: vRowIndex,
+            legSide: vLegSide,
+            pnlDelta: Number(vClosePnl.toFixed(4)),
+            closeCharge: Number(vCloseCharge.toFixed(4)),
+            reopenCharge: Number(vReEntryCharge.toFixed(4)),
+            reason: "covered_manual_swap"
+        }
+    );
+
+    return {
+        trackedOpenPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode, arrSaved),
+        closedContractName: objCurrentPosition.contractName,
+        reopenedContractName: objReEntry.position.contractName,
+        closeOrder: objCloseResult.payload,
+        openOrder: objReEntry.orderPayload
+    };
+}
+
+async function swapCoveredOpenPositionInternal(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const objProfile = await readLiveProfile(vUserId, "covered-options");
+    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        res.status(400).json({ status: "warning", message: "Select an API profile before swapping covered positions." });
+        return;
+    }
+    const objCheck = await performRollingFuturesLtConnectionCheck(vUserId, "covered-options", vSelectedApiProfileId);
+    if (objCheck.profile.connectionStatus.state !== "connected") {
+        res.status(400).json({
+            status: "warning",
+            message: objCheck.profile.connectionStatus.message || "Delta connection is not healthy.",
+            data: objCheck.profile
+        });
+        return;
+    }
+
+    const vImportId = String(req.body?.importId || "").trim();
+    const arrSavedPositions = await listRollingFuturesLtImportedPositions(vUserId, "covered-options");
+    const objPosition = arrSavedPositions.find((objRow) => String(objRow.importId || "").trim() === vImportId);
+    if (!objPosition) {
+        res.status(404).json({
+            status: "warning",
+            message: "Covered open position was not found."
+        });
+        return;
+    }
+    if (!isOptionContractSymbol(objPosition.contractName)) {
+        res.status(400).json({
+            status: "warning",
+            message: "Only covered option positions can be swapped."
+        });
+        return;
+    }
+
+    const objMetadata = getTrackedOptionMetadata(objPosition);
+    const vRowIndex = normalizeOptionRowIndex(
+        "covered-options",
+        objMetadata.rowIndex || (String(objPosition.side || "").trim().toUpperCase() === "SELL" ? 2 : 1)
+    );
+    const vLegSide = getTrackedOptionLegSide(objPosition.contractName).toUpperCase();
+    const objPendingResult = await requestCoveredLiveConfirmation(vUserId, objProfile, {
+        kind: "manual_swap",
+        title: "Confirm Covered Swap",
+        message: `Swap ${objPosition.contractName} now? This will close the live ${vLegSide} leg and reopen it using row ${vRowIndex} Manual Trader settings.`,
+        payload: {
+            importId: objPosition.importId,
+            contractName: objPosition.contractName
+        }
+    });
+    if (objPendingResult === "queued" || objPendingResult === "suppressed") {
+        res.json({
+            status: "warning",
+            message: objPendingResult === "queued"
+                ? "Covered swap is waiting for confirmation."
+                : "Another live action confirmation is already pending."
+        });
+        return;
+    }
+
+    try {
+        const objResult = await executeCoveredOpenPositionSwap(vUserId, vSelectedApiProfileId, objProfile, objPosition);
+        res.json({
+            status: "success",
+            message: `Swapped ${objResult.closedContractName} into ${objResult.reopenedContractName}.`,
+            data: {
+                closeOrder: objResult.closeOrder,
+                openOrder: objResult.openOrder,
+                trackedOpenPositions: objResult.trackedOpenPositions
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to swap the covered position.")
+        });
+    }
+}
+
 async function executeManualFutureInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     if (isCoveredLikeStrategy(pStrategyCode)) {
         res.status(400).json({
@@ -12883,6 +13151,9 @@ export async function reconcileCoveredOptionsOpenPositions(req: Request, res: Re
 }
 export async function closeCoveredOptionsImportedOpenPosition(req: Request, res: Response): Promise<void> {
     await closeImportedOpenPositionInternal(req, res, "covered-options");
+}
+export async function swapCoveredOptionsImportedOpenPosition(req: Request, res: Response): Promise<void> {
+    await swapCoveredOpenPositionInternal(req, res);
 }
 export async function getCoveredOptionsClosedPositions(req: Request, res: Response): Promise<void> {
     await getClosedPositionsInternal(req, res, "covered-options");

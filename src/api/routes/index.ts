@@ -110,6 +110,7 @@ import {
     saveRollingFuturesLtDualProfile,
     clearCoveredOptionsOpenPositions,
     clearOptionsScalperOpenPositions,
+    swapCoveredOptionsImportedOpenPosition,
     handleTelegramWebhook
 } from "../controllers/rolling-futures-lt-controller";
 import {
@@ -367,6 +368,9 @@ export function createApiRouter(
     });
     objRouter.post("/covered-options/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await closeCoveredOptionsImportedOpenPosition(req, res);
+    });
+    objRouter.post("/covered-options/open-positions/swap", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await swapCoveredOptionsImportedOpenPosition(req, res);
     });
     objRouter.post("/covered-options/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await executeCoveredOptionsKillSwitch(req, res);
