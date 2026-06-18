@@ -399,6 +399,9 @@ interface RollingFuturesLtAccountSummarySnapshot {
     openCount: number;
 }
 
+const gCoveredMultiplierMarginUsd = 1.5;
+const gCoveredMultiplierMax = 1000;
+
 function getAccountId(req: Request): string {
     const vOwnAccountId = String(req.authAccount?.accountId || "").trim();
     const vBodyTarget = typeof req.body?.targetUserId === "string" ? req.body.targetUserId : "";
@@ -479,6 +482,22 @@ function normalizeExecStrategyInput(
         qty: vQty,
         targetDelta: vTargetDelta
     };
+}
+
+function normalizeCoveredMultiplierValue(pValue: unknown): number {
+    const vRaw = Math.floor(Number(pValue || 0));
+    if (!Number.isFinite(vRaw) || vRaw < 1) {
+        return 1;
+    }
+    return Math.min(gCoveredMultiplierMax, vRaw);
+}
+
+function normalizeCoveredMultiplierString(pValue: unknown): string {
+    return String(normalizeCoveredMultiplierValue(pValue));
+}
+
+function getCoveredRequiredMarginForMultiplier(pMultiplier: unknown): number {
+    return Number((normalizeCoveredMultiplierValue(pMultiplier) * gCoveredMultiplierMarginUsd).toFixed(2));
 }
 
 async function runExecStrategyPlacement(
@@ -3277,7 +3296,9 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
             .filter((pValue) => Boolean(pValue) && gRollingFuturesTelegramEventTypes.has(pValue))
         : [];
     const objMergedUiState: Record<string, unknown> = {
-        startQty: normalizeStringValue(objUiState.startQty, String(objDefaults.startQty)),
+        startQty: isCoveredOptionsStrategy(pProfile.strategyCode)
+            ? normalizeCoveredMultiplierString(objUiState.startQty ?? objDefaults.startQty)
+            : normalizeStringValue(objUiState.startQty, String(objDefaults.startQty)),
         symbol: normalizeSymbolValue(objUiState.symbol),
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
@@ -3329,7 +3350,9 @@ function normalizeProfileSaveInput(
             .filter((pValue) => Boolean(pValue) && gRollingFuturesTelegramEventTypes.has(pValue))
         : [];
     const objNormalizedUiState: Record<string, unknown> = {
-        startQty: normalizeStringValue(objUiState.startQty, String(objDefaults.startQty)),
+        startQty: isCoveredOptionsStrategy(pStrategyCode)
+            ? normalizeCoveredMultiplierString(objUiState.startQty ?? objDefaults.startQty)
+            : normalizeStringValue(objUiState.startQty, String(objDefaults.startQty)),
         symbol: normalizeSymbolValue(objUiState.symbol),
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
@@ -4329,14 +4352,16 @@ function getProfitCloseRule(
 
     const bBlockedMarginEnabled = Boolean(pUiState.closeBlockedMargin);
     const vBlockedMarginPct = Math.max(0, Number(pUiState.blockedMarginPct || 0));
-    const vBlockedMargin = Math.max(0, Number(pSummary?.blockedMargin || 0));
+    const vBlockedMargin = isCoveredOptionsStrategy(pStrategyCode)
+        ? getCoveredRequiredMarginForMultiplier(pUiState.startQty)
+        : Math.max(0, Number(pSummary?.blockedMargin || 0));
     if (bBlockedMarginEnabled && vBlockedMarginPct > 0 && vBlockedMargin > 0) {
         const vThreshold = vBlockedMargin * (vBlockedMarginPct / 100);
         if (vNetProfit >= vThreshold) {
             return {
                 triggered: true,
                 reason: "blockmargin",
-                message: `Net PnL ${vNetProfit.toFixed(2)} reached the blocked-margin target ${vThreshold.toFixed(2)}.`,
+                message: `Net PnL ${vNetProfit.toFixed(2)} reached the blocked-margin target ${vThreshold.toFixed(2)}${isCoveredOptionsStrategy(pStrategyCode) ? ` using configured blocked margin ${vBlockedMargin.toFixed(2)}` : ""}.`,
                 thresholdValue: Number(vThreshold.toFixed(6)),
                 reEnterEnabled: Boolean(pUiState.reEnterBlock)
             };
@@ -10506,7 +10531,43 @@ async function calculateRecommendedStartQtyInternal(req: Request, res: Response,
         const objUsdRow = pickUsdBalanceRow(arrWalletRows);
         const vAvailableBalance = Number(getAvailableBalanceUsd(objUsdRow).toFixed(2));
         if (!(vAvailableBalance > 0)) {
-            throw new Error("Available Balance is not sufficient to calculate Start Qty.");
+            throw new Error(`Available Balance is not sufficient to calculate ${isCoveredOptionsStrategy(pStrategyCode) ? "Multiplier" : "Start Qty"}.`);
+        }
+
+        if (isCoveredOptionsStrategy(pStrategyCode)) {
+            const vRecommendedQty = Math.min(
+                gCoveredMultiplierMax,
+                Math.max(0, Math.floor(vAvailableBalance / gCoveredMultiplierMarginUsd))
+            );
+            const objEstimate: RollingFuturesLtRecommendedStartQty = {
+                recommendedQty: vRecommendedQty,
+                rawQty: vRecommendedQty,
+                roundedQty: vRecommendedQty,
+                basketAdjustedQty: vRecommendedQty,
+                availableBalance: vAvailableBalance,
+                usableBalance: vAvailableBalance,
+                hedgeReserve: 0,
+                optionReservePerQty: gCoveredMultiplierMarginUsd,
+                safetyFactor: 1,
+                optionReserveMultiplier: 1,
+                hedgeMarginRatio: 0,
+                basketUpliftFactor: 1,
+                contracts: []
+            };
+            if (vRecommendedQty < 1) {
+                res.json({
+                    status: "warning",
+                    message: `Available Balance ${vAvailableBalance.toFixed(2)} is below the required ${gCoveredMultiplierMarginUsd.toFixed(2)} USD for Multiplier 1.`,
+                    data: objEstimate
+                });
+                return;
+            }
+            res.json({
+                status: "success",
+                message: `Estimated Multiplier ${vRecommendedQty} from Available Balance ${vAvailableBalance.toFixed(2)} using ${gCoveredMultiplierMarginUsd.toFixed(2)} USD per multiplier.`,
+                data: objEstimate
+            });
+            return;
         }
 
         const arrOptionSides: Array<"CE" | "PE"> = objExecInput.legSide === "both"
@@ -11931,6 +11992,22 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
         return;
     }
 
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        const objUiState = getMergedUiState(objProfile);
+        const vMultiplier = normalizeCoveredMultiplierValue(objUiState.startQty);
+        const vRequiredMargin = getCoveredRequiredMarginForMultiplier(vMultiplier);
+        const vSummarySymbol = normalizeSymbolValue(objUiState.symbol);
+        const objSummary = await fetchAccountSummarySnapshot(vUserId, vSelectedApiProfileId, vSummarySymbol);
+        const vAvailableBalance = Number(objSummary.availableBalance || 0);
+        if (!(vAvailableBalance >= vRequiredMargin)) {
+            res.status(400).json({
+                status: "warning",
+                message: `Balance insufficient for the selected qty. Required ${vRequiredMargin.toFixed(2)} USD, available ${vAvailableBalance.toFixed(2)} USD.`
+            });
+            return;
+        }
+    }
+
     if (isCoveredLikeStrategy(pStrategyCode) && Array.isArray(req.body?.rows)) {
         const arrInputs = (req.body.rows as Array<Record<string, unknown>>).map((objRow) => {
             const objInput = normalizeExecStrategyInput(
@@ -12610,17 +12687,22 @@ async function updateRecoveryMetricsInternal(req: Request, res: Response, pStrat
 async function fetchTrackedClosedOrderHistoryRows(
     pClient: any,
     pSelectedSymbol: "BTC" | "ETH",
-    pStartTimeIso = ""
+    pStartTimeIso = "",
+    pEndTimeIso = ""
 ): Promise<DeltaOrderHistoryRow[]> {
     const vPageSize = 100;
     const arrRows: DeltaOrderHistoryRow[] = [];
     let vAfterCursor = "";
     let vSafetyCounter = 0;
     const vStartTime = toEpochMicros(pStartTimeIso);
+    const vEndTime = toEpochMicros(pEndTimeIso, true);
     while (vSafetyCounter < 100) {
         const objParams: Record<string, string | number> = { page_size: vPageSize };
         if (vStartTime) {
             objParams.start_time = vStartTime;
+        }
+        if (vEndTime) {
+            objParams.end_time = vEndTime;
         }
         if (vAfterCursor) {
             objParams.after = vAfterCursor;
@@ -12690,13 +12772,35 @@ async function recalculateAndPersistRecoveryMetricsFromClosedHistory(
         };
     }
     if (isCoveredOptionsStrategy(pStrategyCode)) {
+        const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+        const objUiState = getMergedUiState(objProfile);
+        const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
+        const vClosedFromDate = String(objUiState.closedFromDate || "").trim();
+        const vClosedToDate = String(objUiState.closedToDate || "").trim();
+        const vClosedFromDateIso = parseDeltaUiDateTimeLocalToIsoString(vClosedFromDate);
+        const vClosedToDateIso = parseDeltaUiDateTimeLocalToIsoString(vClosedToDate);
+        const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
+        const arrRows = await fetchTrackedClosedOrderHistoryRows(
+            client,
+            vSelectedSymbol,
+            vClosedFromDateIso,
+            vClosedToDateIso
+        );
+        const vBrokerageTotal = Number(arrRows.reduce((pSum, pRow) => {
+            return pSum + toFiniteNumber(pRow.paid_commission, 0);
+        }, 0).toFixed(4));
+        const vTotalPnl = Number(arrRows.reduce((pSum, pRow) => {
+            return pSum + toFiniteNumber(pRow.meta_data?.pnl, 0);
+        }, 0).toFixed(4));
+        await saveBrokerageRecoveryTotal(pUserId, pStrategyCode, vBrokerageTotal);
+        await saveRecoveredTotalPnl(pUserId, pStrategyCode, vTotalPnl);
         return {
             openPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode),
             recalculated: {
-                strategyStartedAt: "",
-                totalBrokerageToRecover: 0,
-                totalPnl: 0,
-                closedCount: 0
+                strategyStartedAt: vClosedFromDate,
+                totalBrokerageToRecover: vBrokerageTotal,
+                totalPnl: vTotalPnl,
+                closedCount: arrRows.length
             }
         };
     }
@@ -12895,6 +12999,33 @@ async function recalculateRecoveryTotalPnlInternal(req: Request, res: Response, 
     }
 
     try {
+        if (isCoveredOptionsStrategy(pStrategyCode)) {
+            const objResult = await recalculateAndPersistRecoveryMetricsFromClosedHistory(
+                vUserId,
+                pStrategyCode,
+                vSelectedApiProfileId
+            );
+            await logFuturesEvent(
+                vUserId,
+                pStrategyCode,
+                "manual_action",
+                "success",
+                "Covered Recovery Metrics Recalculated",
+                `Recalculated Total Brokerage to ${objResult.recalculated.totalBrokerageToRecover.toFixed(4)} and Total PnL to ${objResult.recalculated.totalPnl.toFixed(4)} from Delta history.`,
+                {
+                    reason: "covered_recovery_metrics_recalc",
+                    totalBrokerageToRecover: objResult.recalculated.totalBrokerageToRecover,
+                    totalPnl: objResult.recalculated.totalPnl,
+                    closedCount: objResult.recalculated.closedCount
+                }
+            );
+            res.json({
+                status: "success",
+                message: "Covered recovery metrics recalculated from Delta history.",
+                data: objResult.openPositions
+            });
+            return;
+        }
         const objResult = await recalculateAndPersistTotalPnl(vUserId, pStrategyCode, vSelectedApiProfileId);
         await logFuturesEvent(
             vUserId,

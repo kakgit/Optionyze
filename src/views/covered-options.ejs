@@ -35,8 +35,8 @@
                     </div>
                     <div class="rolling-futures-hero-badge">
                         <div class="rolling-futures-start-qty-label-row">
-                            <label for="txtRollingFuturesStartQty">Start Qty</label>
-                            <button class="rolling-futures-start-qty-calc-btn" type="button" id="btnRollingFuturesCalcStartQty" title="Calculate Start Qty from Available Balance" aria-label="Calculate Start Qty from Available Balance">
+                            <label for="txtRollingFuturesStartQty">Multiplier</label>
+                            <button class="rolling-futures-start-qty-calc-btn" type="button" id="btnRollingFuturesCalcStartQty" title="Calculate Multiplier from Available Balance" aria-label="Calculate Multiplier from Available Balance">
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <rect x="4" y="3" width="16" height="18" rx="2" />
                                     <path d="M8 7h8" />
@@ -48,7 +48,7 @@
                             </button>
                         </div>
                         <div class="rolling-futures-start-qty-row">
-                            <input class="rolling-futures-start-qty" type="number" min="1" step="1" id="txtRollingFuturesStartQty" value="1" />
+                            <input class="rolling-futures-start-qty" type="number" min="1" max="1000" step="1" id="txtRollingFuturesStartQty" value="1" />
                         </div>
                     </div>
                     <div class="rolling-futures-hero-badge action">

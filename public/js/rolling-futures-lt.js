@@ -181,7 +181,52 @@
     let lastNeutralStatus = null;
     let lastRecoveryMetrics = null;
     let pendingLiveConfirmation = null;
+    let lastAccountSummary = null;
     const closedPositionsPageSize = 10;
+    const coveredMultiplierMarginPerUnit = 1.5;
+
+    function clampCoveredMultiplierValue(value) {
+        const vRaw = Math.floor(Number(value || 0));
+        if (!Number.isFinite(vRaw) || vRaw < 1) {
+            return 1;
+        }
+        return Math.min(1000, vRaw);
+    }
+
+    function getCoveredMultiplierValue() {
+        if (!(ids.startQty instanceof HTMLInputElement)) {
+            return 1;
+        }
+        return clampCoveredMultiplierValue(ids.startQty.value);
+    }
+
+    function getCoveredRequiredBlockedMargin(multiplierValue) {
+        return Number((clampCoveredMultiplierValue(multiplierValue) * coveredMultiplierMarginPerUnit).toFixed(2));
+    }
+
+    function refreshCoveredBlockedMarginDisplay() {
+        if (!isCoveredMode || !ids.blockedMarginValue) {
+            return;
+        }
+        const vMultiplier = getCoveredMultiplierValue();
+        const vRequiredMargin = getCoveredRequiredBlockedMargin(vMultiplier);
+        ids.blockedMarginValue.textContent = fmtUsd(vRequiredMargin);
+        ids.blockedMarginValue.title = `Estimated blocked margin from Multiplier ${vMultiplier} x ${coveredMultiplierMarginPerUnit.toFixed(2)} USD`;
+    }
+
+    function ensureCoveredExecBalance() {
+        if (!isCoveredMode) {
+            return;
+        }
+        const vAvailableBalance = Number(lastAccountSummary?.availableBalance);
+        const vRequiredMargin = getCoveredRequiredBlockedMargin(getCoveredMultiplierValue());
+        if (!Number.isFinite(vAvailableBalance) || vAvailableBalance <= 0) {
+            throw new Error("Available Balance is not loaded yet. Refresh connection and try again.");
+        }
+        if (vAvailableBalance < vRequiredMargin) {
+            throw new Error(`Balance insufficient for the selected qty. Required ${vRequiredMargin.toFixed(2)} USD, available ${vAvailableBalance.toFixed(2)} USD.`);
+        }
+    }
 
     function escapeHtml(value) {
         return String(value ?? "")
@@ -1088,6 +1133,7 @@
     }
 
     function clearAccountSummary() {
+        lastAccountSummary = null;
         [
             ids.oneLotValue,
             ids.totalBalanceValue,
@@ -1103,6 +1149,7 @@
     }
 
     function applyAccountSummaryData(objData) {
+        lastAccountSummary = objData || null;
         execStrategyEnabled = mode === "dual" ? Boolean(objData.execStrategy) : true;
         if (ids.oneLotValue) {
             ids.oneLotValue.textContent = fmtUsd(objData.oneLotValue);
@@ -1111,17 +1158,22 @@
             ids.totalBalanceValue.textContent = fmtUsd(objData.totalBalance);
         }
         if (ids.blockedMarginValue) {
-            ids.blockedMarginValue.textContent = fmtUsd(
-                Number.isFinite(Number(objData.blockedMarginDisplay))
-                    ? objData.blockedMarginDisplay
-                    : objData.blockedMargin
-            );
-            const blockedMarginHint = String(objData.blockedMarginHint || "").trim();
-            if (blockedMarginHint) {
-                ids.blockedMarginValue.title = blockedMarginHint;
+            if (isCoveredMode) {
+                refreshCoveredBlockedMarginDisplay();
             }
             else {
-                ids.blockedMarginValue.removeAttribute("title");
+                ids.blockedMarginValue.textContent = fmtUsd(
+                    Number.isFinite(Number(objData.blockedMarginDisplay))
+                        ? objData.blockedMarginDisplay
+                        : objData.blockedMargin
+                );
+                const blockedMarginHint = String(objData.blockedMarginHint || "").trim();
+                if (blockedMarginHint) {
+                    ids.blockedMarginValue.title = blockedMarginHint;
+                }
+                else {
+                    ids.blockedMarginValue.removeAttribute("title");
+                }
             }
         }
         if (ids.availableBalanceValue) {
@@ -1181,6 +1233,9 @@
         try {
             const objUiState = { ...getDefaultUiState(), ...(uiState || {}) };
             setInputValue(ids.startQty, objUiState.startQty);
+            if (isCoveredMode && ids.startQty instanceof HTMLInputElement) {
+                ids.startQty.value = String(clampCoveredMultiplierValue(ids.startQty.value));
+            }
             setInputValue(ids.symbol, String(objUiState.symbol || "BTC").trim().toUpperCase() === "ETH" ? "ETH" : "BTC");
             setInputValue(ids.futureOrderType, String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order");
             setInputValue(ids.bsFutQty, objUiState.bsFutQty);
@@ -1215,6 +1270,7 @@
             applyExpiryModeDefaults(false);
             syncNeutralModeCheckboxes(getActiveNeutralModeKey());
             updateNeutralBadges(lastNeutralStatus);
+            refreshCoveredBlockedMarginDisplay();
         }
         finally {
             isApplyingState = false;
@@ -1228,6 +1284,9 @@
         if (!(ids.startQty instanceof HTMLInputElement)) {
             return;
         }
+        if (isCoveredMode) {
+            ids.startQty.value = String(clampCoveredMultiplierValue(ids.startQty.value));
+        }
         const vStartQty = String(ids.startQty.value || "").trim() || "1";
         getSupportedOptionRowIndexes().forEach(function (rowIndex) {
             const nodes = getOptionRowNodes(rowIndex);
@@ -1235,6 +1294,7 @@
                 nodes.qty.value = vStartQty;
             }
         });
+        refreshCoveredBlockedMarginDisplay();
     }
 
     async function resetManualTraderDefaults() {
@@ -1532,6 +1592,7 @@
         if (!autoTraderEnabled) {
             throw new Error("Turn Auto Trader ON before executing the live strategy.");
         }
+        ensureCoveredExecBalance();
 
         await saveProfile();
 
@@ -1611,6 +1672,7 @@
         if (!canUseLiveActions()) {
             throw new Error("Delta connection is not healthy enough to execute the live covered strategy.");
         }
+        ensureCoveredExecBalance();
 
         await saveProfile();
         execStrategyInFlight = true;
@@ -2235,17 +2297,17 @@
                 return;
             }
             if (vQty < 1) {
-                setStatus(ids.pageStatus, String(objResult?.message || "Available Balance is too low for a safe Start Qty estimate."), "warning");
+                setStatus(ids.pageStatus, String(objResult?.message || (isCoveredMode ? "Available Balance is too low for the selected multiplier estimate." : "Available Balance is too low for a safe Start Qty estimate.")), "warning");
                 return;
             }
-            ids.startQty.value = String(vQty);
+            ids.startQty.value = String(isCoveredMode ? clampCoveredMultiplierValue(vQty) : vQty);
             syncQtyFromStartQty();
             return saveProfile().then(function () {
-                const vMessage = String(objResult?.message || `Estimated Start Qty ${vQty}.`).trim();
-                setStatus(ids.pageStatus, `${vMessage} Start Qty has been updated.`, "success");
+                const vMessage = String(objResult?.message || (isCoveredMode ? `Estimated Multiplier ${vQty}.` : `Estimated Start Qty ${vQty}.`)).trim();
+                setStatus(ids.pageStatus, `${vMessage} ${isCoveredMode ? "Multiplier" : "Start Qty"} has been updated.`, "success");
             });
         }).catch(function (error) {
-            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to calculate Start Qty.", "danger");
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : `Unable to calculate ${isCoveredMode ? "Multiplier" : "Start Qty"}.`, "danger");
         });
     });
     ids.futureOrderType?.addEventListener("change", queueProfileSave);
@@ -2683,6 +2745,9 @@
             if (!(ids.updateRecoveryTotalsCheckbox instanceof HTMLInputElement) || !ids.updateRecoveryTotalsCheckbox.checked) {
                 setStatus(ids.pageStatus, "Closed-position history refreshed.", "success");
                 return null;
+            }
+            if (isCoveredMode) {
+                return recalculateTotalPnlFromHistory();
             }
             const objTotals = calculateClosedPositionRecoveryTotals(rows);
             return updateRecoveryMetrics(objTotals.totalBrokerageToRecover, objTotals.totalPnl);
