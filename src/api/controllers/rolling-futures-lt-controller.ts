@@ -252,6 +252,7 @@ const gRollingFuturesTelegramEventTypes = new Set([
     "future_opened",
     "future_closed",
     "option_opened",
+    "reentry_opened",
     "option_closed",
     "sl_triggered",
     "tp_triggered",
@@ -613,8 +614,45 @@ async function runCoveredExecStrategyBatchPlacement(
         const arrOrders: Array<Record<string, unknown>> = [];
         const arrContracts: Array<Record<string, unknown>> = [];
         const vStrategyStartedAt = new Date().toISOString();
+        const objUiState = getMergedUiState(pProfile);
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "manual_action",
+            "info",
+            "Exec Strategy Settings Snapshot",
+            `Server will execute Covered strategy with Row 1 ${String(objUiState.action1 || "").toUpperCase()} ${String(objUiState.legs1 || "").toUpperCase()} TP ${Number(objUiState.tpD1 || 0).toFixed(2)} SL ${Number(objUiState.slD1 || 0).toFixed(2)}, Row 2 ${String(objUiState.action2 || "").toUpperCase()} ${String(objUiState.legs2 || "").toUpperCase()} TP ${Number(objUiState.tpD2 || 0).toFixed(2)} SL ${Number(objUiState.slD2 || 0).toFixed(2)}.`,
+            {
+                reason: "exec_strategy_settings_snapshot",
+                row1: {
+                    action: String(objUiState.action1 || "").trim().toLowerCase(),
+                    legs: String(objUiState.legs1 || "").trim().toLowerCase(),
+                    tpD: Number(objUiState.tpD1 || 0),
+                    slD: Number(objUiState.slD1 || 0),
+                    reD: Number(objUiState.reD1 || 0),
+                    expiryDate: String(objUiState.expiryDate1 || "").trim()
+                },
+                row2: {
+                    action: String(objUiState.action2 || "").trim().toLowerCase(),
+                    legs: String(objUiState.legs2 || "").trim().toLowerCase(),
+                    tpD: Number(objUiState.tpD2 || 0),
+                    slD: Number(objUiState.slD2 || 0),
+                    reD: Number(objUiState.reD2 || 0),
+                    expiryDate: String(objUiState.expiryDate2 || "").trim()
+                }
+            }
+        );
+        const objBuyHedgeGateConfig = getCoveredBuyHedgeSellPremiumGateConfig(objUiState);
+        const arrInputsToExecute = isCoveredOptionsStrategy(pStrategyCode) && objBuyHedgeGateConfig.enabled
+            ? [...pInputs].sort((pLeft, pRight) => {
+                if (pLeft.action === pRight.action) {
+                    return 0;
+                }
+                return pLeft.action === "sell" ? -1 : 1;
+            })
+            : [...pInputs];
         await resetRecoveryMetrics(pUserId, pStrategyCode);
-        for (const objInput of pInputs) {
+        for (const objInput of arrInputsToExecute) {
             objLastResult = await executeStrategyPlacement(
                 pUserId,
                 pStrategyCode,
@@ -634,13 +672,12 @@ async function runCoveredExecStrategyBatchPlacement(
             throw new Error("No covered strategy rows were supplied for execution.");
         }
 
-        const objUiState = getMergedUiState(pProfile);
         const objNeutralCheck = await applyServerSideNeutralityCheck(
             pUserId,
             pStrategyCode,
             pSelectedApiProfileId,
             objUiState,
-            pInputs[0]?.symbol || normalizeSymbolValue(objUiState.symbol),
+            arrInputsToExecute[0]?.symbol || normalizeSymbolValue(objUiState.symbol),
             objLastResult.trackedOpenPositions,
             null
         );
@@ -652,7 +689,7 @@ async function runCoveredExecStrategyBatchPlacement(
                 userId: pUserId,
                 strategyCode: pStrategyCode,
                 selectedApiProfileId: pSelectedApiProfileId,
-                currentSymbol: pInputs[0]?.symbol || normalizeSymbolValue(objUiState.symbol),
+                currentSymbol: arrInputsToExecute[0]?.symbol || normalizeSymbolValue(objUiState.symbol),
                 state: {
                     ...((objRuntimeAfterExec.state || {}) as Record<string, unknown>),
                     ...objNeutralCheck.nextRuntimeState
@@ -673,11 +710,11 @@ async function runCoveredExecStrategyBatchPlacement(
             "option_opened",
             "success",
             pReason === "admin_exec_strategy" ? "Admin Exec Strategy Started" : "Exec Strategy Started",
-            `Exec Strategy placed ${arrOrders.length} option order${arrOrders.length === 1 ? "" : "s"} across ${pInputs.length} covered row${pInputs.length === 1 ? "" : "s"} using ${objLastResult.profileLabel}.`,
+            `Exec Strategy placed ${arrOrders.length} option order${arrOrders.length === 1 ? "" : "s"} across ${arrInputsToExecute.length} covered row${arrInputsToExecute.length === 1 ? "" : "s"} using ${objLastResult.profileLabel}.`,
             {
-                symbol: pInputs[0]?.symbol || "",
-                qty: pInputs.reduce((pSum, objInput) => pSum + Math.max(0, Number(objInput.qty || 0)), 0),
-                rowCount: pInputs.length,
+                symbol: arrInputsToExecute[0]?.symbol || "",
+                qty: arrInputsToExecute.reduce((pSum, objInput) => pSum + Math.max(0, Number(objInput.qty || 0)), 0),
+                rowCount: arrInputsToExecute.length,
                 reason: pReason
             }
         );
@@ -1355,8 +1392,8 @@ function resolveRollingFuturesExpiryDateByMode(pExpiryMode: string): string {
 }
 
 function normalizeRollingFuturesExpiryDate(pExpiryMode: string, pExpiryDate: unknown): string {
-    void pExpiryDate;
-    return resolveRollingFuturesExpiryDateByMode(pExpiryMode);
+    const vExplicitExpiryDate = normalizeIsoDateOnly(pExpiryDate);
+    return vExplicitExpiryDate || resolveRollingFuturesExpiryDateByMode(pExpiryMode);
 }
 
 function getManualFutureOrderLockKey(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): string {
@@ -1594,6 +1631,8 @@ function getDefaultManualTraderUiState(
         closeBlockedMargin: false,
         blockedMarginPct: bIsDual ? "10" : "20",
         reEnterBlock: bIsDual,
+        buyHedgeSellPremiumGate: false,
+        buyHedgeSellPremiumPct: "2",
         autoConfirmLiveActions: false,
         telegramAlertTypes: [
             "engine_stopped",
@@ -1679,14 +1718,65 @@ function getTrackedOptionMetadata(pPosition: RollingFuturesLtImportedPositionRec
         : {};
 }
 
+function inferCoveredOptionRowIndexFromUiState(
+    pUiState: Record<string, unknown>,
+    pSide: unknown,
+    pLegSide: "ce" | "pe"
+): 1 | 2 {
+    const vAction = String(pSide || "").trim().toLowerCase() === "buy" ? "buy" : "sell";
+    const arrRows = ([1, 2] as const).map((pRowIndex) => {
+        const objRowState = getNormalizedOptionRowUiState(pUiState, "covered-options", pRowIndex);
+        return {
+            rowIndex: pRowIndex,
+            matchesAction: objRowState.action === vAction,
+            matchesLeg: objRowState.legs === "both" || objRowState.legs === pLegSide
+        };
+    });
+    const objActionAndLegMatch = arrRows.find((objRow) => objRow.matchesAction && objRow.matchesLeg);
+    if (objActionAndLegMatch) {
+        return objActionAndLegMatch.rowIndex;
+    }
+    const arrActionMatches = arrRows.filter((objRow) => objRow.matchesAction);
+    if (arrActionMatches.length === 1) {
+        return arrActionMatches[0].rowIndex;
+    }
+    const arrLegMatches = arrRows.filter((objRow) => objRow.matchesLeg);
+    if (arrLegMatches.length === 1) {
+        return arrLegMatches[0].rowIndex;
+    }
+    return 1;
+}
+
+function getTrackedOptionRowIndexForUi(
+    pPosition: RollingFuturesLtImportedPositionRecord,
+    pUiState?: Record<string, unknown> | null
+): 1 | 2 {
+    const objMetadata = getTrackedOptionMetadata(pPosition);
+    const vStoredRowIndex = normalizeOptionRowIndex(pPosition.strategyCode, objMetadata.rowIndex);
+    if (!isCoveredLikeStrategy(pPosition.strategyCode)) {
+        return vStoredRowIndex;
+    }
+    if (!Boolean(objMetadata.importedObservationOnly) && (Number(objMetadata.rowIndex) === 1 || Number(objMetadata.rowIndex) === 2)) {
+        return vStoredRowIndex;
+    }
+    if (pUiState && typeof pUiState === "object") {
+        return inferCoveredOptionRowIndexFromUiState(
+            pUiState,
+            pPosition.side,
+            getTrackedOptionLegSide(pPosition.contractName)
+        );
+    }
+    return vStoredRowIndex;
+}
+
 function hasTrackedOptionRowLeg(
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
     pRowIndex: 1 | 2,
-    pLegSide: "ce" | "pe"
+    pLegSide: "ce" | "pe",
+    pUiState?: Record<string, unknown> | null
 ): boolean {
     return listTrackedOpenOptionPositions(pTrackedPositions).some((objPosition) => {
-        const objMetadata = getTrackedOptionMetadata(objPosition);
-        return normalizeOptionRowIndex(objPosition.strategyCode, objMetadata.rowIndex) === pRowIndex
+        return getTrackedOptionRowIndexForUi(objPosition, pUiState) === pRowIndex
             && getTrackedOptionLegSide(objPosition.contractName) === pLegSide;
     });
 }
@@ -1694,17 +1784,154 @@ function hasTrackedOptionRowLeg(
 function getTrackedOptionRowLegTotalQty(
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
     pRowIndex: 1 | 2,
-    pLegSide: "ce" | "pe"
+    pLegSide: "ce" | "pe",
+    pUiState?: Record<string, unknown> | null
 ): number {
     return listTrackedOpenOptionPositions(pTrackedPositions).reduce((pSum, objPosition) => {
-        const objMetadata = getTrackedOptionMetadata(objPosition);
-        const bMatchesRowLeg = normalizeOptionRowIndex(objPosition.strategyCode, objMetadata.rowIndex) === pRowIndex
+        const bMatchesRowLeg = getTrackedOptionRowIndexForUi(objPosition, pUiState) === pRowIndex
             && getTrackedOptionLegSide(objPosition.contractName) === pLegSide;
         if (!bMatchesRowLeg) {
             return pSum;
         }
         return pSum + Math.max(0, Math.floor(Number(objPosition.qty || 0)));
     }, 0);
+}
+
+function getCoveredBuyHedgeSellPremiumGateConfig(
+    pUiState: Record<string, unknown>
+): {
+    enabled: boolean;
+    thresholdPct: number;
+    minimumSellPremiumRatio: number;
+} {
+    const vThresholdPctRaw = Number(pUiState.buyHedgeSellPremiumPct ?? 2);
+    const vThresholdPct = Number.isFinite(vThresholdPctRaw)
+        ? Math.min(100, Math.max(0, vThresholdPctRaw))
+        : 2;
+    return {
+        enabled: normalizeBooleanValue(pUiState.buyHedgeSellPremiumGate, false),
+        thresholdPct: vThresholdPct,
+        minimumSellPremiumRatio: Math.max(0, 1 - (vThresholdPct / 100))
+    };
+}
+
+function getMatchingCoveredSellLegForBuyHedge(
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pLegSide: "ce" | "pe"
+): RollingFuturesLtImportedPositionRecord | null {
+    const arrMatching = listTrackedOpenOptionPositions(pTrackedPositions).filter((objPosition) => {
+        return String(objPosition.side || "").trim().toUpperCase() === "SELL"
+            && getTrackedOptionLegSide(objPosition.contractName) === pLegSide;
+    });
+    if (!arrMatching.length) {
+        return null;
+    }
+    return [...arrMatching].sort((pLeft, pRight) => {
+        return new Date(String(pRight.openedAt || pRight.updatedAt || "")).getTime()
+            - new Date(String(pLeft.openedAt || pLeft.updatedAt || "")).getTime();
+    })[0] || null;
+}
+
+function evaluateCoveredBuyHedgeSellPremiumGate(
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pUiState: Record<string, unknown>,
+    pLegSide: "ce" | "pe"
+): {
+    enabled: boolean;
+    allowed: boolean;
+    thresholdPct: number;
+    currentSellPremium: number;
+    soldSellPremium: number;
+    minimumRequiredPremium: number;
+    matchingSellPosition: RollingFuturesLtImportedPositionRecord | null;
+    message: string;
+} {
+    const objConfig = getCoveredBuyHedgeSellPremiumGateConfig(pUiState);
+    if (!objConfig.enabled) {
+        return {
+            enabled: false,
+            allowed: true,
+            thresholdPct: objConfig.thresholdPct,
+            currentSellPremium: 0,
+            soldSellPremium: 0,
+            minimumRequiredPremium: 0,
+            matchingSellPosition: null,
+            message: ""
+        };
+    }
+    const objSellPosition = getMatchingCoveredSellLegForBuyHedge(pTrackedPositions, pLegSide);
+    if (!objSellPosition) {
+        return {
+            enabled: true,
+            allowed: false,
+            thresholdPct: objConfig.thresholdPct,
+            currentSellPremium: 0,
+            soldSellPremium: 0,
+            minimumRequiredPremium: 0,
+            matchingSellPosition: null,
+            message: `No matching ${pLegSide.toUpperCase()} sell leg is open for premium-gated buy hedge entry.`
+        };
+    }
+    const vSoldSellPremium = Number(objSellPosition.entryPrice || 0);
+    const vCurrentSellPremium = Number(objSellPosition.markPrice || objSellPosition.entryPrice || 0);
+    const vMinimumRequiredPremium = Number((vSoldSellPremium * objConfig.minimumSellPremiumRatio).toFixed(8));
+    if (!(vSoldSellPremium > 0) || !(vCurrentSellPremium > 0)) {
+        return {
+            enabled: true,
+            allowed: false,
+            thresholdPct: objConfig.thresholdPct,
+            currentSellPremium: vCurrentSellPremium,
+            soldSellPremium: vSoldSellPremium,
+            minimumRequiredPremium: vMinimumRequiredPremium,
+            matchingSellPosition: objSellPosition,
+            message: `Matching ${pLegSide.toUpperCase()} sell premium is unavailable for premium-gated buy hedge entry.`
+        };
+    }
+    const bAllowed = vCurrentSellPremium >= vMinimumRequiredPremium;
+    return {
+        enabled: true,
+        allowed: bAllowed,
+        thresholdPct: objConfig.thresholdPct,
+        currentSellPremium: vCurrentSellPremium,
+        soldSellPremium: vSoldSellPremium,
+        minimumRequiredPremium: vMinimumRequiredPremium,
+        matchingSellPosition: objSellPosition,
+        message: bAllowed
+            ? ""
+            : `Matching ${pLegSide.toUpperCase()} sell premium ${vCurrentSellPremium.toFixed(2)} is below the ${objConfig.thresholdPct.toFixed(2)}% threshold of sold premium ${vSoldSellPremium.toFixed(2)}. Minimum required is ${vMinimumRequiredPremium.toFixed(2)}.`
+    };
+}
+
+function getCoveredBuyHedgeOpenReasonText(
+    pOpenedReason: RollingFuturesLtOptionMetadata["openedReason"] | string,
+    pLegSide: "ce" | "pe",
+    pOptions?: {
+        thresholdPct?: number;
+    }
+): string {
+    const vThresholdText = Number.isFinite(Number(pOptions?.thresholdPct))
+        ? ` Matching ${pLegSide.toUpperCase()} sell premium stayed within the configured ${Number(pOptions?.thresholdPct).toFixed(2)}% threshold.`
+        : "";
+    const vReason = String(pOpenedReason || "").trim().toLowerCase();
+    if (vReason === "strategy_option_open") {
+        return `Buy hedge opened during Exec Strategy for ${pLegSide.toUpperCase()}.${vThresholdText}`;
+    }
+    if (vReason === "manual_option_open") {
+        return `Buy hedge opened manually for ${pLegSide.toUpperCase()}.${vThresholdText}`;
+    }
+    if (vReason === "sl_reentry") {
+        return `Buy hedge reopened for ${pLegSide.toUpperCase()} after SL recovery.${vThresholdText}`;
+    }
+    if (vReason === "tp_reentry") {
+        return `Buy hedge reopened for ${pLegSide.toUpperCase()} after TP recovery.${vThresholdText}`;
+    }
+    if (vReason === "expiry_cutoff_reentry") {
+        return `Buy hedge reopened for ${pLegSide.toUpperCase()} after expiry-day replacement.${vThresholdText}`;
+    }
+    if (vReason === "missing_leg") {
+        return `Buy hedge reopened for missing ${pLegSide.toUpperCase()} leg.${vThresholdText}`;
+    }
+    return `Buy hedge opened for ${pLegSide.toUpperCase()}.${vThresholdText}`;
 }
 
 function getTrackedFutureRealizedPnl(pPosition: RollingFuturesLtImportedPositionRecord): number {
@@ -1766,10 +1993,7 @@ function markPositionsAsImportedObservationOnly(
             : {};
         if (isOptionContractSymbol(objPosition.contractName)) {
             const vRowIndex = isCoveredLikeStrategy(objPosition.strategyCode)
-                ? normalizeOptionRowIndex(
-                    objPosition.strategyCode,
-                    objMetadata.rowIndex || (String(objPosition.side || "").trim().toUpperCase() === "SELL" ? 2 : 1)
-                )
+                ? getTrackedOptionRowIndexForUi(objPosition, pUiState)
                 : normalizeOptionRowIndex(objPosition.strategyCode, objMetadata.rowIndex);
             const objRowState = getNormalizedOptionRowUiState(pUiState, objPosition.strategyCode, vRowIndex);
             return {
@@ -3068,6 +3292,8 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         closeBlockedMargin: normalizeBooleanValue(objUiState.closeBlockedMargin, Boolean(objDefaults.closeBlockedMargin)),
         blockedMarginPct: normalizeStringValue(objUiState.blockedMarginPct, String(objDefaults.blockedMarginPct)),
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
+        buyHedgeSellPremiumGate: normalizeBooleanValue(objUiState.buyHedgeSellPremiumGate, Boolean(objDefaults.buyHedgeSellPremiumGate)),
+        buyHedgeSellPremiumPct: normalizeStringValue(objUiState.buyHedgeSellPremiumPct, String(objDefaults.buyHedgeSellPremiumPct)),
         autoConfirmLiveActions: normalizeBooleanValue(objUiState.autoConfirmLiveActions, Boolean(objDefaults.autoConfirmLiveActions)),
         telegramAlertTypes: Array.from(new Set(arrTelegramPrefs)),
         closedFromDate: String(objUiState.closedFromDate || "").trim(),
@@ -3118,6 +3344,8 @@ function normalizeProfileSaveInput(
         closeBlockedMargin: normalizeBooleanValue(objUiState.closeBlockedMargin, Boolean(objDefaults.closeBlockedMargin)),
         blockedMarginPct: normalizeStringValue(objUiState.blockedMarginPct, String(objDefaults.blockedMarginPct)),
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
+        buyHedgeSellPremiumGate: normalizeBooleanValue(objUiState.buyHedgeSellPremiumGate, Boolean(objDefaults.buyHedgeSellPremiumGate)),
+        buyHedgeSellPremiumPct: normalizeStringValue(objUiState.buyHedgeSellPremiumPct, String(objDefaults.buyHedgeSellPremiumPct)),
         autoConfirmLiveActions: normalizeBooleanValue(objUiState.autoConfirmLiveActions, Boolean(objDefaults.autoConfirmLiveActions)),
         telegramAlertTypes: Array.from(new Set(arrTelegramPrefs)),
         closedFromDate: String(objUiState.closedFromDate || "").trim(),
@@ -5192,6 +5420,9 @@ async function shouldSendFuturesTelegram(
     if (!arrSelectedTypes.length) {
         return false;
     }
+    if (pEventType === "reentry_opened" && arrSelectedTypes.includes("option_opened")) {
+        return true;
+    }
     return arrSelectedTypes.includes(pEventType);
 }
 
@@ -6246,11 +6477,54 @@ async function executeStrategyPlacement(
     const { client, profile } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(objUiState, "strategy_option_open", pStrategyCode, vRowIndex);
     const bIsDualStrategy = isDualRollingFuturesStrategy(pStrategyCode);
-    const arrOptionSides: Array<"CE" | "PE"> = pInput.legSide === "both"
+    let arrOptionSides: Array<"CE" | "PE"> = pInput.legSide === "both"
         ? (bIsDualStrategy ? ["CE", "PE"] : [])
         : [pInput.legSide === "pe" ? "PE" : "CE"];
     if (!arrOptionSides.length) {
         throw new Error("Only one option position can be open at a time. Select either CE or PE, not both.");
+    }
+    if (isCoveredOptionsStrategy(pStrategyCode) && pInput.action === "buy") {
+        const arrEligibleOptionSides = arrOptionSides.filter((pOptionSide) => {
+            const objGate = evaluateCoveredBuyHedgeSellPremiumGate(
+                arrExisting,
+                objUiState,
+                pOptionSide === "PE" ? "pe" : "ce"
+            );
+            return objGate.allowed;
+        });
+        if (!arrEligibleOptionSides.length) {
+            const objBlockedLeg = evaluateCoveredBuyHedgeSellPremiumGate(
+                arrExisting,
+                objUiState,
+                arrOptionSides[0] === "PE" ? "pe" : "ce"
+            );
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "manual_action",
+                "info",
+                "Covered Buy Hedge Entry Skipped",
+                objBlockedLeg.message || "Matching sell premium gate blocked the covered buy hedge entry.",
+                {
+                    rowIndex: vRowIndex,
+                    reason: "covered_buy_hedge_premium_gate"
+                }
+            );
+            return {
+                profileLabel: profile.referenceName || profile.apiKey || "",
+                trackedOpenPositions: arrExisting,
+                contracts: [],
+                orders: [],
+                neutralCheck: {
+                    mode: "none",
+                    hedgePlaced: false,
+                    totalDelta: 0,
+                    totalTheta: 0,
+                    threshold: null
+                }
+            };
+        }
+        arrOptionSides = arrEligibleOptionSides;
     }
     const objConfig = {
         symbol: pInput.symbol,
@@ -6427,6 +6701,28 @@ async function executeStrategyPlacement(
             objNeutralCheck.trackedOpenPositions,
             "active"
         );
+        if (isCoveredOptionsStrategy(pStrategyCode) && pInput.action === "buy") {
+            const objGateConfig = getCoveredBuyHedgeSellPremiumGateConfig(objUiState);
+            for (const objContract of arrContracts) {
+                const vLegSide = String(objContract.optionSide || "").trim().toUpperCase() === "PE" ? "pe" : "ce";
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "option_opened",
+                    "success",
+                    "Covered Buy Hedge Opened",
+                    `${String(objContract.contractSymbol || "").trim()} opened from row ${vRowIndex}. ${getCoveredBuyHedgeOpenReasonText("strategy_option_open", vLegSide, { thresholdPct: objGateConfig.enabled ? objGateConfig.thresholdPct : Number.NaN })}`,
+                    {
+                        symbol: pInput.symbol,
+                        contractName: objContract.contractSymbol,
+                        qty: pInput.qty,
+                        rowIndex: vRowIndex,
+                        legSide: vLegSide,
+                        reason: "covered_buy_hedge_exec_opened"
+                    }
+                );
+            }
+        }
 
         return {
             profileLabel: profile.referenceName || profile.apiKey || "",
@@ -6470,6 +6766,35 @@ async function updateStrategyClosedFromDateAfterExec(
         uiState: {
             ...getMergedUiState(pProfile),
             closedFromDate: formatDeltaUiDateTimeLocalString(objFirstOpenedOption.openedAt)
+        }
+    });
+}
+
+async function updateCoveredRowExpiryDateInProfile(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pRowIndex: 1 | 2,
+    pExpiryDate: string
+): Promise<RollingFuturesLtProfileRecord> {
+    if (!isCoveredLikeStrategy(pProfile.strategyCode)) {
+        return pProfile;
+    }
+    const vExpiryDate = normalizeIsoDateOnly(pExpiryDate);
+    if (!vExpiryDate) {
+        return pProfile;
+    }
+    const objUiState = getMergedUiState(pProfile);
+    const objKeys = getOptionRowStateKeys(pProfile.strategyCode, pRowIndex);
+    if (String(objUiState[objKeys.expiryDate] || "").trim() === vExpiryDate) {
+        return pProfile;
+    }
+    return saveRollingFuturesLtProfile({
+        ...pProfile,
+        userId: pUserId,
+        strategyCode: pProfile.strategyCode,
+        uiState: {
+            ...objUiState,
+            [objKeys.expiryDate]: vExpiryDate
         }
     });
 }
@@ -6757,6 +7082,27 @@ async function openTrackedOptionReEntry(
     if (!(vTargetDelta > 0)) {
         return null;
     }
+    if (isCoveredOptionsStrategy(pStrategyCode) && vOrderAction === "buy") {
+        const arrTrackedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+        const objGate = evaluateCoveredBuyHedgeSellPremiumGate(arrTrackedPositions, objUiState, vLegSide);
+        if (!objGate.allowed) {
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "manual_action",
+                "info",
+                "Covered Buy Hedge Re-Entry Skipped",
+                objGate.message || `Matching ${vLegSide.toUpperCase()} sell premium gate blocked buy hedge re-entry.`,
+                {
+                    contractName: pClosedPosition.contractName,
+                    legSide: vLegSide,
+                    rowIndex: vRowIndex,
+                    reason: "covered_buy_hedge_premium_gate"
+                }
+            );
+            return null;
+        }
+    }
 
     if (isOptionsScalperStrategy(pStrategyCode)) {
         const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
@@ -6901,7 +7247,7 @@ async function executeCoveredPendingReEntryNow(
 ): Promise<boolean> {
     const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
     let arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
-    if (hasTrackedOptionRowLeg(arrSavedPositions, pPending.rowIndex, pPending.legSide)) {
+    if (hasTrackedOptionRowLeg(arrSavedPositions, pPending.rowIndex, pPending.legSide, getMergedUiState(pProfile))) {
         return false;
     }
     const objPlaceholderPosition = buildCoveredReEntryPlaceholderPosition(
@@ -6943,6 +7289,23 @@ async function executeCoveredPendingReEntryNow(
         ...arrSavedPositions,
         objReEntry.position
     ]);
+    if (String(objReEntry.position.side || "").trim().toUpperCase() === "BUY") {
+        const objGateConfig = getCoveredBuyHedgeSellPremiumGateConfig(getMergedUiState(pProfile));
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "reentry_opened",
+            "success",
+            "Covered Buy Hedge Reopened",
+            `${String(objReEntry.position.contractName || "").trim()} reopened for row ${pPending.rowIndex}. ${getCoveredBuyHedgeOpenReasonText(pPending.reason, pPending.legSide, { thresholdPct: objGateConfig.enabled ? objGateConfig.thresholdPct : Number.NaN })}`,
+            {
+                contractName: objReEntry.position.contractName,
+                rowIndex: pPending.rowIndex,
+                legSide: pPending.legSide,
+                reason: "covered_buy_hedge_reentry_opened"
+            }
+        );
+    }
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
         || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const arrPending = getCoveredPendingOptionReEntriesState(objRuntime)
@@ -7082,11 +7445,12 @@ async function processCoveredPendingOptionReEntries(
     const vNowMs = Date.now();
     let arrNextPending = [...arrPending];
     const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
-    const vSymbol = normalizeSymbolValue(getMergedUiState(pProfile).symbol);
+    const objUiState = getMergedUiState(pProfile);
+    const vSymbol = normalizeSymbolValue(objUiState.symbol);
     for (const objPending of arrPending) {
-        const objRowState = getNormalizedOptionRowUiState(getMergedUiState(pProfile), pStrategyCode, objPending.rowIndex);
+        const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, objPending.rowIndex);
         const vConfiguredQty = Math.max(1, Math.floor(Number(objRowState.qty || 1)));
-        const vCurrentOpenQty = getTrackedOptionRowLegTotalQty(arrSavedPositions, objPending.rowIndex, objPending.legSide);
+        const vCurrentOpenQty = getTrackedOptionRowLegTotalQty(arrSavedPositions, objPending.rowIndex, objPending.legSide, objUiState);
         if (vCurrentOpenQty > vConfiguredQty) {
             arrNextPending = arrNextPending.filter((objEntry) => objEntry.dedupeKey !== objPending.dedupeKey);
             await logFuturesEvent(
@@ -7106,13 +7470,23 @@ async function processCoveredPendingOptionReEntries(
             );
             continue;
         }
-        if (hasTrackedOptionRowLeg(arrSavedPositions, objPending.rowIndex, objPending.legSide)) {
+        if (hasTrackedOptionRowLeg(arrSavedPositions, objPending.rowIndex, objPending.legSide, objUiState)) {
             arrNextPending = arrNextPending.filter((objEntry) => objEntry.dedupeKey !== objPending.dedupeKey);
             continue;
         }
         const vRunAtMs = new Date(objPending.runAt).getTime();
         if (!Number.isFinite(vRunAtMs) || vRunAtMs > vNowMs) {
             continue;
+        }
+        if (String(objPending.action || "").trim().toLowerCase() === "buy") {
+            const objGate = evaluateCoveredBuyHedgeSellPremiumGate(
+                arrSavedPositions,
+                objUiState,
+                objPending.legSide
+            );
+            if (objGate.enabled && !objGate.allowed) {
+                continue;
+            }
         }
         const objMetadata: RollingFuturesLtOptionMetadata = {
             rowIndex: objPending.rowIndex,
@@ -7253,23 +7627,15 @@ async function ensureCoveredConfiguredLegPresence(
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
         || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const arrPending = getCoveredPendingOptionReEntriesState(objRuntime);
-    const arrPendingWithoutMissingLeg = arrPending.filter((objEntry) => objEntry.reason !== "missing_leg");
-    if (arrPendingWithoutMissingLeg.length !== arrPending.length) {
-        await saveRollingFuturesLtRuntime({
-            ...objRuntime,
-            userId: pUserId,
-            strategyCode: pStrategyCode,
-            state: buildRuntimeStateWithCoveredPendingOptionReEntries(objRuntime, arrPendingWithoutMissingLeg)
-        });
-    }
+    let bScheduledAny = false;
     for (const vRowIndex of [1, 2] as const) {
         const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
         const arrRequiredLegs = objRowState.legs === "both"
             ? ["ce", "pe"] as Array<"ce" | "pe">
             : [objRowState.legs];
-        const vExistingCount = arrRequiredLegs.filter((vLegSide) => hasTrackedOptionRowLeg(pTrackedPositions, vRowIndex, vLegSide)).length;
-        const arrMissingLegs = arrRequiredLegs.filter((vLegSide) => !hasTrackedOptionRowLeg(pTrackedPositions, vRowIndex, vLegSide));
-        const arrPendingForRow = arrPendingWithoutMissingLeg.filter((objEntry) => objEntry.rowIndex === vRowIndex);
+        const vExistingCount = arrRequiredLegs.filter((vLegSide) => hasTrackedOptionRowLeg(pTrackedPositions, vRowIndex, vLegSide, objUiState)).length;
+        const arrMissingLegs = arrRequiredLegs.filter((vLegSide) => !hasTrackedOptionRowLeg(pTrackedPositions, vRowIndex, vLegSide, objUiState));
+        const arrPendingForRow = arrPending.filter((objEntry) => objEntry.rowIndex === vRowIndex);
         const arrPendingLegSides = Array.from(new Set(arrPendingForRow.map((objEntry) => objEntry.legSide)));
         const bAlternatingMissingLegDetected = arrMissingLegs.some((vLegSide) => !arrPendingLegSides.includes(vLegSide));
         if (vExistingCount > 0
@@ -7303,10 +7669,126 @@ async function ensureCoveredConfiguredLegPresence(
             await releaseDualStrategyLease(pUserId, pStrategyCode, true);
             return;
         }
-        if (vExistingCount <= 0) {
+        if (objRowState.action !== "buy") {
             continue;
         }
+        for (const vLegSide of arrMissingLegs) {
+            const bAlreadyPending = arrPending.some((objEntry) => objEntry.rowIndex === vRowIndex && objEntry.legSide === vLegSide);
+            if (bAlreadyPending) {
+                continue;
+            }
+            const objGate = evaluateCoveredBuyHedgeSellPremiumGate(pTrackedPositions, objUiState, vLegSide);
+            if (objGate.enabled && !objGate.allowed) {
+                continue;
+            }
+            await scheduleCoveredPendingOptionReEntry(
+                pUserId,
+                pStrategyCode,
+                pProfile,
+                vRowIndex,
+                vLegSide,
+                "missing_leg"
+            );
+            bScheduledAny = true;
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "manual_action",
+                "info",
+                "Covered Buy Hedge Re-Entry Scheduled",
+                `Row ${vRowIndex} ${vLegSide.toUpperCase()} buy hedge is missing while the matching sell leg is still eligible. A re-entry will be checked by the engine.`,
+                {
+                    rowIndex: vRowIndex,
+                    legSide: vLegSide,
+                    reason: "covered_buy_hedge_missing_leg_scheduled"
+                }
+            );
+        }
     }
+    if (!bScheduledAny) {
+        return;
+    }
+    await processCoveredPendingOptionReEntries(
+        pUserId,
+        String(objRuntime.selectedApiProfileId || pProfile.selectedApiProfileId || "").trim(),
+        pProfile,
+        pTrackedPositions
+    );
+}
+
+async function restoreCoveredMissingBuyHedgesAfterImport(
+    pUserId: string,
+    pSelectedApiProfileId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<RollingFuturesLtImportedPositionRecord[]> {
+    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    const objUiState = getMergedUiState(pProfile);
+    const objGateConfig = getCoveredBuyHedgeSellPremiumGateConfig(objUiState);
+    if (!objGateConfig.enabled) {
+        return pTrackedPositions;
+    }
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const bAutoTraderOn = Boolean(objRuntime?.autoTraderEnabled)
+        && String(objRuntime?.status || "").trim().toLowerCase() === "running";
+    if (!bAutoTraderOn) {
+        return pTrackedPositions;
+    }
+
+    let arrSavedPositions = [...pTrackedPositions];
+    let bScheduledAny = false;
+    for (const vRowIndex of [1, 2] as const) {
+        const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
+        if (objRowState.action !== "buy") {
+            continue;
+        }
+        const arrRequiredLegs = objRowState.legs === "both"
+            ? ["ce", "pe"] as Array<"ce" | "pe">
+            : [objRowState.legs];
+        for (const vLegSide of arrRequiredLegs) {
+            if (hasTrackedOptionRowLeg(arrSavedPositions, vRowIndex, vLegSide, objUiState)) {
+                continue;
+            }
+            const objGate = evaluateCoveredBuyHedgeSellPremiumGate(arrSavedPositions, objUiState, vLegSide);
+            if (!objGate.allowed) {
+                continue;
+            }
+            await scheduleCoveredPendingOptionReEntry(
+                pUserId,
+                pStrategyCode,
+                pProfile,
+                vRowIndex,
+                vLegSide,
+                "missing_leg"
+            );
+            bScheduledAny = true;
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "manual_action",
+                "info",
+                "Covered Buy Hedge Import Restore Scheduled",
+                `Imported ${vLegSide.toUpperCase()} sell leg still satisfies the ${objGateConfig.thresholdPct.toFixed(2)}% threshold, so the missing buy hedge for row ${vRowIndex} was scheduled for restore.`,
+                {
+                    rowIndex: vRowIndex,
+                    legSide: vLegSide,
+                    thresholdPct: objGateConfig.thresholdPct,
+                    reason: "covered_buy_hedge_import_restore_scheduled"
+                }
+            );
+        }
+    }
+
+    if (!bScheduledAny) {
+        return arrSavedPositions;
+    }
+    arrSavedPositions = await processCoveredPendingOptionReEntries(
+        pUserId,
+        pSelectedApiProfileId,
+        pProfile,
+        arrSavedPositions
+    );
+    return arrSavedPositions;
 }
 
 async function applyTriggeredOptionRule(
@@ -7321,13 +7803,20 @@ async function applyTriggeredOptionRule(
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
     pSkipConfirmation = false
 ): Promise<RollingFuturesLtImportedPositionRecord[]> {
+    const objRuleRowState = getNormalizedOptionRowUiState(
+        getMergedUiState(pProfile),
+        pStrategyCode,
+        getTrackedOptionMetadata(pPosition).rowIndex
+    );
+    const vAppliedTakeProfitDelta = Math.max(0, Number(objRuleRowState.tpD || getTrackedOptionMetadata(pPosition).takeProfitDelta || 0.25));
+    const vAppliedStopLossDelta = Math.max(0, Number(objRuleRowState.slD || getTrackedOptionMetadata(pPosition).stopLossDelta || 0.65));
     if (isCoveredOptionsStrategy(pStrategyCode) && !pSkipConfirmation) {
         const vConfirmationResult = await requestCoveredLiveConfirmation(pUserId, pProfile, {
             kind: "option_rule_close",
             title: pReason === "sl" ? "Confirm SL Close" : (pReason === "tp" ? "Confirm TP Close" : "Confirm Expiry Close"),
             message: pReason === "expiry_cutoff"
                 ? `Covered option ${pPosition.contractName} is on its expiry date. Confirm to swap it into the next expiry.`
-                : `Covered option ${pPosition.contractName} hit ${pReason.toUpperCase()} at delta ${Math.abs(Number(pCurrentDelta || 0)).toFixed(3)}. Confirm to close it.`,
+                : `Covered option ${String(pPosition.side || "").trim().toUpperCase()} ${pPosition.contractName} on row ${objRuleRowState.rowIndex} hit ${pReason.toUpperCase()} at delta ${Math.abs(Number(pCurrentDelta || 0)).toFixed(3)} (TP ${vAppliedTakeProfitDelta.toFixed(3)}, SL ${vAppliedStopLossDelta.toFixed(3)}). Confirm to close it.`,
             payload: {
                 importId: pPosition.importId,
                 contractName: pPosition.contractName,
@@ -7394,12 +7883,15 @@ async function applyTriggeredOptionRule(
             pReason === "sl" ? "sl_triggered" : "tp_triggered",
             pReason === "sl" ? "warning" : "info",
             pReason === "sl" ? "Option SL Triggered" : "Option TP Triggered",
-            `Closed option ${pPosition.contractName} after ${pReason.toUpperCase()} hit at delta ${Math.abs(Number(pCurrentDelta || 0)).toFixed(3)}.`,
+            `Closed option ${pPosition.contractName} after ${pReason.toUpperCase()} hit at delta ${Math.abs(Number(pCurrentDelta || 0)).toFixed(3)} using row ${objRuleRowState.rowIndex} TP ${vAppliedTakeProfitDelta.toFixed(3)} and SL ${vAppliedStopLossDelta.toFixed(3)}.`,
             {
                 contractName: pPosition.contractName,
                 qty: pPosition.qty,
                 currentDelta: Math.abs(Number(pCurrentDelta || 0)),
-                reason: pReason
+                reason: pReason,
+                rowIndex: objRuleRowState.rowIndex,
+                takeProfitDelta: Number(vAppliedTakeProfitDelta.toFixed(4)),
+                stopLossDelta: Number(vAppliedStopLossDelta.toFixed(4))
             }
         );
     }
@@ -7465,6 +7957,14 @@ async function applyTriggeredOptionRule(
                 );
                 if (objReEntry) {
                     arrNextPositions = [...arrNextPositions, objReEntry.position];
+                    if (pReason === "expiry_cutoff" && isCoveredOptionsStrategy(pStrategyCode)) {
+                        await updateCoveredRowExpiryDateInProfile(
+                            pUserId,
+                            pProfile,
+                            objPaperRowState.rowIndex,
+                            getTrackedOptionResolvedExpiryDate(objReEntry.position)
+                        );
+                    }
                     await logFuturesEvent(
                         pUserId,
                         pStrategyCode,
@@ -7582,13 +8082,31 @@ async function applyTriggeredOptionRule(
                     pReason === "expiry_cutoff"
                         ? `Opened replacement option ${objReEntry.position.contractName} after expiry-day swap using row ${objRowState.rowIndex} settings.`
                         : `Opened replacement option ${objReEntry.position.contractName} after ${pReason.toUpperCase()} using Re D ${Number(objMetadata.reEntryDelta || 0).toFixed(2)}.`,
-                    {
-                        contractName: objReEntry.position.contractName,
-                        qty: objReEntry.position.qty,
-                        reason: pReason
+                        {
+                            contractName: objReEntry.position.contractName,
+                            qty: objReEntry.position.qty,
+                            reason: pReason
+                        }
+                    );
+                    if (String(objReEntry.position.side || "").trim().toUpperCase() === "BUY") {
+                        const objGateConfig = getCoveredBuyHedgeSellPremiumGateConfig(getMergedUiState(pProfile));
+                        await logFuturesEvent(
+                            pUserId,
+                            pStrategyCode,
+                            pReason === "expiry_cutoff" ? "option_opened" : "reentry_opened",
+                            "success",
+                            "Covered Buy Hedge Reopened",
+                            `${String(objReEntry.position.contractName || "").trim()} reopened for row ${objRowState.rowIndex}. ${getCoveredBuyHedgeOpenReasonText(String(getTrackedOptionMetadata(objReEntry.position).openedReason || ""), getTrackedOptionLegSide(objReEntry.position.contractName), { thresholdPct: objGateConfig.enabled ? objGateConfig.thresholdPct : Number.NaN })}`,
+                            {
+                                contractName: objReEntry.position.contractName,
+                                qty: objReEntry.position.qty,
+                                rowIndex: objRowState.rowIndex,
+                                legSide: getTrackedOptionLegSide(objReEntry.position.contractName),
+                                reason: "covered_buy_hedge_reentry_opened"
+                            }
+                        );
                     }
-                );
-            }
+                }
             else {
                 await incrementBrokerageRecoveryTotal(pUserId, pStrategyCode, vCloseCharge, arrNextPositions.length);
                 await incrementRecoveredTotalPnl(pUserId, pStrategyCode, vClosePnl, arrNextPositions.length);
@@ -7718,12 +8236,22 @@ async function findTriggeredTrackedOptions(
     currentDelta: number;
     currentMarkPrice: number | null;
     reason: "sl" | "tp" | "expiry_cutoff";
+    ruleAudit?: {
+        rowIndex: 1 | 2;
+        takeProfitDelta: number;
+        stopLossDelta: number;
+    };
 }>> {
     const arrTriggered: Array<{
         position: RollingFuturesLtImportedPositionRecord;
         currentDelta: number;
         currentMarkPrice: number | null;
         reason: "sl" | "tp" | "expiry_cutoff";
+        ruleAudit?: {
+            rowIndex: 1 | 2;
+            takeProfitDelta: number;
+            stopLossDelta: number;
+        };
     }> = [];
     const objCurrentDeltaTime = getCurrentDeltaUiDateTimeParts();
     for (const objPosition of pTrackedPositions) {
@@ -7751,7 +8279,7 @@ async function findTriggeredTrackedOptions(
             continue;
         }
         const objMetadata = getTrackedOptionMetadata(objPosition);
-        const vRowIndex = normalizeOptionRowIndex(objPosition.strategyCode, objMetadata.rowIndex);
+        const vRowIndex = getTrackedOptionRowIndexForUi(objPosition, pUiState);
         const objRowState = getNormalizedOptionRowUiState(pUiState, objPosition.strategyCode, vRowIndex);
         const vLiveTakeProfitDelta = Number(objRowState.tpD);
         const vLiveStopLossDelta = Number(objRowState.slD);
@@ -7766,11 +8294,31 @@ async function findTriggeredTrackedOptions(
                 : Number(objMetadata.stopLossDelta || 0.65)
         );
         if (objDecision.shouldAct && objDecision.reason) {
+            if (isCoveredOptionsStrategy(objPosition.strategyCode)
+                && String(objPosition.side || "").trim().toUpperCase() === "BUY") {
+                const objGate = evaluateCoveredBuyHedgeSellPremiumGate(
+                    pTrackedPositions,
+                    pUiState,
+                    getTrackedOptionLegSide(objPosition.contractName)
+                );
+                if (objGate.enabled && objGate.allowed) {
+                    continue;
+                }
+            }
             arrTriggered.push({
                 position: objPosition,
                 currentDelta: vCurrentDelta,
                 currentMarkPrice: Number.isFinite(Number(objTicker?.markPrice)) ? Number(objTicker?.markPrice) : null,
-                reason: objDecision.reason
+                reason: objDecision.reason,
+                ruleAudit: {
+                    rowIndex: vRowIndex,
+                    takeProfitDelta: Number.isFinite(vLiveTakeProfitDelta) && vLiveTakeProfitDelta > 0
+                        ? vLiveTakeProfitDelta
+                        : Number(objMetadata.takeProfitDelta || 0.25),
+                    stopLossDelta: Number.isFinite(vLiveStopLossDelta) && vLiveStopLossDelta > 0
+                        ? vLiveStopLossDelta
+                        : Number(objMetadata.stopLossDelta || 0.65)
+                }
             });
         }
     }
@@ -10153,7 +10701,15 @@ async function saveOpenPositionsInternal(req: Request, res: Response, pStrategyC
         openedAt: String(objRow.openedAt || "").trim(),
         updatedAt: ""
     })), vBaseDelta), vBaseDelta), objUiState);
-    const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, arrPrepared);
+    let arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, arrPrepared);
+    if (arrSaved.length && isCoveredOptionsStrategy(pStrategyCode) && objProfile.selectedApiProfileId) {
+        arrSaved = await restoreCoveredMissingBuyHedgesAfterImport(
+            vUserId,
+            String(objProfile.selectedApiProfileId || "").trim(),
+            objProfile,
+            arrSaved
+        );
+    }
     let objProfileForResponse = objProfile;
     if (arrSaved.length && isCoveredOptionsStrategy(pStrategyCode) && objProfile.selectedApiProfileId) {
         objProfileForResponse = await syncCoveredRecoveryMetricsFromClosedHistory(
@@ -11126,7 +11682,18 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
         if (bIsDualStrategy && !isCoveredLikeStrategy(pStrategyCode) && hasTrackedOptionLeg(arrExisting, vLegSide === "pe" ? "pe" : "ce")) {
             throw new Error(`A ${vLegSide.toUpperCase()} option is already open. Close the existing ${vLegSide.toUpperCase()} leg before placing another one.`);
         }
-        const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(getMergedUiState(objProfile), "manual_option_open", pStrategyCode, vRowIndex);
+        const objUiState = getMergedUiState(objProfile);
+        if (isCoveredOptionsStrategy(pStrategyCode) && vAction === "buy") {
+            const objGate = evaluateCoveredBuyHedgeSellPremiumGate(
+                arrExisting,
+                objUiState,
+                vLegSide === "pe" ? "pe" : "ce"
+            );
+            if (!objGate.allowed) {
+                throw new Error(objGate.message || `Matching ${vLegSide.toUpperCase()} sell premium gate blocked buy hedge entry.`);
+            }
+        }
+        const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(objUiState, "manual_option_open", pStrategyCode, vRowIndex);
         const objConfig = {
             symbol: vSymbol,
             contractName: getContractNameForSymbol(vSymbol),
@@ -11253,6 +11820,25 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
                 reason: "manual_option"
             }
         );
+        if (isCoveredOptionsStrategy(pStrategyCode) && vAction === "buy") {
+            const objGateConfig = getCoveredBuyHedgeSellPremiumGateConfig(objUiState);
+            await logFuturesEvent(
+                vUserId,
+                pStrategyCode,
+                "option_opened",
+                "success",
+                "Covered Buy Hedge Opened",
+                `${String(objContract.contractSymbol || "").trim()} opened manually from row ${vRowIndex}. ${getCoveredBuyHedgeOpenReasonText("manual_option_open", vLegSide === "pe" ? "pe" : "ce", { thresholdPct: objGateConfig.enabled ? objGateConfig.thresholdPct : Number.NaN })}`,
+                {
+                    symbol: vSymbol,
+                    contractName: objContract.contractSymbol,
+                    qty: vQty,
+                    rowIndex: vRowIndex,
+                    legSide: vLegSide === "pe" ? "pe" : "ce",
+                    reason: "covered_buy_hedge_manual_opened"
+                }
+            );
+        }
 
         res.json({
             status: "success",

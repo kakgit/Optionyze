@@ -52,6 +52,7 @@
         pageStatus: document.getElementById(`${prefix}PageStatus`),
         importStatus: document.getElementById(`${prefix}ImportStatus`),
         resetDefaultsButton: document.getElementById("btnRollingFuturesResetDefaults"),
+        showSavedProfileButton: document.getElementById("btnRollingFuturesShowSavedProfile"),
         startQty: document.getElementById("txtRollingFuturesStartQty"),
         calculateStartQtyButton: document.getElementById("btnRollingFuturesCalcStartQty"),
         symbol: document.getElementById("ddlRollingFuturesSymbol"),
@@ -108,6 +109,8 @@
         closeBlockedMargin: document.getElementById("chkRollingFuturesCloseBlockedMargin"),
         blockedMarginPct: document.getElementById("txtRollingFuturesBlockedMarginPct"),
         reEnterBlock: document.getElementById("chkRollingFuturesReEnterBlock"),
+        buyHedgeSellPremiumGate: document.getElementById("chkRollingFuturesBuyHedgeSellPremiumGate"),
+        buyHedgeSellPremiumPct: document.getElementById("txtRollingFuturesBuyHedgeSellPremiumPct"),
         autoConfirmLiveActions: document.getElementById("chkRollingFuturesAutoConfirmLiveActions"),
         recalculateTotalPnlButton: document.getElementById(`btn${idPrefix}RecalculateTotalPnl`),
         importButton: document.getElementById(`btn${idPrefix}ImportPositions`),
@@ -142,6 +145,9 @@
         importList: document.getElementById(`${prefix}ImportList`),
         closeImportModalButton: document.getElementById(`btn${idPrefix}CloseImportModal`),
         applyImportedPositionsButton: document.getElementById(`btn${idPrefix}ApplyImportedPositions`)
+        ,
+        savedProfilePanel: document.getElementById("rollingFuturesSavedProfilePanel"),
+        savedProfileBody: document.getElementById("rollingFuturesSavedProfileBody")
     };
 
     let selectedApiProfileId = "";
@@ -215,6 +221,54 @@
         const dateValue = formatDateDisplay(value);
         const timeValue = objDate.toLocaleTimeString();
         return `${dateValue} ${timeValue}`;
+    }
+
+    function formatSavedProfileValue(value, fallbackValue) {
+        const text = String(value ?? "").trim();
+        return text || String(fallbackValue ?? "-").trim() || "-";
+    }
+
+    function renderSavedManualTraderProfile(uiState) {
+        if (!ids.savedProfilePanel || !ids.savedProfileBody) {
+            return;
+        }
+        const state = { ...getDefaultUiState(), ...(uiState || {}) };
+        const rowBlocks = getSupportedOptionRowIndexes().map(function (rowIndex) {
+            const keys = getOptionRowStateKeys(rowIndex);
+            return `
+                <div class="rolling-futures-saved-profile-card">
+                    <div class="rolling-futures-saved-profile-title">Row ${rowIndex}</div>
+                    <div class="rolling-futures-saved-profile-grid">
+                        <span>Action: <strong>${escapeHtml(formatSavedProfileValue(state[keys.action], "-"))}</strong></span>
+                        <span>Legs: <strong>${escapeHtml(formatSavedProfileValue(state[keys.legs], "-"))}</strong></span>
+                        <span>Expiry: <strong>${escapeHtml(formatSavedProfileValue(state[keys.expiryDate], "-"))}</strong></span>
+                        <span>Qty: <strong>${escapeHtml(formatSavedProfileValue(state[keys.qty], "-"))}</strong></span>
+                        <span>New D: <strong>${escapeHtml(formatSavedProfileValue(state[keys.newD], "-"))}</strong></span>
+                        <span>Re D: <strong>${escapeHtml(formatSavedProfileValue(state[keys.reD], "-"))}</strong></span>
+                        <span>TP D: <strong>${escapeHtml(formatSavedProfileValue(state[keys.tpD], "-"))}</strong></span>
+                        <span>SL D: <strong>${escapeHtml(formatSavedProfileValue(state[keys.slD], "-"))}</strong></span>
+                        <span>Re Enter: <strong>${escapeHtml(String(Boolean(state[keys.reEnter])) === "true" ? "ON" : "OFF")}</strong></span>
+                    </div>
+                </div>
+            `;
+        }).join("");
+        const gateBlock = isCoveredMode ? `
+            <div class="rolling-futures-saved-profile-card">
+                <div class="rolling-futures-saved-profile-title">Buy Hedge Threshold</div>
+                <div class="rolling-futures-saved-profile-grid">
+                    <span>Enabled: <strong>${escapeHtml(String(Boolean(state.buyHedgeSellPremiumGate)) === "true" ? "ON" : "OFF")}</strong></span>
+                    <span>Threshold %: <strong>${escapeHtml(formatSavedProfileValue(state.buyHedgeSellPremiumPct, "2"))}</strong></span>
+                </div>
+            </div>
+        ` : "";
+        ids.savedProfileBody.innerHTML = `${rowBlocks}${gateBlock}`;
+        ids.savedProfilePanel.style.display = "";
+    }
+
+    async function showSavedManualTraderProfile() {
+        const objResult = await getJson(`${endpointBase}/profile`);
+        renderSavedManualTraderProfile(objResult?.data?.uiState || {});
+        return objResult;
     }
 
     function formatDateInputValue(dateValue) {
@@ -446,6 +500,8 @@
             closeBlockedMargin: false,
             blockedMarginPct: "10",
             reEnterBlock: true,
+            buyHedgeSellPremiumGate: false,
+            buyHedgeSellPremiumPct: "2",
             autoConfirmLiveActions: false,
             onlyDeltaNeutral: !isDualLikeMode && !isCoveredMode,
             rangeDeltaNeutral: isDualLikeMode && !isCoveredMode,
@@ -1100,6 +1156,8 @@
             closeBlockedMargin: getCheckboxValue(ids.closeBlockedMargin, false),
             blockedMarginPct: getInputValue(ids.blockedMarginPct, "20"),
             reEnterBlock: getCheckboxValue(ids.reEnterBlock, false),
+            buyHedgeSellPremiumGate: getCheckboxValue(ids.buyHedgeSellPremiumGate, false),
+            buyHedgeSellPremiumPct: getInputValue(ids.buyHedgeSellPremiumPct, "2"),
             autoConfirmLiveActions: getCheckboxValue(ids.autoConfirmLiveActions, false),
             telegramAlertTypes: ids.telegramEventCheckboxes.filter(function (checkbox) {
                 return checkbox instanceof HTMLInputElement && checkbox.checked;
@@ -1140,6 +1198,8 @@
             setCheckboxValue(ids.closeBlockedMargin, objUiState.closeBlockedMargin);
             setInputValue(ids.blockedMarginPct, objUiState.blockedMarginPct);
             setCheckboxValue(ids.reEnterBlock, objUiState.reEnterBlock);
+            setCheckboxValue(ids.buyHedgeSellPremiumGate, objUiState.buyHedgeSellPremiumGate);
+            setInputValue(ids.buyHedgeSellPremiumPct, objUiState.buyHedgeSellPremiumPct);
             setCheckboxValue(ids.autoConfirmLiveActions, objUiState.autoConfirmLiveActions);
             setInputValue(ids.closedFromDate, String(objUiState.closedFromDate || "").trim());
             setInputValue(ids.closedToDate, String(objUiState.closedToDate || "").trim());
@@ -2152,6 +2212,13 @@
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to reset manual trader defaults.", "danger");
         });
     });
+    ids.showSavedProfileButton?.addEventListener("click", function () {
+        void showSavedManualTraderProfile().then(function () {
+            setStatus(ids.pageStatus, "Saved Manual Trader values loaded from DB.", "success");
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to load saved Manual Trader values.", "danger");
+        });
+    });
     ids.startQty?.addEventListener("input", function () {
         syncQtyFromStartQty();
         queueProfileSave();
@@ -2207,6 +2274,8 @@
         ids.closeBlockedMargin,
         ids.blockedMarginPct,
         ids.reEnterBlock,
+        ids.buyHedgeSellPremiumGate,
+        ids.buyHedgeSellPremiumPct,
         ids.autoConfirmLiveActions
     ].forEach(function (node) {
         node?.addEventListener("change", queueProfileSave);

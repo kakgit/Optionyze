@@ -217,6 +217,13 @@
                         <span class="rolling-demo-manual-title">Manual Trader</span>
                     </div>
                     <div class="rolling-demo-card-tools rolling-futures-manual-tools">
+                        <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingFuturesShowSavedProfile" title="Show saved manual trader values from DB" aria-label="Show saved manual trader values from DB">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <ellipse cx="12" cy="6" rx="7" ry="3" />
+                                <path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" />
+                                <path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+                            </svg>
+                        </button>
                         <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingFuturesResetDefaults" title="Reset manual trader defaults" aria-label="Reset manual trader defaults">
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M3 12a9 9 0 1 0 3-6.7" />
@@ -225,7 +232,6 @@
                         </button>
                     </div>
                 </div>
-
                 <div class="rolling-futures-demo-grid row">
                     <div class="rolling-demo-field">
                         <label for="ddlRollingFuturesAction1">Action</label>
@@ -365,7 +371,7 @@
                     </div>
                 </div>
 
-                <div class="rolling-futures-demo-grid actions-row">
+                <div class="rolling-futures-demo-grid actions-row rolling-futures-actions-row-with-gate">
                     <div class="rolling-demo-field">
                         <label>&nbsp;</label>
                         <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesSellPe2">SELL PE</button>
@@ -382,6 +388,36 @@
                         <label>&nbsp;</label>
                         <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesBuyPe2">BUY PE</button>
                     </div>
+                    <div class="rolling-demo-field rolling-futures-buy-gate-field">
+                        <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
+                            <div class="rolling-futures-help-inline-top rolling-futures-buy-gate-top">
+                                <div class="rolling-futures-buy-gate-text">Open Buy Hedge Only If Matching Sell Premium Stays Above Threshold</div>
+                            </div>
+                            <div class="rolling-futures-help-inline-bottom rolling-futures-buy-gate-controls">
+                                <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesBuyHedgeSellPremiumGate">
+                                    <input type="checkbox" id="chkRollingFuturesBuyHedgeSellPremiumGate" />
+                                </label>
+                                <div class="rolling-demo-field rolling-futures-help-input-field">
+                                    <input type="number" id="txtRollingFuturesBuyHedgeSellPremiumPct" min="0" step="0.1" value="2" />
+                                </div>
+                                <span class="rolling-futures-help-icon-wrap">
+                                    <button type="button" class="rolling-futures-help-trigger" aria-label="Show buy hedge premium help">
+                                        ?
+                                    </button>
+                                    <span class="rolling-futures-help-popout floating">
+                                        For covered buy-leg opens and re-entries, the matching CE or PE sell leg must still trade at or above the configured threshold of its sold premium. Example: at <code>2%</code>, a leg sold at <code>100</code> must stay at <code>98</code> or higher.
+                                    </span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="rolling-futures-saved-profile-panel" id="rollingFuturesSavedProfilePanel" style="display:none;">
+                    <div class="rolling-futures-saved-profile-head">
+                        <strong>Saved Manual Trader Values (DB)</strong>
+                    </div>
+                    <div class="rolling-futures-saved-profile-body" id="rollingFuturesSavedProfileBody"></div>
                 </div>
             </div>
 

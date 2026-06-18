@@ -15,6 +15,7 @@ const gRollingFuturesTelegramEventTypes = [
     "future_opened",
     "future_closed",
     "option_opened",
+    "reentry_opened",
     "option_closed",
     "sl_triggered",
     "tp_triggered",
