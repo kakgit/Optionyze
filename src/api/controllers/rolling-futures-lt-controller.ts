@@ -6551,19 +6551,16 @@ async function executeStrategyPlacement(
         loopSeconds: 8
     };
 
-    const arrOrders: Array<Record<string, unknown>> = [];
-    const arrContracts: Array<Record<string, unknown>> = [];
-    try {
+        const arrOrders: Array<Record<string, unknown>> = [];
+        const arrContracts: Array<Record<string, unknown>> = [];
+        try {
         for (const vOptionSide of arrOptionSides) {
-            const objContract = await findBestLiveOptionContract(objConfig, vOptionSide, pInput.targetDelta, true);
+            const objContract = await findBestLiveOptionContractWithNearestFallback(objConfig, vOptionSide, pInput.targetDelta);
             if (!objContract) {
-                throw new Error(`No live ${vOptionSide} contract was found for ${pInput.symbol} with delta at or below ${pInput.targetDelta.toFixed(2)}.`);
+                throw new Error(`No live ${vOptionSide} contract was found for ${pInput.symbol} near target delta ${pInput.targetDelta.toFixed(2)}.`);
             }
 
             const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
-            if (!(vAbsoluteDelta <= pInput.targetDelta)) {
-                throw new Error(`The selected ${vOptionSide} contract delta ${vAbsoluteDelta.toFixed(2)} exceeded New D ${pInput.targetDelta.toFixed(2)}.`);
-            }
             const objImmediateRuleDecision = shouldTriggerTrackedOption(
                 pInput.action.toUpperCase(),
                 vAbsoluteDelta,
@@ -6770,6 +6767,18 @@ async function updateStrategyClosedFromDateAfterExec(
     });
 }
 
+async function findBestLiveOptionContractWithNearestFallback(
+    pConfig: Parameters<typeof findBestLiveOptionContract>[0],
+    pOptionSide: "CE" | "PE",
+    pTargetDelta: number
+): Promise<Awaited<ReturnType<typeof findBestLiveOptionContract>>> {
+    const objStrictMatch = await findBestLiveOptionContract(pConfig, pOptionSide, pTargetDelta, true);
+    if (objStrictMatch) {
+        return objStrictMatch;
+    }
+    return findBestLiveOptionContract(pConfig, pOptionSide, pTargetDelta, false);
+}
+
 async function updateCoveredRowExpiryDateInProfile(
     pUserId: string,
     pProfile: RollingFuturesLtProfileRecord,
@@ -6851,20 +6860,16 @@ async function buildOptionsScalperPaperOptionOpen(
         renkoPriceSource: "spot_price" as const,
         loopSeconds: 8
     };
-    const objContract = await findBestLiveOptionContract(
+    const objContract = await findBestLiveOptionContractWithNearestFallback(
         objConfig,
         pInput.legSide === "pe" ? "PE" : "CE",
-        pInput.targetDelta,
-        true
+        pInput.targetDelta
     );
     if (!objContract) {
-        throw new Error(`No live ${pInput.legSide.toUpperCase()} contract was found for ${pInput.symbol} with delta at or below ${pInput.targetDelta.toFixed(2)}.`);
+        throw new Error(`No live ${pInput.legSide.toUpperCase()} contract was found for ${pInput.symbol} near target delta ${pInput.targetDelta.toFixed(2)}.`);
     }
 
     const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
-    if (!(vAbsoluteDelta <= pInput.targetDelta)) {
-        throw new Error(`The selected ${pInput.legSide.toUpperCase()} contract delta ${vAbsoluteDelta.toFixed(2)} exceeded New D ${pInput.targetDelta.toFixed(2)}.`);
-    }
     const vTakeProfitDelta = Math.max(0, Number(pInput.takeProfitDelta ?? objOptionMetadata.takeProfitDelta ?? objRowState.tpD ?? 0.25));
     const vStopLossDelta = Math.max(0, Number(pInput.stopLossDelta ?? objOptionMetadata.stopLossDelta ?? objRowState.slD ?? 0.65));
     const objImmediateRuleDecision = shouldTriggerTrackedOption(
@@ -7164,20 +7169,16 @@ async function openTrackedOptionReEntry(
         loopSeconds: 8
     };
 
-    const objContract = await findBestLiveOptionContract(
+    const objContract = await findBestLiveOptionContractWithNearestFallback(
         objConfig,
         vLegSide === "pe" ? "PE" : "CE",
-        vTargetDelta,
-        true
+        vTargetDelta
     );
     if (!objContract) {
         return null;
     }
 
     const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
-    if (!(vAbsoluteDelta <= vTargetDelta)) {
-        return null;
-    }
     if (shouldTriggerTrackedOption(
         vOrderAction.toUpperCase(),
         vAbsoluteDelta,
@@ -10541,7 +10542,7 @@ async function calculateRecommendedStartQtyInternal(req: Request, res: Response,
         };
 
         const arrContracts = (await Promise.all(arrOptionSides.map(async (vOptionSide) => {
-            return await findBestLiveOptionContract(objConfig, vOptionSide, objExecInput.targetDelta, true);
+            return await findBestLiveOptionContractWithNearestFallback(objConfig, vOptionSide, objExecInput.targetDelta);
         }))).filter((objContract): objContract is NonNullable<typeof objContract> => Boolean(objContract));
 
         if (arrContracts.length !== arrOptionSides.length) {
@@ -11718,16 +11719,12 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
             renkoPriceSource: "spot_price" as const,
             loopSeconds: 8
         };
-        const objContract = await findBestLiveOptionContract(objConfig, vLegSide === "pe" ? "PE" : "CE", vTargetDelta, true);
+        const objContract = await findBestLiveOptionContractWithNearestFallback(objConfig, vLegSide === "pe" ? "PE" : "CE", vTargetDelta);
         if (!objContract) {
-            throw new Error(`No live ${vLegSide.toUpperCase()} contract was found for ${vSymbol} with delta at or below ${vTargetDelta.toFixed(2)}.`);
+            throw new Error(`No live ${vLegSide.toUpperCase()} contract was found for ${vSymbol} near target delta ${vTargetDelta.toFixed(2)}.`);
         }
 
         const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
-        if (!(vAbsoluteDelta <= vTargetDelta)) {
-            throw new Error(`The selected ${vLegSide.toUpperCase()} contract delta ${vAbsoluteDelta.toFixed(2)} exceeded New D ${vTargetDelta.toFixed(2)}.`);
-        }
-
         const vClientOrderId = await allocateStrategyClientOrderId(vUserId, pStrategyCode, "EN");
         const objOrderPayload: Record<string, unknown> = {
             product_symbol: objContract.contractSymbol,
