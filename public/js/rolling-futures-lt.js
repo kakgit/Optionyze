@@ -204,14 +204,30 @@
         return Number((clampCoveredMultiplierValue(multiplierValue) * coveredMultiplierMarginPerUnit).toFixed(2));
     }
 
-    function refreshCoveredBlockedMarginDisplay() {
-        if (!isCoveredMode || !ids.blockedMarginValue) {
+    function refreshCoveredBalanceSummaryDisplay() {
+        if (!isCoveredMode) {
             return;
         }
         const vMultiplier = getCoveredMultiplierValue();
         const vRequiredMargin = getCoveredRequiredBlockedMargin(vMultiplier);
-        ids.blockedMarginValue.textContent = fmtUsd(vRequiredMargin);
-        ids.blockedMarginValue.title = `Estimated blocked margin from Multiplier ${vMultiplier} x ${coveredMultiplierMarginPerUnit.toFixed(2)} USD`;
+        if (ids.blockedMarginValue) {
+            ids.blockedMarginValue.textContent = fmtUsd(vRequiredMargin);
+            ids.blockedMarginValue.title = `Estimated blocked margin from Multiplier ${vMultiplier} x ${coveredMultiplierMarginPerUnit.toFixed(2)} USD`;
+        }
+        if (ids.availableBalanceValue) {
+            const vTotalBalance = Number(lastAccountSummary?.totalBalance);
+            const vEstimatedAvailableBalance = Number.isFinite(vTotalBalance)
+                ? Math.max(0, Number((vTotalBalance - vRequiredMargin).toFixed(2)))
+                : null;
+            if (vEstimatedAvailableBalance === null) {
+                ids.availableBalanceValue.textContent = fmtUsd(lastAccountSummary?.availableBalance);
+                ids.availableBalanceValue.removeAttribute("title");
+            }
+            else {
+                ids.availableBalanceValue.textContent = fmtUsd(vEstimatedAvailableBalance);
+                ids.availableBalanceValue.title = `Estimated available balance from Total Balance ${vTotalBalance.toFixed(2)} USD - Required Margin ${vRequiredMargin.toFixed(2)} USD`;
+            }
+        }
     }
 
     function ensureCoveredExecBalance() {
@@ -1159,7 +1175,7 @@
         }
         if (ids.blockedMarginValue) {
             if (isCoveredMode) {
-                refreshCoveredBlockedMarginDisplay();
+                refreshCoveredBalanceSummaryDisplay();
             }
             else {
                 ids.blockedMarginValue.textContent = fmtUsd(
@@ -1177,7 +1193,9 @@
             }
         }
         if (ids.availableBalanceValue) {
-            ids.availableBalanceValue.textContent = fmtUsd(objData.availableBalance);
+            if (!isCoveredMode) {
+                ids.availableBalanceValue.textContent = fmtUsd(objData.availableBalance);
+            }
         }
         if (ids.healthValue) {
             ids.healthValue.textContent = Number.isFinite(Number(objData.healthPct)) ? `${Number(objData.healthPct).toFixed(2)} %` : "-";
@@ -1270,7 +1288,7 @@
             applyExpiryModeDefaults(false);
             syncNeutralModeCheckboxes(getActiveNeutralModeKey());
             updateNeutralBadges(lastNeutralStatus);
-            refreshCoveredBlockedMarginDisplay();
+            refreshCoveredBalanceSummaryDisplay();
         }
         finally {
             isApplyingState = false;
@@ -1294,7 +1312,7 @@
                 nodes.qty.value = vStartQty;
             }
         });
-        refreshCoveredBlockedMarginDisplay();
+        refreshCoveredBalanceSummaryDisplay();
     }
 
     async function resetManualTraderDefaults() {
