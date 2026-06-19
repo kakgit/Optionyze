@@ -118,6 +118,7 @@
         refreshOpenPositionsButton: document.getElementById(`btn${idPrefix}RefreshOpenPositions`),
         killSwitchButton: document.getElementById(`btn${idPrefix}KillSwitch`),
         openPositionsBody: document.getElementById(`${prefix}OpenPositionsBody`),
+        hedgeGateSummary: document.getElementById("rollingDualFuturesHedgeGateSummary"),
         closedFromDate: document.getElementById(`txt${idPrefix}ClosedFromDate`),
         closedToDate: document.getElementById(`txt${idPrefix}ClosedToDate`),
         clearClosedFiltersButton: document.getElementById(`btn${idPrefix}ClearClosedFilters`),
@@ -136,6 +137,7 @@
         confirmationTitle: document.getElementById(`${prefix}ConfirmationTitle`),
         confirmationTime: document.getElementById(`${prefix}ConfirmationTime`),
         confirmationMessage: document.getElementById(`${prefix}ConfirmationMessage`),
+        confirmationSound: document.getElementById("chkRollingFuturesConfirmationSound"),
         confirmActionButton: document.getElementById(`btn${idPrefix}ConfirmAction`),
         rejectActionButton: document.getElementById(`btn${idPrefix}RejectAction`),
         telegramNotice: document.getElementById("rollingDualFuturesTelegramNotice"),
@@ -157,6 +159,7 @@
     let closedPositions = [];
     let closedPositionsPage = 1;
     let connectionPollTimer = null;
+    let confirmationPollTimer = null;
     let isApplyingState = false;
     let saveTimer = null;
     let previousOpenPositionLtps = new Map();
@@ -181,6 +184,11 @@
     let lastNeutralStatus = null;
     let lastRecoveryMetrics = null;
     let pendingLiveConfirmation = null;
+    let confirmationAudioContext = null;
+    let queuedConfirmationSoundActionId = "";
+    let lastConfirmationSoundActionId = "";
+    const confirmationSoundStorageKey = "optionyze.covered.confirmation-sound";
+    let confirmationSoundEnabled = readConfirmationSoundPreference();
     let lastAccountSummary = null;
     const closedPositionsPageSize = 10;
     const coveredMultiplierMarginPerUnit = 1.5;
@@ -1093,6 +1101,7 @@
             ? pendingLiveConfirmation
             : null;
         if (!objPending) {
+            queuedConfirmationSoundActionId = "";
             if (ids.confirmationEmpty) {
                 ids.confirmationEmpty.style.display = "";
             }
@@ -1122,6 +1131,90 @@
         if (ids.rejectActionButton instanceof HTMLButtonElement) {
             ids.rejectActionButton.disabled = confirmationInFlight;
         }
+        maybePlayPendingLiveConfirmationSound(objPending);
+    }
+
+    function readConfirmationSoundPreference() {
+        try {
+            return window.localStorage.getItem(confirmationSoundStorageKey) !== "off";
+        }
+        catch (_error) {
+            return true;
+        }
+    }
+
+    function saveConfirmationSoundPreference() {
+        try {
+            window.localStorage.setItem(confirmationSoundStorageKey, confirmationSoundEnabled ? "on" : "off");
+        }
+        catch (_error) {
+        }
+    }
+
+    function getConfirmationAudioContext() {
+        if (confirmationAudioContext) {
+            return confirmationAudioContext;
+        }
+        const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+        if (typeof AudioContextConstructor !== "function") {
+            return null;
+        }
+        confirmationAudioContext = new AudioContextConstructor();
+        return confirmationAudioContext;
+    }
+
+    function playConfirmationBeep(actionId) {
+        const normalizedActionId = String(actionId || "").trim();
+        if (!confirmationSoundEnabled || !normalizedActionId || normalizedActionId === lastConfirmationSoundActionId) {
+            return false;
+        }
+        const audioContext = getConfirmationAudioContext();
+        if (!audioContext || audioContext.state !== "running") {
+            queuedConfirmationSoundActionId = normalizedActionId;
+            return false;
+        }
+        const oscillator = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        const startAt = audioContext.currentTime;
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(880, startAt);
+        gain.gain.setValueAtTime(0.0001, startAt);
+        gain.gain.exponentialRampToValueAtTime(0.16, startAt + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.22);
+        oscillator.connect(gain);
+        gain.connect(audioContext.destination);
+        oscillator.start(startAt);
+        oscillator.stop(startAt + 0.23);
+        lastConfirmationSoundActionId = normalizedActionId;
+        queuedConfirmationSoundActionId = "";
+        return true;
+    }
+
+    function maybePlayPendingLiveConfirmationSound(pPending) {
+        const vActionId = String(pPending?.actionId || "").trim();
+        if (!vActionId || vActionId === lastConfirmationSoundActionId) {
+            return;
+        }
+        playConfirmationBeep(vActionId);
+    }
+
+    function unlockConfirmationAudio() {
+        if (!isCoveredMode) {
+            return Promise.resolve();
+        }
+        const audioContext = getConfirmationAudioContext();
+        if (!audioContext) {
+            return Promise.resolve();
+        }
+        const objResume = audioContext.state === "running"
+            ? Promise.resolve()
+            : audioContext.resume();
+        return objResume.then(function () {
+            if (queuedConfirmationSoundActionId) {
+                playConfirmationBeep(queuedConfirmationSoundActionId);
+            }
+        }).catch(function () {
+        });
     }
 
     async function confirmPendingLiveAction() {
@@ -1794,8 +1887,89 @@
 
     function renderGreekCell(contractValue, totalValue, digits) {
         return `
-            <div style="text-wrap: nowrap; text-align:right; font-weight:bold; color:orange;">${escapeHtml(fmt(contractValue, digits))}</div>
-            <div style="text-wrap: nowrap; text-align:right; font-weight:bold; color:grey;">${escapeHtml(fmt(totalValue, digits))}</div>
+            <div class="rolling-demo-greek-value current">${escapeHtml(fmt(contractValue, digits))}</div>
+            <div class="rolling-demo-greek-value reference">${escapeHtml(fmt(totalValue, digits))}</div>
+        `;
+    }
+
+    function renderPositionSide(side) {
+        const normalizedSide = String(side || "-").trim().toUpperCase();
+        if (!isCoveredMode || (normalizedSide !== "BUY" && normalizedSide !== "SELL")) {
+            return escapeHtml(normalizedSide);
+        }
+        const sideClass = normalizedSide.toLowerCase();
+        const directionArrow = normalizedSide === "BUY" ? "↑" : "↓";
+        return `<span class="rolling-covered-side-badge ${sideClass}"><span aria-hidden="true">${directionArrow}</span>${normalizedSide}</span>`;
+    }
+
+    function renderPnlValue(value, isTotal) {
+        if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+            return "-";
+        }
+        const pnl = Number(value);
+        if (!isCoveredMode) {
+            return escapeHtml(fmt(pnl, 2));
+        }
+        const toneClass = pnl > 0 ? "positive" : (pnl < 0 ? "negative" : "neutral");
+        const displayValue = `${pnl > 0 ? "+" : ""}${fmt(pnl, 2)}`;
+        return `<span class="rolling-covered-pnl-value ${toneClass}${isTotal ? " total" : ""}">${escapeHtml(displayValue)}</span>`;
+    }
+
+    function getCoveredContractLegSide(contractName) {
+        const symbol = String(contractName || "").trim().toUpperCase();
+        if (symbol.startsWith("P-") || symbol.includes("-P-") || symbol.endsWith("-P") || symbol.includes("PUT")) {
+            return "PE";
+        }
+        if (symbol.startsWith("C-") || symbol.includes("-C-") || symbol.endsWith("-C") || symbol.includes("CALL")) {
+            return "CE";
+        }
+        return "";
+    }
+
+    function findLatestCoveredSellLeg(rows, legSide) {
+        return (Array.isArray(rows) ? rows : [])
+            .filter(function (row) {
+                return String(row?.side || "").trim().toUpperCase() === "SELL"
+                    && getCoveredContractLegSide(row?.contractName) === legSide;
+            })
+            .sort(function (left, right) {
+                return new Date(String(right?.openedAt || right?.updatedAt || "")).getTime()
+                    - new Date(String(left?.openedAt || left?.updatedAt || "")).getTime();
+            })[0] || null;
+    }
+
+    function renderCoveredHedgeGateSummary(rows) {
+        if (!isCoveredMode || !ids.hedgeGateSummary) {
+            return;
+        }
+        const gateEnabled = ids.buyHedgeSellPremiumGate instanceof HTMLInputElement
+            && ids.buyHedgeSellPremiumGate.checked;
+        const rawThresholdPct = Number(ids.buyHedgeSellPremiumPct instanceof HTMLInputElement
+            ? ids.buyHedgeSellPremiumPct.value
+            : 2);
+        const thresholdPct = Number.isFinite(rawThresholdPct)
+            ? Math.min(100, Math.max(0, rawThresholdPct))
+            : 2;
+        if (!gateEnabled) {
+            ids.hedgeGateSummary.innerHTML = '<span class="rolling-covered-hedge-chip off">Gate Off</span>';
+            return;
+        }
+        const minimumRatio = Math.max(0, 1 - (thresholdPct / 100));
+        const legChips = ["CE", "PE"].map(function (legSide) {
+            const sellLeg = findLatestCoveredSellLeg(rows, legSide);
+            const soldPremium = Number(sellLeg?.entryPrice || 0);
+            const currentPremium = Number(sellLeg?.markPrice || sellLeg?.entryPrice || 0);
+            if (!(soldPremium > 0)) {
+                return `<span class="rolling-covered-hedge-chip neutral">${legSide} Min —</span>`;
+            }
+            const minimumPremium = soldPremium * minimumRatio;
+            const toneClass = currentPremium < minimumPremium ? "success" : "danger";
+            const title = `${legSide} current ${fmt(currentPremium, 2)} | sold ${fmt(soldPremium, 2)} | minimum ${fmt(minimumPremium, 2)}`;
+            return `<span class="rolling-covered-hedge-chip ${toneClass}" title="${escapeHtml(title)}">${legSide} Min ${escapeHtml(fmt(minimumPremium, 2))}</span>`;
+        }).join("");
+        ids.hedgeGateSummary.innerHTML = `
+            <span class="rolling-covered-hedge-chip gate">Gate ${escapeHtml(fmt(thresholdPct, 2))}%</span>
+            ${legChips}
         `;
     }
 
@@ -1813,6 +1987,7 @@
         const arrRows = objPayload.positions;
         const objTotals = objPayload.totals || {};
         displayedPositions = arrRows;
+        renderCoveredHedgeGateSummary(arrRows);
         lastNeutralStatus = objPayload.neutralStatus || null;
         applyRecoveryMetrics(objPayload.recoveryMetrics || null);
         updateNeutralBadges(lastNeutralStatus);
@@ -1821,7 +1996,8 @@
         }
         if (!arrRows.length) {
             previousOpenPositionLtps = new Map();
-            ids.openPositionsBody.innerHTML = "<tr><td colspan=\"16\" class=\"rolling-demo-empty\">No imported live positions are currently shown.</td></tr>";
+            const openPositionsColumnCount = isCoveredMode ? 13 : 14;
+            ids.openPositionsBody.innerHTML = `<tr><td colspan="${openPositionsColumnCount}" class="rolling-demo-empty">No imported live positions are currently shown.</td></tr>`;
             if (ids.openCount) {
                 ids.openCount.textContent = "0";
             }
@@ -1840,21 +2016,31 @@
             }
             const ltpBlinkClass = getLtpBlinkClass(importId, row.markPrice);
             const greeks = row.greeks || {};
+            const coveredSideRowClass = isCoveredMode && (side === "BUY" || side === "SELL")
+                ? `rolling-covered-side-row ${side.toLowerCase()}`
+                : "";
             return `
-                <tr>
-                    <td>${renderGreekCell(greeks.deltaTotal, resolveSecondaryGreekValue(greeks.deltaDisplayTotal, greeks.deltaTotal), 2)}</td>
+                <tr class="${coveredSideRowClass}">
+                    <td>${renderGreekCell(
+                        isCoveredMode ? greeks.deltaPerContract : greeks.deltaTotal,
+                        resolveSecondaryGreekValue(
+                            isCoveredMode ? greeks.deltaDisplayPerContract : greeks.deltaDisplayTotal,
+                            isCoveredMode ? greeks.deltaPerContract : greeks.deltaTotal
+                        ),
+                        2
+                    )}</td>
                     <td>${renderGreekCell(greeks.thetaDisplayTotal ?? greeks.thetaTotal, greeks.thetaBaseDisplayTotal ?? greeks.thetaTotal, 4)}</td>
                     <td>${escapeHtml(contractName)}</td>
-                    <td>${escapeHtml(side)}</td>
+                    <td>${renderPositionSide(side)}</td>
                     <td>${escapeHtml(fmt(row.lotSize || lotSize, 3))}</td>
                     <td>${escapeHtml(fmt(row.qty, 0))}</td>
                     <td>${side === "BUY" ? escapeHtml(fmt(row.entryPrice, 2)) : "-"}</td>
                     <td>${side === "SELL" ? escapeHtml(fmt(row.entryPrice, 2)) : "-"}</td>
                     <td class="${escapeHtml(ltpBlinkClass)}">${escapeHtml(fmt(row.markPrice, 2))}</td>
                     <td>${escapeHtml(fmt(row.charges, 4))}</td>
-                    <td>${escapeHtml(fmt(row.pnl, 2))}</td>
+                    <td>${renderPnlValue(row.pnl, false)}</td>
                     <td>${escapeHtml(formatDateTimeDisplay(row.openedAt))}</td>
-                    <td>LIVE</td>
+                    ${isCoveredMode ? "" : "<td>LIVE</td>"}
                     <td>
                         <div class="rolling-demo-table-actions">
                             <button class="rolling-demo-icon-btn rolling-live-swap-open-position" type="button" data-import-id="${escapeHtml(importId)}" title="Replace this position using Manual Trader settings" aria-label="Replace this position using Manual Trader settings">
@@ -1884,7 +2070,14 @@
         }).join("");
         ids.openPositionsBody.innerHTML = `${openRowsHtml}
             <tr class="rolling-demo-total-row">
-                <td>${renderGreekCell(objTotals.totalDelta, resolveSecondaryGreekValue(objTotals.totalDeltaDisplay, objTotals.totalDelta), 2)}</td>
+                <td>${renderGreekCell(
+                    isCoveredMode ? objTotals.totalDeltaPerContract : objTotals.totalDelta,
+                    resolveSecondaryGreekValue(
+                        isCoveredMode ? objTotals.totalDeltaDisplayPerContract : objTotals.totalDeltaDisplay,
+                        isCoveredMode ? objTotals.totalDeltaPerContract : objTotals.totalDelta
+                    ),
+                    2
+                )}</td>
                 <td>${renderGreekCell(objTotals.totalThetaDisplay ?? objTotals.totalTheta, objTotals.totalThetaBaseDisplay ?? objTotals.totalTheta, 4)}</td>
                 <td><strong>TOTAL</strong></td>
                 <td>-</td>
@@ -1894,9 +2087,9 @@
                 <td>-</td>
                 <td>-</td>
                 <td class="rolling-demo-total-value">${escapeHtml(fmt(objTotals.totalCharges, 4))}</td>
-                <td class="rolling-demo-total-value">${escapeHtml(fmt(objTotals.totalPnl, 2))}</td>
+                <td class="rolling-demo-total-value">${renderPnlValue(objTotals.totalPnl, true)}</td>
                 <td>-</td>
-                <td>-</td>
+                ${isCoveredMode ? "" : "<td>-</td>"}
                 <td>-</td>
             </tr>
         `;
@@ -1959,7 +2152,8 @@
             return;
         }
         if (!closedPositions.length) {
-            ids.closedPositionsBody.innerHTML = "<tr><td colspan=\"10\" class=\"rolling-demo-empty\">No Delta fill history found for the selected date range.</td></tr>";
+            const closedPositionsColumnCount = isCoveredMode ? 9 : 10;
+            ids.closedPositionsBody.innerHTML = `<tr><td colspan="${closedPositionsColumnCount}" class="rolling-demo-empty">No Delta fill history found for the selected date range.</td></tr>`;
             if (ids.closedPageInfo) {
                 ids.closedPageInfo.textContent = "Page 0 of 0";
             }
@@ -1972,19 +2166,23 @@
         const pageRows = closedPositions.slice(startIndex, startIndex + closedPositionsPageSize);
         const closedRowsHtml = pageRows.map(function (row) {
             const contractName = String(row.symbol || "-");
+            const side = String(row.side || "-").trim().toUpperCase();
             const lotSize = contractName.includes("ETH") ? 0.01 : 0.001;
+            const coveredSideRowClass = isCoveredMode && (side === "BUY" || side === "SELL")
+                ? `rolling-covered-side-row ${side.toLowerCase()}`
+                : "";
             return `
-                <tr>
-                    <td>${escapeHtml(formatDateTimeDisplay(row.startAt))}</td>
-                    <td>${escapeHtml(formatDateTimeDisplay(row.endAt))}</td>
+                <tr class="${coveredSideRowClass}">
+                    <td>${escapeHtml(formatDateTimeDisplay(isCoveredMode ? (row.endAt || row.startAt) : row.startAt))}</td>
+                    ${isCoveredMode ? "" : `<td>${escapeHtml(formatDateTimeDisplay(row.endAt))}</td>`}
                     <td>${escapeHtml(contractName)}</td>
-                    <td>${escapeHtml(String(row.side || "-"))}</td>
+                    <td>${renderPositionSide(side)}</td>
                     <td>${escapeHtml(fmt(lotSize, 3))}</td>
                     <td>${escapeHtml(fmt(row.qty, 0))}</td>
                     <td>${row.buyPrice === null ? "-" : escapeHtml(fmt(row.buyPrice, 2))}</td>
                     <td>${row.sellPrice === null ? "-" : escapeHtml(fmt(row.sellPrice, 2))}</td>
                     <td>${escapeHtml(fmt(row.charges, 2))}</td>
-                    <td>${row.pnl === null ? "-" : escapeHtml(fmt(row.pnl, 2))}</td>
+                    <td>${renderPnlValue(row.pnl, false)}</td>
                 </tr>
             `;
         }).join("");
@@ -1999,9 +2197,9 @@
         }, 0) : null;
         ids.closedPositionsBody.innerHTML = `${closedRowsHtml}
             <tr class="rolling-demo-total-row">
-                <td colspan="8">Total</td>
+                <td colspan="${isCoveredMode ? 7 : 8}">Total</td>
                 <td class="rolling-demo-total-value">${escapeHtml(fmt(totalCharges, 2))}</td>
-                <td class="rolling-demo-total-value">${escapeHtml(totalPnl === null ? "-" : fmt(totalPnl, 2))}</td>
+                <td class="rolling-demo-total-value">${renderPnlValue(totalPnl, true)}</td>
             </tr>
         `;
         if (ids.closedPageInfo) {
@@ -2267,6 +2465,18 @@
         }, 30000);
     }
 
+    function startConfirmationPolling() {
+        if (!isCoveredMode) {
+            return;
+        }
+        if (confirmationPollTimer) {
+            clearInterval(confirmationPollTimer);
+        }
+        confirmationPollTimer = setInterval(function () {
+            void loadRuntimeStatus().catch(function () { return undefined; });
+        }, 5000);
+    }
+
     applySymbolDefaults();
     applyExpiryModeDefaults(true);
     if (ids.engineStatus) {
@@ -2361,6 +2571,16 @@
         node?.addEventListener("change", queueProfileSave);
         if (node instanceof HTMLInputElement && node.type !== "checkbox") {
             node.addEventListener("input", queueProfileSave);
+        }
+    });
+    [ids.buyHedgeSellPremiumGate, ids.buyHedgeSellPremiumPct].forEach(function (node) {
+        node?.addEventListener("change", function () {
+            renderCoveredHedgeGateSummary(displayedPositions);
+        });
+        if (node instanceof HTMLInputElement && node.type !== "checkbox") {
+            node.addEventListener("input", function () {
+                renderCoveredHedgeGateSummary(displayedPositions);
+            });
         }
     });
     getSupportedOptionRowIndexes().forEach(function (rowIndex) {
@@ -2461,6 +2681,36 @@
             }
         });
     });
+    if (ids.confirmationSound instanceof HTMLInputElement) {
+        ids.confirmationSound.checked = confirmationSoundEnabled;
+        const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+        if (typeof AudioContextConstructor !== "function") {
+            ids.confirmationSound.checked = false;
+            ids.confirmationSound.disabled = true;
+            ids.confirmationSound.title = "Confirmation sounds are not supported by this browser.";
+        }
+        ids.confirmationSound.addEventListener("change", function () {
+            confirmationSoundEnabled = ids.confirmationSound instanceof HTMLInputElement
+                ? ids.confirmationSound.checked
+                : true;
+            saveConfirmationSoundPreference();
+            if (!confirmationSoundEnabled) {
+                queuedConfirmationSoundActionId = "";
+                return;
+            }
+            const vPendingActionId = String(pendingLiveConfirmation?.actionId || "").trim();
+            if (vPendingActionId && vPendingActionId !== lastConfirmationSoundActionId) {
+                queuedConfirmationSoundActionId = vPendingActionId;
+            }
+            void unlockConfirmationAudio();
+        });
+    }
+    document.addEventListener("pointerdown", function () {
+        void unlockConfirmationAudio();
+    }, { once: true, capture: true });
+    document.addEventListener("keydown", function () {
+        void unlockConfirmationAudio();
+    }, { once: true, capture: true });
     ids.confirmActionButton?.addEventListener("click", function () {
         void confirmPendingLiveAction().then(function (objResult) {
             return Promise.all([
@@ -3077,4 +3327,5 @@
     });
 
     startConnectionPolling();
+    startConfirmationPolling();
 })();

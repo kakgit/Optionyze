@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import crypto from "node:crypto";
 const DeltaRestClient = require("delta-rest-client");
 import { getAccountById, getAccountByTelegramChatId } from "../../storage/accounts-store";
+import { sendMobilePushToAccount } from "../../services/firebase-push-service";
 import { getDeltaApiProfile } from "../../storage/delta-api-profile-store";
 import {
     deleteRollingFuturesLtImportedPosition,
@@ -4807,6 +4808,24 @@ async function requestCoveredLiveConfirmation(
             kind: objPending.kind
         }
     );
+    void sendMobilePushToAccount(pUserId, {
+        title: objPending.title,
+        message: objPending.message,
+        data: {
+            type: "covered_live_confirmation",
+            actionId: objPending.actionId,
+            kind: objPending.kind,
+            strategyCode: pProfile.strategyCode
+        }
+    }).then((objResult) => {
+        if (objResult.failedCount > 0) {
+            console.warn(
+                `[mobile-push] ${objResult.failedCount}/${objResult.tokenCount} covered confirmation deliveries failed for account ${pUserId}.`
+            );
+        }
+    }).catch((objError) => {
+        console.error(`[mobile-push] covered confirmation delivery failed for account ${pUserId}:`, objError);
+    });
     void sendCoveredLiveConfirmationTelegramPrompt(pUserId, objPending).catch(() => undefined);
     return "queued";
 }

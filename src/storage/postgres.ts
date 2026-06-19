@@ -169,6 +169,21 @@ export async function ensurePostgresSchema(): Promise<void> {
     `);
 
     await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_mobile_push_tokens (
+            token TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            platform TEXT NOT NULL,
+            device_label TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+    await objPool.query(`
+        CREATE INDEX IF NOT EXISTS idx_optionyze_mobile_push_tokens_account_id
+        ON optionyze_mobile_push_tokens(account_id);
+    `);
+
+    await objPool.query(`
         CREATE TABLE IF NOT EXISTS optionyze_strategy_execution_requests (
             request_id TEXT PRIMARY KEY,
             account_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,

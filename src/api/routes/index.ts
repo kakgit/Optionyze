@@ -120,6 +120,7 @@ import {
     testDeltaApiProfileLoginController,
     updateDeltaApiProfileController
 } from "../controllers/delta-api-controller";
+import { registerMobilePushTokenController } from "../controllers/mobile-push-controller";
 import type { RunnerManager } from "../../runners/runner-manager";
 import type { DirectionalOptionsDemoService } from "../../strategies/directional-options-demo/service";
 import { requireAdminApi, requireAuthApi, requireFreshPasswordApi, requireSurvivalAdminApi } from "../middleware/auth-middleware";
@@ -166,6 +167,10 @@ export function createApiRouter(
     });
     objRouter.delete("/admin/accounts/:accountId", requireAdminApi, async (req, res) => {
         await deleteManagedUserController(req, res);
+    });
+
+    objRouter.post("/account/mobile-push-tokens", requireAuthApi, async (req, res) => {
+        await registerMobilePushTokenController(req, res);
     });
 
     objRouter.get("/account/delta-api-profiles", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
