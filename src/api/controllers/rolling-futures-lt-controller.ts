@@ -8889,6 +8889,27 @@ async function processCoveredPendingActionQueue(
     }
 }
 
+async function triggerCoveredPendingActionQueueNow(
+    pUserId: string,
+    pSelectedApiProfileId: string,
+    pProfile?: RollingFuturesLtProfileRecord
+): Promise<void> {
+    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    const vSelectedApiProfileId = String(pSelectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        return;
+    }
+
+    const objProfile = pProfile || await readLiveProfile(pUserId, pStrategyCode);
+    const arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    await processCoveredPendingActionQueue(
+        pUserId,
+        vSelectedApiProfileId,
+        objProfile,
+        arrSavedPositions
+    );
+}
+
 async function ensureCoveredConfiguredLegPresence(
     pUserId: string,
     pProfile: RollingFuturesLtProfileRecord,
@@ -9787,6 +9808,13 @@ async function processCoveredLiveActionDecision(
                     }
                 }
             );
+            if (objQueueResult.created) {
+                await triggerCoveredPendingActionQueueNow(
+                    pUserId,
+                    vSelectedApiProfileId,
+                    objProfile
+                );
+            }
             return {
                 status: "success",
                 message: objQueueResult.created
@@ -9828,6 +9856,13 @@ async function processCoveredLiveActionDecision(
                     }
                 }
             );
+            if (objQueueResult.created) {
+                await triggerCoveredPendingActionQueueNow(
+                    pUserId,
+                    vSelectedApiProfileId,
+                    objProfile
+                );
+            }
             return {
                 status: "success",
                 message: objQueueResult.created
@@ -9858,6 +9893,13 @@ async function processCoveredLiveActionDecision(
                     }
                 }
             );
+            if (objQueueResult.created) {
+                await triggerCoveredPendingActionQueueNow(
+                    pUserId,
+                    vSelectedApiProfileId,
+                    objProfile
+                );
+            }
             return {
                 status: "success",
                 message: objQueueResult.created
