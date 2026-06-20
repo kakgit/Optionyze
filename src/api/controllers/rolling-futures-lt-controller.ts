@@ -1801,6 +1801,35 @@ function hasTrackedOptionRowLeg(
     });
 }
 
+function getTrackedOptionRowLegPosition(
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pRowIndex: 1 | 2,
+    pLegSide: "ce" | "pe",
+    pSide?: "BUY" | "SELL",
+    pUiState?: Record<string, unknown> | null
+): RollingFuturesLtImportedPositionRecord | null {
+    const vNormalizedSide = pSide ? pSide.toUpperCase() : "";
+    const arrMatches = listTrackedOpenOptionPositions(pTrackedPositions).filter((objPosition) => {
+        if (getTrackedOptionRowIndexForUi(objPosition, pUiState) !== pRowIndex) {
+            return false;
+        }
+        if (getTrackedOptionLegSide(objPosition.contractName) !== pLegSide) {
+            return false;
+        }
+        if (vNormalizedSide && String(objPosition.side || "").trim().toUpperCase() !== vNormalizedSide) {
+            return false;
+        }
+        return true;
+    });
+    if (!arrMatches.length) {
+        return null;
+    }
+    return [...arrMatches].sort((pLeft, pRight) => {
+        return new Date(String(pRight.openedAt || pRight.updatedAt || "")).getTime()
+            - new Date(String(pLeft.openedAt || pLeft.updatedAt || "")).getTime();
+    })[0] || null;
+}
+
 function getTrackedOptionRowLegTotalQty(
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
     pRowIndex: 1 | 2,
@@ -2099,6 +2128,39 @@ function resolveCoveredCutoffReEntryExpiryDate(pExpiryMode: string, pCurrentExpi
         );
     }
     return vNextExpiryDate || addDaysToIsoDateValue(vCurrentExpiryDate, 1) || vCurrentExpiryDate;
+}
+
+function getCoveredBuyHedgeExpiryCutoffBlock(
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pRowIndex: 1 | 2,
+    pLegSide: "ce" | "pe",
+    pUiState?: Record<string, unknown> | null
+): {
+    matchingSellPosition: RollingFuturesLtImportedPositionRecord;
+    resolvedExpiryDate: string;
+} | null {
+    const objMatchingSell = getTrackedOptionRowLegPosition(
+        pTrackedPositions,
+        pRowIndex,
+        pLegSide,
+        "SELL",
+        pUiState
+    );
+    if (!objMatchingSell) {
+        return null;
+    }
+    const vResolvedExpiryDate = getTrackedOptionResolvedExpiryDate(objMatchingSell);
+    if (!vResolvedExpiryDate) {
+        return null;
+    }
+    const objCurrentDeltaTime = getCurrentDeltaUiDateTimeParts();
+    if (vResolvedExpiryDate > objCurrentDeltaTime.date) {
+        return null;
+    }
+    return {
+        matchingSellPosition: objMatchingSell,
+        resolvedExpiryDate: vResolvedExpiryDate
+    };
 }
 
 function hasMissingTrackedOptionBaseGreeks(pPosition: RollingFuturesLtImportedPositionRecord): boolean {
@@ -7292,8 +7354,20 @@ async function executeCoveredPendingReEntryNow(
 ): Promise<boolean> {
     const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
     let arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
-    if (hasTrackedOptionRowLeg(arrSavedPositions, pPending.rowIndex, pPending.legSide, getMergedUiState(pProfile))) {
+    const objUiState = getMergedUiState(pProfile);
+    if (hasTrackedOptionRowLeg(arrSavedPositions, pPending.rowIndex, pPending.legSide, objUiState)) {
         return false;
+    }
+    if (String(pPending.action || "").trim().toLowerCase() === "buy") {
+        const objExpiryCutoffBlock = getCoveredBuyHedgeExpiryCutoffBlock(
+            arrSavedPositions,
+            pPending.rowIndex,
+            pPending.legSide,
+            objUiState
+        );
+        if (objExpiryCutoffBlock) {
+            return false;
+        }
     }
     const objPlaceholderPosition = buildCoveredReEntryPlaceholderPosition(
         pUserId,
@@ -7524,6 +7598,15 @@ async function processCoveredPendingOptionReEntries(
             continue;
         }
         if (String(objPending.action || "").trim().toLowerCase() === "buy") {
+            const objExpiryCutoffBlock = getCoveredBuyHedgeExpiryCutoffBlock(
+                arrSavedPositions,
+                objPending.rowIndex,
+                objPending.legSide,
+                objUiState
+            );
+            if (objExpiryCutoffBlock) {
+                continue;
+            }
             const objGate = evaluateCoveredBuyHedgeSellPremiumGate(
                 arrSavedPositions,
                 objUiState,
