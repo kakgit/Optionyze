@@ -47,6 +47,10 @@ interface DeltaApiProfileRow {
     updated_at: string | Date;
 }
 
+interface DeltaApiProfileQueryRunner {
+    query<TResult = unknown>(text: string, values?: unknown[]): Promise<{ rows: TResult[] }>;
+}
+
 const gProfilesFile = path.resolve(process.cwd(), "data", "delta-api", "profiles.json");
 
 async function loadJsonProfiles(): Promise<DeltaApiProfileRecord[]> {
@@ -108,31 +112,46 @@ export async function createDeltaApiProfile(pInput: CreateDeltaApiProfileInput):
 
     if (isPostgresConfigured()) {
         const objPool = getPostgresPool();
-        await ensureUniqueReferenceName(objPool, objProfile.accountId, objProfile.referenceName);
-        await objPool.query(`
-            INSERT INTO optionyze_delta_api_profiles (
-                profile_id,
-                account_id,
-                reference_name,
-                api_key,
-                api_secret,
-                created_at,
-                updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-        `, [
-            objProfile.profileId,
-            objProfile.accountId,
-            objProfile.referenceName,
-            objProfile.apiKey,
-            objProfile.apiSecret,
-            objProfile.createdAt,
-            objProfile.updatedAt
-        ]);
+        const objClient = await objPool.connect();
+        try {
+            await objClient.query("BEGIN");
+            await acquireDeltaApiKeyGuard(objClient, objProfile.apiKey);
+            await ensureUniqueReferenceName(objClient, objProfile.accountId, objProfile.referenceName);
+            await ensureUniqueApiKey(objClient, objProfile.apiKey);
+            await objClient.query(`
+                INSERT INTO optionyze_delta_api_profiles (
+                    profile_id,
+                    account_id,
+                    reference_name,
+                    api_key,
+                    api_secret,
+                    created_at,
+                    updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `, [
+                objProfile.profileId,
+                objProfile.accountId,
+                objProfile.referenceName,
+                objProfile.apiKey,
+                objProfile.apiSecret,
+                objProfile.createdAt,
+                objProfile.updatedAt
+            ]);
+            await objClient.query("COMMIT");
+        }
+        catch (objError) {
+            await objClient.query("ROLLBACK");
+            throw objError;
+        }
+        finally {
+            objClient.release();
+        }
         return mapSummaryRecord(objProfile);
     }
 
     const objProfiles = await loadJsonProfiles();
     ensureUniqueReferenceNameJson(objProfiles, objProfile.accountId, objProfile.referenceName);
+    ensureUniqueApiKeyJson(objProfiles, objProfile.apiKey);
     objProfiles.push(objProfile);
     await writeJsonFileAtomic(gProfilesFile, objProfiles);
     return mapSummaryRecord(objProfile);
@@ -144,31 +163,46 @@ export async function updateDeltaApiProfile(pProfileId: string, pInput: UpdateDe
 
     if (isPostgresConfigured()) {
         const objPool = getPostgresPool();
-        const objExisting = await getDeltaApiProfile(vAccountId, vProfileId);
-        if (!objExisting) {
-            throw new Error("API credential profile not found.");
+        const objClient = await objPool.connect();
+        try {
+            await objClient.query("BEGIN");
+            const objExisting = await getDeltaApiProfile(vAccountId, vProfileId);
+            if (!objExisting) {
+                throw new Error("API credential profile not found.");
+            }
+
+            const vApiKey = normalizeDeltaApiKey(pInput.apiKey);
+            await acquireDeltaApiKeyGuard(objClient, vApiKey);
+            await ensureUniqueReferenceName(objClient, vAccountId, pInput.referenceName, vProfileId);
+            await ensureUniqueApiKey(objClient, vApiKey, vProfileId);
+            const vApiSecret = String(pInput.apiSecret || "").trim() || objExisting.apiSecret;
+            const vUpdatedAt = new Date().toISOString();
+
+            await objClient.query(`
+                UPDATE optionyze_delta_api_profiles
+                SET reference_name = $3,
+                    api_key = $4,
+                    api_secret = $5,
+                    updated_at = $6
+                WHERE account_id = $1
+                  AND profile_id = $2
+            `, [
+                vAccountId,
+                vProfileId,
+                String(pInput.referenceName || "").trim(),
+                vApiKey,
+                vApiSecret,
+                vUpdatedAt
+            ]);
+            await objClient.query("COMMIT");
         }
-
-        await ensureUniqueReferenceName(objPool, vAccountId, pInput.referenceName, vProfileId);
-        const vApiSecret = String(pInput.apiSecret || "").trim() || objExisting.apiSecret;
-        const vUpdatedAt = new Date().toISOString();
-
-        await objPool.query(`
-            UPDATE optionyze_delta_api_profiles
-            SET reference_name = $3,
-                api_key = $4,
-                api_secret = $5,
-                updated_at = $6
-            WHERE account_id = $1
-              AND profile_id = $2
-        `, [
-            vAccountId,
-            vProfileId,
-            String(pInput.referenceName || "").trim(),
-            String(pInput.apiKey || "").trim(),
-            vApiSecret,
-            vUpdatedAt
-        ]);
+        catch (objError) {
+            await objClient.query("ROLLBACK");
+            throw objError;
+        }
+        finally {
+            objClient.release();
+        }
 
         const objUpdated = await getDeltaApiProfile(vAccountId, vProfileId);
         if (!objUpdated) {
@@ -184,11 +218,12 @@ export async function updateDeltaApiProfile(pProfileId: string, pInput: UpdateDe
     }
 
     ensureUniqueReferenceNameJson(objProfiles, vAccountId, pInput.referenceName, vProfileId);
+    ensureUniqueApiKeyJson(objProfiles, pInput.apiKey, vProfileId);
     const objExisting = objProfiles[vIndex];
     const objUpdated: DeltaApiProfileRecord = {
         ...objExisting,
         referenceName: String(pInput.referenceName || "").trim(),
-        apiKey: String(pInput.apiKey || "").trim(),
+        apiKey: normalizeDeltaApiKey(pInput.apiKey),
         apiSecret: String(pInput.apiSecret || "").trim() || objExisting.apiSecret,
         updatedAt: new Date().toISOString()
     };
@@ -256,8 +291,21 @@ function mapSummaryRecord(pRecord: DeltaApiProfileRecord): DeltaApiProfileSummar
     };
 }
 
-async function ensureUniqueReferenceName(pPool: ReturnType<typeof getPostgresPool>, pAccountId: string, pReferenceName: string, pExcludeProfileId = ""): Promise<void> {
-    const objResult = await pPool.query<{ profile_id: string }>(`
+function normalizeDeltaApiKey(pApiKey: string): string {
+    return String(pApiKey || "").trim();
+}
+
+async function acquireDeltaApiKeyGuard(pRunner: DeltaApiProfileQueryRunner, pApiKey: string): Promise<void> {
+    const vApiKey = normalizeDeltaApiKey(pApiKey);
+    if (!vApiKey) {
+        return;
+    }
+
+    await pRunner.query("SELECT pg_advisory_xact_lock(hashtext($1))", [vApiKey]);
+}
+
+async function ensureUniqueReferenceName(pRunner: DeltaApiProfileQueryRunner, pAccountId: string, pReferenceName: string, pExcludeProfileId = ""): Promise<void> {
+    const objResult = await pRunner.query<{ profile_id: string }>(`
         SELECT profile_id
         FROM optionyze_delta_api_profiles
         WHERE account_id = $1
@@ -268,6 +316,21 @@ async function ensureUniqueReferenceName(pPool: ReturnType<typeof getPostgresPoo
 
     if (objResult.rows[0]) {
         throw new Error("Reference Name already exists for this account.");
+    }
+}
+
+async function ensureUniqueApiKey(pRunner: DeltaApiProfileQueryRunner, pApiKey: string, pExcludeProfileId = ""): Promise<void> {
+    const vApiKey = normalizeDeltaApiKey(pApiKey);
+    const objResult = await pRunner.query<{ profile_id: string; account_id: string }>(`
+        SELECT profile_id, account_id
+        FROM optionyze_delta_api_profiles
+        WHERE BTRIM(api_key) = BTRIM($1)
+          AND ($2 = '' OR profile_id <> $2)
+        LIMIT 1
+    `, [vApiKey, String(pExcludeProfileId || "").trim()]);
+
+    if (objResult.rows[0]) {
+        throw new Error("API Key already exists for another user profile.");
     }
 }
 
@@ -283,5 +346,18 @@ function ensureUniqueReferenceNameJson(pProfiles: DeltaApiProfileRecord[], pAcco
 
     if (objExisting) {
         throw new Error("Reference Name already exists for this account.");
+    }
+}
+
+function ensureUniqueApiKeyJson(pProfiles: DeltaApiProfileRecord[], pApiKey: string, pExcludeProfileId = ""): void {
+    const vApiKey = normalizeDeltaApiKey(pApiKey);
+    const vExcludeProfileId = String(pExcludeProfileId || "").trim();
+    const objExisting = pProfiles.find((objProfile) => (
+        normalizeDeltaApiKey(objProfile.apiKey) === vApiKey
+        && objProfile.profileId !== vExcludeProfileId
+    ));
+
+    if (objExisting) {
+        throw new Error("API Key already exists for another user profile.");
     }
 }
