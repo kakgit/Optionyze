@@ -1884,6 +1884,33 @@ function getMatchingCoveredSellLegForBuyHedge(
     })[0] || null;
 }
 
+function isCoveredSellLegNegativeForBuyHedge(
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pLegSide: "ce" | "pe"
+): {
+    negative: boolean;
+    matchingSellPosition: RollingFuturesLtImportedPositionRecord | null;
+    message: string;
+} {
+    const objSellPosition = getMatchingCoveredSellLegForBuyHedge(pTrackedPositions, pLegSide);
+    if (!objSellPosition) {
+        return {
+            negative: false,
+            matchingSellPosition: null,
+            message: `No matching ${pLegSide.toUpperCase()} sell leg is open for buy hedge trigger.`
+        };
+    }
+    const vPnl = Number(objSellPosition.pnl || 0);
+    const bNegative = Number.isFinite(vPnl) && vPnl < 0;
+    return {
+        negative: bNegative,
+        matchingSellPosition: objSellPosition,
+        message: bNegative
+            ? ""
+            : `Matching ${pLegSide.toUpperCase()} sell leg is not in loss yet, so the buy hedge trigger stays idle.`
+    };
+}
+
 function evaluateCoveredBuyHedgeSellPremiumGate(
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
     pUiState: Record<string, unknown>,
@@ -8993,6 +9020,10 @@ async function ensureCoveredConfiguredLegPresence(
             if (bAlreadyPending) {
                 continue;
             }
+            const objNegativeSellCheck = isCoveredSellLegNegativeForBuyHedge(pTrackedPositions, vLegSide);
+            if (!objNegativeSellCheck.negative) {
+                continue;
+            }
             const objGate = evaluateCoveredBuyHedgeSellPremiumGate(pTrackedPositions, objUiState, vLegSide);
             if (objGate.enabled && !objGate.allowed) {
                 continue;
@@ -9012,7 +9043,7 @@ async function ensureCoveredConfiguredLegPresence(
                 "manual_action",
                 "info",
                 "Covered Buy Hedge Re-Entry Scheduled",
-                `Row ${vRowIndex} ${vLegSide.toUpperCase()} buy hedge is missing while the matching sell leg is still eligible. A re-entry will be checked by the engine.`,
+                `Row ${vRowIndex} ${vLegSide.toUpperCase()} buy hedge is missing and the matching sell leg is now in loss. A re-entry will be checked by the engine.`,
                 {
                     rowIndex: vRowIndex,
                     legSide: vLegSide,
@@ -9065,6 +9096,10 @@ async function restoreCoveredMissingBuyHedgesAfterImport(
             if (hasTrackedOptionRowLeg(arrSavedPositions, vRowIndex, vLegSide, objUiState)) {
                 continue;
             }
+            const objNegativeSellCheck = isCoveredSellLegNegativeForBuyHedge(arrSavedPositions, vLegSide);
+            if (!objNegativeSellCheck.negative) {
+                continue;
+            }
             const objGate = evaluateCoveredBuyHedgeSellPremiumGate(arrSavedPositions, objUiState, vLegSide);
             if (!objGate.allowed) {
                 continue;
@@ -9084,7 +9119,7 @@ async function restoreCoveredMissingBuyHedgesAfterImport(
                 "manual_action",
                 "info",
                 "Covered Buy Hedge Import Restore Scheduled",
-                `Imported ${vLegSide.toUpperCase()} sell leg still satisfies the ${objGateConfig.thresholdPct.toFixed(2)}% threshold, so the missing buy hedge for row ${vRowIndex} was scheduled for restore.`,
+                `Imported ${vLegSide.toUpperCase()} sell leg is in loss and still satisfies the ${objGateConfig.thresholdPct.toFixed(2)}% threshold, so the missing buy hedge for row ${vRowIndex} was scheduled for restore.`,
                 {
                     rowIndex: vRowIndex,
                     legSide: vLegSide,
