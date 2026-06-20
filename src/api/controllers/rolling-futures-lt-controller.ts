@@ -5588,6 +5588,83 @@ function buildCoveredLiveConfirmationTelegramText(
     return arrLines.join("\n");
 }
 
+function buildCoveredLiveConfirmationPushCopy(
+    pPending: CoveredLiveConfirmationState
+): {
+    title: string;
+    message: string;
+} {
+    const objPayload = pPending.payload && typeof pPending.payload === "object"
+        ? pPending.payload
+        : {};
+    const vReason = String(objPayload.reason || "").trim().toLowerCase();
+    const vContractName = String(
+        objPayload.contractName
+        || objPayload.closedContractName
+        || ""
+    ).trim();
+    const arrInputs = Array.isArray(objPayload.inputs)
+        ? objPayload.inputs as Array<Record<string, unknown>>
+        : [];
+    const vExecSymbol = String(
+        objPayload.symbol
+        || arrInputs[0]?.symbol
+        || ""
+    ).trim().toUpperCase();
+    const vExecRowCount = arrInputs.length;
+    const vTitleContext = (pBaseTitle: string, pContext: string): string => {
+        const vContext = String(pContext || "").trim();
+        return vContext ? `${pBaseTitle} | ${vContext}` : pBaseTitle;
+    };
+
+    if (pPending.kind === "option_rule_close") {
+        if (vReason === "sl") {
+            return {
+                title: vTitleContext("SL Trigger", vContractName),
+                message: "Stop-loss trigger hit. Confirm to close this covered leg."
+            };
+        }
+        if (vReason === "tp") {
+            return {
+                title: vTitleContext("TP Trigger", vContractName),
+                message: "Take-profit trigger hit. Confirm to close this covered leg."
+            };
+        }
+        if (vReason === "expiry_cutoff") {
+            return {
+                title: vTitleContext("Replacement Ready", vContractName),
+                message: "Expiry replacement is ready. Confirm to reopen this covered leg."
+            };
+        }
+    }
+
+    if (pPending.kind === "exec_batch") {
+        return {
+            title: vTitleContext("Exec Strategy", vExecSymbol),
+            message: `Covered Exec Strategy is ready. Confirm to place ${Math.max(1, vExecRowCount)} row${Math.max(1, vExecRowCount) === 1 ? "" : "s"}${vExecSymbol ? ` for ${vExecSymbol}` : ""}.`
+        };
+    }
+
+    if (pPending.kind === "covered_reentry") {
+        return {
+            title: vTitleContext("Re-entry Ready", vContractName),
+            message: "Replacement leg is ready. Confirm to reopen the covered position."
+        };
+    }
+
+    if (pPending.kind === "manual_swap") {
+        return {
+            title: vTitleContext("Replacement Ready", vContractName),
+            message: "Covered swap is ready. Confirm to replace this covered leg."
+        };
+    }
+
+    return {
+        title: String(pPending.title || "Optionyze Live Confirmation").trim() || "Optionyze Live Confirmation",
+        message: String(pPending.message || "Confirm the covered action.").trim() || "Confirm the covered action."
+    };
+}
+
 async function sendCoveredLiveConfirmationTelegramPrompt(
     pUserId: string,
     pPending: CoveredLiveConfirmationState
@@ -5669,9 +5746,10 @@ async function requestCoveredLiveConfirmation(
             kind: objPending.kind
         }
     );
+    const objPushCopy = buildCoveredLiveConfirmationPushCopy(objPending);
     void sendMobilePushToAccount(pUserId, {
-        title: objPending.title,
-        message: objPending.message,
+        title: objPushCopy.title,
+        message: objPushCopy.message,
         data: {
             type: "covered_live_confirmation",
             actionId: objPending.actionId,
