@@ -4646,7 +4646,7 @@ function getCoveredLiveConfirmationState(
         return null;
     }
     const vKind = String(objEntry.kind || "").trim();
-    if (vKind !== "exec_batch" && vKind !== "option_rule_close" && vKind !== "covered_reentry") {
+    if (vKind !== "exec_batch" && vKind !== "option_rule_close" && vKind !== "covered_reentry" && vKind !== "manual_swap") {
         return null;
     }
     return {
