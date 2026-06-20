@@ -1620,6 +1620,24 @@ function getNormalizedOptionRowUiState(
     };
 }
 
+function resolveCoveredTrackedPositionRowIndex(
+    pUiState: Record<string, unknown>,
+    pPosition: Pick<RollingFuturesLtImportedPositionRecord, "side">,
+    pPreferredRowIndex?: unknown
+): 1 | 2 {
+    const vPositionAction = String(pPosition.side || "").trim().toLowerCase() === "buy" ? "buy" : "sell";
+    const arrActionMatchedRows = ([1, 2] as const).filter((vRowIndex) => {
+        return getNormalizedOptionRowUiState(pUiState, "covered-options", vRowIndex).action === vPositionAction;
+    });
+    if (arrActionMatchedRows.length === 1) {
+        return arrActionMatchedRows[0];
+    }
+    if (pPreferredRowIndex === 1 || pPreferredRowIndex === 2) {
+        return pPreferredRowIndex;
+    }
+    return vPositionAction === "sell" ? 2 : 1;
+}
+
 function formatDeltaUiDateTimeLocalString(pValue: string): string {
     const vEpochMs = new Date(String(pValue || "")).getTime();
     if (!Number.isFinite(vEpochMs)) {
@@ -7963,7 +7981,9 @@ async function openTrackedOptionReEntry(
     placedAt: string;
 } | null> {
     const objUiState = getMergedUiState(pProfile);
-    const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pMetadata.rowIndex);
+    const vRowIndex = isCoveredOptionsStrategy(pStrategyCode)
+        ? resolveCoveredTrackedPositionRowIndex(objUiState, pClosedPosition, pMetadata.rowIndex)
+        : normalizeOptionRowIndex(pStrategyCode, pMetadata.rowIndex);
     const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
     const vSymbol = normalizeSymbolValue(objUiState.symbol);
     const vLegSide = pOptions?.forceLegSide === "pe"
@@ -12645,9 +12665,10 @@ async function executeCoveredOpenPositionSwap(
     const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const objMetadata = getTrackedOptionMetadata(pPosition);
     const objUiState = getMergedUiState(pProfile);
-    const vRowIndex = normalizeOptionRowIndex(
-        pStrategyCode,
-        objMetadata.rowIndex || (String(pPosition.side || "").trim().toUpperCase() === "SELL" ? 2 : 1)
+    const vRowIndex = resolveCoveredTrackedPositionRowIndex(
+        objUiState,
+        pPosition,
+        objMetadata.rowIndex
     );
     const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
     const vLegSide = getTrackedOptionLegSide(pPosition.contractName);
@@ -12817,9 +12838,10 @@ async function swapCoveredOpenPositionInternal(req: Request, res: Response): Pro
     }
 
     const objMetadata = getTrackedOptionMetadata(objPosition);
-    const vRowIndex = normalizeOptionRowIndex(
-        "covered-options",
-        objMetadata.rowIndex || (String(objPosition.side || "").trim().toUpperCase() === "SELL" ? 2 : 1)
+    const vRowIndex = resolveCoveredTrackedPositionRowIndex(
+        getMergedUiState(objProfile),
+        objPosition,
+        objMetadata.rowIndex
     );
     const vLegSide = getTrackedOptionLegSide(objPosition.contractName).toUpperCase();
     const objPendingResult = await requestCoveredLiveConfirmation(vUserId, objProfile, {
