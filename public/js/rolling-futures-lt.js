@@ -50,6 +50,7 @@
         openRenkoSignal: document.getElementById(`${prefix}OpenRenkoSignal`),
         autoTraderButton: document.getElementById("btnRollingFuturesDemoAutoTrader"),
         pageStatus: document.getElementById(`${prefix}PageStatus`),
+        queueStatus: document.getElementById(`${prefix}QueueStatus`),
         importStatus: document.getElementById(`${prefix}ImportStatus`),
         resetDefaultsButton: document.getElementById("btnRollingFuturesResetDefaults"),
         showSavedProfileButton: document.getElementById("btnRollingFuturesShowSavedProfile"),
@@ -680,6 +681,64 @@
         }
     }
 
+    function formatRuntimeStatusDateTime(dateValue) {
+        const objDate = new Date(String(dateValue || "").trim());
+        if (Number.isNaN(objDate.getTime())) {
+            return "";
+        }
+        return formatDateTimeInputValue(objDate).replace("T", " ");
+    }
+
+    function formatCoveredQueueSummary(summary) {
+        const objSummary = summary && typeof summary === "object" ? summary : null;
+        if (!objSummary) {
+            return {
+                message: "",
+                tone: ""
+            };
+        }
+        const vTotal = Number(objSummary.total || 0);
+        const vPending = Number(objSummary.pending || 0);
+        const vProcessing = Number(objSummary.processing || 0);
+        const vFailed = Number(objSummary.failed || 0);
+        const vNextActionType = String(objSummary.nextActionType || "").trim().toUpperCase();
+        const vNextRunAt = formatRuntimeStatusDateTime(objSummary.nextRunAt);
+        const vCooldownEndsAt = formatRuntimeStatusDateTime(objSummary.cooldownEndsAt);
+        const vThrottleMode = String(objSummary.throttleMode || "local").trim().toLowerCase() === "shared"
+            ? "shared"
+            : "local";
+        const vOwnerServerId = String(objSummary.throttleOwnerServerId || "").trim();
+
+        if (!vTotal && !vCooldownEndsAt) {
+            return {
+                message: "Queue idle.",
+                tone: "success"
+            };
+        }
+
+        const arrBits = [`Queue ${vTotal} total`];
+        if (vPending) {
+            arrBits.push(`${vPending} pending`);
+        }
+        if (vProcessing) {
+            arrBits.push(`${vProcessing} processing`);
+        }
+        if (vFailed) {
+            arrBits.push(`${vFailed} failed`);
+        }
+        if (vNextActionType) {
+            arrBits.push(`next ${vNextActionType}${vNextRunAt ? ` at ${vNextRunAt}` : ""}`);
+        }
+        if (vCooldownEndsAt) {
+            arrBits.push(`${vThrottleMode} gap until ${vCooldownEndsAt}${vOwnerServerId ? ` via ${vOwnerServerId}` : ""}`);
+        }
+
+        return {
+            message: arrBits.join(" | "),
+            tone: vFailed ? "danger" : (vTotal ? "warning" : "success")
+        };
+    }
+
     function isAdminTargetModeActive() {
         return mode === "dual" && currentAccountIsAdmin;
     }
@@ -1094,6 +1153,10 @@
             queueClosedPositionsRefresh();
         }
         updateNeutralBadges(lastNeutralStatus);
+        if (isCoveredMode) {
+            const objQueueStatus = formatCoveredQueueSummary(objRuntime.coveredQueueSummary || null);
+            setStatus(ids.queueStatus, objQueueStatus.message, objQueueStatus.tone);
+        }
         renderPendingLiveConfirmation();
         setButtonsEnabled();
     }

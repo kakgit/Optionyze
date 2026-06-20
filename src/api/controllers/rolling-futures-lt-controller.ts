@@ -60,7 +60,7 @@ import {
     renewSurvivalStateLease,
     upsertSurvivalState
 } from "../../storage/survival-store";
-import { isPrimaryDatabaseUnavailableError } from "../../storage/postgres";
+import { isPostgresConfigured, isPrimaryDatabaseUnavailableError } from "../../storage/postgres";
 
 interface DeltaWalletBalanceRow {
     asset_symbol?: string;
@@ -149,6 +149,8 @@ const gFutureLimitRetryCount = 5;
 const gOptionReentryPendingMs = 5000;
 const gCoveredOptionReEntryRetryMs = 60 * 1000;
 const gCoveredActionQueueGapMs = 15 * 1000;
+const gCoveredActionQueueLeaseUserId = "__system__";
+const gCoveredActionQueueLeaseStrategyCode = "covered-action-queue";
 const gCoveredActionQueueRetryMs = 30 * 1000;
 const gProfitClosePauseAfterOptionRuleMs = 15000;
 const gProfitCloseReEntryCooldownMs = 5 * 60 * 1000;
@@ -3394,6 +3396,71 @@ function markCoveredActionQueueProcessedNow(): void {
     gLastCoveredActionQueueProcessedAtMs = Date.now();
 }
 
+function getLocalCoveredActionQueueNextAvailableAt(): string {
+    if (!gLastCoveredActionQueueProcessedAtMs) {
+        return "";
+    }
+    return new Date(gLastCoveredActionQueueProcessedAtMs + gCoveredActionQueueGapMs).toISOString();
+}
+
+async function acquireCoveredActionQueueProcessingSlot(): Promise<CoveredActionQueueThrottleResult> {
+    if (!isPostgresConfigured()) {
+        if (!canProcessCoveredActionQueueNow()) {
+            return {
+                allowed: false,
+                mode: "local",
+                nextAvailableAt: getLocalCoveredActionQueueNextAvailableAt(),
+                ownerServerId: gServerId
+            };
+        }
+        markCoveredActionQueueProcessedNow();
+        return {
+            allowed: true,
+            mode: "local",
+            nextAvailableAt: getLocalCoveredActionQueueNextAvailableAt(),
+            ownerServerId: gServerId
+        };
+    }
+
+    const objExistingLease = await getStrategyLease(
+        gCoveredActionQueueLeaseUserId,
+        gCoveredActionQueueLeaseStrategyCode
+    );
+    if (isLeaseActive(objExistingLease)) {
+        return {
+            allowed: false,
+            mode: "shared",
+            nextAvailableAt: String(objExistingLease?.leaseExpiresAt || "").trim(),
+            ownerServerId: String(objExistingLease?.ownerServerId || "").trim()
+        };
+    }
+
+    const objAcquireResult = await acquireStrategyLease({
+        userId: gCoveredActionQueueLeaseUserId,
+        strategyCode: gCoveredActionQueueLeaseStrategyCode,
+        ownerServerId: gServerId,
+        ownerInstanceId: gServerInstanceId,
+        leaseDurationMs: gCoveredActionQueueGapMs,
+        metadata: {
+            purpose: "covered_action_queue_gap"
+        }
+    });
+    if (!objAcquireResult.acquired || !objAcquireResult.lease) {
+        return {
+            allowed: false,
+            mode: "shared",
+            nextAvailableAt: String(objAcquireResult.lease?.leaseExpiresAt || "").trim(),
+            ownerServerId: String(objAcquireResult.lease?.ownerServerId || "").trim()
+        };
+    }
+    return {
+        allowed: true,
+        mode: "shared",
+        nextAvailableAt: String(objAcquireResult.lease.leaseExpiresAt || "").trim(),
+        ownerServerId: String(objAcquireResult.lease.ownerServerId || "").trim()
+    };
+}
+
 function buildCoveredQueuedExecBatchInputsFromPayload(
     pProfile: RollingFuturesLtProfileRecord,
     pPayload: Record<string, unknown>
@@ -4555,6 +4622,26 @@ type CoveredPendingActionQueueItem = {
     payload: Record<string, unknown>;
 };
 
+type CoveredActionQueueThrottleResult = {
+    allowed: boolean;
+    mode: "shared" | "local";
+    nextAvailableAt: string;
+    ownerServerId: string;
+};
+
+type CoveredActionQueueSummary = {
+    total: number;
+    pending: number;
+    processing: number;
+    failed: number;
+    nextActionType: CoveredQueuedActionType | "";
+    nextRunAt: string;
+    cooldownEndsAt: string;
+    cooldownActive: boolean;
+    throttleMode: "shared" | "local";
+    throttleOwnerServerId: string;
+};
+
 function getCoveredPendingOptionReEntriesState(
     pRuntime: RollingFuturesLtRuntimeRecord | null
 ): CoveredPendingOptionReEntryState[] {
@@ -4692,6 +4779,60 @@ function buildRuntimeStateWithCoveredPendingActionQueue(
         payload: objEntry.payload && typeof objEntry.payload === "object" ? objEntry.payload : {}
     }));
     return objState;
+}
+
+async function buildCoveredActionQueueSummary(
+    pRuntime: RollingFuturesLtRuntimeRecord | null
+): Promise<CoveredActionQueueSummary> {
+    const arrQueue = getCoveredPendingActionQueueState(pRuntime);
+    const vNowMs = Date.now();
+    const arrEligible = arrQueue.filter((objEntry) => {
+        if (objEntry.status === "processing") {
+            return false;
+        }
+        const vRunAtMs = new Date(objEntry.runAt).getTime();
+        return Number.isFinite(vRunAtMs) && vRunAtMs <= vNowMs;
+    }).sort((pLeft, pRight) => {
+        if (pLeft.priority !== pRight.priority) {
+            return pLeft.priority - pRight.priority;
+        }
+        return new Date(pLeft.createdAt).getTime() - new Date(pRight.createdAt).getTime();
+    });
+    const objNext = arrEligible[0];
+
+    let vThrottleMode: "shared" | "local" = "local";
+    let vCooldownEndsAt = getLocalCoveredActionQueueNextAvailableAt();
+    let vThrottleOwnerServerId = gServerId;
+
+    if (isPostgresConfigured()) {
+        vThrottleMode = "shared";
+        const objLease = await getStrategyLease(
+            gCoveredActionQueueLeaseUserId,
+            gCoveredActionQueueLeaseStrategyCode
+        );
+        if (isLeaseActive(objLease)) {
+            vCooldownEndsAt = String(objLease?.leaseExpiresAt || "").trim();
+            vThrottleOwnerServerId = String(objLease?.ownerServerId || "").trim();
+        }
+        else {
+            vCooldownEndsAt = "";
+            vThrottleOwnerServerId = "";
+        }
+    }
+
+    const vCooldownEndsAtMs = new Date(vCooldownEndsAt).getTime();
+    return {
+        total: arrQueue.length,
+        pending: arrQueue.filter((objEntry) => objEntry.status === "pending").length,
+        processing: arrQueue.filter((objEntry) => objEntry.status === "processing").length,
+        failed: arrQueue.filter((objEntry) => objEntry.status === "failed").length,
+        nextActionType: objNext?.actionType || "",
+        nextRunAt: String(objNext?.runAt || "").trim(),
+        cooldownEndsAt: vCooldownEndsAt,
+        cooldownActive: Number.isFinite(vCooldownEndsAtMs) && vCooldownEndsAtMs > vNowMs,
+        throttleMode: vThrottleMode,
+        throttleOwnerServerId: vThrottleOwnerServerId
+    };
 }
 
 function getPendingOptionRecoveryRefreshState(pRuntime: RollingFuturesLtRuntimeRecord | null): {
@@ -8126,7 +8267,15 @@ async function processCoveredPendingActionQueue(
         return new Date(pLeft.createdAt).getTime() - new Date(pRight.createdAt).getTime();
     });
     const objNext = arrEligible[0];
-    if (!objNext || !canProcessCoveredActionQueueNow()) {
+    if (!objNext) {
+        return {
+            profile: pProfile,
+            positions: pTrackedPositions
+        };
+    }
+
+    const objThrottle = await acquireCoveredActionQueueProcessingSlot();
+    if (!objThrottle.allowed) {
         return {
             profile: pProfile,
             positions: pTrackedPositions
@@ -8287,7 +8436,6 @@ async function processCoveredPendingActionQueue(
             strategyCode: pStrategyCode,
             state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterSuccess, arrQueueAfterSuccess)
         });
-        markCoveredActionQueueProcessedNow();
         return {
             profile: objProfile,
             positions: arrSavedPositions
@@ -9567,6 +9715,9 @@ async function getRuntimeStatusInternal(req: Request, res: Response, pStrategyCo
     const objLease = isDualLeaseManagedStrategy(pStrategyCode)
         ? await getStrategyLease(vUserId, pStrategyCode)
         : null;
+    const objCoveredQueueSummary = pStrategyCode === "covered-options"
+        ? await buildCoveredActionQueueSummary(objRuntime)
+        : null;
     res.json({
         status: "success",
         data: {
@@ -9575,7 +9726,8 @@ async function getRuntimeStatusInternal(req: Request, res: Response, pStrategyCo
                 selectedApiProfileId: String(objProfile.selectedApiProfileId || "").trim()
             }),
             lease: objLease && isLeaseActive(objLease) ? objLease : null,
-            currentServerId: gServerId
+            currentServerId: gServerId,
+            coveredQueueSummary: objCoveredQueueSummary
         }
     });
 }
