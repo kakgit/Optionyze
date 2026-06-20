@@ -148,6 +148,8 @@ const gFutureLimitRetryDelayMs = 5000;
 const gFutureLimitRetryCount = 5;
 const gOptionReentryPendingMs = 5000;
 const gCoveredOptionReEntryRetryMs = 60 * 1000;
+const gCoveredActionQueueGapMs = 15 * 1000;
+const gCoveredActionQueueRetryMs = 30 * 1000;
 const gProfitClosePauseAfterOptionRuleMs = 15000;
 const gProfitCloseReEntryCooldownMs = 5 * 60 * 1000;
 const gProfitCloseConfirmationMs = 5 * 60 * 1000;
@@ -241,6 +243,7 @@ const gNeutralityHedgeLocks = new Set<string>();
 const gAutoTraderIntervals = new Map<string, NodeJS.Timeout>();
 const gAutoTraderCycleLocks = new Set<string>();
 const gLocalStrategyLeaseTokens = new Map<string, string>();
+let gLastCoveredActionQueueProcessedAtMs = 0;
 const gNeutralityHedgePendingMs = 45 * 1000;
 const gDuplicateLiveEventCooldownMs = 60 * 1000;
 const gServerId = getServerId();
@@ -1408,7 +1411,10 @@ function resolveRollingFuturesExpiryDateByModeFromBaseDate(pExpiryMode: string, 
 }
 
 function resolveRollingFuturesExpiryDateByMode(pExpiryMode: string): string {
-    return resolveRollingFuturesExpiryDateByModeFromBaseDate(pExpiryMode);
+    return resolveRollingFuturesExpiryDateByModeFromBaseDate(
+        pExpiryMode,
+        getCurrentDeltaUiDateTimeParts().date
+    );
 }
 
 function normalizeRollingFuturesExpiryDate(pExpiryMode: string, pExpiryDate: unknown): string {
@@ -3338,6 +3344,345 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
     return objMergedUiState;
 }
 
+async function refreshModeDrivenExpiryDatesInProfile(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pProfile?: RollingFuturesLtProfileRecord | null
+): Promise<RollingFuturesLtProfileRecord> {
+    let objProfile = pProfile || await readLiveProfile(pUserId, pStrategyCode);
+    if (!isCoveredLikeStrategy(pStrategyCode)) {
+        return objProfile;
+    }
+    const objUiState = getMergedUiState(objProfile);
+    const vDeltaDate = getCurrentDeltaUiDateTimeParts().date;
+    let bChanged = false;
+    const objNextUiState: Record<string, unknown> = {
+        ...objUiState
+    };
+    for (const vRowIndex of [1, 2] as const) {
+        const objKeys = getOptionRowStateKeys(pStrategyCode, vRowIndex);
+        const vExpiryMode = String(objUiState[objKeys.expiryMode] || "").trim();
+        if (!["1", "2", "4", "5", "6", "7"].includes(vExpiryMode)) {
+            continue;
+        }
+        const vResolvedExpiryDate = resolveRollingFuturesExpiryDateByModeFromBaseDate(vExpiryMode, vDeltaDate);
+        if (!vResolvedExpiryDate) {
+            continue;
+        }
+        if (String(objUiState[objKeys.expiryDate] || "").trim() === vResolvedExpiryDate) {
+            continue;
+        }
+        objNextUiState[objKeys.expiryDate] = vResolvedExpiryDate;
+        bChanged = true;
+    }
+    if (!bChanged) {
+        return objProfile;
+    }
+    objProfile = await saveRollingFuturesLtProfile(normalizeProfileSaveInput(pUserId, pStrategyCode, {
+        ...objProfile,
+        uiState: objNextUiState,
+        connectionStatus: objProfile.connectionStatus
+    }));
+    return objProfile;
+}
+
+function canProcessCoveredActionQueueNow(): boolean {
+    return (Date.now() - gLastCoveredActionQueueProcessedAtMs) >= gCoveredActionQueueGapMs;
+}
+
+function markCoveredActionQueueProcessedNow(): void {
+    gLastCoveredActionQueueProcessedAtMs = Date.now();
+}
+
+function buildCoveredQueuedExecBatchInputsFromPayload(
+    pProfile: RollingFuturesLtProfileRecord,
+    pPayload: Record<string, unknown>
+): Array<{
+    action: "buy" | "sell";
+    symbol: "BTC" | "ETH";
+    legSide: "ce" | "pe" | "both";
+    expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
+    expiryDate: string;
+    qty: number;
+    targetDelta: number;
+    rowIndex: 1 | 2;
+}> {
+    const arrRows = Array.isArray(pPayload.inputs)
+        ? pPayload.inputs as Array<Record<string, unknown>>
+        : [];
+    const objMergedUiState = getMergedUiState(pProfile);
+    return arrRows.map((objRow) => {
+        const vRowIndex = normalizeOptionRowIndex(pProfile.strategyCode, objRow.rowIndex);
+        const objRowState = getNormalizedOptionRowUiState(objMergedUiState, pProfile.strategyCode, vRowIndex);
+        const objInput = normalizeExecStrategyInput(
+            objRowState.action,
+            objMergedUiState.symbol,
+            objRowState.legs,
+            objRowState.expiryMode,
+            objRowState.expiryDate,
+            objRowState.qty || 1,
+            objRowState.newD || 0.53
+        );
+        return {
+            ...objInput,
+            rowIndex: vRowIndex
+        };
+    }).filter((objInput) => Boolean(objInput.expiryDate));
+}
+
+async function enqueueCoveredPendingAction(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pItem: Omit<CoveredPendingActionQueueItem, "priority" | "status" | "createdAt" | "startedAt" | "finishedAt" | "attemptCount" | "lastError">
+): Promise<{ created: boolean; queueItem: CoveredPendingActionQueueItem; }> {
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const arrQueue = getCoveredPendingActionQueueState(objRuntime);
+    const objExisting = arrQueue.find((objEntry) => objEntry.queueKey === pItem.queueKey);
+    if (objExisting) {
+        return { created: false, queueItem: objExisting };
+    }
+    const objQueueItem: CoveredPendingActionQueueItem = {
+        queueKey: String(pItem.queueKey || "").trim(),
+        actionType: pItem.actionType,
+        priority: getCoveredActionQueuePriority(pItem.actionType),
+        status: "pending",
+        runAt: String(pItem.runAt || "").trim() || new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        startedAt: "",
+        finishedAt: "",
+        attemptCount: 0,
+        lastError: "",
+        payload: pItem.payload && typeof pItem.payload === "object" ? pItem.payload : {}
+    };
+    await saveRollingFuturesLtRuntime({
+        ...objRuntime,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntime, [
+            ...arrQueue,
+            objQueueItem
+        ])
+    });
+    return { created: true, queueItem: objQueueItem };
+}
+
+async function queueCoveredTriggeredAction(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pPosition: RollingFuturesLtImportedPositionRecord,
+    pReason: "sl" | "tp" | "expiry_cutoff",
+    pCurrentDelta: number,
+    pCurrentMarkPrice: number | null
+): Promise<{ created: boolean; message: string; }> {
+    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    const vQueueKey = `${pReason}:${String(pPosition.importId || "").trim()}`;
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    if (getCoveredPendingActionQueueState(objRuntime).some((objEntry) => objEntry.queueKey === vQueueKey)) {
+        return {
+            created: false,
+            message: "The action is already queued."
+        };
+    }
+    const vConfirmationResult = await requestCoveredLiveConfirmation(pUserId, pProfile, {
+        kind: "option_rule_close",
+        title: pReason === "sl" ? "Confirm SL Close" : (pReason === "tp" ? "Confirm TP Close" : "Confirm Expiry Close"),
+        message: pReason === "expiry_cutoff"
+            ? `Covered option ${pPosition.contractName} is on its expiry date. Confirm to swap it into the next expiry.`
+            : `Covered option ${String(pPosition.side || "").trim().toUpperCase()} ${pPosition.contractName} hit ${pReason.toUpperCase()}. Confirm to queue the action.`,
+        payload: {
+            importId: pPosition.importId,
+            contractName: pPosition.contractName,
+            reason: pReason,
+            currentDelta: pCurrentDelta,
+            currentMarkPrice: pCurrentMarkPrice
+        }
+    });
+    if (vConfirmationResult === "queued" || vConfirmationResult === "suppressed") {
+        return {
+            created: false,
+            message: vConfirmationResult === "queued"
+                ? "The action is waiting for confirmation."
+                : "Another live action confirmation is already pending."
+        };
+    }
+    const objQueueResult = await enqueueCoveredPendingAction(pUserId, pStrategyCode, {
+        queueKey: vQueueKey,
+        actionType: pReason === "sl" ? "sl" : (pReason === "tp" ? "tp" : "expiry_rollover"),
+        runAt: new Date().toISOString(),
+        payload: {
+            importId: pPosition.importId,
+            contractName: pPosition.contractName,
+            reason: pReason,
+            currentDelta: pCurrentDelta,
+            currentMarkPrice: pCurrentMarkPrice
+        }
+    });
+    if (objQueueResult.created) {
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "manual_action",
+            pReason === "sl" ? "warning" : "info",
+            pReason === "sl"
+                ? "SL Action Queued"
+                : (pReason === "tp" ? "TP Action Queued" : "Expiry Rollover Queued"),
+            pReason === "expiry_cutoff"
+                ? `Queued expiry rollover for ${pPosition.contractName}.`
+                : `Queued ${pReason.toUpperCase()} action for ${pPosition.contractName}.`,
+            {
+                contractName: pPosition.contractName,
+                actionType: objQueueResult.queueItem.actionType,
+                queueKey: objQueueResult.queueItem.queueKey,
+                reason: "covered_action_queue_created"
+            }
+        );
+    }
+    return {
+        created: objQueueResult.created,
+        message: objQueueResult.created
+            ? "The action was queued for execution."
+            : "The action is already queued."
+    };
+}
+
+async function queueCoveredExecBatchAction(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pInputs: Array<Record<string, unknown>>,
+    pSuppressClosedFromDateUpdate: boolean
+): Promise<{ created: boolean; message: string; }> {
+    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    if (getCoveredPendingActionQueueState(objRuntime).some((objEntry) => objEntry.queueKey === "exec_batch")) {
+        return {
+            created: false,
+            message: "Exec Strategy is already queued."
+        };
+    }
+    const vConfirmationResult = await requestCoveredLiveConfirmation(pUserId, pProfile, {
+        kind: "exec_batch",
+        title: "Confirm Exec Strategy",
+        message: `Covered Exec Strategy is ready to place ${pInputs.length} row${pInputs.length === 1 ? "" : "s"}. Confirm to queue the execution.`,
+        payload: {
+            inputs: pInputs,
+            suppressClosedFromDateUpdate: pSuppressClosedFromDateUpdate
+        }
+    });
+    if (vConfirmationResult === "queued" || vConfirmationResult === "suppressed") {
+        return {
+            created: false,
+            message: vConfirmationResult === "queued"
+                ? "Exec Strategy is waiting for confirmation."
+                : "Another live action confirmation is already pending."
+        };
+    }
+    const objQueueResult = await enqueueCoveredPendingAction(pUserId, pStrategyCode, {
+        queueKey: "exec_batch",
+        actionType: "exec_batch",
+        runAt: new Date().toISOString(),
+        payload: {
+            inputs: pInputs,
+            suppressClosedFromDateUpdate: pSuppressClosedFromDateUpdate
+        }
+    });
+    if (objQueueResult.created) {
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "manual_action",
+            "info",
+            "Exec Strategy Queued",
+            `Queued Covered Exec Strategy for ${pInputs.length} row${pInputs.length === 1 ? "" : "s"}.`,
+            {
+                actionType: objQueueResult.queueItem.actionType,
+                queueKey: objQueueResult.queueItem.queueKey,
+                reason: "covered_exec_queue_created"
+            }
+        );
+    }
+    return {
+        created: objQueueResult.created,
+        message: objQueueResult.created
+            ? "Exec Strategy was queued for execution."
+            : "Exec Strategy is already queued."
+    };
+}
+
+async function queueCoveredReEntryAction(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pPending: CoveredPendingOptionReEntryState
+): Promise<{ created: boolean; message: string; }> {
+    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    const vQueueKey = `covered_reentry:${String(pPending.dedupeKey || "").trim()}`;
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    if (getCoveredPendingActionQueueState(objRuntime).some((objEntry) => objEntry.queueKey === vQueueKey)) {
+        return {
+            created: false,
+            message: "Covered re-entry is already queued."
+        };
+    }
+    const vConfirmationResult = await requestCoveredLiveConfirmation(pUserId, pProfile, {
+        kind: "covered_reentry",
+        title: "Confirm Covered Re-Entry",
+        message: `Row ${pPending.rowIndex} ${pPending.legSide.toUpperCase()} is ready to re-enter after ${pPending.reason.replaceAll("_", " ")}. Confirm to queue the replacement option order.`,
+        payload: {
+            dedupeKey: pPending.dedupeKey,
+            rowIndex: pPending.rowIndex,
+            legSide: pPending.legSide,
+            action: pPending.action,
+            qty: pPending.qty,
+            reason: pPending.reason,
+            targetDelta: pPending.targetDelta,
+            expiryMode: pPending.expiryMode,
+            expiryDate: pPending.expiryDate,
+            closedContractName: pPending.closedContractName
+        }
+    });
+    if (vConfirmationResult === "queued" || vConfirmationResult === "suppressed") {
+        return {
+            created: false,
+            message: vConfirmationResult === "queued"
+                ? "Covered re-entry is waiting for confirmation."
+                : "Another live action confirmation is already pending."
+        };
+    }
+    const objQueueResult = await enqueueCoveredPendingAction(pUserId, pStrategyCode, {
+        queueKey: vQueueKey,
+        actionType: "covered_reentry",
+        runAt: new Date().toISOString(),
+        payload: {
+            dedupeKey: pPending.dedupeKey
+        }
+    });
+    if (objQueueResult.created) {
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "manual_action",
+            "info",
+            "Covered Re-Entry Queued",
+            `Queued covered re-entry for row ${pPending.rowIndex} ${pPending.legSide.toUpperCase()}.`,
+            {
+                rowIndex: pPending.rowIndex,
+                legSide: pPending.legSide,
+                queueKey: objQueueResult.queueItem.queueKey,
+                reason: "covered_reentry_queue_created"
+            }
+        );
+    }
+    return {
+        created: objQueueResult.created,
+        message: objQueueResult.created
+            ? "Covered re-entry was queued for execution."
+            : "Covered re-entry is already queued."
+    };
+}
+
 function normalizeProfileSaveInput(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -3524,8 +3869,8 @@ async function fetchLiveFuturePositions(
     let vSymbol: "BTC" | "ETH" = "BTC";
     let arrSavedPositions: RollingFuturesLtImportedPositionRecord[] = [];
     try {
-        const objProfile = await readLiveProfile(pUserId, pStrategyCode);
-        const objUiState = getMergedUiState(objProfile);
+        let objProfile = await readLiveProfile(pUserId, pStrategyCode);
+        let objUiState = getMergedUiState(objProfile);
         vSymbol = normalizeSymbolValue(pSymbolOverride || objUiState.symbol);
         arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
     }
@@ -4194,6 +4539,22 @@ type CoveredPendingOptionReEntryState = {
     lastError: string;
 };
 
+type CoveredQueuedActionType = "sl" | "tp" | "covered_reentry" | "expiry_rollover" | "exec_batch";
+
+type CoveredPendingActionQueueItem = {
+    queueKey: string;
+    actionType: CoveredQueuedActionType;
+    priority: number;
+    status: "pending" | "processing" | "failed";
+    runAt: string;
+    createdAt: string;
+    startedAt: string;
+    finishedAt: string;
+    attemptCount: number;
+    lastError: string;
+    payload: Record<string, unknown>;
+};
+
 function getCoveredPendingOptionReEntriesState(
     pRuntime: RollingFuturesLtRuntimeRecord | null
 ): CoveredPendingOptionReEntryState[] {
@@ -4251,6 +4612,84 @@ function buildRuntimeStateWithCoveredPendingOptionReEntries(
         attemptCount: Math.max(0, Math.floor(Number(objEntry.attemptCount || 0))),
         closedContractName: String(objEntry.closedContractName || "").trim(),
         lastError: String(objEntry.lastError || "").trim()
+    }));
+    return objState;
+}
+
+function getCoveredActionQueuePriority(pActionType: CoveredQueuedActionType): number {
+    if (pActionType === "sl") {
+        return 10;
+    }
+    if (pActionType === "tp") {
+        return 20;
+    }
+    if (pActionType === "covered_reentry") {
+        return 25;
+    }
+    if (pActionType === "expiry_rollover") {
+        return 30;
+    }
+    return 40;
+}
+
+function getCoveredPendingActionQueueState(
+    pRuntime: RollingFuturesLtRuntimeRecord | null
+): CoveredPendingActionQueueItem[] {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    const arrQueue = Array.isArray(objState.pendingCoveredActionQueue)
+        ? objState.pendingCoveredActionQueue as Array<Record<string, unknown>>
+        : [];
+    return arrQueue.map((objEntry) => {
+        const vActionTypeRaw = String(objEntry.actionType || "").trim().toLowerCase();
+        const vActionType: CoveredQueuedActionType = vActionTypeRaw === "sl"
+            ? "sl"
+            : (vActionTypeRaw === "tp"
+                ? "tp"
+                : (vActionTypeRaw === "covered_reentry"
+                    ? "covered_reentry"
+                    : (vActionTypeRaw === "expiry_rollover" ? "expiry_rollover" : "exec_batch")));
+        const vStatusRaw = String(objEntry.status || "").trim().toLowerCase();
+        return {
+            queueKey: String(objEntry.queueKey || "").trim(),
+            actionType: vActionType,
+            priority: Math.max(0, Math.floor(Number(objEntry.priority || getCoveredActionQueuePriority(vActionType)))),
+            status: vStatusRaw === "processing"
+                ? "processing"
+                : (vStatusRaw === "failed" ? "failed" : "pending"),
+            runAt: String(objEntry.runAt || "").trim(),
+            createdAt: String(objEntry.createdAt || "").trim(),
+            startedAt: String(objEntry.startedAt || "").trim(),
+            finishedAt: String(objEntry.finishedAt || "").trim(),
+            attemptCount: Math.max(0, Math.floor(Number(objEntry.attemptCount || 0))),
+            lastError: String(objEntry.lastError || "").trim(),
+            payload: objEntry.payload && typeof objEntry.payload === "object"
+                ? objEntry.payload as Record<string, unknown>
+                : {}
+        } satisfies CoveredPendingActionQueueItem;
+    }).filter((objEntry) => Boolean(objEntry.queueKey) && Boolean(objEntry.runAt) && Boolean(objEntry.createdAt));
+}
+
+function buildRuntimeStateWithCoveredPendingActionQueue(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pEntries: CoveredPendingActionQueueItem[]
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    if (!Array.isArray(pEntries) || !pEntries.length) {
+        delete objState.pendingCoveredActionQueue;
+        return objState;
+    }
+    objState.pendingCoveredActionQueue = pEntries.map((objEntry) => ({
+        queueKey: String(objEntry.queueKey || "").trim(),
+        actionType: objEntry.actionType,
+        priority: Math.max(0, Math.floor(Number(objEntry.priority || getCoveredActionQueuePriority(objEntry.actionType)))),
+        status: objEntry.status === "processing" ? "processing" : (objEntry.status === "failed" ? "failed" : "pending"),
+        runAt: String(objEntry.runAt || "").trim(),
+        createdAt: String(objEntry.createdAt || "").trim(),
+        startedAt: String(objEntry.startedAt || "").trim(),
+        finishedAt: String(objEntry.finishedAt || "").trim(),
+        attemptCount: Math.max(0, Math.floor(Number(objEntry.attemptCount || 0))),
+        lastError: String(objEntry.lastError || "").trim(),
+        payload: objEntry.payload && typeof objEntry.payload === "object" ? objEntry.payload : {}
     }));
     return objState;
 }
@@ -7584,44 +8023,14 @@ async function processCoveredPendingOptionReEntries(
                     }
                 );
             }
-            const objPlaceholderPosition = buildCoveredReEntryPlaceholderPosition(
+            const objQueueResult = await queueCoveredReEntryAction(
                 pUserId,
-                pStrategyCode,
-                objPending.rowIndex,
-                objPending.legSide,
-                objPending.action,
-                objPending.qty
-            );
-            const vConfirmationResult = await requestCoveredLiveConfirmation(pUserId, pProfile, {
-                kind: "covered_reentry",
-                title: "Confirm Covered Re-Entry",
-                message: `Row ${objPending.rowIndex} ${objPending.legSide.toUpperCase()} is ready to re-enter after ${objPending.reason.replaceAll("_", " ")}. Confirm to place the replacement option order.`,
-                payload: {
-                    dedupeKey: objPending.dedupeKey,
-                    rowIndex: objPending.rowIndex,
-                    legSide: objPending.legSide,
-                    action: objPending.action,
-                    qty: objPending.qty,
-                    reason: objPending.reason,
-                    targetDelta: objPending.targetDelta,
-                    expiryMode: objPending.expiryMode,
-                    expiryDate: objPending.expiryDate,
-                    closedContractName: objPending.closedContractName
-                }
-            });
-            if (vConfirmationResult === "queued" || vConfirmationResult === "suppressed") {
-                continue;
-            }
-            const bOpened = await executeCoveredPendingReEntryNow(
-                pUserId,
-                pSelectedApiProfileId,
                 pProfile,
                 objPending
             );
-            if (!bOpened) {
+            if (!objQueueResult.created) {
                 continue;
             }
-            arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
             arrNextPending = arrNextPending.filter((objEntry) => objEntry.dedupeKey !== objPending.dedupeKey);
         }
         catch (objError) {
@@ -7682,6 +8091,249 @@ async function processCoveredPendingOptionReEntries(
         state: buildRuntimeStateWithCoveredPendingOptionReEntries(objLatestRuntime, arrNextPending)
     });
     return arrSavedPositions;
+}
+
+async function processCoveredPendingActionQueue(
+    pUserId: string,
+    pSelectedApiProfileId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<{
+    profile: RollingFuturesLtProfileRecord;
+    positions: RollingFuturesLtImportedPositionRecord[];
+}> {
+    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const arrQueue = getCoveredPendingActionQueueState(objRuntime);
+    if (!arrQueue.length) {
+        return {
+            profile: pProfile,
+            positions: pTrackedPositions
+        };
+    }
+    const vNowMs = Date.now();
+    const arrEligible = arrQueue.filter((objEntry) => {
+        if (objEntry.status === "processing") {
+            return false;
+        }
+        const vRunAtMs = new Date(objEntry.runAt).getTime();
+        return Number.isFinite(vRunAtMs) && vRunAtMs <= vNowMs;
+    }).sort((pLeft, pRight) => {
+        if (pLeft.priority !== pRight.priority) {
+            return pLeft.priority - pRight.priority;
+        }
+        return new Date(pLeft.createdAt).getTime() - new Date(pRight.createdAt).getTime();
+    });
+    const objNext = arrEligible[0];
+    if (!objNext || !canProcessCoveredActionQueueNow()) {
+        return {
+            profile: pProfile,
+            positions: pTrackedPositions
+        };
+    }
+
+    const arrQueueProcessing = arrQueue.map((objEntry) => {
+        if (objEntry.queueKey !== objNext.queueKey) {
+            return objEntry;
+        }
+        return {
+            ...objEntry,
+            status: "processing" as const,
+            startedAt: new Date().toISOString(),
+            finishedAt: "",
+            lastError: ""
+        };
+    });
+    await saveRollingFuturesLtRuntime({
+        ...objRuntime,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntime, arrQueueProcessing)
+    });
+
+    let objProfile = await refreshModeDrivenExpiryDatesInProfile(pUserId, pStrategyCode, pProfile);
+    let arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    try {
+        if (objNext.actionType === "exec_batch") {
+            const arrInputs = buildCoveredQueuedExecBatchInputsFromPayload(objProfile, objNext.payload);
+            if (!arrInputs.length) {
+                throw new Error("The queued Exec Strategy no longer has valid rows.");
+            }
+            const objExecResult = await runCoveredExecStrategyBatchPlacement(
+                pUserId,
+                pStrategyCode,
+                pSelectedApiProfileId,
+                objProfile,
+                arrInputs,
+                "exec_strategy"
+            );
+            arrSavedPositions = objExecResult.trackedOpenPositions;
+            if (!Boolean(objNext.payload.suppressClosedFromDateUpdate)) {
+                objProfile = await syncCoveredRecoveryMetricsFromClosedHistory(
+                    pUserId,
+                    pStrategyCode,
+                    pSelectedApiProfileId,
+                    objProfile,
+                    arrSavedPositions
+                );
+            }
+        }
+        else if (objNext.actionType === "covered_reentry") {
+            const objRuntimeLatest = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+                || objRuntime;
+            const arrPendingReEntries = getCoveredPendingOptionReEntriesState(objRuntimeLatest);
+            const vDedupeKey = String(objNext.payload.dedupeKey || "").trim();
+            const objPendingReEntry = arrPendingReEntries.find((objEntry) => objEntry.dedupeKey === vDedupeKey);
+            if (!objPendingReEntry) {
+                const arrQueueAfterSkip = getCoveredPendingActionQueueState(objRuntimeLatest)
+                    .filter((objEntry) => objEntry.queueKey !== objNext.queueKey);
+                await saveRollingFuturesLtRuntime({
+                    ...objRuntimeLatest,
+                    userId: pUserId,
+                    strategyCode: pStrategyCode,
+                    state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeLatest, arrQueueAfterSkip)
+                });
+                return {
+                    profile: objProfile,
+                    positions: arrSavedPositions
+                };
+            }
+            const bOpened = await executeCoveredPendingReEntryNow(
+                pUserId,
+                pSelectedApiProfileId,
+                objProfile,
+                objPendingReEntry
+            );
+            if (!bOpened) {
+                const arrQueueAfterSkip = getCoveredPendingActionQueueState(objRuntimeLatest)
+                    .filter((objEntry) => objEntry.queueKey !== objNext.queueKey);
+                await saveRollingFuturesLtRuntime({
+                    ...objRuntimeLatest,
+                    userId: pUserId,
+                    strategyCode: pStrategyCode,
+                    state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeLatest, arrQueueAfterSkip)
+                });
+                return {
+                    profile: objProfile,
+                    positions: await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode)
+                };
+            }
+            arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+        }
+        else {
+            const vImportId = String(objNext.payload.importId || "").trim();
+            const vContractName = String(objNext.payload.contractName || "").trim();
+            const vReason = objNext.actionType === "sl"
+                ? "sl"
+                : (objNext.actionType === "tp" ? "tp" : "expiry_cutoff");
+            const objPosition = arrSavedPositions.find((objRow) => String(objRow.importId || "").trim() === vImportId)
+                || arrSavedPositions.find((objRow) => String(objRow.contractName || "").trim() === vContractName);
+            if (!objPosition) {
+                const objRuntimeAfterSkip = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+                    || objRuntime;
+                const arrQueueAfterSkip = getCoveredPendingActionQueueState(objRuntimeAfterSkip)
+                    .filter((objEntry) => objEntry.queueKey !== objNext.queueKey);
+                await saveRollingFuturesLtRuntime({
+                    ...objRuntimeAfterSkip,
+                    userId: pUserId,
+                    strategyCode: pStrategyCode,
+                    state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterSkip, arrQueueAfterSkip)
+                });
+                return {
+                    profile: objProfile,
+                    positions: arrSavedPositions
+                };
+            }
+            const arrTriggered = await findTriggeredTrackedOptions([objPosition], getMergedUiState(objProfile));
+            const objTriggered = arrTriggered.find((objEntry) => objEntry.reason === vReason);
+            if (!objTriggered) {
+                const objRuntimeAfterSkip = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+                    || objRuntime;
+                const arrQueueAfterSkip = getCoveredPendingActionQueueState(objRuntimeAfterSkip)
+                    .filter((objEntry) => objEntry.queueKey !== objNext.queueKey);
+                await saveRollingFuturesLtRuntime({
+                    ...objRuntimeAfterSkip,
+                    userId: pUserId,
+                    strategyCode: pStrategyCode,
+                    state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterSkip, arrQueueAfterSkip)
+                });
+                return {
+                    profile: objProfile,
+                    positions: arrSavedPositions
+                };
+            }
+            arrSavedPositions = await applyTriggeredOptionRule(
+                pUserId,
+                pStrategyCode,
+                pSelectedApiProfileId,
+                objProfile,
+                objPosition,
+                objTriggered.currentDelta,
+                objTriggered.currentMarkPrice,
+                objTriggered.reason,
+                arrSavedPositions,
+                true
+            );
+        }
+
+        const objRuntimeAfterSuccess = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+            || objRuntime;
+        const arrQueueAfterSuccess = getCoveredPendingActionQueueState(objRuntimeAfterSuccess)
+            .filter((objEntry) => objEntry.queueKey !== objNext.queueKey);
+        await saveRollingFuturesLtRuntime({
+            ...objRuntimeAfterSuccess,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterSuccess, arrQueueAfterSuccess)
+        });
+        markCoveredActionQueueProcessedNow();
+        return {
+            profile: objProfile,
+            positions: arrSavedPositions
+        };
+    }
+    catch (objError) {
+        const objRuntimeAfterFailure = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+            || objRuntime;
+        const arrQueueAfterFailure = getCoveredPendingActionQueueState(objRuntimeAfterFailure).map((objEntry) => {
+            if (objEntry.queueKey !== objNext.queueKey) {
+                return objEntry;
+            }
+            return {
+                ...objEntry,
+                status: "failed" as const,
+                runAt: new Date(Date.now() + gCoveredActionQueueRetryMs).toISOString(),
+                finishedAt: new Date().toISOString(),
+                attemptCount: objEntry.attemptCount + 1,
+                lastError: getErrorMessage(objError, "Unable to process queued covered action.")
+            };
+        });
+        await saveRollingFuturesLtRuntime({
+            ...objRuntimeAfterFailure,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterFailure, arrQueueAfterFailure)
+        });
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "engine_error",
+            "warning",
+            "Covered Action Queue Retry Scheduled",
+            `${getErrorMessage(objError, "Unable to process queued covered action.")} Retry will be attempted after ${Math.floor(gCoveredActionQueueRetryMs / 1000)} seconds.`,
+            {
+                queueKey: objNext.queueKey,
+                actionType: objNext.actionType,
+                retryAt: new Date(Date.now() + gCoveredActionQueueRetryMs).toISOString(),
+                reason: "covered_action_queue_retry"
+            }
+        );
+        return {
+            profile: objProfile,
+            positions: arrSavedPositions
+        };
+    }
 }
 
 async function ensureCoveredConfiguredLegPresence(
@@ -7870,15 +8522,19 @@ async function applyTriggeredOptionRule(
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
     pSkipConfirmation = false
 ): Promise<RollingFuturesLtImportedPositionRecord[]> {
+    let objProfile = pProfile;
+    if (isCoveredLikeStrategy(pStrategyCode)) {
+        objProfile = await refreshModeDrivenExpiryDatesInProfile(pUserId, pStrategyCode, objProfile);
+    }
     const objRuleRowState = getNormalizedOptionRowUiState(
-        getMergedUiState(pProfile),
+        getMergedUiState(objProfile),
         pStrategyCode,
         getTrackedOptionMetadata(pPosition).rowIndex
     );
     const vAppliedTakeProfitDelta = Math.max(0, Number(objRuleRowState.tpD || getTrackedOptionMetadata(pPosition).takeProfitDelta || 0.25));
     const vAppliedStopLossDelta = Math.max(0, Number(objRuleRowState.slD || getTrackedOptionMetadata(pPosition).stopLossDelta || 0.65));
     if (isCoveredOptionsStrategy(pStrategyCode) && !pSkipConfirmation) {
-        const vConfirmationResult = await requestCoveredLiveConfirmation(pUserId, pProfile, {
+        const vConfirmationResult = await requestCoveredLiveConfirmation(pUserId, objProfile, {
             kind: "option_rule_close",
             title: pReason === "sl" ? "Confirm SL Close" : (pReason === "tp" ? "Confirm TP Close" : "Confirm Expiry Close"),
             message: pReason === "expiry_cutoff"
@@ -7999,7 +8655,7 @@ async function applyTriggeredOptionRule(
         if (Boolean(objMetadata.reEnterEnabled)) {
             try {
                 const objPaperRowState = getNormalizedOptionRowUiState(
-                    getMergedUiState(pProfile),
+                    getMergedUiState(objProfile),
                     pStrategyCode,
                     objMetadata.rowIndex
                 );
@@ -8007,7 +8663,7 @@ async function applyTriggeredOptionRule(
                     pUserId,
                     pStrategyCode,
                     pSelectedApiProfileId,
-                    pProfile,
+                    objProfile,
                     pPosition,
                     objMetadata,
                     pReason,
@@ -8027,7 +8683,7 @@ async function applyTriggeredOptionRule(
                     if (pReason === "expiry_cutoff" && isCoveredOptionsStrategy(pStrategyCode)) {
                         await updateCoveredRowExpiryDateInProfile(
                             pUserId,
-                            pProfile,
+                            objProfile,
                             objPaperRowState.rowIndex,
                             getTrackedOptionResolvedExpiryDate(objReEntry.position)
                         );
@@ -8099,13 +8755,13 @@ async function applyTriggeredOptionRule(
                 vOptionReentryPendingUntil
             )
         });
-        const objRowState = getNormalizedOptionRowUiState(getMergedUiState(pProfile), pStrategyCode, objMetadata.rowIndex);
+        const objRowState = getNormalizedOptionRowUiState(getMergedUiState(objProfile), pStrategyCode, objMetadata.rowIndex);
         try {
             const objReEntry = await openTrackedOptionReEntry(
                 pUserId,
                 pStrategyCode,
                 pSelectedApiProfileId,
-                pProfile,
+                objProfile,
                 pPosition,
                 objMetadata,
                 pReason,
@@ -8156,7 +8812,7 @@ async function applyTriggeredOptionRule(
                         }
                     );
                     if (String(objReEntry.position.side || "").trim().toUpperCase() === "BUY") {
-                        const objGateConfig = getCoveredBuyHedgeSellPremiumGateConfig(getMergedUiState(pProfile));
+                        const objGateConfig = getCoveredBuyHedgeSellPremiumGateConfig(getMergedUiState(objProfile));
                         await logFuturesEvent(
                             pUserId,
                             pStrategyCode,
@@ -8561,41 +9217,29 @@ async function processCoveredLiveActionDecision(
 
     try {
         if (objPending.kind === "exec_batch") {
-            const arrInputs = Array.isArray(objPending.payload.inputs)
-                ? (objPending.payload.inputs as Array<Record<string, unknown>>).map((objRow) => {
-                    const objInput = normalizeExecStrategyInput(
-                        String(objRow.action || "").trim().toLowerCase(),
-                        objRow.symbol || getMergedUiState(objProfile).symbol,
-                        String(objRow.legSide || "").trim().toLowerCase(),
-                        String(objRow.expiryMode || "5").trim(),
-                        objRow.expiryDate,
-                        objRow.qty || 1,
-                        objRow.targetDelta || 0.53
-                    );
-                    objInput.rowIndex = normalizeOptionRowIndex(pStrategyCode, objRow.rowIndex);
-                    return objInput;
-                }).filter((objInput) => Boolean(objInput.expiryDate))
-                : [];
+            const arrInputs = buildCoveredQueuedExecBatchInputsFromPayload(objProfile, objPending.payload);
             if (!arrInputs.length) {
                 throw new Error("The pending Exec Strategy confirmation no longer has valid rows.");
             }
-            const objExecResult = await runCoveredExecStrategyBatchPlacement(
+            const objQueueResult = await enqueueCoveredPendingAction(
                 pUserId,
                 pStrategyCode,
-                vSelectedApiProfileId,
-                objProfile,
-                arrInputs,
-                "exec_strategy"
+                {
+                    queueKey: "exec_batch",
+                    actionType: "exec_batch",
+                    runAt: new Date().toISOString(),
+                    payload: {
+                        inputs: arrInputs,
+                        suppressClosedFromDateUpdate: Boolean(objPending.payload.suppressClosedFromDateUpdate)
+                    }
+                }
             );
-            if (!Boolean(objPending.payload.suppressClosedFromDateUpdate)) {
-                await updateStrategyClosedFromDateAfterExec(
-                    pUserId,
-                    pStrategyCode,
-                    objProfile,
-                    objExecResult.trackedOpenPositions
-                );
-            }
-            return { status: "success", message: "Covered Exec Strategy confirmed and executed.", data: objExecResult };
+            return {
+                status: "success",
+                message: objQueueResult.created
+                    ? "Covered Exec Strategy confirmed and queued."
+                    : "Covered Exec Strategy was already queued."
+            };
         }
 
         if (objPending.kind === "option_rule_close") {
@@ -8615,24 +9259,27 @@ async function processCoveredLiveActionDecision(
                 await logFuturesEvent(pUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", `The trigger for ${objPosition.contractName} no longer holds. No order was placed.`, { contractName: objPosition.contractName, reason: "covered_confirmation_trigger_cleared" });
                 return { status: "warning", message: "The trigger is no longer valid. No order was placed." };
             }
-            const arrNextPositions = await applyTriggeredOptionRule(
+            const objQueueResult = await enqueueCoveredPendingAction(
                 pUserId,
                 pStrategyCode,
-                vSelectedApiProfileId,
-                objProfile,
-                objPosition,
-                objTriggered.currentDelta,
-                objTriggered.currentMarkPrice,
-                objTriggered.reason,
-                arrSavedPositions,
-                true
+                {
+                    queueKey: `${vReason}:${String(objPosition.importId || "").trim()}`,
+                    actionType: vReason === "sl" ? "sl" : (vReason === "tp" ? "tp" : "expiry_rollover"),
+                    runAt: new Date().toISOString(),
+                    payload: {
+                        importId: objPosition.importId,
+                        contractName: objPosition.contractName,
+                        reason: vReason,
+                        currentDelta: objTriggered.currentDelta,
+                        currentMarkPrice: objTriggered.currentMarkPrice
+                    }
+                }
             );
             return {
                 status: "success",
-                message: `${objTriggered.reason.toUpperCase()} close confirmed and executed.`,
-                data: {
-                    trackedOpenPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode, arrNextPositions)
-                }
+                message: objQueueResult.created
+                    ? `${objTriggered.reason.toUpperCase()} action confirmed and queued.`
+                    : `${objTriggered.reason.toUpperCase()} action was already queued.`
             };
         }
 
@@ -8646,17 +9293,23 @@ async function processCoveredLiveActionDecision(
                 await logFuturesEvent(pUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", "The covered re-entry request is no longer pending. No order was placed.", { reason: "covered_confirmation_reentry_missing" });
                 return { status: "warning", message: "The covered re-entry is no longer pending." };
             }
-            const bOpened = await executeCoveredPendingReEntryNow(pUserId, vSelectedApiProfileId, objProfile, objReEntry);
-            if (!bOpened) {
-                await logFuturesEvent(pUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", "The covered re-entry condition is no longer valid. No order was placed.", { reason: "covered_confirmation_reentry_cleared" });
-                return { status: "warning", message: "The covered re-entry is no longer valid." };
-            }
+            const objQueueResult = await enqueueCoveredPendingAction(
+                pUserId,
+                pStrategyCode,
+                {
+                    queueKey: `covered_reentry:${vDedupeKey}`,
+                    actionType: "covered_reentry",
+                    runAt: new Date().toISOString(),
+                    payload: {
+                        dedupeKey: vDedupeKey
+                    }
+                }
+            );
             return {
                 status: "success",
-                message: "Covered re-entry confirmed and executed.",
-                data: {
-                    trackedOpenPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode)
-                }
+                message: objQueueResult.created
+                    ? "Covered re-entry confirmed and queued."
+                    : "Covered re-entry was already queued."
             };
         }
 
@@ -8824,7 +9477,7 @@ async function rejectCoveredLiveActionInternal(req: Request, res: Response): Pro
 
 async function getProfileInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
-    const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+    const objProfile = await refreshModeDrivenExpiryDatesInProfile(vUserId, pStrategyCode);
     const objTargetAccount = await getAccountById(vUserId);
     res.json({
         status: "success",
@@ -8858,6 +9511,7 @@ async function saveProfileInternal(req: Request, res: Response, pStrategyCode: R
         connectionStatus: objExisting.connectionStatus
     });
     let objSaved = await saveRollingFuturesLtProfile(objIncoming);
+    objSaved = await refreshModeDrivenExpiryDatesInProfile(vUserId, pStrategyCode, objSaved);
     await ensureRuntimeProfileSelection(vUserId, pStrategyCode, objSaved.selectedApiProfileId);
     const objSavedUiState = getMergedUiState(objSaved);
     const vClosedFromDateChanged = String(objExistingUiState.closedFromDate || "").trim() !== String(objSavedUiState.closedFromDate || "").trim();
@@ -9615,12 +10269,12 @@ async function runAutoTraderCycle(
             return;
         }
 
-        const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+        let objProfile = await readLiveProfile(pUserId, pStrategyCode);
         if (!await renewDualStrategyLease(pUserId, pStrategyCode, objRuntime, objProfile)) {
             stopAutoTraderCycle(pUserId, pStrategyCode);
             return;
         }
-        const objUiState = getMergedUiState(objProfile);
+        let objUiState = getMergedUiState(objProfile);
         const vSelectedApiProfileId = String(objRuntime.selectedApiProfileId || objProfile.selectedApiProfileId || "").trim();
         const vSymbol = normalizeSymbolValue(objUiState.symbol);
         if (!vSelectedApiProfileId) {
@@ -9684,6 +10338,15 @@ async function runAutoTraderCycle(
             arrSavedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrLivePositions);
         }
         if (isCoveredOptionsStrategy(pStrategyCode)) {
+            const objQueueResult = await processCoveredPendingActionQueue(
+                pUserId,
+                vSelectedApiProfileId,
+                objProfile,
+                arrSavedPositions
+            );
+            objProfile = objQueueResult.profile;
+            arrSavedPositions = objQueueResult.positions;
+            objUiState = getMergedUiState(objProfile);
             arrSavedPositions = await processCoveredPendingOptionReEntries(
                 pUserId,
                 vSelectedApiProfileId,
@@ -9857,17 +10520,29 @@ async function runAutoTraderCycle(
             if (!objCurrentTrackedPosition) {
                 continue;
             }
-            arrSavedPositions = await applyTriggeredOptionRule(
-                pUserId,
-                pStrategyCode,
-                vSelectedApiProfileId,
-                objProfile,
-                objCurrentTrackedPosition,
-                objTriggeredOption.currentDelta,
-                objTriggeredOption.currentMarkPrice,
-                objTriggeredOption.reason,
-                arrSavedPositions
-            );
+            if (isCoveredOptionsStrategy(pStrategyCode)) {
+                await queueCoveredTriggeredAction(
+                    pUserId,
+                    objProfile,
+                    objCurrentTrackedPosition,
+                    objTriggeredOption.reason,
+                    objTriggeredOption.currentDelta,
+                    objTriggeredOption.currentMarkPrice
+                );
+            }
+            else {
+                arrSavedPositions = await applyTriggeredOptionRule(
+                    pUserId,
+                    pStrategyCode,
+                    vSelectedApiProfileId,
+                    objProfile,
+                    objCurrentTrackedPosition,
+                    objTriggeredOption.currentDelta,
+                    objTriggeredOption.currentMarkPrice,
+                    objTriggeredOption.reason,
+                    arrSavedPositions
+                );
+            }
             // Covered expiry-day swaps are processed one per cycle so margin release,
             // re-entry and optional confirmations can settle before the next leg swaps.
             if (isCoveredOptionsStrategy(pStrategyCode) && objTriggeredOption.reason === "expiry_cutoff") {
@@ -12008,6 +12683,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
         }));
         await ensureRuntimeProfileSelection(vUserId, pStrategyCode, objProfile.selectedApiProfileId);
     }
+    objProfile = await refreshModeDrivenExpiryDatesInProfile(vUserId, pStrategyCode, objProfile);
     const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
     if (!vSelectedApiProfileId) {
         res.status(400).json({ status: "warning", message: "Select an API profile before executing the live strategy." });
@@ -12050,17 +12726,20 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
     }
 
     if (isCoveredLikeStrategy(pStrategyCode) && Array.isArray(req.body?.rows)) {
+        const objMergedUiState = getMergedUiState(objProfile);
         const arrInputs = (req.body.rows as Array<Record<string, unknown>>).map((objRow) => {
+            const vRowIndex = normalizeOptionRowIndex(pStrategyCode, objRow.rowIndex);
+            const objRowState = getNormalizedOptionRowUiState(objMergedUiState, pStrategyCode, vRowIndex);
             const objInput = normalizeExecStrategyInput(
-                String(objRow.action || "").trim().toLowerCase(),
-                objRow.symbol || getMergedUiState(objProfile).symbol,
-                String(objRow.legSide || "").trim().toLowerCase(),
-                String(objRow.expiryMode || "5").trim(),
-                objRow.expiryDate,
-                objRow.qty || 1,
-                objRow.targetDelta || 0.53
+                objRowState.action,
+                objMergedUiState.symbol,
+                objRowState.legs,
+                objRowState.expiryMode,
+                objRowState.expiryDate,
+                objRowState.qty || 1,
+                objRowState.newD || 0.53
             );
-            objInput.rowIndex = normalizeOptionRowIndex(pStrategyCode, objRow.rowIndex);
+            objInput.rowIndex = vRowIndex;
             return objInput;
         }).filter((objInput) => Boolean(objInput.expiryDate));
 
@@ -12072,75 +12751,24 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
             return;
         }
 
-        const vConfirmationResult = await requestCoveredLiveConfirmation(vUserId, objProfile, {
-            kind: "exec_batch",
-            title: "Confirm Exec Strategy",
-            message: `Covered Exec Strategy is ready to place ${arrInputs.length} row${arrInputs.length === 1 ? "" : "s"} for ${arrInputs[0]?.symbol || ""}. Confirm to open the new covered positions.`,
-            payload: {
-                inputs: arrInputs,
-                suppressClosedFromDateUpdate: Boolean(req.body?.suppressClosedFromDateUpdate)
-            }
-        });
-        if (vConfirmationResult === "queued" || vConfirmationResult === "suppressed") {
+        const objQueueResult = await queueCoveredExecBatchAction(
+            vUserId,
+            objProfile,
+            arrInputs,
+            Boolean(req.body?.suppressClosedFromDateUpdate)
+        );
+        if (!objQueueResult.created) {
             res.json({
                 status: "warning",
-                message: vConfirmationResult === "queued"
-                    ? "Exec Strategy is waiting for confirmation."
-                    : "Another live action confirmation is already pending."
+                message: objQueueResult.message
             });
             return;
         }
-
-        try {
-            const objExecResult = await runCoveredExecStrategyBatchPlacement(
-                vUserId,
-                pStrategyCode,
-                vSelectedApiProfileId,
-                objProfile,
-                arrInputs,
-                "exec_strategy"
-            );
-            if (!Boolean(req.body?.suppressClosedFromDateUpdate)) {
-                if (isCoveredOptionsStrategy(pStrategyCode)) {
-                    objProfile = await syncCoveredRecoveryMetricsFromClosedHistory(
-                        vUserId,
-                        pStrategyCode,
-                        vSelectedApiProfileId,
-                        objProfile,
-                        objExecResult.trackedOpenPositions
-                    );
-                }
-                else if (isOptionsScalperStrategy(pStrategyCode)) {
-                    objProfile = await updateStrategyClosedFromDateAfterExec(
-                        vUserId,
-                        pStrategyCode,
-                        objProfile,
-                        objExecResult.trackedOpenPositions
-                    );
-                    await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(vUserId, objProfile);
-                }
-            }
-
-            res.json({
-                status: "success",
-            message: `${isOptionsScalperStrategy(pStrategyCode) ? "Paper Exec Strategy opened" : "Exec Strategy placed"} ${objExecResult.orders.length} option order${objExecResult.orders.length === 1 ? "" : "s"} across ${arrInputs.length} ${isOptionsScalperStrategy(pStrategyCode) ? "paper" : "covered"} rows.`,
-                data: {
-                    orders: objExecResult.orders,
-                    contracts: objExecResult.contracts,
-                    trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, objExecResult.trackedOpenPositions),
-                    neutralCheck: objExecResult.neutralCheck,
-                    rowCount: arrInputs.length
-                }
-            });
-            return;
-        }
-        catch (objError) {
-            res.status(500).json({
-                status: "danger",
-                message: getErrorMessage(objError, "Unable to execute the live covered strategy.")
-            });
-            return;
-        }
+        res.json({
+            status: "success",
+            message: objQueueResult.message
+        });
+        return;
     }
 
     const vAction = String(req.body?.action || "").trim().toLowerCase();

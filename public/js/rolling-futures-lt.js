@@ -344,9 +344,9 @@
         if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) {
             return "";
         }
-        const year = String(dateValue.getFullYear());
-        const month = String(dateValue.getMonth() + 1).padStart(2, "0");
-        const day = String(dateValue.getDate()).padStart(2, "0");
+        const year = String(dateValue.getUTCFullYear());
+        const month = String(dateValue.getUTCMonth() + 1).padStart(2, "0");
+        const day = String(dateValue.getUTCDate()).padStart(2, "0");
         return `${year}-${month}-${day}`;
     }
 
@@ -604,36 +604,41 @@
         return defaultState;
     }
 
+    function getCurrentDeltaDate() {
+        const dateValue = new Date(Date.now() + (deltaUiTimezoneOffsetMinutes * 60 * 1000));
+        return new Date(Date.UTC(dateValue.getUTCFullYear(), dateValue.getUTCMonth(), dateValue.getUTCDate()));
+    }
+
     function getLastFridayOfMonth(yearValue, monthIndex) {
-        const dateValue = new Date(yearValue, monthIndex + 1, 0);
-        while (dateValue.getDay() !== 5) {
-            dateValue.setDate(dateValue.getDate() - 1);
+        const dateValue = new Date(Date.UTC(yearValue, monthIndex + 1, 0));
+        while (dateValue.getUTCDay() !== 5) {
+            dateValue.setUTCDate(dateValue.getUTCDate() - 1);
         }
         return dateValue;
     }
 
     function getFutureFriday(baseDate, fridayOffset) {
-        const currentDayOfWeek = baseDate.getDay();
+        const currentDayOfWeek = baseDate.getUTCDay();
         const daysToThisFriday = (5 - currentDayOfWeek + 7) % 7;
         const dateValue = new Date(baseDate);
-        dateValue.setDate(baseDate.getDate() + daysToThisFriday + (fridayOffset * 7));
+        dateValue.setUTCDate(baseDate.getUTCDate() + daysToThisFriday + (fridayOffset * 7));
         return dateValue;
     }
 
     function resolveExpiryDateByMode(expiryMode) {
         const modeValue = String(expiryMode || "").trim();
-        const currentDate = new Date();
+        const currentDate = getCurrentDeltaDate();
 
         if (modeValue === "1") {
-            currentDate.setDate(currentDate.getDate() + 1);
+            currentDate.setUTCDate(currentDate.getUTCDate() + 1);
             return currentDate;
         }
         if (modeValue === "2") {
-            currentDate.setDate(currentDate.getDate() + 2);
+            currentDate.setUTCDate(currentDate.getUTCDate() + 2);
             return currentDate;
         }
         if (modeValue === "4") {
-            const weeklyFridayOffset = (currentDate.getDay() >= 3 && currentDate.getDay() <= 5) ? 1 : 0;
+            const weeklyFridayOffset = (currentDate.getUTCDay() >= 3 && currentDate.getUTCDay() <= 5) ? 1 : 0;
             return getFutureFriday(currentDate, weeklyFridayOffset);
         }
         if (modeValue === "5") {
@@ -643,15 +648,15 @@
             return daysToCandidate <= 10 ? getFutureFriday(currentDate, 2) : biWeeklyCandidate;
         }
         if (modeValue === "6") {
-            const lastFridayOfMonth = getLastFridayOfMonth(currentDate.getFullYear(), currentDate.getMonth());
-            const lastFridayOfNextMonth = getLastFridayOfMonth(currentDate.getFullYear(), currentDate.getMonth() + 1);
+            const lastFridayOfMonth = getLastFridayOfMonth(currentDate.getUTCFullYear(), currentDate.getUTCMonth());
+            const lastFridayOfNextMonth = getLastFridayOfMonth(currentDate.getUTCFullYear(), currentDate.getUTCMonth() + 1);
             const msPerDay = 24 * 60 * 60 * 1000;
             const daysToCandidate = Math.floor((lastFridayOfMonth.getTime() - currentDate.getTime()) / msPerDay);
             return daysToCandidate <= 14 ? lastFridayOfNextMonth : lastFridayOfMonth;
         }
         if (modeValue === "7") {
-            const lastFridayOfNextMonth = getLastFridayOfMonth(currentDate.getFullYear(), currentDate.getMonth() + 1);
-            const lastFridayOfThirdMonth = getLastFridayOfMonth(currentDate.getFullYear(), currentDate.getMonth() + 2);
+            const lastFridayOfNextMonth = getLastFridayOfMonth(currentDate.getUTCFullYear(), currentDate.getUTCMonth() + 1);
+            const lastFridayOfThirdMonth = getLastFridayOfMonth(currentDate.getUTCFullYear(), currentDate.getUTCMonth() + 2);
             const msPerDay = 24 * 60 * 60 * 1000;
             const daysToCandidate = Math.floor((lastFridayOfNextMonth.getTime() - currentDate.getTime()) / msPerDay);
             return daysToCandidate <= 40 ? lastFridayOfThirdMonth : lastFridayOfNextMonth;
