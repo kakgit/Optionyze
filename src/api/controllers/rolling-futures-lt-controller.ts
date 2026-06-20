@@ -3597,21 +3597,12 @@ async function queueCoveredTriggeredAction(
     pCurrentMarkPrice: number | null
 ): Promise<{ created: boolean; message: string; }> {
     const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
-    const vQueueKey = `${pReason}:${String(pPosition.importId || "").trim()}`;
-    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
-    if (getCoveredPendingActionQueueState(objRuntime).some((objEntry) => objEntry.queueKey === vQueueKey)) {
-        return {
-            created: false,
-            message: "The action is already queued."
-        };
-    }
     const vConfirmationResult = await requestCoveredLiveConfirmation(pUserId, pProfile, {
         kind: "option_rule_close",
         title: pReason === "sl" ? "Confirm SL Close" : (pReason === "tp" ? "Confirm TP Close" : "Confirm Expiry Close"),
         message: pReason === "expiry_cutoff"
             ? `Covered option ${pPosition.contractName} is on its expiry date. Confirm to swap it into the next expiry.`
-            : `Covered option ${String(pPosition.side || "").trim().toUpperCase()} ${pPosition.contractName} hit ${pReason.toUpperCase()}. Confirm to queue the action.`,
+            : `Covered option ${String(pPosition.side || "").trim().toUpperCase()} ${pPosition.contractName} hit ${pReason.toUpperCase()}. Confirm to execute the action now.`,
         payload: {
             importId: pPosition.importId,
             contractName: pPosition.contractName,
@@ -3628,43 +3619,37 @@ async function queueCoveredTriggeredAction(
                 : "Another live action confirmation is already pending."
         };
     }
-    const objQueueResult = await enqueueCoveredPendingAction(pUserId, pStrategyCode, {
-        queueKey: vQueueKey,
-        actionType: pReason === "sl" ? "sl" : (pReason === "tp" ? "tp" : "expiry_rollover"),
-        runAt: new Date().toISOString(),
-        payload: {
-            importId: pPosition.importId,
-            contractName: pPosition.contractName,
-            reason: pReason,
-            currentDelta: pCurrentDelta,
-            currentMarkPrice: pCurrentMarkPrice
-        }
-    });
-    if (objQueueResult.created) {
-        await logFuturesEvent(
-            pUserId,
-            pStrategyCode,
-            "manual_action",
-            pReason === "sl" ? "warning" : "info",
-            pReason === "sl"
-                ? "SL Action Queued"
-                : (pReason === "tp" ? "TP Action Queued" : "Expiry Rollover Queued"),
-            pReason === "expiry_cutoff"
-                ? `Queued expiry rollover for ${pPosition.contractName}.`
-                : `Queued ${pReason.toUpperCase()} action for ${pPosition.contractName}.`,
-            {
-                contractName: pPosition.contractName,
-                actionType: objQueueResult.queueItem.actionType,
-                queueKey: objQueueResult.queueItem.queueKey,
-                reason: "covered_action_queue_created"
-            }
-        );
+    const vSelectedApiProfileId = String(pProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        return {
+            created: false,
+            message: "Select an API profile before executing the action."
+        };
     }
+    const arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    const objCurrentPosition = arrSavedPositions.find((objRow) => String(objRow.importId || "").trim() === String(pPosition.importId || "").trim())
+        || arrSavedPositions.find((objRow) => String(objRow.contractName || "").trim() === String(pPosition.contractName || "").trim());
+    if (!objCurrentPosition) {
+        return {
+            created: false,
+            message: "The position is no longer open."
+        };
+    }
+    await applyTriggeredOptionRule(
+        pUserId,
+        pStrategyCode,
+        vSelectedApiProfileId,
+        pProfile,
+        objCurrentPosition,
+        pCurrentDelta,
+        pCurrentMarkPrice,
+        pReason,
+        arrSavedPositions,
+        true
+    );
     return {
-        created: objQueueResult.created,
-        message: objQueueResult.created
-            ? "The action was queued for execution."
-            : "The action is already queued."
+        created: true,
+        message: "The action was executed."
     };
 }
 
@@ -3674,19 +3659,10 @@ async function queueCoveredExecBatchAction(
     pInputs: Array<Record<string, unknown>>,
     pSuppressClosedFromDateUpdate: boolean
 ): Promise<{ created: boolean; message: string; }> {
-    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
-    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
-    if (getCoveredPendingActionQueueState(objRuntime).some((objEntry) => objEntry.queueKey === "exec_batch")) {
-        return {
-            created: false,
-            message: "Exec Strategy is already queued."
-        };
-    }
     const vConfirmationResult = await requestCoveredLiveConfirmation(pUserId, pProfile, {
         kind: "exec_batch",
         title: "Confirm Exec Strategy",
-        message: `Covered Exec Strategy is ready to place ${pInputs.length} row${pInputs.length === 1 ? "" : "s"}. Confirm to queue the execution.`,
+        message: `Covered Exec Strategy is ready to place ${pInputs.length} row${pInputs.length === 1 ? "" : "s"}. Confirm to execute now.`,
         payload: {
             inputs: pInputs,
             suppressClosedFromDateUpdate: pSuppressClosedFromDateUpdate
@@ -3700,35 +3676,43 @@ async function queueCoveredExecBatchAction(
                 : "Another live action confirmation is already pending."
         };
     }
-    const objQueueResult = await enqueueCoveredPendingAction(pUserId, pStrategyCode, {
-        queueKey: "exec_batch",
-        actionType: "exec_batch",
-        runAt: new Date().toISOString(),
-        payload: {
-            inputs: pInputs,
-            suppressClosedFromDateUpdate: pSuppressClosedFromDateUpdate
-        }
-    });
-    if (objQueueResult.created) {
-        await logFuturesEvent(
+    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    const vSelectedApiProfileId = String(pProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        return {
+            created: false,
+            message: "Select an API profile before executing the strategy."
+        };
+    }
+    const objExecResult = await runCoveredExecStrategyBatchPlacement(
+        pUserId,
+        pStrategyCode,
+        vSelectedApiProfileId,
+        pProfile,
+        pInputs as Array<{
+            action: "buy" | "sell";
+            symbol: "BTC" | "ETH";
+            legSide: "ce" | "pe" | "both";
+            expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
+            expiryDate: string;
+            qty: number;
+            targetDelta: number;
+            rowIndex: 1 | 2;
+        }>,
+        "exec_strategy"
+    );
+    if (!pSuppressClosedFromDateUpdate) {
+        await syncCoveredRecoveryMetricsFromClosedHistory(
             pUserId,
             pStrategyCode,
-            "manual_action",
-            "info",
-            "Exec Strategy Queued",
-            `Queued Covered Exec Strategy for ${pInputs.length} row${pInputs.length === 1 ? "" : "s"}.`,
-            {
-                actionType: objQueueResult.queueItem.actionType,
-                queueKey: objQueueResult.queueItem.queueKey,
-                reason: "covered_exec_queue_created"
-            }
+            vSelectedApiProfileId,
+            pProfile,
+            objExecResult.trackedOpenPositions
         );
     }
     return {
-        created: objQueueResult.created,
-        message: objQueueResult.created
-            ? "Exec Strategy was queued for execution."
-            : "Exec Strategy is already queued."
+        created: true,
+        message: "Exec Strategy executed successfully."
     };
 }
 
@@ -3737,20 +3721,10 @@ async function queueCoveredReEntryAction(
     pProfile: RollingFuturesLtProfileRecord,
     pPending: CoveredPendingOptionReEntryState
 ): Promise<{ created: boolean; message: string; }> {
-    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
-    const vQueueKey = `covered_reentry:${String(pPending.dedupeKey || "").trim()}`;
-    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
-    if (getCoveredPendingActionQueueState(objRuntime).some((objEntry) => objEntry.queueKey === vQueueKey)) {
-        return {
-            created: false,
-            message: "Covered re-entry is already queued."
-        };
-    }
     const vConfirmationResult = await requestCoveredLiveConfirmation(pUserId, pProfile, {
         kind: "covered_reentry",
         title: "Confirm Covered Re-Entry",
-        message: `Row ${pPending.rowIndex} ${pPending.legSide.toUpperCase()} is ready to re-enter after ${pPending.reason.replaceAll("_", " ")}. Confirm to queue the replacement option order.`,
+        message: `Row ${pPending.rowIndex} ${pPending.legSide.toUpperCase()} is ready to re-enter after ${pPending.reason.replaceAll("_", " ")}. Confirm to place the replacement option order now.`,
         payload: {
             dedupeKey: pPending.dedupeKey,
             rowIndex: pPending.rowIndex,
@@ -3772,35 +3746,25 @@ async function queueCoveredReEntryAction(
                 : "Another live action confirmation is already pending."
         };
     }
-    const objQueueResult = await enqueueCoveredPendingAction(pUserId, pStrategyCode, {
-        queueKey: vQueueKey,
-        actionType: "covered_reentry",
-        runAt: new Date().toISOString(),
-        payload: {
-            dedupeKey: pPending.dedupeKey
-        }
-    });
-    if (objQueueResult.created) {
-        await logFuturesEvent(
-            pUserId,
-            pStrategyCode,
-            "manual_action",
-            "info",
-            "Covered Re-Entry Queued",
-            `Queued covered re-entry for row ${pPending.rowIndex} ${pPending.legSide.toUpperCase()}.`,
-            {
-                rowIndex: pPending.rowIndex,
-                legSide: pPending.legSide,
-                queueKey: objQueueResult.queueItem.queueKey,
-                reason: "covered_reentry_queue_created"
-            }
-        );
+    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    const vSelectedApiProfileId = String(pProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        return {
+            created: false,
+            message: "Select an API profile before placing the re-entry."
+        };
     }
+    const bOpened = await executeCoveredPendingReEntryNow(
+        pUserId,
+        vSelectedApiProfileId,
+        pProfile,
+        pPending
+    );
     return {
-        created: objQueueResult.created,
-        message: objQueueResult.created
-            ? "Covered re-entry was queued for execution."
-            : "Covered re-entry is already queued."
+        created: bOpened,
+        message: bOpened
+            ? "Covered re-entry executed successfully."
+            : "Covered re-entry was no longer needed."
     };
 }
 
@@ -9853,35 +9817,26 @@ async function processCoveredLiveActionDecision(
             if (!arrInputs.length) {
                 throw new Error("The pending Exec Strategy confirmation no longer has valid rows.");
             }
-            const objQueueResult = await enqueueCoveredPendingAction(
+            const objExecResult = await runCoveredExecStrategyBatchPlacement(
                 pUserId,
                 pStrategyCode,
-                {
-                    queueKey: "exec_batch",
-                    actionType: "exec_batch",
-                    runAt: new Date().toISOString(),
-                    payload: {
-                        inputs: arrInputs,
-                        suppressClosedFromDateUpdate: Boolean(objPending.payload.suppressClosedFromDateUpdate)
-                    }
-                }
+                vSelectedApiProfileId,
+                objProfile,
+                arrInputs,
+                "exec_strategy"
             );
-            if (objQueueResult.created) {
-                await triggerCoveredPendingActionQueueNow(
+            if (!Boolean(objPending.payload.suppressClosedFromDateUpdate)) {
+                await syncCoveredRecoveryMetricsFromClosedHistory(
                     pUserId,
+                    pStrategyCode,
                     vSelectedApiProfileId,
-                    objProfile
-                );
-                scheduleCoveredPendingQueueDrain(
-                    pUserId,
-                    vSelectedApiProfileId
+                    objProfile,
+                    objExecResult.trackedOpenPositions
                 );
             }
             return {
                 status: "success",
-                message: objQueueResult.created
-                    ? "Covered Exec Strategy confirmed and queued."
-                    : "Covered Exec Strategy was already queued."
+                message: "Covered Exec Strategy confirmed and executed."
             };
         }
 
@@ -9902,38 +9857,21 @@ async function processCoveredLiveActionDecision(
                 await logFuturesEvent(pUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", `The trigger for ${objPosition.contractName} no longer holds. No order was placed.`, { contractName: objPosition.contractName, reason: "covered_confirmation_trigger_cleared" });
                 return { status: "warning", message: "The trigger is no longer valid. No order was placed." };
             }
-            const objQueueResult = await enqueueCoveredPendingAction(
+            await applyTriggeredOptionRule(
                 pUserId,
                 pStrategyCode,
-                {
-                    queueKey: `${vReason}:${String(objPosition.importId || "").trim()}`,
-                    actionType: vReason === "sl" ? "sl" : (vReason === "tp" ? "tp" : "expiry_rollover"),
-                    runAt: new Date().toISOString(),
-                    payload: {
-                        importId: objPosition.importId,
-                        contractName: objPosition.contractName,
-                        reason: vReason,
-                        currentDelta: objTriggered.currentDelta,
-                        currentMarkPrice: objTriggered.currentMarkPrice
-                    }
-                }
+                vSelectedApiProfileId,
+                objProfile,
+                objPosition,
+                objTriggered.currentDelta,
+                objTriggered.currentMarkPrice,
+                objTriggered.reason,
+                arrSavedPositions,
+                true
             );
-            if (objQueueResult.created) {
-                await triggerCoveredPendingActionQueueNow(
-                    pUserId,
-                    vSelectedApiProfileId,
-                    objProfile
-                );
-                scheduleCoveredPendingQueueDrain(
-                    pUserId,
-                    vSelectedApiProfileId
-                );
-            }
             return {
                 status: "success",
-                message: objQueueResult.created
-                    ? `${objTriggered.reason.toUpperCase()} action confirmed and queued.`
-                    : `${objTriggered.reason.toUpperCase()} action was already queued.`
+                message: `${objTriggered.reason.toUpperCase()} action confirmed and executed.`
             };
         }
 
@@ -9947,34 +9885,21 @@ async function processCoveredLiveActionDecision(
                 await logFuturesEvent(pUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", "The covered re-entry request is no longer pending. No order was placed.", { reason: "covered_confirmation_reentry_missing" });
                 return { status: "warning", message: "The covered re-entry is no longer pending." };
             }
-            const objQueueResult = await enqueueCoveredPendingAction(
+            const bOpened = await executeCoveredPendingReEntryNow(
                 pUserId,
-                pStrategyCode,
-                {
-                    queueKey: `covered_reentry:${vDedupeKey}`,
-                    actionType: "covered_reentry",
-                    runAt: new Date().toISOString(),
-                    payload: {
-                        dedupeKey: vDedupeKey
-                    }
-                }
+                vSelectedApiProfileId,
+                objProfile,
+                objReEntry
             );
-            if (objQueueResult.created) {
-                await triggerCoveredPendingActionQueueNow(
-                    pUserId,
-                    vSelectedApiProfileId,
-                    objProfile
-                );
-                scheduleCoveredPendingQueueDrain(
-                    pUserId,
-                    vSelectedApiProfileId
-                );
+            if (!bOpened) {
+                return {
+                    status: "warning",
+                    message: "Covered re-entry was no longer needed."
+                };
             }
             return {
                 status: "success",
-                message: objQueueResult.created
-                    ? "Covered re-entry confirmed and queued."
-                    : "Covered re-entry was already queued."
+                message: "Covered re-entry confirmed and executed."
             };
         }
 
@@ -11024,6 +10949,15 @@ async function runAutoTraderCycle(
             stopAutoTraderCycle(pUserId, pStrategyCode);
             return;
         }
+        if (isCoveredOptionsStrategy(pStrategyCode) && getCoveredPendingActionQueueState(objRuntime).length > 0) {
+            await saveRollingFuturesLtRuntime({
+                ...objRuntime,
+                userId: pUserId,
+                strategyCode: pStrategyCode,
+                state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntime, [])
+            });
+            objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode) || objRuntime;
+        }
         let objUiState = getMergedUiState(objProfile);
         const vSelectedApiProfileId = String(objRuntime.selectedApiProfileId || objProfile.selectedApiProfileId || "").trim();
         const vSymbol = normalizeSymbolValue(objUiState.symbol);
@@ -11088,15 +11022,6 @@ async function runAutoTraderCycle(
             arrSavedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrLivePositions);
         }
         if (isCoveredOptionsStrategy(pStrategyCode)) {
-            const objQueueResult = await processCoveredPendingActionQueue(
-                pUserId,
-                vSelectedApiProfileId,
-                objProfile,
-                arrSavedPositions
-            );
-            objProfile = objQueueResult.profile;
-            arrSavedPositions = objQueueResult.positions;
-            objUiState = getMergedUiState(objProfile);
             arrSavedPositions = await processCoveredPendingOptionReEntries(
                 pUserId,
                 vSelectedApiProfileId,
