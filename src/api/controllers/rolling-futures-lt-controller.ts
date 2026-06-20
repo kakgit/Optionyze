@@ -152,6 +152,8 @@ const gCoveredActionQueueGapMs = 15 * 1000;
 const gCoveredActionQueueLeaseUserId = "__system__";
 const gCoveredActionQueueLeaseStrategyCode = "covered-action-queue";
 const gCoveredActionQueueRetryMs = 30 * 1000;
+const gCoveredPendingQueueDrainDelayMs = 5000;
+const gCoveredPendingQueueDrainMaxAttempts = 48;
 const gCoveredActionQueueProcessingTimeoutMs = 3 * 60 * 1000;
 const gCoveredActionQueueMaxAttempts = 5;
 const gCoveredActionQueueHistoryLimit = 25;
@@ -246,6 +248,7 @@ const gManualOptionOrderLocks = new Set<string>();
 const gExecStrategyLocks = new Set<string>();
 const gNeutralityHedgeLocks = new Set<string>();
 const gAutoTraderIntervals = new Map<string, NodeJS.Timeout>();
+const gCoveredPendingQueueDrainTimers = new Map<string, NodeJS.Timeout>();
 const gAutoTraderCycleLocks = new Set<string>();
 const gLocalStrategyLeaseTokens = new Map<string, string>();
 let gLastCoveredActionQueueProcessedAtMs = 0;
@@ -9814,6 +9817,10 @@ async function processCoveredLiveActionDecision(
                     vSelectedApiProfileId,
                     objProfile
                 );
+                scheduleCoveredPendingQueueDrain(
+                    pUserId,
+                    vSelectedApiProfileId
+                );
             }
             return {
                 status: "success",
@@ -9862,6 +9869,10 @@ async function processCoveredLiveActionDecision(
                     vSelectedApiProfileId,
                     objProfile
                 );
+                scheduleCoveredPendingQueueDrain(
+                    pUserId,
+                    vSelectedApiProfileId
+                );
             }
             return {
                 status: "success",
@@ -9898,6 +9909,10 @@ async function processCoveredLiveActionDecision(
                     pUserId,
                     vSelectedApiProfileId,
                     objProfile
+                );
+                scheduleCoveredPendingQueueDrain(
+                    pUserId,
+                    vSelectedApiProfileId
                 );
             }
             return {
@@ -10194,6 +10209,87 @@ async function checkConnectionInternal(req: Request, res: Response, pStrategyCod
 
 function getAutoTraderRuntimeKey(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): string {
     return `${String(pUserId || "").trim()}::${pStrategyCode}`;
+}
+
+function getCoveredPendingQueueDrainKey(pUserId: string): string {
+    return `${getAutoTraderRuntimeKey(pUserId, "covered-options")}::covered-pending-drain`;
+}
+
+function stopCoveredPendingQueueDrain(pUserId: string): void {
+    const vDrainKey = getCoveredPendingQueueDrainKey(pUserId);
+    const objTimer = gCoveredPendingQueueDrainTimers.get(vDrainKey);
+    if (objTimer) {
+        clearTimeout(objTimer);
+    }
+    gCoveredPendingQueueDrainTimers.delete(vDrainKey);
+}
+
+function scheduleCoveredPendingQueueDrain(
+    pUserId: string,
+    pSelectedApiProfileId: string,
+    pAttempt: number = 1
+): void {
+    const vDrainKey = getCoveredPendingQueueDrainKey(pUserId);
+    const vSelectedApiProfileId = String(pSelectedApiProfileId || "").trim();
+    if (pAttempt <= 1) {
+        stopCoveredPendingQueueDrain(pUserId);
+    }
+    else {
+        const objExistingTimer = gCoveredPendingQueueDrainTimers.get(vDrainKey);
+        if (objExistingTimer) {
+            clearTimeout(objExistingTimer);
+        }
+    }
+
+    const objTimer = setTimeout(async () => {
+        gCoveredPendingQueueDrainTimers.delete(vDrainKey);
+        const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+        try {
+            const objRuntimeBefore = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+                || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+            const arrQueueBefore = getCoveredPendingActionQueueState(objRuntimeBefore);
+            if (!arrQueueBefore.length) {
+                return;
+            }
+
+            const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+            const vProfileApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+            const vEffectiveApiProfileId = vSelectedApiProfileId || vProfileApiProfileId;
+            if (!vEffectiveApiProfileId) {
+                return;
+            }
+
+            const arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+            await processCoveredPendingActionQueue(
+                pUserId,
+                vEffectiveApiProfileId,
+                objProfile,
+                arrSavedPositions
+            );
+
+            const objRuntimeAfter = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+                || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+            const arrQueueAfter = getCoveredPendingActionQueueState(objRuntimeAfter);
+            if (!arrQueueAfter.length) {
+                return;
+            }
+        }
+        catch (objError) {
+            console.error("scheduleCoveredPendingQueueDrain failed:", objError);
+        }
+
+        if (pAttempt >= gCoveredPendingQueueDrainMaxAttempts) {
+            return;
+        }
+
+        scheduleCoveredPendingQueueDrain(
+            pUserId,
+            vSelectedApiProfileId,
+            pAttempt + 1
+        );
+    }, gCoveredPendingQueueDrainDelayMs);
+
+    gCoveredPendingQueueDrainTimers.set(vDrainKey, objTimer);
 }
 
 function getLocalSurvivalLeaseToken(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): string {
