@@ -485,22 +485,23 @@
         if (isCoveredMode && vRowIndex === 2) {
             return {
                 ...optionDefaults,
-                expiryMode: "4",
-                newD: "0.43",
-                reD: "0.43",
-                tpD: "0.20",
-                slD: "0.63"
+                action: "buy",
+                expiryMode: "1",
+                newD: "0.13",
+                reD: "0.13",
+                tpD: "1.00",
+                slD: "0.05"
             };
         }
         if (isCoveredMode && vRowIndex === 1) {
             return {
                 ...optionDefaults,
-                action: "buy",
+                action: "sell",
                 expiryMode: "6",
-                newD: "0.63",
-                reD: "0.63",
-                tpD: "0.82",
-                slD: "0.42"
+                newD: "0.33",
+                reD: "0.33",
+                tpD: "0.10",
+                slD: "0.50"
             };
         }
         return optionDefaults;
@@ -575,11 +576,11 @@
             brokerageMultiplier: "10",
             reEnterBrok: true,
             closeBlockedMargin: false,
-            blockedMarginPct: "10",
+            blockedMarginPct: "20",
             reEnterBlock: true,
-            buyHedgeSellPremiumGate: false,
+            buyHedgeSellPremiumGate: true,
             buyHedgeSellPremiumPct: "2",
-            autoConfirmLiveActions: false,
+            autoConfirmLiveActions: true,
             onlyDeltaNeutral: !isDualLikeMode && !isCoveredMode,
             rangeDeltaNeutral: isDualLikeMode && !isCoveredMode,
             gammaAwareNeutral: false,

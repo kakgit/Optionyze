@@ -1563,20 +1563,20 @@ function getDefaultOptionRowUiState(
         reEnter: true
     };
     if (isCoveredLikeStrategy(pStrategyCode) && vRowIndex === 1) {
-        objDefaults.action = "buy";
+        objDefaults.action = "sell";
         objDefaults.expiryMode = "6";
-        objDefaults.newD = "0.63";
-        objDefaults.reD = "0.63";
-        objDefaults.tpD = "0.82";
-        objDefaults.slD = "0.42";
+        objDefaults.newD = "0.33";
+        objDefaults.reD = "0.33";
+        objDefaults.tpD = "0.10";
+        objDefaults.slD = "0.50";
     }
     if (isCoveredLikeStrategy(pStrategyCode) && vRowIndex === 2) {
-        objDefaults.action = "sell";
-        objDefaults.expiryMode = "4";
-        objDefaults.newD = "0.43";
-        objDefaults.reD = "0.43";
-        objDefaults.tpD = "0.20";
-        objDefaults.slD = "0.63";
+        objDefaults.action = "buy";
+        objDefaults.expiryMode = "1";
+        objDefaults.newD = "0.13";
+        objDefaults.reD = "0.13";
+        objDefaults.tpD = "1.00";
+        objDefaults.slD = "0.05";
     }
     return objDefaults;
 }
@@ -1660,11 +1660,11 @@ function getDefaultManualTraderUiState(
         brokerageMultiplier: "10",
         reEnterBrok: bIsDual,
         closeBlockedMargin: false,
-        blockedMarginPct: bIsDual ? "10" : "20",
+        blockedMarginPct: "20",
         reEnterBlock: bIsDual,
-        buyHedgeSellPremiumGate: false,
+        buyHedgeSellPremiumGate: isCoveredLikeStrategy(pStrategyCode),
         buyHedgeSellPremiumPct: "2",
-        autoConfirmLiveActions: false,
+        autoConfirmLiveActions: isCoveredLikeStrategy(pStrategyCode),
         telegramAlertTypes: [
             "engine_stopped",
             "engine_error",
