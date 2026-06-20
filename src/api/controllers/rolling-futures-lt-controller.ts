@@ -152,6 +152,9 @@ const gCoveredActionQueueGapMs = 15 * 1000;
 const gCoveredActionQueueLeaseUserId = "__system__";
 const gCoveredActionQueueLeaseStrategyCode = "covered-action-queue";
 const gCoveredActionQueueRetryMs = 30 * 1000;
+const gCoveredActionQueueProcessingTimeoutMs = 3 * 60 * 1000;
+const gCoveredActionQueueMaxAttempts = 5;
+const gCoveredActionQueueHistoryLimit = 25;
 const gProfitClosePauseAfterOptionRuleMs = 15000;
 const gProfitCloseReEntryCooldownMs = 5 * 60 * 1000;
 const gProfitCloseConfirmationMs = 5 * 60 * 1000;
@@ -3526,10 +3529,13 @@ async function enqueueCoveredPendingAction(
         ...objRuntime,
         userId: pUserId,
         strategyCode: pStrategyCode,
-        state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntime, [
-            ...arrQueue,
-            objQueueItem
-        ])
+        state: appendCoveredActionQueueHistory({
+            ...objRuntime,
+            state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntime, [
+                ...arrQueue,
+                objQueueItem
+            ])
+        }, objQueueItem, "queued")
     });
     return { created: true, queueItem: objQueueItem };
 }
@@ -3748,6 +3754,89 @@ async function queueCoveredReEntryAction(
             ? "Covered re-entry was queued for execution."
             : "Covered re-entry is already queued."
     };
+}
+
+async function recoverStaleCoveredPendingActionQueue(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pRuntime: RollingFuturesLtRuntimeRecord
+): Promise<RollingFuturesLtRuntimeRecord> {
+    const arrQueue = getCoveredPendingActionQueueState(pRuntime);
+    const vNowMs = Date.now();
+    let bChanged = false;
+    let objWorkingRuntime = pRuntime;
+    let arrNextQueue = [...arrQueue];
+
+    for (const objEntry of arrQueue) {
+        if (objEntry.status !== "processing") {
+            continue;
+        }
+        const vStartedAtMs = new Date(objEntry.startedAt).getTime();
+        if (!Number.isFinite(vStartedAtMs) || (vNowMs - vStartedAtMs) < gCoveredActionQueueProcessingTimeoutMs) {
+            continue;
+        }
+
+        bChanged = true;
+        const vNextAttemptCount = objEntry.attemptCount + 1;
+        const bRetryAllowed = vNextAttemptCount < gCoveredActionQueueMaxAttempts;
+        const vLastError = `Recovered from stuck processing after ${Math.floor(gCoveredActionQueueProcessingTimeoutMs / 1000)} seconds.`;
+        const objRecoveredEntry: CoveredPendingActionQueueItem = {
+            ...objEntry,
+            status: bRetryAllowed ? "pending" : "failed",
+            runAt: bRetryAllowed ? new Date(Date.now() + gCoveredActionQueueRetryMs).toISOString() : "",
+            finishedAt: new Date().toISOString(),
+            attemptCount: vNextAttemptCount,
+            lastError: vLastError
+        };
+        arrNextQueue = arrNextQueue.map((objQueueEntry) => objQueueEntry.queueKey === objEntry.queueKey
+            ? objRecoveredEntry
+            : objQueueEntry);
+
+        const objRecoveredRuntime = {
+            ...objWorkingRuntime,
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithCoveredPendingActionQueue(objWorkingRuntime, arrNextQueue)
+        };
+        objWorkingRuntime = {
+            ...objRecoveredRuntime,
+            state: appendCoveredActionQueueHistory(
+                objRecoveredRuntime,
+                objRecoveredEntry,
+                bRetryAllowed ? "recovered" : "failed",
+                bRetryAllowed
+                    ? `Recovered stuck queue item. Retry scheduled after ${Math.floor(gCoveredActionQueueRetryMs / 1000)} seconds.`
+                    : "Recovered stuck queue item, but retry limit was reached."
+            )
+        };
+
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "engine_error",
+            "warning",
+            bRetryAllowed ? "Covered Queue Item Recovered" : "Covered Queue Item Failed",
+            bRetryAllowed
+                ? `${buildCoveredActionQueueHistoryDetail(objEntry)} Processing was stuck and has been rescheduled.`
+                : `${buildCoveredActionQueueHistoryDetail(objEntry)} Processing was stuck and retry limit was reached.`,
+            {
+                queueKey: objEntry.queueKey,
+                actionType: objEntry.actionType,
+                attemptCount: vNextAttemptCount,
+                retryAt: bRetryAllowed ? objRecoveredEntry.runAt : "",
+                reason: bRetryAllowed
+                    ? "covered_action_queue_recovered"
+                    : "covered_action_queue_recovery_failed"
+            }
+        );
+    }
+
+    if (!bChanged) {
+        return pRuntime;
+    }
+
+    await saveRollingFuturesLtRuntime(objWorkingRuntime);
+    return objWorkingRuntime;
 }
 
 function normalizeProfileSaveInput(
@@ -4640,6 +4729,22 @@ type CoveredActionQueueSummary = {
     cooldownActive: boolean;
     throttleMode: "shared" | "local";
     throttleOwnerServerId: string;
+    recentItems: CoveredPendingActionQueueItem[];
+    recentHistory: CoveredActionQueueHistoryItem[];
+};
+
+type CoveredActionQueueHistoryItem = {
+    historyKey: string;
+    queueKey: string;
+    actionType: CoveredQueuedActionType;
+    outcome: "queued" | "started" | "succeeded" | "skipped" | "retry_scheduled" | "recovered" | "failed";
+    title: string;
+    detail: string;
+    createdAt: string;
+    startedAt: string;
+    finishedAt: string;
+    attemptCount: number;
+    lastError: string;
 };
 
 function getCoveredPendingOptionReEntriesState(
@@ -4753,7 +4858,7 @@ function getCoveredPendingActionQueueState(
                 ? objEntry.payload as Record<string, unknown>
                 : {}
         } satisfies CoveredPendingActionQueueItem;
-    }).filter((objEntry) => Boolean(objEntry.queueKey) && Boolean(objEntry.runAt) && Boolean(objEntry.createdAt));
+    }).filter((objEntry) => Boolean(objEntry.queueKey) && Boolean(objEntry.createdAt));
 }
 
 function buildRuntimeStateWithCoveredPendingActionQueue(
@@ -4781,10 +4886,164 @@ function buildRuntimeStateWithCoveredPendingActionQueue(
     return objState;
 }
 
+function getCoveredActionQueueHistoryState(
+    pRuntime: RollingFuturesLtRuntimeRecord | null
+): CoveredActionQueueHistoryItem[] {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    const arrHistory = Array.isArray(objState.pendingCoveredActionQueueHistory)
+        ? objState.pendingCoveredActionQueueHistory as Array<Record<string, unknown>>
+        : [];
+    return arrHistory.map((objEntry) => {
+        const vActionTypeRaw = String(objEntry.actionType || "").trim().toLowerCase();
+        const vActionType: CoveredQueuedActionType = vActionTypeRaw === "sl"
+            ? "sl"
+            : (vActionTypeRaw === "tp"
+                ? "tp"
+                : (vActionTypeRaw === "covered_reentry"
+                    ? "covered_reentry"
+                    : (vActionTypeRaw === "expiry_rollover" ? "expiry_rollover" : "exec_batch")));
+        const vOutcomeRaw = String(objEntry.outcome || "").trim().toLowerCase();
+        const vOutcome: CoveredActionQueueHistoryItem["outcome"] = vOutcomeRaw === "queued"
+            ? "queued"
+            : (vOutcomeRaw === "started"
+                ? "started"
+                : (vOutcomeRaw === "succeeded"
+                    ? "succeeded"
+                    : (vOutcomeRaw === "skipped"
+                        ? "skipped"
+                        : (vOutcomeRaw === "retry_scheduled"
+                            ? "retry_scheduled"
+                            : (vOutcomeRaw === "recovered" ? "recovered" : "failed")))));
+        return {
+            historyKey: String(objEntry.historyKey || "").trim(),
+            queueKey: String(objEntry.queueKey || "").trim(),
+            actionType: vActionType,
+            outcome: vOutcome,
+            title: String(objEntry.title || "").trim(),
+            detail: String(objEntry.detail || "").trim(),
+            createdAt: String(objEntry.createdAt || "").trim(),
+            startedAt: String(objEntry.startedAt || "").trim(),
+            finishedAt: String(objEntry.finishedAt || "").trim(),
+            attemptCount: Math.max(0, Math.floor(Number(objEntry.attemptCount || 0))),
+            lastError: String(objEntry.lastError || "").trim()
+        } satisfies CoveredActionQueueHistoryItem;
+    }).filter((objEntry) => Boolean(objEntry.historyKey) && Boolean(objEntry.createdAt));
+}
+
+function buildRuntimeStateWithCoveredActionQueueHistory(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pEntries: CoveredActionQueueHistoryItem[]
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    if (!Array.isArray(pEntries) || !pEntries.length) {
+        delete objState.pendingCoveredActionQueueHistory;
+        return objState;
+    }
+    objState.pendingCoveredActionQueueHistory = pEntries.slice(0, gCoveredActionQueueHistoryLimit).map((objEntry) => ({
+        historyKey: String(objEntry.historyKey || "").trim(),
+        queueKey: String(objEntry.queueKey || "").trim(),
+        actionType: objEntry.actionType,
+        outcome: objEntry.outcome,
+        title: String(objEntry.title || "").trim(),
+        detail: String(objEntry.detail || "").trim(),
+        createdAt: String(objEntry.createdAt || "").trim(),
+        startedAt: String(objEntry.startedAt || "").trim(),
+        finishedAt: String(objEntry.finishedAt || "").trim(),
+        attemptCount: Math.max(0, Math.floor(Number(objEntry.attemptCount || 0))),
+        lastError: String(objEntry.lastError || "").trim()
+    }));
+    return objState;
+}
+
+function buildCoveredActionQueueHistoryTitle(
+    pActionType: CoveredQueuedActionType,
+    pOutcome: CoveredActionQueueHistoryItem["outcome"]
+): string {
+    const vActionLabel = pActionType === "sl"
+        ? "SL"
+        : (pActionType === "tp"
+            ? "TP"
+            : (pActionType === "covered_reentry"
+                ? "Covered Re-Entry"
+                : (pActionType === "expiry_rollover" ? "Expiry Rollover" : "Exec Strategy")));
+    if (pOutcome === "queued") {
+        return `${vActionLabel} Queued`;
+    }
+    if (pOutcome === "started") {
+        return `${vActionLabel} Started`;
+    }
+    if (pOutcome === "succeeded") {
+        return `${vActionLabel} Completed`;
+    }
+    if (pOutcome === "skipped") {
+        return `${vActionLabel} Skipped`;
+    }
+    if (pOutcome === "retry_scheduled") {
+        return `${vActionLabel} Retry Scheduled`;
+    }
+    if (pOutcome === "recovered") {
+        return `${vActionLabel} Recovered`;
+    }
+    return `${vActionLabel} Failed`;
+}
+
+function buildCoveredActionQueueHistoryDetail(
+    pItem: Pick<CoveredPendingActionQueueItem, "actionType" | "payload" | "queueKey">,
+    pFallbackMessage = ""
+): string {
+    const vPayload = pItem.payload && typeof pItem.payload === "object" ? pItem.payload : {};
+    const vContractName = String(vPayload.contractName || vPayload.closedContractName || "").trim();
+    const vReason = String(vPayload.reason || "").trim().replaceAll("_", " ");
+    const vRowIndex = Math.max(0, Math.floor(Number(vPayload.rowIndex || 0)));
+    const vLegSide = String(vPayload.legSide || "").trim().toUpperCase();
+    if (pItem.actionType === "covered_reentry") {
+        return vRowIndex && vLegSide
+            ? `Row ${vRowIndex} ${vLegSide}${vReason ? ` after ${vReason}` : ""}.`
+            : (pFallbackMessage || "Covered re-entry action.");
+    }
+    if (pItem.actionType === "exec_batch") {
+        const vInputCount = Array.isArray(vPayload.inputs) ? vPayload.inputs.length : 0;
+        return vInputCount > 0
+            ? `Exec Strategy for ${vInputCount} row${vInputCount === 1 ? "" : "s"}.`
+            : (pFallbackMessage || "Exec Strategy action.");
+    }
+    if (vContractName) {
+        return `${vContractName}${vReason ? ` (${vReason})` : ""}.`;
+    }
+    return pFallbackMessage || `Queue item ${pItem.queueKey}.`;
+}
+
+function appendCoveredActionQueueHistory(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pItem: Pick<CoveredPendingActionQueueItem, "queueKey" | "actionType" | "startedAt" | "finishedAt" | "attemptCount" | "lastError" | "payload">,
+    pOutcome: CoveredActionQueueHistoryItem["outcome"],
+    pDetail = ""
+): Record<string, unknown> {
+    const arrHistory = getCoveredActionQueueHistoryState(pRuntime);
+    const objEntry: CoveredActionQueueHistoryItem = {
+        historyKey: crypto.randomUUID(),
+        queueKey: String(pItem.queueKey || "").trim(),
+        actionType: pItem.actionType,
+        outcome: pOutcome,
+        title: buildCoveredActionQueueHistoryTitle(pItem.actionType, pOutcome),
+        detail: buildCoveredActionQueueHistoryDetail(pItem, pDetail),
+        createdAt: new Date().toISOString(),
+        startedAt: String(pItem.startedAt || "").trim(),
+        finishedAt: String(pItem.finishedAt || "").trim(),
+        attemptCount: Math.max(0, Math.floor(Number(pItem.attemptCount || 0))),
+        lastError: String(pItem.lastError || "").trim()
+    };
+    return buildRuntimeStateWithCoveredActionQueueHistory(pRuntime, [
+        objEntry,
+        ...arrHistory
+    ]);
+}
+
 async function buildCoveredActionQueueSummary(
     pRuntime: RollingFuturesLtRuntimeRecord | null
 ): Promise<CoveredActionQueueSummary> {
     const arrQueue = getCoveredPendingActionQueueState(pRuntime);
+    const arrHistory = getCoveredActionQueueHistoryState(pRuntime);
     const vNowMs = Date.now();
     const arrEligible = arrQueue.filter((objEntry) => {
         if (objEntry.status === "processing") {
@@ -4831,7 +5090,17 @@ async function buildCoveredActionQueueSummary(
         cooldownEndsAt: vCooldownEndsAt,
         cooldownActive: Number.isFinite(vCooldownEndsAtMs) && vCooldownEndsAtMs > vNowMs,
         throttleMode: vThrottleMode,
-        throttleOwnerServerId: vThrottleOwnerServerId
+        throttleOwnerServerId: vThrottleOwnerServerId,
+        recentItems: [...arrQueue].sort((pLeft, pRight) => {
+            if (pLeft.status !== pRight.status) {
+                return pLeft.status === "processing" ? -1 : (pRight.status === "processing" ? 1 : 0);
+            }
+            if (pLeft.priority !== pRight.priority) {
+                return pLeft.priority - pRight.priority;
+            }
+            return new Date(pLeft.createdAt).getTime() - new Date(pRight.createdAt).getTime();
+        }).slice(0, 8),
+        recentHistory: arrHistory.slice(0, 8)
     };
 }
 
@@ -8244,8 +8513,9 @@ async function processCoveredPendingActionQueue(
     positions: RollingFuturesLtImportedPositionRecord[];
 }> {
     const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
-    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+    let objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
         || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    objRuntime = await recoverStaleCoveredPendingActionQueue(pUserId, pStrategyCode, objRuntime);
     const arrQueue = getCoveredPendingActionQueueState(objRuntime);
     if (!arrQueue.length) {
         return {
@@ -8298,8 +8568,29 @@ async function processCoveredPendingActionQueue(
         ...objRuntime,
         userId: pUserId,
         strategyCode: pStrategyCode,
-        state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntime, arrQueueProcessing)
+        state: appendCoveredActionQueueHistory({
+            ...objRuntime,
+            state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntime, arrQueueProcessing)
+        }, {
+            ...objNext,
+            startedAt: new Date().toISOString(),
+            finishedAt: "",
+            lastError: ""
+        }, "started")
     });
+    await logFuturesEvent(
+        pUserId,
+        pStrategyCode,
+        "manual_action",
+        "info",
+        "Covered Action Queue Started",
+        `${buildCoveredActionQueueHistoryDetail(objNext)} Queue execution has started.`,
+        {
+            queueKey: objNext.queueKey,
+            actionType: objNext.actionType,
+            reason: "covered_action_queue_started"
+        }
+    );
 
     let objProfile = await refreshModeDrivenExpiryDatesInProfile(pUserId, pStrategyCode, pProfile);
     let arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
@@ -8341,8 +8632,27 @@ async function processCoveredPendingActionQueue(
                     ...objRuntimeLatest,
                     userId: pUserId,
                     strategyCode: pStrategyCode,
-                    state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeLatest, arrQueueAfterSkip)
+                    state: appendCoveredActionQueueHistory({
+                        ...objRuntimeLatest,
+                        state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeLatest, arrQueueAfterSkip)
+                    }, {
+                        ...objNext,
+                        finishedAt: new Date().toISOString()
+                    }, "skipped", "Pending covered re-entry no longer exists.")
                 });
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "manual_action",
+                    "warning",
+                    "Covered Action Queue Skipped",
+                    "Pending covered re-entry no longer exists, so the queued action was removed.",
+                    {
+                        queueKey: objNext.queueKey,
+                        actionType: objNext.actionType,
+                        reason: "covered_action_queue_skipped_missing_reentry"
+                    }
+                );
                 return {
                     profile: objProfile,
                     positions: arrSavedPositions
@@ -8361,8 +8671,27 @@ async function processCoveredPendingActionQueue(
                     ...objRuntimeLatest,
                     userId: pUserId,
                     strategyCode: pStrategyCode,
-                    state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeLatest, arrQueueAfterSkip)
+                    state: appendCoveredActionQueueHistory({
+                        ...objRuntimeLatest,
+                        state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeLatest, arrQueueAfterSkip)
+                    }, {
+                        ...objNext,
+                        finishedAt: new Date().toISOString()
+                    }, "skipped", "Covered re-entry no longer needed.")
                 });
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "manual_action",
+                    "info",
+                    "Covered Action Queue Skipped",
+                    "Covered re-entry was no longer needed, so the queued action was removed.",
+                    {
+                        queueKey: objNext.queueKey,
+                        actionType: objNext.actionType,
+                        reason: "covered_action_queue_skipped_reentry_not_needed"
+                    }
+                );
                 return {
                     profile: objProfile,
                     positions: await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode)
@@ -8387,8 +8716,27 @@ async function processCoveredPendingActionQueue(
                     ...objRuntimeAfterSkip,
                     userId: pUserId,
                     strategyCode: pStrategyCode,
-                    state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterSkip, arrQueueAfterSkip)
+                    state: appendCoveredActionQueueHistory({
+                        ...objRuntimeAfterSkip,
+                        state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterSkip, arrQueueAfterSkip)
+                    }, {
+                        ...objNext,
+                        finishedAt: new Date().toISOString()
+                    }, "skipped", "The tracked position no longer exists.")
                 });
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "manual_action",
+                    "warning",
+                    "Covered Action Queue Skipped",
+                    "The tracked position no longer exists, so the queued action was removed.",
+                    {
+                        queueKey: objNext.queueKey,
+                        actionType: objNext.actionType,
+                        reason: "covered_action_queue_skipped_missing_position"
+                    }
+                );
                 return {
                     profile: objProfile,
                     positions: arrSavedPositions
@@ -8405,8 +8753,27 @@ async function processCoveredPendingActionQueue(
                     ...objRuntimeAfterSkip,
                     userId: pUserId,
                     strategyCode: pStrategyCode,
-                    state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterSkip, arrQueueAfterSkip)
+                    state: appendCoveredActionQueueHistory({
+                        ...objRuntimeAfterSkip,
+                        state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterSkip, arrQueueAfterSkip)
+                    }, {
+                        ...objNext,
+                        finishedAt: new Date().toISOString()
+                    }, "skipped", "The trigger condition no longer holds.")
                 });
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "manual_action",
+                    "info",
+                    "Covered Action Queue Skipped",
+                    "The trigger condition no longer holds, so the queued action was removed.",
+                    {
+                        queueKey: objNext.queueKey,
+                        actionType: objNext.actionType,
+                        reason: "covered_action_queue_skipped_trigger_cleared"
+                    }
+                );
                 return {
                     profile: objProfile,
                     positions: arrSavedPositions
@@ -8434,8 +8801,27 @@ async function processCoveredPendingActionQueue(
             ...objRuntimeAfterSuccess,
             userId: pUserId,
             strategyCode: pStrategyCode,
-            state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterSuccess, arrQueueAfterSuccess)
+            state: appendCoveredActionQueueHistory({
+                ...objRuntimeAfterSuccess,
+                state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterSuccess, arrQueueAfterSuccess)
+            }, {
+                ...objNext,
+                finishedAt: new Date().toISOString()
+            }, "succeeded")
         });
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "manual_action",
+            "success",
+            "Covered Action Queue Completed",
+            `${buildCoveredActionQueueHistoryDetail(objNext)} Queue execution completed successfully.`,
+            {
+                queueKey: objNext.queueKey,
+                actionType: objNext.actionType,
+                reason: "covered_action_queue_completed"
+            }
+        );
         return {
             profile: objProfile,
             positions: arrSavedPositions
@@ -8444,6 +8830,9 @@ async function processCoveredPendingActionQueue(
     catch (objError) {
         const objRuntimeAfterFailure = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
             || objRuntime;
+        const vNextAttemptCount = objNext.attemptCount + 1;
+        const bRetryAllowed = vNextAttemptCount < gCoveredActionQueueMaxAttempts;
+        const vLastError = getErrorMessage(objError, "Unable to process queued covered action.");
         const arrQueueAfterFailure = getCoveredPendingActionQueueState(objRuntimeAfterFailure).map((objEntry) => {
             if (objEntry.queueKey !== objNext.queueKey) {
                 return objEntry;
@@ -8451,30 +8840,46 @@ async function processCoveredPendingActionQueue(
             return {
                 ...objEntry,
                 status: "failed" as const,
-                runAt: new Date(Date.now() + gCoveredActionQueueRetryMs).toISOString(),
+                runAt: bRetryAllowed ? new Date(Date.now() + gCoveredActionQueueRetryMs).toISOString() : "",
                 finishedAt: new Date().toISOString(),
-                attemptCount: objEntry.attemptCount + 1,
-                lastError: getErrorMessage(objError, "Unable to process queued covered action.")
+                attemptCount: vNextAttemptCount,
+                lastError: vLastError
             };
         });
+        const objFailedEntry = arrQueueAfterFailure.find((objEntry) => objEntry.queueKey === objNext.queueKey) || {
+            ...objNext,
+            status: "failed" as const,
+            runAt: bRetryAllowed ? new Date(Date.now() + gCoveredActionQueueRetryMs).toISOString() : "",
+            finishedAt: new Date().toISOString(),
+            attemptCount: vNextAttemptCount,
+            lastError: vLastError
+        };
         await saveRollingFuturesLtRuntime({
             ...objRuntimeAfterFailure,
             userId: pUserId,
             strategyCode: pStrategyCode,
-            state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterFailure, arrQueueAfterFailure)
+            state: appendCoveredActionQueueHistory({
+                ...objRuntimeAfterFailure,
+                state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterFailure, arrQueueAfterFailure)
+            }, objFailedEntry, bRetryAllowed ? "retry_scheduled" : "failed", bRetryAllowed
+                ? `Retry will be attempted after ${Math.floor(gCoveredActionQueueRetryMs / 1000)} seconds.`
+                : "Retry limit reached.")
         });
         await logFuturesEvent(
             pUserId,
             pStrategyCode,
             "engine_error",
-            "warning",
-            "Covered Action Queue Retry Scheduled",
-            `${getErrorMessage(objError, "Unable to process queued covered action.")} Retry will be attempted after ${Math.floor(gCoveredActionQueueRetryMs / 1000)} seconds.`,
+            bRetryAllowed ? "warning" : "error",
+            bRetryAllowed ? "Covered Action Queue Retry Scheduled" : "Covered Action Queue Failed",
+            bRetryAllowed
+                ? `${vLastError} Retry will be attempted after ${Math.floor(gCoveredActionQueueRetryMs / 1000)} seconds.`
+                : `${vLastError} Retry limit reached, so no further automatic retry will be attempted.`,
             {
                 queueKey: objNext.queueKey,
                 actionType: objNext.actionType,
-                retryAt: new Date(Date.now() + gCoveredActionQueueRetryMs).toISOString(),
-                reason: "covered_action_queue_retry"
+                retryAt: bRetryAllowed ? objFailedEntry.runAt : "",
+                attemptCount: vNextAttemptCount,
+                reason: bRetryAllowed ? "covered_action_queue_retry" : "covered_action_queue_failed"
             }
         );
         return {

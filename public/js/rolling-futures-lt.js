@@ -51,6 +51,13 @@
         autoTraderButton: document.getElementById("btnRollingFuturesDemoAutoTrader"),
         pageStatus: document.getElementById(`${prefix}PageStatus`),
         queueStatus: document.getElementById(`${prefix}QueueStatus`),
+        queueTotal: document.getElementById(`${prefix}QueueTotal`),
+        queuePending: document.getElementById(`${prefix}QueuePending`),
+        queueProcessing: document.getElementById(`${prefix}QueueProcessing`),
+        queueFailed: document.getElementById(`${prefix}QueueFailed`),
+        queueMeta: document.getElementById(`${prefix}QueueMeta`),
+        queueItems: document.getElementById(`${prefix}QueueItems`),
+        queueHistory: document.getElementById(`${prefix}QueueHistory`),
         importStatus: document.getElementById(`${prefix}ImportStatus`),
         resetDefaultsButton: document.getElementById("btnRollingFuturesResetDefaults"),
         showSavedProfileButton: document.getElementById("btnRollingFuturesShowSavedProfile"),
@@ -739,6 +746,133 @@
         };
     }
 
+    function formatCoveredQueueActionLabel(actionType) {
+        const value = String(actionType || "").trim().toLowerCase();
+        if (value === "sl") {
+            return "SL";
+        }
+        if (value === "tp") {
+            return "TP";
+        }
+        if (value === "covered_reentry") {
+            return "Covered Re-Entry";
+        }
+        if (value === "expiry_rollover") {
+            return "Expiry Rollover";
+        }
+        return "Exec Strategy";
+    }
+
+    function formatCoveredQueueItemStatus(status) {
+        const value = String(status || "").trim().toLowerCase();
+        if (value === "processing") {
+            return "Processing";
+        }
+        if (value === "failed") {
+            return "Failed";
+        }
+        return "Pending";
+    }
+
+    function renderCoveredQueuePanel(summary) {
+        const objSummary = summary && typeof summary === "object" ? summary : null;
+        if (!isCoveredMode) {
+            return;
+        }
+        if (ids.queueTotal) {
+            ids.queueTotal.textContent = String(Number(objSummary?.total || 0));
+        }
+        if (ids.queuePending) {
+            ids.queuePending.textContent = String(Number(objSummary?.pending || 0));
+        }
+        if (ids.queueProcessing) {
+            ids.queueProcessing.textContent = String(Number(objSummary?.processing || 0));
+        }
+        if (ids.queueFailed) {
+            ids.queueFailed.textContent = String(Number(objSummary?.failed || 0));
+        }
+
+        const vNextAction = formatCoveredQueueActionLabel(objSummary?.nextActionType || "");
+        const vNextRunAt = formatRuntimeStatusDateTime(objSummary?.nextRunAt || "");
+        const vCooldownEndsAt = formatRuntimeStatusDateTime(objSummary?.cooldownEndsAt || "");
+        const vOwnerServerId = String(objSummary?.throttleOwnerServerId || "").trim();
+        const vThrottleMode = String(objSummary?.throttleMode || "").trim().toLowerCase() === "shared" ? "shared" : "local";
+        const arrMeta = [];
+        if (String(objSummary?.nextActionType || "").trim()) {
+            arrMeta.push(`Next ${vNextAction}${vNextRunAt ? ` at ${vNextRunAt}` : ""}`);
+        }
+        if (vCooldownEndsAt) {
+            arrMeta.push(`${vThrottleMode} gap until ${vCooldownEndsAt}${vOwnerServerId ? ` via ${vOwnerServerId}` : ""}`);
+        }
+        setStatus(ids.queueMeta, arrMeta.join(" | ") || "No queued items right now.", Number(objSummary?.failed || 0) ? "danger" : (Number(objSummary?.total || 0) ? "warning" : "success"));
+
+        const arrItems = Array.isArray(objSummary?.recentItems) ? objSummary.recentItems : [];
+        if (ids.queueItems) {
+            ids.queueItems.innerHTML = arrItems.length
+                ? arrItems.map(function (item) {
+                    const vAction = formatCoveredQueueActionLabel(item.actionType);
+                    const vStatus = formatCoveredQueueItemStatus(item.status);
+                    const vRunAt = formatRuntimeStatusDateTime(item.runAt);
+                    const vStartedAt = formatRuntimeStatusDateTime(item.startedAt);
+                    const vFinishedAt = formatRuntimeStatusDateTime(item.finishedAt);
+                    const vLastError = String(item.lastError || "").trim();
+                    const arrBits = [`Status: ${vStatus}`];
+                    if (vRunAt) {
+                        arrBits.push(`Run At: ${vRunAt}`);
+                    }
+                    if (vStartedAt) {
+                        arrBits.push(`Started: ${vStartedAt}`);
+                    }
+                    if (vFinishedAt) {
+                        arrBits.push(`Finished: ${vFinishedAt}`);
+                    }
+                    if (Number(item.attemptCount || 0) > 0) {
+                        arrBits.push(`Attempts: ${Number(item.attemptCount || 0)}`);
+                    }
+                    return `
+                        <article class="rolling-demo-event-item ${escapeHtml(String(item.status || "pending").trim().toLowerCase() === "failed" ? "error" : (String(item.status || "").trim().toLowerCase() === "processing" ? "info" : "success"))}">
+                            <div class="rolling-demo-event-head">
+                                <div class="rolling-demo-event-title-stack">
+                                    <strong class="rolling-demo-event-title">${escapeHtml(vAction)}</strong>
+                                </div>
+                            </div>
+                            <p class="rolling-demo-event-message">${escapeHtml(arrBits.join(" | "))}</p>
+                            ${vLastError ? `<p class="rolling-demo-event-message">${escapeHtml(vLastError)}</p>` : ""}
+                        </article>
+                    `;
+                }).join("")
+                : "<div class=\"rolling-demo-event-empty\">No queued items right now.</div>";
+        }
+
+        const arrHistory = Array.isArray(objSummary?.recentHistory) ? objSummary.recentHistory : [];
+        if (ids.queueHistory) {
+            ids.queueHistory.innerHTML = arrHistory.length
+                ? arrHistory.map(function (item) {
+                    const vFinishedAt = formatRuntimeStatusDateTime(item.finishedAt || item.createdAt);
+                    const vTone = item.outcome === "failed"
+                        ? "error"
+                        : (item.outcome === "retry_scheduled" || item.outcome === "recovered" || item.outcome === "skipped"
+                            ? "warning"
+                            : "success");
+                    const vDetail = String(item.detail || "").trim();
+                    const vLastError = String(item.lastError || "").trim();
+                    return `
+                        <article class="rolling-demo-event-item ${escapeHtml(vTone)}">
+                            <div class="rolling-demo-event-head">
+                                <div class="rolling-demo-event-title-stack">
+                                    <strong class="rolling-demo-event-title">${escapeHtml(String(item.title || "Queue History").trim())}</strong>
+                                </div>
+                                <span class="rolling-demo-event-time">${escapeHtml(vFinishedAt || "-")}</span>
+                            </div>
+                            <p class="rolling-demo-event-message">${escapeHtml(vDetail || "-")}</p>
+                            ${vLastError ? `<p class="rolling-demo-event-message">${escapeHtml(vLastError)}</p>` : ""}
+                        </article>
+                    `;
+                }).join("")
+                : "<div class=\"rolling-demo-event-empty\">No queue history yet.</div>";
+        }
+    }
+
     function isAdminTargetModeActive() {
         return mode === "dual" && currentAccountIsAdmin;
     }
@@ -1156,6 +1290,7 @@
         if (isCoveredMode) {
             const objQueueStatus = formatCoveredQueueSummary(objRuntime.coveredQueueSummary || null);
             setStatus(ids.queueStatus, objQueueStatus.message, objQueueStatus.tone);
+            renderCoveredQueuePanel(objRuntime.coveredQueueSummary || null);
         }
         renderPendingLiveConfirmation();
         setButtonsEnabled();
