@@ -638,7 +638,7 @@
                         <% for (const eventType of rollingTelegramEventTypes || []) { %>
                             <label class="rolling-demo-check rolling-demo-check-wide" for="dual-live-pref-<%= eventType %>">
                                 <input type="checkbox" class="rolling-demo-telegram-event" id="dual-live-pref-<%= eventType %>" value="<%= eventType %>" />
-                                <span><%= eventType.replaceAll('_', ' ') %></span>
+                                <span><%= String(eventType || '').split('_').join(' ') %></span>
                             </label>
                         <% } %>
                     </div>
