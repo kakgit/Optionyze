@@ -7703,8 +7703,9 @@ async function executeCoveredPendingReEntryNow(
     pPending: CoveredPendingOptionReEntryState
 ): Promise<boolean> {
     const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    const objProfile = await refreshModeDrivenExpiryDatesInProfile(pUserId, pStrategyCode, pProfile);
     let arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
-    if (hasTrackedOptionRowLeg(arrSavedPositions, pPending.rowIndex, pPending.legSide, getMergedUiState(pProfile))) {
+    if (hasTrackedOptionRowLeg(arrSavedPositions, pPending.rowIndex, pPending.legSide, getMergedUiState(objProfile))) {
         return false;
     }
     const objPlaceholderPosition = buildCoveredReEntryPlaceholderPosition(
@@ -7717,25 +7718,28 @@ async function executeCoveredPendingReEntryNow(
     );
     const objMetadata: RollingFuturesLtOptionMetadata = {
         rowIndex: pPending.rowIndex,
-        takeProfitDelta: Math.max(0, Number(getNormalizedOptionRowUiState(getMergedUiState(pProfile), pStrategyCode, pPending.rowIndex).tpD || 0)),
-        stopLossDelta: Math.max(0, Number(getNormalizedOptionRowUiState(getMergedUiState(pProfile), pStrategyCode, pPending.rowIndex).slD || 0)),
+        takeProfitDelta: Math.max(0, Number(getNormalizedOptionRowUiState(getMergedUiState(objProfile), pStrategyCode, pPending.rowIndex).tpD || 0)),
+        stopLossDelta: Math.max(0, Number(getNormalizedOptionRowUiState(getMergedUiState(objProfile), pStrategyCode, pPending.rowIndex).slD || 0)),
         reEntryDelta: Math.max(0, Number(pPending.targetDelta || 0)),
         reEnterEnabled: true,
         openedReason: pPending.reason
     };
+    const objPendingRowState = getNormalizedOptionRowUiState(getMergedUiState(objProfile), pStrategyCode, pPending.rowIndex);
+    const vResolvedPendingExpiryDate = pPending.reason === "expiry_cutoff"
+        ? String(pPending.expiryDate || "").trim()
+        : String(objPendingRowState.expiryDate || "").trim();
     const objReEntry = await openTrackedOptionReEntry(
         pUserId,
         pStrategyCode,
         pSelectedApiProfileId,
-        pProfile,
+        objProfile,
         objPlaceholderPosition,
         objMetadata,
         pPending.reason === "tp" || pPending.reason === "expiry_cutoff" ? pPending.reason : "sl",
         {
             forceLegSide: pPending.legSide,
             forceTargetDelta: pPending.targetDelta,
-            forceExpiryDate: pPending.expiryDate,
-            useRowAction: true,
+            forceExpiryDate: vResolvedPendingExpiryDate,
             useRowQty: true
         }
     );
@@ -7747,7 +7751,7 @@ async function executeCoveredPendingReEntryNow(
         objReEntry.position
     ]);
     if (String(objReEntry.position.side || "").trim().toUpperCase() === "BUY") {
-        const objGateConfig = getCoveredBuyHedgeSellPremiumGateConfig(getMergedUiState(pProfile));
+        const objGateConfig = getCoveredBuyHedgeSellPremiumGateConfig(getMergedUiState(objProfile));
         await logFuturesEvent(
             pUserId,
             pStrategyCode,
@@ -8923,7 +8927,8 @@ async function processCoveredLiveActionDecision(
         return { status: "success", message: "Pending live action was rejected." };
     }
 
-    const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+    let objProfile = await readLiveProfile(pUserId, pStrategyCode);
+    objProfile = await refreshModeDrivenExpiryDatesInProfile(pUserId, pStrategyCode, objProfile);
     const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
     if (!vSelectedApiProfileId) {
         return { status: "warning", message: "Select an API profile before confirming live actions." };
@@ -9981,6 +9986,9 @@ async function runAutoTraderCycle(
         }
 
         let objProfile = await readLiveProfile(pUserId, pStrategyCode);
+        if (isCoveredLikeStrategy(pStrategyCode)) {
+            objProfile = await refreshModeDrivenExpiryDatesInProfile(pUserId, pStrategyCode, objProfile);
+        }
         if (!await renewDualStrategyLease(pUserId, pStrategyCode, objRuntime, objProfile)) {
             stopAutoTraderCycle(pUserId, pStrategyCode);
             return;
@@ -11649,9 +11657,10 @@ async function executeCoveredOpenPositionSwap(
     openOrder: Record<string, unknown>;
 }> {
     const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    const objProfile = await refreshModeDrivenExpiryDatesInProfile(pUserId, pStrategyCode, pProfile);
     const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
     const objMetadata = getTrackedOptionMetadata(pPosition);
-    const objUiState = getMergedUiState(pProfile);
+    const objUiState = getMergedUiState(objProfile);
     const vRowIndex = resolveCoveredTrackedPositionRowIndex(
         objUiState,
         pPosition,
@@ -11703,7 +11712,7 @@ async function executeCoveredOpenPositionSwap(
         pUserId,
         pStrategyCode,
         pSelectedApiProfileId,
-        pProfile,
+        objProfile,
         objCurrentPosition,
         {
             ...objMetadata,
