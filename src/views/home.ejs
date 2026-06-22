@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Optionyze | Delta Neutral Live Trading</title>
+    <%- include('partials/brand-head') %>
     <style>
         :root { color-scheme: dark; --bg: #050816; --panel: rgba(10, 18, 38, 0.82); --text: #f3f6ff; --muted: #a7b2d4; --line: rgba(162, 180, 228, 0.18); --accent-soft: rgba(80, 227, 194, 0.12); --shadow: 0 28px 80px rgba(0, 0, 0, 0.35); }
         * { box-sizing: border-box; }
@@ -12,8 +13,8 @@
         .shell { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
         .topbar { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(16px); background: rgba(5, 8, 22, 0.72); border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
         .nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 78px; }
-        .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: 0.18em; font-size: 0.95rem; }
-        .brand-mark { width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center; background: linear-gradient(135deg, rgba(80, 227, 194, 0.22), rgba(242, 182, 90, 0.2)); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: var(--shadow); }
+        .brand { display: flex; align-items: center; gap: 14px; font-weight: 700; letter-spacing: 0.18em; font-size: 0.95rem; }
+        .brand-mark { width: 48px; height: 48px; display: block; object-fit: contain; flex: 0 0 auto; }
         .nav-links, .auth-links { display: flex; align-items: center; gap: 18px; }
         .nav-links a, .auth-links a, .auth-links button { color: var(--muted); font-size: 0.95rem; background: none; border: 0; cursor: pointer; font: inherit; }
         .nav-links a:hover, .auth-links a:hover, .auth-links button:hover { color: var(--text); }
@@ -56,7 +57,7 @@
 <body>
     <header class="topbar">
         <div class="shell nav">
-            <a class="brand" href="/"><span class="brand-mark">O</span><span>OPTIONYZE</span></a>
+            <a class="brand" href="/"><img class="brand-mark" src="/brand/optionyze-logo-v4-dark-blue.png" alt="Optionyze" /><span>OPTIONYZE</span></a>
             <nav class="nav-links"><a href="#strategy">Strategy</a><a href="#execution">Execution</a><a href="#risk">Risk Control</a><a href="#platform">Platform</a></nav>
             <div class="auth-links">
                 <% if (currentAccount) { %>

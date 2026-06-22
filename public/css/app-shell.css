@@ -66,7 +66,7 @@ body.app-page {
 .app-brand {
     display:flex;
     align-items:center;
-    gap:12px;
+    gap:14px;
     color:var(--app-text);
     text-decoration:none;
     font-weight:700;
@@ -75,12 +75,11 @@ body.app-page {
 }
 
 .app-mark {
-    width:40px;
-    height:40px;
-    border-radius:14px;
-    display:grid;
-    place-items:center;
-    background:linear-gradient(135deg, rgba(80,227,194,.22), rgba(125,211,252,.22));
+    width:48px;
+    height:48px;
+    display:block;
+    object-fit:contain;
+    flex:0 0 auto;
 }
 
 .app-top-actions {

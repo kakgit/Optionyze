@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title><%= pageTitle %></title>
+    <%- include('partials/brand-head') %>
     <link rel="stylesheet" href="/css/app-shell.css" />
     <link rel="stylesheet" href="/css/account-menu.css" />
     <link rel="stylesheet" href="/css/dashboard.css" />
@@ -27,8 +28,6 @@
                 <div class="dashboard-actions">
                     <a class="app-solid-btn" href="/rollingfutures-lt-dual">Open Delta Neutral</a>
                     <a class="app-ghost-btn" href="/covered-options">Open Covered Options</a>
-                    <a class="app-ghost-btn" href="/options-scalper">Open Options-Scalper</a>
-                    <a class="app-ghost-btn" href="/directional-options">Open Directional Options Demo</a>
                     <a class="app-ghost-btn" href="/account/profile">Review My Profile</a>
                     <a class="app-ghost-btn" href="/account/delta-exchange-api">Delta API Settings</a>
                 </div>
@@ -97,16 +96,6 @@
                     <div class="dashboard-shortcut-kicker">Strategy</div>
                     <div class="dashboard-shortcut-title">Open Covered Options Live</div>
                     <div class="dashboard-shortcut-copy">Launch the Covered Options live workspace as a separate copy of the dual runner with its own saved profile, runtime state, and recovery metrics.</div>
-                </a>
-                <a class="dashboard-shortcut" href="/directional-options">
-                    <div class="dashboard-shortcut-kicker">Strategy</div>
-                    <div class="dashboard-shortcut-title">Open Directional Options Demo</div>
-                    <div class="dashboard-shortcut-copy">Use a directional workspace with CE and PE setup rows, one-click trigger controls, indicator scoring, and score-gated auto trader prep.</div>
-                </a>
-                <a class="dashboard-shortcut" href="/options-scalper">
-                    <div class="dashboard-shortcut-kicker">Paper Trading</div>
-                    <div class="dashboard-shortcut-title">Open Options-Scalper</div>
-                    <div class="dashboard-shortcut-copy">Launch a paper-trading copy of the Covered Options workspace on its own page and menu path, ready for simulation wiring.</div>
                 </a>
                 <a class="dashboard-shortcut" href="/account/profile">
                     <div class="dashboard-shortcut-kicker">Profile</div>

@@ -4,13 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title><%= pageTitle %></title>
+    <%- include('partials/brand-head') %>
     <style>
         :root { color-scheme: dark; --panel: rgba(10, 18, 38, 0.88); --line: rgba(162,180,228,.18); --text: #f3f6ff; --muted:#a7b2d4; --danger:#ff9f9f; }
         * { box-sizing: border-box; }
         body { margin:0; min-height:100vh; font-family:"Segoe UI","Trebuchet MS",sans-serif; color:var(--text); background:linear-gradient(180deg,#040714 0%,#08101f 55%,#050816 100%); display:grid; place-items:center; padding:24px; }
         .card { width:min(100%, 460px); padding:30px; border-radius:28px; background:var(--panel); border:1px solid var(--line); box-shadow:0 28px 80px rgba(0,0,0,.35); }
-        .brand { display:flex; align-items:center; gap:12px; color:var(--text); text-decoration:none; font-weight:700; letter-spacing:.18em; font-size:.95rem; }
-        .mark { width:40px; height:40px; border-radius:14px; display:grid; place-items:center; background:linear-gradient(135deg, rgba(80,227,194,.22), rgba(125,211,252,.22)); }
+        .brand { display:flex; align-items:center; gap:14px; color:var(--text); text-decoration:none; font-weight:700; letter-spacing:.18em; font-size:.95rem; }
+        .mark { width:48px; height:48px; display:block; object-fit:contain; flex:0 0 auto; }
         h1 { margin:22px 0 10px; font-size:2rem; }
         p { margin:0 0 20px; color:var(--muted); line-height:1.7; }
         label { display:block; margin:14px 0 8px; font-size:.94rem; color:#dce5ff; }
@@ -25,7 +26,7 @@
 </head>
 <body>
     <section class="card">
-        <a class="brand" href="/"><span class="mark">O</span><span>OPTIONYZE</span></a>
+        <a class="brand" href="/"><img class="mark" src="/brand/optionyze-logo-v4-dark-blue.png" alt="Optionyze" /><span>OPTIONYZE</span></a>
         <h1>Sign In</h1>
         <p>Access your server-side trading workspace and continue from your account dashboard.</p>
         <% if (errorMessage) { %><div class="error"><%= errorMessage %></div><% } %>
