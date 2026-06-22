@@ -9,11 +9,8 @@ import { RunnerManager } from "../runners/runner-manager";
 import { getServerId } from "../runtime/server-runtime";
 import { ensurePostgresSchema, isPostgresConfigured } from "../storage/postgres";
 import { ensureSurvivalPostgresSchema } from "../storage/survival-postgres";
-import { DirectionalOptionsDemoService } from "../strategies/directional-options-demo/service";
 import {
     renderCoveredOptionsPage,
-    renderOptionsScalperPage,
-    renderDirectionalOptionsPage,
     renderRollingFuturesLiveDualPage
 } from "../api/controllers/strategyfo-paper-controller";
 import { recoverRollingFuturesLtAutoTraderCycles } from "../api/controllers/rolling-futures-lt-controller";
@@ -58,7 +55,6 @@ async function bootstrap(): Promise<void> {
     const app = express();
     const port = Number(process.env.PORT || 3001);
     const runnerManager = new RunnerManager();
-    const directionalOptionsDemoService = new DirectionalOptionsDemoService();
 
     await ensurePostgresSchema();
     await ensureSurvivalPostgresSchema();
@@ -67,7 +63,6 @@ async function bootstrap(): Promise<void> {
     await cleanupExpiredSurvivalAdminSessions();
     await runnerManager.hydrate();
     await recoverRollingFuturesLtAutoTraderCycles();
-    await directionalOptionsDemoService.hydrate();
     await ensureTelegramWebhookRegistered();
 
     app.set("view engine", "ejs");
@@ -101,8 +96,6 @@ async function bootstrap(): Promise<void> {
     app.get("/dashboard", requireAuthPage, requireFreshPasswordPage, renderDashboardPage);
     app.get("/rollingfutures-lt-dual", requireAuthPage, requireFreshPasswordPage, renderRollingFuturesLiveDualPage);
     app.get("/covered-options", requireAuthPage, requireFreshPasswordPage, renderCoveredOptionsPage);
-    app.get("/options-scalper", requireAuthPage, requireFreshPasswordPage, renderOptionsScalperPage);
-    app.get("/directional-options", requireAuthPage, requireFreshPasswordPage, renderDirectionalOptionsPage);
     app.get("/mngusers", requireAuthPage, requireFreshPasswordPage, requireAdminPage, renderMngUsersPage);
     app.get("/account/profile", requireAuthPage, renderMyProfilePage);
     app.post("/account/profile", requireAuthPage, async (req, res) => {
@@ -116,7 +109,7 @@ async function bootstrap(): Promise<void> {
     app.post("/auth/change-password", requireAuthPage, async (req, res) => {
         await changePassword(req, res);
     });
-    app.use("/api", createApiRouter(runnerManager, directionalOptionsDemoService));
+    app.use("/api", createApiRouter(runnerManager));
 
     app.listen(port, () => {
         console.log(`Optionyze server listening on port ${port} as ${getServerId()}`);
