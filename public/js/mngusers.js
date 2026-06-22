@@ -1,26 +1,15 @@
 const gState = {
     users: [],
     filteredUsers: [],
-    runningUsers: [],
-    pendingExecutionRequests: [],
     pageSize: 5,
     userPage: 1,
-    runningUsersPage: 1,
-    execRequestsPage: 1,
     editingAccountId: "",
     resettingAccountId: "",
     currentAccountId: "",
-    currentServerId: "",
     activeModal: "",
     isLoadingUsers: false,
-    isLoadingRunningUsers: false,
-    isLoadingExecutionRequests: false,
-    isSavingExecutionSettings: false,
     isSavingUser: false,
-    isResettingPassword: false,
-    executingRequestId: "",
-    switchingPrimaryAccountId: "",
-    simulatingPrimaryOutageAccountId: ""
+    isResettingPassword: false
 };
 
 const els = {};
@@ -28,38 +17,22 @@ const els = {};
 document.addEventListener("DOMContentLoaded", () => {
     cacheElements();
     gState.currentAccountId = String(els.app?.dataset.currentAccountId || "");
-    gState.currentServerId = String(els.app?.dataset.currentServerId || "").trim();
 
     els.searchInput?.addEventListener("input", applyFilters);
     els.refreshButton?.addEventListener("click", () => {
         void loadAdminData({ showSuccess: true });
     });
-    els.refreshRunningUsersButton?.addEventListener("click", () => {
-        void refreshRunningUsers();
-    });
-    els.refreshExecRequestsButton?.addEventListener("click", () => {
-        void refreshExecutionRequests();
-    });
-    els.autoExecSl?.addEventListener("change", () => {
-        void saveExecutionSettings();
-    });
-    els.autoExecTp?.addEventListener("change", () => {
-        void saveExecutionSettings();
-    });
     els.addUserButton?.addEventListener("click", () => openUserModal());
     els.cancelModalButton?.addEventListener("click", closeActiveModal);
     els.closeModalButton?.addEventListener("click", closeActiveModal);
-    els.isSurvivalAdmin?.addEventListener("change", syncSurvivalAdminFormState);
+    els.execStrategy?.addEventListener("change", syncVerifierExecStrategyState);
+    els.isVerifier?.addEventListener("change", syncVerifierExecStrategyState);
     els.userForm?.addEventListener("submit", submitUserForm);
-
     els.closeResetPasswordModalButton?.addEventListener("click", closeActiveModal);
     els.cancelResetPasswordModalButton?.addEventListener("click", closeActiveModal);
     els.resetPasswordForm?.addEventListener("submit", submitResetPasswordForm);
-
     els.overlay?.addEventListener("click", closeActiveModal);
     els.userTableBody?.addEventListener("click", handleTableAction);
-    els.runningUsersTableBody?.addEventListener("click", handleRunningUsersAction);
-    els.execRequestTableBody?.addEventListener("click", handleExecRequestAction);
     document.addEventListener("keydown", handleDocumentKeydown);
 
     void loadAdminData({ showSuccess: true });
@@ -69,21 +42,11 @@ function cacheElements() {
     els.app = document.getElementById("mngUsersApp");
     els.searchInput = document.getElementById("searchInput");
     els.refreshButton = document.getElementById("btnRefresh");
-    els.refreshRunningUsersButton = document.getElementById("btnRefreshRunningUsers");
-    els.refreshExecRequestsButton = document.getElementById("btnRefreshExecRequests");
     els.addUserButton = document.getElementById("btnAddUser");
     els.pageStatus = document.getElementById("pageStatus");
     els.resultCount = document.getElementById("resultCount");
     els.userPager = document.getElementById("userPager");
     els.userTableBody = document.getElementById("userTableBody");
-    els.execRequestCount = document.getElementById("execRequestCount");
-    els.runningUsersCount = document.getElementById("runningUsersCount");
-    els.runningUsersPager = document.getElementById("runningUsersPager");
-    els.runningUsersTableBody = document.getElementById("runningUsersTableBody");
-    els.execRequestPager = document.getElementById("execRequestPager");
-    els.execRequestTableBody = document.getElementById("execRequestTableBody");
-    els.autoExecSl = document.getElementById("autoExecSl");
-    els.autoExecTp = document.getElementById("autoExecTp");
     els.overlay = document.getElementById("overlay");
 
     els.userModal = document.getElementById("userModal");
@@ -103,8 +66,8 @@ function cacheElements() {
     els.confirmPassword = document.getElementById("confirmPassword");
     els.isActive = document.getElementById("isActive");
     els.execStrategy = document.getElementById("execStrategy");
+    els.isVerifier = document.getElementById("isVerifier");
     els.isAdmin = document.getElementById("isAdmin");
-    els.isSurvivalAdmin = document.getElementById("isSurvivalAdmin");
     els.mustChangePassword = document.getElementById("mustChangePassword");
 
     els.resetPasswordModal = document.getElementById("resetPasswordModal");
@@ -119,51 +82,16 @@ function cacheElements() {
     els.resetMustChangePassword = document.getElementById("resetMustChangePassword");
 }
 
-async function loadRunningUsers() {
-    if (gState.isLoadingRunningUsers) {
-        return;
-    }
-
-    gState.isLoadingRunningUsers = true;
-    try {
-        const objResult = await requestJson("/api/rollingfutures-lt-dual/admin/running-users", {
-            credentials: "same-origin"
-        }, "Unable to load running dual users.");
-        gState.runningUsers = Array.isArray(objResult.data) ? objResult.data : [];
-        gState.runningUsersPage = 1;
-        renderRunningUsers();
-    }
-    catch (objError) {
-        setPageStatus(getErrorMessage(objError, "Unable to load running dual users."), "error");
-    }
-    finally {
-        gState.isLoadingRunningUsers = false;
-    }
-}
-
-async function refreshRunningUsers() {
-    setButtonBusy(els.refreshRunningUsersButton, true, "");
-    try {
-        await loadRunningUsers();
-        setPageStatus(`Loaded ${gState.runningUsers.length} running dual user${gState.runningUsers.length === 1 ? "" : "s"}.`, "success");
-    }
-    finally {
-        restoreIconButton(els.refreshRunningUsersButton);
-    }
-}
-
 async function loadUsers() {
     if (gState.isLoadingUsers) {
         return;
     }
 
     gState.isLoadingUsers = true;
-
     try {
         const objResult = await requestJson("/api/admin/accounts", {
             credentials: "same-origin"
         }, "Unable to load users.");
-
         gState.users = Array.isArray(objResult.data) ? objResult.data : [];
         applyFilters();
     }
@@ -175,185 +103,19 @@ async function loadUsers() {
     }
 }
 
-async function loadExecutionRequests() {
-    if (gState.isLoadingExecutionRequests) {
-        return;
-    }
-
-    gState.isLoadingExecutionRequests = true;
-    try {
-        const objResult = await requestJson("/api/admin/strategy-execution-requests", {
-            credentials: "same-origin"
-        }, "Unable to load pending strategy execution requests.");
-        gState.pendingExecutionRequests = Array.isArray(objResult.data) ? objResult.data : [];
-        gState.execRequestsPage = 1;
-        renderExecutionRequests();
-    }
-    catch (objError) {
-        setPageStatus(getErrorMessage(objError, "Unable to load pending strategy execution requests."), "error");
-    }
-    finally {
-        gState.isLoadingExecutionRequests = false;
-    }
-}
-
-async function refreshExecutionRequests() {
-    setButtonBusy(els.refreshExecRequestsButton, true, "");
-    try {
-        await loadExecutionRequests();
-        setPageStatus(`Loaded ${gState.pendingExecutionRequests.length} pending strategy request${gState.pendingExecutionRequests.length === 1 ? "" : "s"}.`, "success");
-    }
-    finally {
-        restoreIconButton(els.refreshExecRequestsButton);
-    }
-}
-
 async function loadAdminData(pOptions) {
     const bShowSuccess = Boolean(pOptions?.showSuccess);
     setPageStatus("Loading admin data...", "info");
     setButtonBusy(els.refreshButton, true, "");
 
     try {
-        await Promise.all([loadUsers(), loadRunningUsers(), loadExecutionRequests(), loadExecutionSettings()]);
+        await loadUsers();
         if (bShowSuccess) {
-            setPageStatus(`Loaded ${gState.users.length} user account${gState.users.length === 1 ? "" : "s"}, ${gState.runningUsers.length} running dual user${gState.runningUsers.length === 1 ? "" : "s"}, and ${gState.pendingExecutionRequests.length} pending strategy request${gState.pendingExecutionRequests.length === 1 ? "" : "s"}.`, "success");
+            setPageStatus(`Loaded ${gState.users.length} user account${gState.users.length === 1 ? "" : "s"}.`, "success");
         }
     }
     finally {
         restoreIconButton(els.refreshButton);
-    }
-}
-
-function renderRunningUsers() {
-    if (!els.runningUsersTableBody) {
-        return;
-    }
-
-    if (els.runningUsersCount) {
-        els.runningUsersCount.textContent = `${gState.runningUsers.length} running`;
-    }
-
-    if (!gState.runningUsers.length) {
-        els.runningUsersTableBody.innerHTML = `<tr><td colspan="6" class="mngusers-empty">No running Dual live users right now.</td></tr>`;
-        renderPager(els.runningUsersPager, {
-            page: 1,
-            totalItems: 0,
-            totalPages: 0,
-            onPageChange: () => undefined
-        });
-        return;
-    }
-
-    const objPaged = paginateRows(gState.runningUsers, gState.runningUsersPage, gState.pageSize);
-    gState.runningUsersPage = objPaged.page;
-
-    els.runningUsersTableBody.innerHTML = objPaged.rows.map((objUser) => {
-        const bSwitching = gState.switchingPrimaryAccountId === objUser.accountId;
-        const vModeChip = objUser.survivalMode
-            ? `<span class="mngusers-chip mngusers-chip-warn">Survival DB</span>`
-            : `<span class="mngusers-chip mngusers-chip-live">Primary DB</span>`;
-        const vPrimaryOwner = objUser.ownerServerId || "-";
-        const vSurvivalOwner = objUser.survivalOwnerServerId || "-";
-        const vHandbackTarget = objUser.handbackTargetServerId || "render";
-        const bHandbackPending = Boolean(objUser.handbackPending);
-        const vOutageChip = objUser.simulatedPrimaryDbOutage
-            ? `<span class="mngusers-chip mngusers-chip-warn">Outage Test ON</span>`
-            : "";
-        const bOwnedHere = vPrimaryOwner === gState.currentServerId || vSurvivalOwner === gState.currentServerId;
-        const bCanHandbackHere = bHandbackPending && gState.currentServerId === vHandbackTarget;
-        let vActionHtml = "";
-        if (bCanHandbackHere) {
-            vActionHtml = `
-                <button class="app-link-btn" type="button" data-running-action="switch-primary" data-account-id="${escapeHtml(objUser.accountId)}" ${bSwitching ? "disabled" : ""}>
-                    ${bSwitching ? "Handing Back..." : `Handback To ${escapeHtml(vHandbackTarget)}`}
-                </button>
-            `;
-        }
-        else if (!bOwnedHere) {
-            vActionHtml = `
-                <button class="app-link-btn" type="button" data-running-action="force-takeover-here" data-account-id="${escapeHtml(objUser.accountId)}">
-                    Force Takeover Here
-                </button>
-            `;
-        }
-        else if (objUser.survivalMode && !bHandbackPending) {
-            vActionHtml = `
-                <button class="app-link-btn" type="button" data-running-action="switch-primary" data-account-id="${escapeHtml(objUser.accountId)}" ${bSwitching ? "disabled" : ""}>
-                    ${bSwitching ? "Switching..." : "Switch To Primary DB"}
-                </button>
-            `;
-        }
-        else if (bHandbackPending) {
-            vActionHtml = `<span class="mngusers-chip mngusers-chip-muted">Handback Pending: ${escapeHtml(vHandbackTarget)}</span>`;
-        }
-        else if (bOwnedHere) {
-            vActionHtml = `<span class="mngusers-chip mngusers-chip-muted">Normal</span>`;
-        }
-        return `
-            <tr>
-                <td class="mngusers-nowrap">${escapeHtml(objUser.fullName || "-")}</td>
-                <td class="mngusers-nowrap">${escapeHtml(objUser.email || "-")}</td>
-                <td>
-                    <div class="mngusers-status-stack">
-                        <div>${vModeChip}</div>
-                        ${vOutageChip ? `<div>${vOutageChip}</div>` : ""}
-                    </div>
-                </td>
-                <td>
-                    <div class="mngusers-owner-stack">
-                        <div><strong>Primary:</strong> ${escapeHtml(vPrimaryOwner)}</div>
-                        <div><strong>Survival:</strong> ${escapeHtml(vSurvivalOwner)}</div>
-                    </div>
-                </td>
-                <td class="mngusers-nowrap">${escapeHtml(formatDateTime(objUser.lastCycleAt || objUser.updatedAt))}</td>
-                <td class="mngusers-nowrap">${vActionHtml}</td>
-            </tr>
-        `;
-    }).join("");
-
-    renderPager(els.runningUsersPager, {
-        page: objPaged.page,
-        totalItems: gState.runningUsers.length,
-        totalPages: objPaged.totalPages,
-        onPageChange: (pPage) => {
-            gState.runningUsersPage = pPage;
-            renderRunningUsers();
-        }
-    });
-}
-
-async function loadExecutionSettings() {
-    const objResult = await requestJson("/api/admin/strategy-execution-requests/settings", {
-        credentials: "same-origin"
-    }, "Unable to load auto execution settings.");
-    setCheckedNode(els.autoExecSl, objResult.data?.slEnabled !== false);
-    setCheckedNode(els.autoExecTp, Boolean(objResult.data?.tpEnabled));
-}
-
-async function saveExecutionSettings() {
-    if (gState.isSavingExecutionSettings) {
-        return;
-    }
-
-    gState.isSavingExecutionSettings = true;
-    try {
-        const objResult = await requestJson("/api/admin/strategy-execution-requests/settings", {
-            method: "PUT",
-            credentials: "same-origin",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                slEnabled: getCheckedNode(els.autoExecSl),
-                tpEnabled: getCheckedNode(els.autoExecTp)
-            })
-        }, "Unable to save auto execution settings.");
-        setPageStatus(objResult.message || "Auto execution settings saved successfully.", "success");
-    }
-    catch (objError) {
-        setPageStatus(getErrorMessage(objError, "Unable to save auto execution settings."), "error");
-        await loadExecutionSettings().catch(() => undefined);
-    }
-    finally {
-        gState.isSavingExecutionSettings = false;
     }
 }
 
@@ -366,10 +128,8 @@ function applyFilters() {
         objUser.telegramChatId
     ].join(" ").toLowerCase().includes(vSearch));
     gState.userPage = 1;
-    gState.execRequestsPage = 1;
     renderStats();
     renderTable();
-    renderExecutionRequests();
 }
 
 function renderStats() {
@@ -408,7 +168,7 @@ function renderTable() {
         const vCreated = formatDateTime(objUser.createdAt);
         const vBadges = [
             objUser.isAdmin ? `<span class="mngusers-chip mngusers-chip-admin">Admin</span>` : `<span class="mngusers-chip mngusers-chip-muted">User</span>`,
-            objUser.isSurvivalAdmin ? `<span class="mngusers-chip mngusers-chip-info">Survival Admin</span>` : "",
+            objUser.isVerifier ? `<span class="mngusers-chip mngusers-chip-info">Verifier</span>` : "",
             objUser.isActive ? `<span class="mngusers-chip mngusers-chip-live">Active</span>` : `<span class="mngusers-chip mngusers-chip-off">Inactive</span>`,
             objUser.mustChangePassword ? `<span class="mngusers-chip mngusers-chip-warn">Pwd Reset</span>` : ""
         ].filter(Boolean).join(" ");
@@ -460,92 +220,6 @@ function renderTable() {
         onPageChange: (pPage) => {
             gState.userPage = pPage;
             renderTable();
-        }
-    });
-}
-
-function renderExecutionRequests() {
-    if (!els.execRequestTableBody) {
-        return;
-    }
-
-    const vSearch = String(els.searchInput?.value || "").trim().toLowerCase();
-    const arrRequests = gState.pendingExecutionRequests.filter((objRequest) => !vSearch || [
-        objRequest.fullName,
-        objRequest.email
-    ].join(" ").toLowerCase().includes(vSearch)).sort((objA, objB) => {
-        return new Date(String(objA.createdAt || 0)).getTime() - new Date(String(objB.createdAt || 0)).getTime();
-    });
-
-    if (els.execRequestCount) {
-        els.execRequestCount.textContent = `${arrRequests.length} pending`;
-    }
-
-    if (!arrRequests.length) {
-        els.execRequestTableBody.innerHTML = `<tr><td colspan="8" class="mngusers-empty">No pending strategy execution requests.</td></tr>`;
-        renderPager(els.execRequestPager, {
-            page: 1,
-            totalItems: 0,
-            totalPages: 0,
-            onPageChange: () => undefined
-        });
-        return;
-    }
-
-    const objPaged = paginateRows(arrRequests, gState.execRequestsPage, gState.pageSize);
-    gState.execRequestsPage = objPaged.page;
-
-    els.execRequestTableBody.innerHTML = objPaged.rows.map((objRequest) => {
-        const bExecuting = gState.executingRequestId === objRequest.requestId;
-        const bCanExecuteHere = objRequest.canExecuteHere !== false;
-        const vStartQty = Number(objRequest.requestPayload?.startQty ?? objRequest.requestPayload?.qty);
-        const vAvailableBalance = Number(objRequest.requestPayload?.availableBalance);
-        const vOwnerServerId = String(objRequest.ownerServerId || "").trim();
-        const vOwnerLabel = !vOwnerServerId || vOwnerServerId === "-"
-            ? "this server"
-            : vOwnerServerId === gState.currentServerId
-                ? `${vOwnerServerId} (current)`
-                : vOwnerServerId;
-        const vExecuteTitle = bExecuting
-            ? "Executing..."
-            : bCanExecuteHere
-                ? "Execute"
-                : `Execute this request from ${vOwnerServerId || "the owner server"}`;
-        return `
-            <tr>
-                <td class="mngusers-nowrap">${escapeHtml(formatDateTime(objRequest.createdAt))}</td>
-                <td class="mngusers-nowrap">${escapeHtml(objRequest.fullName)}</td>
-                <td class="mngusers-nowrap">${escapeHtml(objRequest.email)}</td>
-                <td>${escapeHtml(getExecutionTriggerLabel(objRequest.triggerSource))}</td>
-                <td>${Number.isFinite(vStartQty) ? escapeHtml(String(vStartQty)) : "-"}</td>
-                <td>${Number.isFinite(vAvailableBalance) ? escapeHtml(`${vAvailableBalance.toFixed(2)} USD`) : "-"}</td>
-                <td>
-                    ${objRequest.execStrategy ? `<span class="mngusers-chip mngusers-chip-info">Enabled</span>` : `<span class="mngusers-chip mngusers-chip-muted">Disabled</span>`}
-                    <div class="mngusers-table-subtle">Owner: ${escapeHtml(vOwnerLabel)}</div>
-                </td>
-                <td class="mngusers-nowrap">
-                    <button class="mngusers-icon-btn execute" type="button" data-request-action="execute" data-request-id="${escapeHtml(objRequest.requestId)}" title="${escapeHtml(vExecuteTitle)}" aria-label="${escapeHtml(vExecuteTitle)}" ${bExecuting || !bCanExecuteHere ? "disabled" : ""}>
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M8 5v14l11-7z" fill="currentColor"></path>
-                        </svg>
-                    </button>
-                    <button class="mngusers-icon-btn cancel" type="button" data-request-action="cancel" data-request-id="${escapeHtml(objRequest.requestId)}" title="Cancel" aria-label="Cancel" ${bExecuting ? "disabled" : ""}>
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-                        </svg>
-                    </button>
-                </td>
-            </tr>
-        `;
-    }).join("");
-
-    renderPager(els.execRequestPager, {
-        page: objPaged.page,
-        totalItems: arrRequests.length,
-        totalPages: objPaged.totalPages,
-        onPageChange: (pPage) => {
-            gState.execRequestsPage = pPage;
-            renderExecutionRequests();
         }
     });
 }
@@ -623,39 +297,6 @@ function handleTableAction(objEvent) {
     }
 }
 
-function handleExecRequestAction(objEvent) {
-    const objButton = objEvent.target instanceof Element ? objEvent.target.closest("button[data-request-action]") : null;
-    if (!(objButton instanceof HTMLButtonElement)) {
-        return;
-    }
-
-    const vAction = String(objButton.dataset.requestAction || "").trim();
-    const vRequestId = String(objButton.dataset.requestId || "").trim();
-    if (vAction === "execute" && vRequestId) {
-        void executePendingRequest(vRequestId);
-        return;
-    }
-    if (vAction === "cancel" && vRequestId) {
-        void cancelPendingRequest(vRequestId);
-    }
-}
-
-function handleRunningUsersAction(objEvent) {
-    const objButton = objEvent.target instanceof Element ? objEvent.target.closest("button[data-running-action]") : null;
-    if (!(objButton instanceof HTMLButtonElement)) {
-        return;
-    }
-    const vAction = String(objButton.dataset.runningAction || "").trim();
-    const vAccountId = String(objButton.dataset.accountId || "").trim();
-    if (vAction === "force-takeover-here" && vAccountId) {
-        void forceTakeoverHere(vAccountId);
-        return;
-    }
-    if (vAction === "switch-primary" && vAccountId) {
-        void switchRunningUserToPrimary(vAccountId);
-    }
-}
-
 function openUserModal(pUser) {
     gState.editingAccountId = String(pUser?.accountId || "");
     setTextNode(els.modalTitle, gState.editingAccountId ? "Edit User" : "Add User");
@@ -674,10 +315,10 @@ function openUserModal(pUser) {
     setInputValue(els.confirmPassword, "");
     setCheckedNode(els.isActive, pUser ? Boolean(pUser.isActive) : true);
     setCheckedNode(els.execStrategy, pUser ? Boolean(pUser.execStrategy) : false);
+    setCheckedNode(els.isVerifier, pUser ? Boolean(pUser.isVerifier) : false);
     setCheckedNode(els.isAdmin, pUser ? Boolean(pUser.isAdmin) : false);
-    setCheckedNode(els.isSurvivalAdmin, pUser ? Boolean(pUser.isSurvivalAdmin) : false);
     setCheckedNode(els.mustChangePassword, pUser ? Boolean(pUser.mustChangePassword) : false);
-    syncSurvivalAdminFormState();
+    syncVerifierExecStrategyState();
 
     if (els.passwordFields instanceof HTMLElement) {
         els.passwordFields.hidden = Boolean(gState.editingAccountId);
@@ -751,8 +392,9 @@ async function submitUserForm(objEvent) {
         confirmPassword: getInputValue(els.confirmPassword),
         isActive: getCheckedNode(els.isActive),
         execStrategy: getCheckedNode(els.execStrategy),
+        isVerifier: getCheckedNode(els.isVerifier),
         isAdmin: getCheckedNode(els.isAdmin),
-        isSurvivalAdmin: getCheckedNode(els.isSurvivalAdmin),
+        isSurvivalAdmin: false,
         mustChangePassword: getCheckedNode(els.mustChangePassword)
     };
 
@@ -761,13 +403,8 @@ async function submitUserForm(objEvent) {
         return;
     }
 
-    if (objPayload.isSurvivalAdmin && objPayload.execStrategy) {
-        setFormMessage(els.modalMessage, "A Survival Admin account cannot have Exec Strategy enabled.", "error");
-        return;
-    }
-
-    if (objPayload.isSurvivalAdmin && gState.editingAccountId && gState.editingAccountId === gState.currentAccountId) {
-        setFormMessage(els.modalMessage, "Use a different dedicated account for Survival Admin access.", "error");
+    if (objPayload.isVerifier && objPayload.execStrategy) {
+        setFormMessage(els.modalMessage, "Verifier and Exec Strategy cannot both be enabled.", "error");
         return;
     }
 
@@ -814,17 +451,6 @@ async function submitUserForm(objEvent) {
     finally {
         gState.isSavingUser = false;
         setButtonBusy(els.saveUserButton, false, "Save User");
-    }
-}
-
-function syncSurvivalAdminFormState() {
-    const bSurvivalAdmin = getCheckedNode(els.isSurvivalAdmin);
-    if (els.execStrategy instanceof HTMLInputElement) {
-        els.execStrategy.disabled = bSurvivalAdmin;
-    }
-
-    if (bSurvivalAdmin) {
-        setCheckedNode(els.execStrategy, false);
     }
 }
 
@@ -900,166 +526,20 @@ async function deleteUser(pUser) {
     }
 }
 
-async function executePendingRequest(pRequestId) {
-    if (!pRequestId || gState.executingRequestId) {
+function syncVerifierExecStrategyState(objEvent) {
+    const objTarget = objEvent?.target;
+    if (objTarget === els.execStrategy && getCheckedNode(els.execStrategy)) {
+        setCheckedNode(els.isVerifier, false);
         return;
     }
 
-    gState.executingRequestId = pRequestId;
-    renderExecutionRequests();
-
-    try {
-        const objResult = await requestJson(`/api/admin/strategy-execution-requests/${encodeURIComponent(pRequestId)}/execute`, {
-            method: "POST",
-            credentials: "same-origin"
-        }, "Unable to execute the pending strategy request.");
-
-        setPageStatus(objResult.message || "Strategy executed successfully.", "success");
-        await loadAdminData();
-    }
-    catch (objError) {
-        setPageStatus(getErrorMessage(objError, "Unable to execute the pending strategy request."), "error");
-        await loadExecutionRequests().catch(() => undefined);
-    }
-    finally {
-        gState.executingRequestId = "";
-        renderExecutionRequests();
-    }
-}
-
-async function cancelPendingRequest(pRequestId) {
-    if (!pRequestId || gState.executingRequestId) {
+    if (objTarget === els.isVerifier && getCheckedNode(els.isVerifier)) {
+        setCheckedNode(els.execStrategy, false);
         return;
     }
 
-    const objRequest = gState.pendingExecutionRequests.find((objRow) => objRow.requestId === pRequestId);
-    const vConfirmed = window.confirm(`Cancel the pending strategy execution request for ${objRequest?.fullName || "this user"}?`);
-    if (!vConfirmed) {
-        return;
-    }
-
-    gState.executingRequestId = pRequestId;
-    renderExecutionRequests();
-
-    try {
-        const objResult = await requestJson(`/api/admin/strategy-execution-requests/${encodeURIComponent(pRequestId)}`, {
-            method: "DELETE",
-            credentials: "same-origin"
-        }, "Unable to cancel the pending strategy request.");
-
-        setPageStatus(objResult.message || "Pending strategy request cancelled successfully.", "success");
-        await loadAdminData();
-    }
-    catch (objError) {
-        setPageStatus(getErrorMessage(objError, "Unable to cancel the pending strategy request."), "error");
-        await loadExecutionRequests().catch(() => undefined);
-    }
-    finally {
-        gState.executingRequestId = "";
-        renderExecutionRequests();
-    }
-}
-
-async function switchRunningUserToPrimary(pAccountId) {
-    if (!pAccountId || gState.switchingPrimaryAccountId) {
-        return;
-    }
-
-    const objUser = gState.runningUsers.find((objRow) => objRow.accountId === pAccountId);
-    const vConfirmed = window.confirm(`Switch ${objUser?.fullName || "this running user"} back to Primary DB control now?`);
-    if (!vConfirmed) {
-        return;
-    }
-
-    gState.switchingPrimaryAccountId = pAccountId;
-    renderRunningUsers();
-
-    try {
-        const objResult = await requestJson(`/api/rollingfutures-lt-dual/admin/running-users/${encodeURIComponent(pAccountId)}/switch-primary`, {
-            method: "POST",
-            credentials: "same-origin"
-        }, "Unable to switch this running strategy back to Primary DB.");
-        setPageStatus(objResult.message || "Strategy switched back to Primary DB successfully.", "success");
-        await loadAdminData();
-    }
-    catch (objError) {
-        setPageStatus(getErrorMessage(objError, "Unable to switch this running strategy back to Primary DB."), "error");
-        await loadRunningUsers().catch(() => undefined);
-    }
-    finally {
-        gState.switchingPrimaryAccountId = "";
-        renderRunningUsers();
-    }
-}
-
-async function forceTakeoverHere(pAccountId) {
-    if (!pAccountId) {
-        return;
-    }
-
-    const objUser = gState.runningUsers.find((objRow) => objRow.accountId === pAccountId);
-    const vTargetServer = gState.currentServerId || "this server";
-    const vConfirmed = window.confirm(`Force takeover of ${objUser?.fullName || "this running user"} to ${vTargetServer}?`);
-    if (!vConfirmed) {
-        return;
-    }
-
-    try {
-        const objResult = await requestJson(`/api/rollingfutures-lt-dual/admin/running-users/${encodeURIComponent(pAccountId)}/force-takeover-here`, {
-            method: "POST",
-            credentials: "same-origin"
-        }, "Unable to force takeover to this server.");
-        setPageStatus(objResult.message || `Strategy assigned to ${vTargetServer}.`, "success");
-        await loadAdminData();
-    }
-    catch (objError) {
-        setPageStatus(getErrorMessage(objError, "Unable to force takeover to this server."), "error");
-        await loadRunningUsers().catch(() => undefined);
-    }
-}
-
-async function setSimulatedPrimaryOutage(pAccountId, pEnabled) {
-    if (!pAccountId || gState.simulatingPrimaryOutageAccountId) {
-        return;
-    }
-
-    const objUser = gState.runningUsers.find((objRow) => objRow.accountId === pAccountId);
-    const vConfirmed = window.confirm(
-        pEnabled
-            ? `Simulate Primary DB outage now for ${objUser?.fullName || "this running user"}?`
-            : `Clear the simulated Primary DB outage for ${objUser?.fullName || "this running user"}?`
-    );
-    if (!vConfirmed) {
-        return;
-    }
-
-    gState.simulatingPrimaryOutageAccountId = pAccountId;
-    renderRunningUsers();
-
-    try {
-        const objResult = await requestJson(`/api/rollingfutures-lt-dual/admin/running-users/${encodeURIComponent(pAccountId)}/simulate-primary-outage`, {
-            method: pEnabled ? "POST" : "DELETE",
-            credentials: "same-origin"
-        }, pEnabled
-            ? "Unable to enable simulated Primary DB outage."
-            : "Unable to clear simulated Primary DB outage.");
-        setPageStatus(
-            objResult.message || (pEnabled
-                ? "Simulated Primary DB outage enabled."
-                : "Simulated Primary DB outage cleared."),
-            "success"
-        );
-        await loadAdminData();
-    }
-    catch (objError) {
-        setPageStatus(getErrorMessage(objError, pEnabled
-            ? "Unable to enable simulated Primary DB outage."
-            : "Unable to clear simulated Primary DB outage."), "error");
-        await loadRunningUsers().catch(() => undefined);
-    }
-    finally {
-        gState.simulatingPrimaryOutageAccountId = "";
-        renderRunningUsers();
+    if (getCheckedNode(els.isVerifier) && getCheckedNode(els.execStrategy)) {
+        setCheckedNode(els.execStrategy, false);
     }
 }
 
@@ -1161,20 +641,6 @@ function getCheckedNode(pNode) {
 function formatDateTime(pValue) {
     const objDate = new Date(pValue);
     return Number.isNaN(objDate.getTime()) ? "-" : objDate.toLocaleString("en-IN");
-}
-
-function getExecutionTriggerLabel(pTriggerSource) {
-    const vTriggerSource = String(pTriggerSource || "").trim().toLowerCase();
-    if (vTriggerSource === "manual_exec_strategy") {
-        return "Manual Exec Strategy";
-    }
-    if (vTriggerSource === "brokerage_profit_reentry") {
-        return "Brokerage Profit Trigger";
-    }
-    if (vTriggerSource === "blocked_margin_profit_reentry") {
-        return "Blocked Margin Trigger";
-    }
-    return vTriggerSource ? vTriggerSource.replaceAll("_", " ") : "-";
 }
 
 function escapeHtml(pValue) {

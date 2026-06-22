@@ -15,23 +15,12 @@ import {
 import { loadRollingFuturesLtRuntime } from "../../storage/rolling-futures-lt-runtime-store";
 import { getStrategyLease } from "../../storage/strategy-lease-store";
 import { getSurvivalState } from "../../storage/survival-store";
-import {
-    deletePendingStrategyExecutionRequest,
-    listPendingStrategyExecutionRequests
-} from "../../storage/strategy-execution-request-store";
-import {
-    getPendingStrategyAutoExecSettings,
-    savePendingStrategyAutoExecSettings
-} from "../../storage/admin-settings-store";
-import { executePendingRollingFuturesLtDualStrategyRequest } from "./rolling-futures-lt-controller";
 import type { RunnerManager } from "../../runners/runner-manager";
-import { getServerId } from "../../runtime/server-runtime";
 
 export function renderMngUsersPage(req: Request, res: Response): void {
     res.render("mngusers", {
         pageTitle: "MngUsers | Optionyze",
-        currentAccount: req.authAccount,
-        currentServerId: getServerId()
+        currentAccount: req.authAccount
     });
 }
 
@@ -46,97 +35,6 @@ export async function listManagedUsersController(_req: Request, res: Response): 
     }
     catch (objError) {
         res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to load managed users.") });
-    }
-}
-
-export async function listPendingStrategyExecutionRequestsController(_req: Request, res: Response): Promise<void> {
-    try {
-        const arrRequests = await listPendingStrategyExecutionRequests();
-        const vCurrentServerId = String(getServerId() || "").trim().toLowerCase();
-        const arrEnrichedRequests = await Promise.all(arrRequests.map(async (objRequest) => {
-            let vPrimaryOwnerServerId = "";
-            let vSurvivalOwnerServerId = "";
-
-            try {
-                const [objRuntime, objLease, objSurvival] = await Promise.all([
-                    loadRollingFuturesLtRuntime(objRequest.accountId, "rolling-futures-lt-dual"),
-                    getStrategyLease(objRequest.accountId, "rolling-futures-lt-dual"),
-                    getSurvivalState(objRequest.accountId, "rolling-futures-lt-dual")
-                ]);
-                const vLeaseExpiresAtMs = objLease?.leaseExpiresAt ? new Date(objLease.leaseExpiresAt).getTime() : Number.NaN;
-                const bRuntimeRunning = Boolean(
-                    objRuntime?.autoTraderEnabled
-                    && String(objRuntime.status || "").trim().toLowerCase() === "running"
-                );
-                const bActiveLease = Boolean(objLease && bRuntimeRunning && Number.isFinite(vLeaseExpiresAtMs) && vLeaseExpiresAtMs > Date.now());
-                vPrimaryOwnerServerId = bActiveLease ? String(objLease?.ownerServerId || "").trim().toLowerCase() : "";
-
-                const bActiveSurvival = String(objSurvival?.runStatus || "").trim().toLowerCase() === "active";
-                vSurvivalOwnerServerId = bActiveSurvival
-                    ? String(objSurvival?.ownerServerId || "").trim().toLowerCase()
-                    : "";
-            }
-            catch {
-                vPrimaryOwnerServerId = "";
-                vSurvivalOwnerServerId = "";
-            }
-
-            const vEffectiveOwnerServerId = vPrimaryOwnerServerId || vSurvivalOwnerServerId;
-            return {
-                ...objRequest,
-                ownerServerId: vEffectiveOwnerServerId || "-",
-                primaryOwnerServerId: vPrimaryOwnerServerId || "-",
-                survivalOwnerServerId: vSurvivalOwnerServerId || "-",
-                canExecuteHere: !vEffectiveOwnerServerId || vEffectiveOwnerServerId === vCurrentServerId
-            };
-        }));
-        res.json({ status: "success", data: arrEnrichedRequests });
-    }
-    catch (objError) {
-        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to load pending strategy execution requests.") });
-    }
-}
-
-export async function executePendingStrategyExecutionRequestController(req: Request, res: Response): Promise<void> {
-    await executePendingRollingFuturesLtDualStrategyRequest(req, res);
-}
-
-export async function cancelPendingStrategyExecutionRequestController(req: Request, res: Response): Promise<void> {
-    const vRequestId = String(req.params.requestId || "").trim();
-    if (!vRequestId) {
-        res.status(400).json({ status: "warning", message: "Execution request id is required." });
-        return;
-    }
-
-    try {
-        await deletePendingStrategyExecutionRequest(vRequestId);
-        res.json({ status: "success", message: "Pending strategy execution request cancelled successfully." });
-    }
-    catch (objError) {
-        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to cancel pending strategy execution request.") });
-    }
-}
-
-export async function getPendingStrategyAutoExecSettingsController(_req: Request, res: Response): Promise<void> {
-    try {
-        const objSettings = await getPendingStrategyAutoExecSettings();
-        res.json({ status: "success", data: objSettings });
-    }
-    catch (objError) {
-        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to load pending strategy auto-exec settings.") });
-    }
-}
-
-export async function savePendingStrategyAutoExecSettingsController(req: Request, res: Response): Promise<void> {
-    try {
-        const objSettings = await savePendingStrategyAutoExecSettings({
-            slEnabled: req.body?.slEnabled !== false,
-            tpEnabled: Boolean(req.body?.tpEnabled)
-        });
-        res.json({ status: "success", message: "Auto execution settings saved successfully.", data: objSettings });
-    }
-    catch (objError) {
-        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to save pending strategy auto-exec settings.") });
     }
 }
 
@@ -257,6 +155,7 @@ function readCreateAccountInput(req: Request): CreateAccountInput {
         password: String(req.body?.password || ""),
         isAdmin: Boolean(req.body?.isAdmin),
         isSurvivalAdmin: Boolean(req.body?.isSurvivalAdmin),
+        isVerifier: Boolean(req.body?.isVerifier),
         execStrategy: Boolean(req.body?.execStrategy),
         isActive: req.body?.isActive !== false,
         mustChangePassword: Boolean(req.body?.mustChangePassword)
@@ -272,6 +171,7 @@ function readUpdateAccountInput(req: Request): UpdateAccountInput {
         isActive: Boolean(req.body?.isActive),
         isAdmin: Boolean(req.body?.isAdmin),
         isSurvivalAdmin: Boolean(req.body?.isSurvivalAdmin),
+        isVerifier: Boolean(req.body?.isVerifier),
         execStrategy: Boolean(req.body?.execStrategy),
         mustChangePassword: Boolean(req.body?.mustChangePassword)
     };
@@ -279,6 +179,7 @@ function readUpdateAccountInput(req: Request): UpdateAccountInput {
 
 function validateCreateManagedUser(pInput: CreateAccountInput, pConfirmPassword: string): void {
     validateManagedUserBasics(pInput.fullName, pInput.email, pInput.mobileNo, pInput.telegramChatId);
+    validateVerifierInput(Boolean(pInput.isVerifier), Boolean(pInput.execStrategy));
 
     if (pInput.password.length < 3) {
         throw new Error("Password must be at least 3 characters long.");
@@ -291,6 +192,7 @@ function validateCreateManagedUser(pInput: CreateAccountInput, pConfirmPassword:
 
 function validateManagedUserUpdate(pInput: UpdateAccountInput): void {
     validateManagedUserBasics(pInput.fullName, pInput.email, pInput.mobileNo, pInput.telegramChatId);
+    validateVerifierInput(pInput.isVerifier, pInput.execStrategy);
 }
 
 async function assertSurvivalAdminEligibilityForCreate(req: Request, pInput: CreateAccountInput): Promise<void> {
@@ -342,6 +244,12 @@ function validateSurvivalAdminInput(req: Request, pAccountId: string, pIsSurviva
 
     if (req.authAccount?.accountId && req.authAccount.accountId === pAccountId) {
         throw new Error("Use a different dedicated account for Survival Admin access.");
+    }
+}
+
+function validateVerifierInput(pIsVerifier: boolean, pExecStrategy: boolean): void {
+    if (pIsVerifier && pExecStrategy) {
+        throw new Error("Verifier and Exec Strategy cannot both be enabled.");
     }
 }
 

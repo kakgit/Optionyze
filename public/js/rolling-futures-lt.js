@@ -21,9 +21,11 @@
     const deltaUiTimezoneOffsetMinutes = 5.5 * 60;
     const currentAccountId = String(document.body?.dataset?.currentAccountId || "").trim();
     const currentAccountIsAdmin = String(document.body?.dataset?.currentAccountAdmin || "").trim().toLowerCase() === "true";
+    const currentAccountIsVerifier = String(document.body?.dataset?.currentAccountVerifier || "").trim().toLowerCase() === "true";
     const currentAccountFullName = String(document.body?.dataset?.currentAccountFullName || "").trim();
     const currentAccountEmail = String(document.body?.dataset?.currentAccountEmail || "").trim();
     const currentAccountTelegramChatId = String(document.body?.dataset?.currentAccountTelegramChatId || "").trim();
+    const requiresExplicitTargetSelection = isCoveredMode && currentAccountIsVerifier;
     const symbolConfig = {
         BTC: { contractName: "BTCUSD", lotSize: 0.001 },
         ETH: { contractName: "ETHUSD", lotSize: 0.01 }
@@ -50,14 +52,6 @@
         openRenkoSignal: document.getElementById(`${prefix}OpenRenkoSignal`),
         autoTraderButton: document.getElementById("btnRollingFuturesDemoAutoTrader"),
         pageStatus: document.getElementById(`${prefix}PageStatus`),
-        queueStatus: document.getElementById(`${prefix}QueueStatus`),
-        queueTotal: document.getElementById(`${prefix}QueueTotal`),
-        queuePending: document.getElementById(`${prefix}QueuePending`),
-        queueProcessing: document.getElementById(`${prefix}QueueProcessing`),
-        queueFailed: document.getElementById(`${prefix}QueueFailed`),
-        queueMeta: document.getElementById(`${prefix}QueueMeta`),
-        queueItems: document.getElementById(`${prefix}QueueItems`),
-        queueHistory: document.getElementById(`${prefix}QueueHistory`),
         importStatus: document.getElementById(`${prefix}ImportStatus`),
         resetDefaultsButton: document.getElementById("btnRollingFuturesResetDefaults"),
         showSavedProfileButton: document.getElementById("btnRollingFuturesShowSavedProfile"),
@@ -181,14 +175,22 @@
     let closedFiltersRefreshTimer = null;
     let lastClosedPositionsRefreshAt = "";
     let adminRunningUsers = [];
-    let targetUserId = currentAccountId;
-    let currentTargetAccount = {
-        accountId: currentAccountId,
-        fullName: currentAccountFullName,
-        email: currentAccountEmail,
-        telegramChatId: currentAccountTelegramChatId,
-        execStrategy: initialExecStrategyEnabled
-    };
+    let targetUserId = requiresExplicitTargetSelection ? "" : currentAccountId;
+    let currentTargetAccount = requiresExplicitTargetSelection
+        ? {
+            accountId: "",
+            fullName: "",
+            email: "",
+            telegramChatId: "",
+            execStrategy: false
+        }
+        : {
+            accountId: currentAccountId,
+            fullName: currentAccountFullName,
+            email: currentAccountEmail,
+            telegramChatId: currentAccountTelegramChatId,
+            execStrategy: initialExecStrategyEnabled
+        };
     let lastNeutralStatus = null;
     let lastRecoveryMetrics = null;
     let pendingLiveConfirmation = null;
@@ -244,6 +246,7 @@
                 ids.availableBalanceValue.title = `Estimated available balance from Total Balance ${vTotalBalance.toFixed(2)} USD - Required Margin ${vRequiredMargin.toFixed(2)} USD`;
             }
         }
+        renderNetPnlValue();
     }
 
     function ensureCoveredExecBalance() {
@@ -694,188 +697,18 @@
         if (Number.isNaN(objDate.getTime())) {
             return "";
         }
-        return formatDateTimeInputValue(objDate).replace("T", " ");
-    }
-
-    function formatCoveredQueueSummary(summary) {
-        const objSummary = summary && typeof summary === "object" ? summary : null;
-        if (!objSummary) {
-            return {
-                message: "",
-                tone: ""
-            };
-        }
-        const vTotal = Number(objSummary.total || 0);
-        const vPending = Number(objSummary.pending || 0);
-        const vProcessing = Number(objSummary.processing || 0);
-        const vFailed = Number(objSummary.failed || 0);
-        const vNextActionType = String(objSummary.nextActionType || "").trim().toUpperCase();
-        const vNextRunAt = formatRuntimeStatusDateTime(objSummary.nextRunAt);
-        const vCooldownEndsAt = formatRuntimeStatusDateTime(objSummary.cooldownEndsAt);
-        const vThrottleMode = String(objSummary.throttleMode || "local").trim().toLowerCase() === "shared"
-            ? "shared"
-            : "local";
-        const vOwnerServerId = String(objSummary.throttleOwnerServerId || "").trim();
-
-        if (!vTotal && !vCooldownEndsAt) {
-            return {
-                message: "Queue idle.",
-                tone: "success"
-            };
-        }
-
-        const arrBits = [`Queue ${vTotal} total`];
-        if (vPending) {
-            arrBits.push(`${vPending} pending`);
-        }
-        if (vProcessing) {
-            arrBits.push(`${vProcessing} processing`);
-        }
-        if (vFailed) {
-            arrBits.push(`${vFailed} failed`);
-        }
-        if (vNextActionType) {
-            arrBits.push(`next ${vNextActionType}${vNextRunAt ? ` at ${vNextRunAt}` : ""}`);
-        }
-        if (vCooldownEndsAt) {
-            arrBits.push(`${vThrottleMode} gap until ${vCooldownEndsAt}${vOwnerServerId ? ` via ${vOwnerServerId}` : ""}`);
-        }
-
-        return {
-            message: arrBits.join(" | "),
-            tone: vFailed ? "danger" : (vTotal ? "warning" : "success")
-        };
-    }
-
-    function formatCoveredQueueActionLabel(actionType) {
-        const value = String(actionType || "").trim().toLowerCase();
-        if (value === "sl") {
-            return "SL";
-        }
-        if (value === "tp") {
-            return "TP";
-        }
-        if (value === "covered_reentry") {
-            return "Covered Re-Entry";
-        }
-        if (value === "expiry_rollover") {
-            return "Expiry Rollover";
-        }
-        return "Exec Strategy";
-    }
-
-    function formatCoveredQueueItemStatus(status) {
-        const value = String(status || "").trim().toLowerCase();
-        if (value === "processing") {
-            return "Processing";
-        }
-        if (value === "failed") {
-            return "Failed";
-        }
-        return "Pending";
-    }
-
-    function renderCoveredQueuePanel(summary) {
-        const objSummary = summary && typeof summary === "object" ? summary : null;
-        if (!isCoveredMode) {
-            return;
-        }
-        if (ids.queueTotal) {
-            ids.queueTotal.textContent = String(Number(objSummary?.total || 0));
-        }
-        if (ids.queuePending) {
-            ids.queuePending.textContent = String(Number(objSummary?.pending || 0));
-        }
-        if (ids.queueProcessing) {
-            ids.queueProcessing.textContent = String(Number(objSummary?.processing || 0));
-        }
-        if (ids.queueFailed) {
-            ids.queueFailed.textContent = String(Number(objSummary?.failed || 0));
-        }
-
-        const vNextAction = formatCoveredQueueActionLabel(objSummary?.nextActionType || "");
-        const vNextRunAt = formatRuntimeStatusDateTime(objSummary?.nextRunAt || "");
-        const vCooldownEndsAt = formatRuntimeStatusDateTime(objSummary?.cooldownEndsAt || "");
-        const vOwnerServerId = String(objSummary?.throttleOwnerServerId || "").trim();
-        const vThrottleMode = String(objSummary?.throttleMode || "").trim().toLowerCase() === "shared" ? "shared" : "local";
-        const arrMeta = [];
-        if (String(objSummary?.nextActionType || "").trim()) {
-            arrMeta.push(`Next ${vNextAction}${vNextRunAt ? ` at ${vNextRunAt}` : ""}`);
-        }
-        if (vCooldownEndsAt) {
-            arrMeta.push(`${vThrottleMode} gap until ${vCooldownEndsAt}${vOwnerServerId ? ` via ${vOwnerServerId}` : ""}`);
-        }
-        setStatus(ids.queueMeta, arrMeta.join(" | ") || "No queued items right now.", Number(objSummary?.failed || 0) ? "danger" : (Number(objSummary?.total || 0) ? "warning" : "success"));
-
-        const arrItems = Array.isArray(objSummary?.recentItems) ? objSummary.recentItems : [];
-        if (ids.queueItems) {
-            ids.queueItems.innerHTML = arrItems.length
-                ? arrItems.map(function (item) {
-                    const vAction = formatCoveredQueueActionLabel(item.actionType);
-                    const vStatus = formatCoveredQueueItemStatus(item.status);
-                    const vRunAt = formatRuntimeStatusDateTime(item.runAt);
-                    const vStartedAt = formatRuntimeStatusDateTime(item.startedAt);
-                    const vFinishedAt = formatRuntimeStatusDateTime(item.finishedAt);
-                    const vLastError = String(item.lastError || "").trim();
-                    const arrBits = [`Status: ${vStatus}`];
-                    if (vRunAt) {
-                        arrBits.push(`Run At: ${vRunAt}`);
-                    }
-                    if (vStartedAt) {
-                        arrBits.push(`Started: ${vStartedAt}`);
-                    }
-                    if (vFinishedAt) {
-                        arrBits.push(`Finished: ${vFinishedAt}`);
-                    }
-                    if (Number(item.attemptCount || 0) > 0) {
-                        arrBits.push(`Attempts: ${Number(item.attemptCount || 0)}`);
-                    }
-                    return `
-                        <article class="rolling-demo-event-item ${escapeHtml(String(item.status || "pending").trim().toLowerCase() === "failed" ? "error" : (String(item.status || "").trim().toLowerCase() === "processing" ? "info" : "success"))}">
-                            <div class="rolling-demo-event-head">
-                                <div class="rolling-demo-event-title-stack">
-                                    <strong class="rolling-demo-event-title">${escapeHtml(vAction)}</strong>
-                                </div>
-                            </div>
-                            <p class="rolling-demo-event-message">${escapeHtml(arrBits.join(" | "))}</p>
-                            ${vLastError ? `<p class="rolling-demo-event-message">${escapeHtml(vLastError)}</p>` : ""}
-                        </article>
-                    `;
-                }).join("")
-                : "<div class=\"rolling-demo-event-empty\">No queued items right now.</div>";
-        }
-
-        const arrHistory = Array.isArray(objSummary?.recentHistory) ? objSummary.recentHistory : [];
-        if (ids.queueHistory) {
-            ids.queueHistory.innerHTML = arrHistory.length
-                ? arrHistory.map(function (item) {
-                    const vFinishedAt = formatRuntimeStatusDateTime(item.finishedAt || item.createdAt);
-                    const vTone = item.outcome === "failed"
-                        ? "error"
-                        : (item.outcome === "retry_scheduled" || item.outcome === "recovered" || item.outcome === "skipped"
-                            ? "warning"
-                            : "success");
-                    const vDetail = String(item.detail || "").trim();
-                    const vLastError = String(item.lastError || "").trim();
-                    return `
-                        <article class="rolling-demo-event-item ${escapeHtml(vTone)}">
-                            <div class="rolling-demo-event-head">
-                                <div class="rolling-demo-event-title-stack">
-                                    <strong class="rolling-demo-event-title">${escapeHtml(String(item.title || "Queue History").trim())}</strong>
-                                </div>
-                                <span class="rolling-demo-event-time">${escapeHtml(vFinishedAt || "-")}</span>
-                            </div>
-                            <p class="rolling-demo-event-message">${escapeHtml(vDetail || "-")}</p>
-                            ${vLastError ? `<p class="rolling-demo-event-message">${escapeHtml(vLastError)}</p>` : ""}
-                        </article>
-                    `;
-                }).join("")
-                : "<div class=\"rolling-demo-event-empty\">No queue history yet.</div>";
-        }
+        const objDeltaDate = new Date(objDate.getTime() + (deltaUiTimezoneOffsetMinutes * 60 * 1000));
+        const day = String(objDeltaDate.getUTCDate()).padStart(2, "0");
+        const month = String(objDeltaDate.getUTCMonth() + 1).padStart(2, "0");
+        const year = String(objDeltaDate.getUTCFullYear());
+        const hour = String(objDeltaDate.getUTCHours()).padStart(2, "0");
+        const minute = String(objDeltaDate.getUTCMinutes()).padStart(2, "0");
+        return `${day}-${month}-${year} ${hour}:${minute}`;
     }
 
     function isAdminTargetModeActive() {
-        return mode === "dual" && currentAccountIsAdmin;
+        return (mode === "dual" && currentAccountIsAdmin)
+            || (mode === "covered" && currentAccountIsVerifier);
     }
 
     function getEffectiveTargetUserId() {
@@ -917,6 +750,10 @@
         const objTarget = currentTargetAccount || {};
         const vFullName = String(objTarget.fullName || "").trim();
         const vEmail = String(objTarget.email || "").trim();
+        if (requiresExplicitTargetSelection && !String(objTarget.accountId || "").trim()) {
+            ids.adminTargetMeta.textContent = "Select a running Covered Options user to load settings and positions.";
+            return;
+        }
         ids.adminTargetMeta.textContent = vFullName
             ? `Viewing ${vFullName}${vEmail ? ` (${vEmail})` : ""}.`
             : "Choose a running Dual strategy user to view or control.";
@@ -929,6 +766,10 @@
         const objTarget = currentTargetAccount || {};
         const vChatId = String(objTarget.telegramChatId || "").trim();
         const vFullName = String(objTarget.fullName || "").trim();
+        if (requiresExplicitTargetSelection && !String(objTarget.accountId || "").trim()) {
+            ids.telegramNotice.innerHTML = "Select a running Covered Options user to view Telegram details.";
+            return;
+        }
         if (vChatId) {
             ids.telegramNotice.innerHTML = isAdminTargetModeActive() && vFullName
                 ? `Telegram Chat ID for <strong>${escapeHtml(vFullName)}</strong>: <strong>${escapeHtml(vChatId)}</strong>`
@@ -1158,6 +999,43 @@
         };
     }
 
+    function getCoveredNetPnlReferenceMargin() {
+        if (!isCoveredMode) {
+            return Number.NaN;
+        }
+        const vBlockedMarginDisplay = Number(lastAccountSummary?.blockedMarginDisplay);
+        if (Number.isFinite(vBlockedMarginDisplay) && vBlockedMarginDisplay > 0) {
+            return vBlockedMarginDisplay;
+        }
+        const vBlockedMargin = Number(lastAccountSummary?.blockedMargin);
+        if (Number.isFinite(vBlockedMargin) && vBlockedMargin > 0) {
+            return vBlockedMargin;
+        }
+        const vRequiredMargin = getCoveredRequiredBlockedMargin(getCoveredMultiplierValue());
+        return Number.isFinite(vRequiredMargin) && vRequiredMargin > 0 ? vRequiredMargin : Number.NaN;
+    }
+
+    function renderNetPnlValue() {
+        if (!ids.netPl) {
+            return;
+        }
+        const vNetPnl = Number(lastRecoveryMetrics?.netPnl);
+        const vNetPnlText = fmt(vNetPnl, 4) === "-" ? "0.0000" : fmt(vNetPnl, 4);
+        if (!isCoveredMode) {
+            ids.netPl.textContent = vNetPnlText;
+            return;
+        }
+        const vReferenceMargin = getCoveredNetPnlReferenceMargin();
+        if (!Number.isFinite(vNetPnl) || !Number.isFinite(vReferenceMargin) || vReferenceMargin <= 0) {
+            ids.netPl.textContent = vNetPnlText;
+            ids.netPl.removeAttribute("title");
+            return;
+        }
+        const vRoundedPct = Math.round((vNetPnl / vReferenceMargin) * 100);
+        ids.netPl.textContent = `${vNetPnlText} (${vRoundedPct}%)`;
+        ids.netPl.title = `Net PnL as percentage of blocked margin ${vReferenceMargin.toFixed(2)} USD`;
+    }
+
     function applyRecoveryMetrics(recoveryMetrics) {
         const objMetrics = recoveryMetrics || {};
         lastRecoveryMetrics = objMetrics;
@@ -1167,9 +1045,7 @@
         if (ids.yet2Recover instanceof HTMLInputElement) {
             ids.yet2Recover.value = fmt(objMetrics.totalPnl, 4) === "-" ? "0" : fmt(objMetrics.totalPnl, 4);
         }
-        if (ids.netPl) {
-            ids.netPl.textContent = fmt(objMetrics.netPnl, 4) === "-" ? "0.0000" : fmt(objMetrics.netPnl, 4);
-        }
+        renderNetPnlValue();
     }
 
     function mergeRuntimeRecoveryMetrics(runtimeState) {
@@ -1288,11 +1164,6 @@
             queueClosedPositionsRefresh();
         }
         updateNeutralBadges(lastNeutralStatus);
-        if (isCoveredMode) {
-            const objQueueStatus = formatCoveredQueueSummary(objRuntime.coveredQueueSummary || null);
-            setStatus(ids.queueStatus, objQueueStatus.message, objQueueStatus.tone);
-            renderCoveredQueuePanel(objRuntime.coveredQueueSummary || null);
-        }
         renderPendingLiveConfirmation();
         setButtonsEnabled();
     }
@@ -1660,6 +1531,21 @@
             return;
         }
         const arrUsers = Array.isArray(users) ? users : [];
+        if (requiresExplicitTargetSelection) {
+            ids.adminTargetUser.innerHTML = [
+                `<option value="">Select running user</option>`,
+                ...arrUsers.map(function (user) {
+                    const vAccountId = String(user.accountId || "").trim();
+                    const vFullName = String(user.fullName || "User").trim();
+                    const vEmail = String(user.email || "").trim();
+                    const vLabel = vEmail ? `${vFullName} (${vEmail})` : vFullName;
+                    return `<option value="${escapeHtml(vAccountId)}">${escapeHtml(vLabel)}</option>`;
+                })
+            ].join("");
+            ids.adminTargetUser.disabled = false;
+            ids.adminTargetUser.value = targetUserId || "";
+            return;
+        }
         const arrOtherRunningUsers = arrUsers.filter(function (user) {
             return String(user.accountId || "").trim() !== currentAccountId;
         });
@@ -1686,6 +1572,36 @@
         }
         const objResult = await getJson(`${endpointBase}/admin/running-users`);
         adminRunningUsers = Array.isArray(objResult?.data) ? objResult.data : [];
+        if (requiresExplicitTargetSelection) {
+            const bCurrentSelectionValid = adminRunningUsers.some(function (user) {
+                return String(user.accountId || "").trim() === targetUserId;
+            });
+            if (!bCurrentSelectionValid) {
+                targetUserId = "";
+            }
+            renderAdminRunningUsers(adminRunningUsers);
+            const objSelectedUser = adminRunningUsers.find(function (user) {
+                return String(user.accountId || "").trim() === targetUserId;
+            });
+            currentTargetAccount = objSelectedUser
+                ? {
+                    accountId: String(objSelectedUser.accountId || "").trim(),
+                    fullName: String(objSelectedUser.fullName || "").trim(),
+                    email: String(objSelectedUser.email || "").trim(),
+                    telegramChatId: String(objSelectedUser.telegramChatId || "").trim(),
+                    execStrategy: Boolean(objSelectedUser.execStrategy)
+                }
+                : {
+                    accountId: "",
+                    fullName: "",
+                    email: "",
+                    telegramChatId: "",
+                    execStrategy: false
+                };
+            updateAdminTargetMeta();
+            updateTelegramNotice();
+            return;
+        }
         if (!adminRunningUsers.length) {
             targetUserId = currentAccountId;
             currentTargetAccount = {
@@ -1733,7 +1649,7 @@
     }
 
     async function loadApiProfiles() {
-        const objResult = await getJson("/api/account/delta-api-profiles");
+        const objResult = await getJson(withTargetUrl("/api/account/delta-api-profiles"));
         const arrProfiles = Array.isArray(objResult?.data) ? objResult.data : [];
         if (!(ids.apiProfile instanceof HTMLSelectElement)) {
             return;
@@ -3467,6 +3383,27 @@
         renderEvents([]);
         renderOpenPositions([]);
         renderClosedPositions([]);
+        clearAccountSummary();
+        applyConnectionStatus({
+            state: "not_selected",
+            message: requiresExplicitTargetSelection && !getEffectiveTargetUserId()
+                ? "Select a running Covered Options user to load settings."
+                : ""
+        });
+        applyRuntimeStatus({
+            status: "idle",
+            autoTraderEnabled: false,
+            state: {}
+        });
+        applyUiState({});
+        if (requiresExplicitTargetSelection && !getEffectiveTargetUserId()) {
+            if (ids.apiProfile instanceof HTMLSelectElement) {
+                ids.apiProfile.innerHTML = "<option value=\"\">Select API profile</option>";
+                ids.apiProfile.value = "";
+            }
+            setButtonsEnabled();
+            return;
+        }
         await loadApiProfiles();
         await loadProfile();
         await Promise.all([
@@ -3486,7 +3423,7 @@
 
     ids.adminTargetUser?.addEventListener("change", function () {
         const vNextTargetUserId = String(ids.adminTargetUser instanceof HTMLSelectElement ? ids.adminTargetUser.value : "").trim();
-        if (!vNextTargetUserId || vNextTargetUserId === targetUserId) {
+        if (vNextTargetUserId === targetUserId) {
             return;
         }
         targetUserId = vNextTargetUserId;
@@ -3506,12 +3443,27 @@
                 execStrategy: Boolean(objSelectedUser.execStrategy)
             };
         }
+        else if (requiresExplicitTargetSelection) {
+            currentTargetAccount = {
+                accountId: "",
+                fullName: "",
+                email: "",
+                telegramChatId: "",
+                execStrategy: false
+            };
+        }
         updateAdminTargetMeta();
         updateTelegramNotice();
         void loadPageForCurrentTarget().then(function () {
-            setStatus(ids.pageStatus, `Loaded Dual strategy view for ${currentTargetAccount.fullName || "selected user"}.`, "success");
+            setStatus(
+                ids.pageStatus,
+                currentTargetAccount.fullName
+                    ? `Loaded ${isCoveredMode ? "Covered Options" : "Dual"} view for ${currentTargetAccount.fullName}.`
+                    : (isCoveredMode ? "Waiting for user selection." : "Loaded strategy view."),
+                currentTargetAccount.fullName ? "success" : "info"
+            );
         }).catch(function (error) {
-            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to load the selected Dual strategy user.", "danger");
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : `Unable to load the selected ${isCoveredMode ? "Covered Options" : "Dual"} user.`, "danger");
         });
     });
 

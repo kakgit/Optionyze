@@ -148,15 +148,6 @@ const gFutureLimitRetryDelayMs = 5000;
 const gFutureLimitRetryCount = 5;
 const gOptionReentryPendingMs = 5000;
 const gCoveredOptionReEntryRetryMs = 60 * 1000;
-const gCoveredActionQueueGapMs = 15 * 1000;
-const gCoveredActionQueueLeaseUserId = "__system__";
-const gCoveredActionQueueLeaseStrategyCode = "covered-action-queue";
-const gCoveredActionQueueRetryMs = 30 * 1000;
-const gCoveredPendingQueueDrainDelayMs = 5000;
-const gCoveredPendingQueueDrainMaxAttempts = 48;
-const gCoveredActionQueueProcessingTimeoutMs = 3 * 60 * 1000;
-const gCoveredActionQueueMaxAttempts = 5;
-const gCoveredActionQueueHistoryLimit = 25;
 const gProfitClosePauseAfterOptionRuleMs = 15000;
 const gProfitCloseReEntryCooldownMs = 5 * 60 * 1000;
 const gProfitCloseConfirmationMs = 5 * 60 * 1000;
@@ -248,10 +239,8 @@ const gManualOptionOrderLocks = new Set<string>();
 const gExecStrategyLocks = new Set<string>();
 const gNeutralityHedgeLocks = new Set<string>();
 const gAutoTraderIntervals = new Map<string, NodeJS.Timeout>();
-const gCoveredPendingQueueDrainTimers = new Map<string, NodeJS.Timeout>();
 const gAutoTraderCycleLocks = new Set<string>();
 const gLocalStrategyLeaseTokens = new Map<string, string>();
-let gLastCoveredActionQueueProcessedAtMs = 0;
 const gNeutralityHedgePendingMs = 45 * 1000;
 const gDuplicateLiveEventCooldownMs = 60 * 1000;
 const gServerId = getServerId();
@@ -419,7 +408,11 @@ function getAccountId(req: Request): string {
     const vBodyTarget = typeof req.body?.targetUserId === "string" ? req.body.targetUserId : "";
     const vQueryTarget = typeof req.query?.targetUserId === "string" ? req.query.targetUserId : "";
     const vTargetAccountId = String(vBodyTarget || vQueryTarget || "").trim();
-    if (req.authAccount?.isAdmin && vTargetAccountId) {
+    const bCoveredVerifierTarget = Boolean(
+        req.authAccount?.isVerifier
+        && req.originalUrl.includes("/covered-options")
+    );
+    if ((req.authAccount?.isAdmin || bCoveredVerifierTarget) && vTargetAccountId) {
         return vTargetAccountId;
     }
     return vOwnAccountId;
@@ -3439,79 +3432,6 @@ async function refreshModeDrivenExpiryDatesInProfile(
     return objProfile;
 }
 
-function canProcessCoveredActionQueueNow(): boolean {
-    return (Date.now() - gLastCoveredActionQueueProcessedAtMs) >= gCoveredActionQueueGapMs;
-}
-
-function markCoveredActionQueueProcessedNow(): void {
-    gLastCoveredActionQueueProcessedAtMs = Date.now();
-}
-
-function getLocalCoveredActionQueueNextAvailableAt(): string {
-    if (!gLastCoveredActionQueueProcessedAtMs) {
-        return "";
-    }
-    return new Date(gLastCoveredActionQueueProcessedAtMs + gCoveredActionQueueGapMs).toISOString();
-}
-
-async function acquireCoveredActionQueueProcessingSlot(): Promise<CoveredActionQueueThrottleResult> {
-    if (!isPostgresConfigured()) {
-        if (!canProcessCoveredActionQueueNow()) {
-            return {
-                allowed: false,
-                mode: "local",
-                nextAvailableAt: getLocalCoveredActionQueueNextAvailableAt(),
-                ownerServerId: gServerId
-            };
-        }
-        markCoveredActionQueueProcessedNow();
-        return {
-            allowed: true,
-            mode: "local",
-            nextAvailableAt: getLocalCoveredActionQueueNextAvailableAt(),
-            ownerServerId: gServerId
-        };
-    }
-
-    const objExistingLease = await getStrategyLease(
-        gCoveredActionQueueLeaseUserId,
-        gCoveredActionQueueLeaseStrategyCode
-    );
-    if (isLeaseActive(objExistingLease)) {
-        return {
-            allowed: false,
-            mode: "shared",
-            nextAvailableAt: String(objExistingLease?.leaseExpiresAt || "").trim(),
-            ownerServerId: String(objExistingLease?.ownerServerId || "").trim()
-        };
-    }
-
-    const objAcquireResult = await acquireStrategyLease({
-        userId: gCoveredActionQueueLeaseUserId,
-        strategyCode: gCoveredActionQueueLeaseStrategyCode,
-        ownerServerId: gServerId,
-        ownerInstanceId: gServerInstanceId,
-        leaseDurationMs: gCoveredActionQueueGapMs,
-        metadata: {
-            purpose: "covered_action_queue_gap"
-        }
-    });
-    if (!objAcquireResult.acquired || !objAcquireResult.lease) {
-        return {
-            allowed: false,
-            mode: "shared",
-            nextAvailableAt: String(objAcquireResult.lease?.leaseExpiresAt || "").trim(),
-            ownerServerId: String(objAcquireResult.lease?.ownerServerId || "").trim()
-        };
-    }
-    return {
-        allowed: true,
-        mode: "shared",
-        nextAvailableAt: String(objAcquireResult.lease.leaseExpiresAt || "").trim(),
-        ownerServerId: String(objAcquireResult.lease.ownerServerId || "").trim()
-    };
-}
-
 function buildCoveredQueuedExecBatchInputsFromPayload(
     pProfile: RollingFuturesLtProfileRecord,
     pPayload: Record<string, unknown>
@@ -3546,46 +3466,6 @@ function buildCoveredQueuedExecBatchInputsFromPayload(
             rowIndex: vRowIndex
         };
     }).filter((objInput) => Boolean(objInput.expiryDate));
-}
-
-async function enqueueCoveredPendingAction(
-    pUserId: string,
-    pStrategyCode: RollingFuturesLtStrategyCode,
-    pItem: Omit<CoveredPendingActionQueueItem, "priority" | "status" | "createdAt" | "startedAt" | "finishedAt" | "attemptCount" | "lastError">
-): Promise<{ created: boolean; queueItem: CoveredPendingActionQueueItem; }> {
-    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
-    const arrQueue = getCoveredPendingActionQueueState(objRuntime);
-    const objExisting = arrQueue.find((objEntry) => objEntry.queueKey === pItem.queueKey);
-    if (objExisting) {
-        return { created: false, queueItem: objExisting };
-    }
-    const objQueueItem: CoveredPendingActionQueueItem = {
-        queueKey: String(pItem.queueKey || "").trim(),
-        actionType: pItem.actionType,
-        priority: getCoveredActionQueuePriority(pItem.actionType),
-        status: "pending",
-        runAt: String(pItem.runAt || "").trim() || new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-        startedAt: "",
-        finishedAt: "",
-        attemptCount: 0,
-        lastError: "",
-        payload: pItem.payload && typeof pItem.payload === "object" ? pItem.payload : {}
-    };
-    await saveRollingFuturesLtRuntime({
-        ...objRuntime,
-        userId: pUserId,
-        strategyCode: pStrategyCode,
-        state: appendCoveredActionQueueHistory({
-            ...objRuntime,
-            state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntime, [
-                ...arrQueue,
-                objQueueItem
-            ])
-        }, objQueueItem, "queued")
-    });
-    return { created: true, queueItem: objQueueItem };
 }
 
 async function queueCoveredTriggeredAction(
@@ -3766,89 +3646,6 @@ async function queueCoveredReEntryAction(
             ? "Covered re-entry executed successfully."
             : "Covered re-entry was no longer needed."
     };
-}
-
-async function recoverStaleCoveredPendingActionQueue(
-    pUserId: string,
-    pStrategyCode: RollingFuturesLtStrategyCode,
-    pRuntime: RollingFuturesLtRuntimeRecord
-): Promise<RollingFuturesLtRuntimeRecord> {
-    const arrQueue = getCoveredPendingActionQueueState(pRuntime);
-    const vNowMs = Date.now();
-    let bChanged = false;
-    let objWorkingRuntime = pRuntime;
-    let arrNextQueue = [...arrQueue];
-
-    for (const objEntry of arrQueue) {
-        if (objEntry.status !== "processing") {
-            continue;
-        }
-        const vStartedAtMs = new Date(objEntry.startedAt).getTime();
-        if (!Number.isFinite(vStartedAtMs) || (vNowMs - vStartedAtMs) < gCoveredActionQueueProcessingTimeoutMs) {
-            continue;
-        }
-
-        bChanged = true;
-        const vNextAttemptCount = objEntry.attemptCount + 1;
-        const bRetryAllowed = vNextAttemptCount < gCoveredActionQueueMaxAttempts;
-        const vLastError = `Recovered from stuck processing after ${Math.floor(gCoveredActionQueueProcessingTimeoutMs / 1000)} seconds.`;
-        const objRecoveredEntry: CoveredPendingActionQueueItem = {
-            ...objEntry,
-            status: bRetryAllowed ? "pending" : "failed",
-            runAt: bRetryAllowed ? new Date(Date.now() + gCoveredActionQueueRetryMs).toISOString() : "",
-            finishedAt: new Date().toISOString(),
-            attemptCount: vNextAttemptCount,
-            lastError: vLastError
-        };
-        arrNextQueue = arrNextQueue.map((objQueueEntry) => objQueueEntry.queueKey === objEntry.queueKey
-            ? objRecoveredEntry
-            : objQueueEntry);
-
-        const objRecoveredRuntime = {
-            ...objWorkingRuntime,
-            userId: pUserId,
-            strategyCode: pStrategyCode,
-            state: buildRuntimeStateWithCoveredPendingActionQueue(objWorkingRuntime, arrNextQueue)
-        };
-        objWorkingRuntime = {
-            ...objRecoveredRuntime,
-            state: appendCoveredActionQueueHistory(
-                objRecoveredRuntime,
-                objRecoveredEntry,
-                bRetryAllowed ? "recovered" : "failed",
-                bRetryAllowed
-                    ? `Recovered stuck queue item. Retry scheduled after ${Math.floor(gCoveredActionQueueRetryMs / 1000)} seconds.`
-                    : "Recovered stuck queue item, but retry limit was reached."
-            )
-        };
-
-        await logFuturesEvent(
-            pUserId,
-            pStrategyCode,
-            "engine_error",
-            "warning",
-            bRetryAllowed ? "Covered Queue Item Recovered" : "Covered Queue Item Failed",
-            bRetryAllowed
-                ? `${buildCoveredActionQueueHistoryDetail(objEntry)} Processing was stuck and has been rescheduled.`
-                : `${buildCoveredActionQueueHistoryDetail(objEntry)} Processing was stuck and retry limit was reached.`,
-            {
-                queueKey: objEntry.queueKey,
-                actionType: objEntry.actionType,
-                attemptCount: vNextAttemptCount,
-                retryAt: bRetryAllowed ? objRecoveredEntry.runAt : "",
-                reason: bRetryAllowed
-                    ? "covered_action_queue_recovered"
-                    : "covered_action_queue_recovery_failed"
-            }
-        );
-    }
-
-    if (!bChanged) {
-        return pRuntime;
-    }
-
-    await saveRollingFuturesLtRuntime(objWorkingRuntime);
-    return objWorkingRuntime;
 }
 
 function normalizeProfileSaveInput(
@@ -4707,58 +4504,6 @@ type CoveredPendingOptionReEntryState = {
     lastError: string;
 };
 
-type CoveredQueuedActionType = "sl" | "tp" | "covered_reentry" | "expiry_rollover" | "exec_batch";
-
-type CoveredPendingActionQueueItem = {
-    queueKey: string;
-    actionType: CoveredQueuedActionType;
-    priority: number;
-    status: "pending" | "processing" | "failed";
-    runAt: string;
-    createdAt: string;
-    startedAt: string;
-    finishedAt: string;
-    attemptCount: number;
-    lastError: string;
-    payload: Record<string, unknown>;
-};
-
-type CoveredActionQueueThrottleResult = {
-    allowed: boolean;
-    mode: "shared" | "local";
-    nextAvailableAt: string;
-    ownerServerId: string;
-};
-
-type CoveredActionQueueSummary = {
-    total: number;
-    pending: number;
-    processing: number;
-    failed: number;
-    nextActionType: CoveredQueuedActionType | "";
-    nextRunAt: string;
-    cooldownEndsAt: string;
-    cooldownActive: boolean;
-    throttleMode: "shared" | "local";
-    throttleOwnerServerId: string;
-    recentItems: CoveredPendingActionQueueItem[];
-    recentHistory: CoveredActionQueueHistoryItem[];
-};
-
-type CoveredActionQueueHistoryItem = {
-    historyKey: string;
-    queueKey: string;
-    actionType: CoveredQueuedActionType;
-    outcome: "queued" | "started" | "succeeded" | "skipped" | "retry_scheduled" | "recovered" | "failed";
-    title: string;
-    detail: string;
-    createdAt: string;
-    startedAt: string;
-    finishedAt: string;
-    attemptCount: number;
-    lastError: string;
-};
-
 function getCoveredPendingOptionReEntriesState(
     pRuntime: RollingFuturesLtRuntimeRecord | null
 ): CoveredPendingOptionReEntryState[] {
@@ -4818,302 +4563,6 @@ function buildRuntimeStateWithCoveredPendingOptionReEntries(
         lastError: String(objEntry.lastError || "").trim()
     }));
     return objState;
-}
-
-function getCoveredActionQueuePriority(pActionType: CoveredQueuedActionType): number {
-    if (pActionType === "sl") {
-        return 10;
-    }
-    if (pActionType === "tp") {
-        return 20;
-    }
-    if (pActionType === "covered_reentry") {
-        return 25;
-    }
-    if (pActionType === "expiry_rollover") {
-        return 30;
-    }
-    return 40;
-}
-
-function getCoveredPendingActionQueueState(
-    pRuntime: RollingFuturesLtRuntimeRecord | null
-): CoveredPendingActionQueueItem[] {
-    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
-    const arrQueue = Array.isArray(objState.pendingCoveredActionQueue)
-        ? objState.pendingCoveredActionQueue as Array<Record<string, unknown>>
-        : [];
-    return arrQueue.map((objEntry) => {
-        const vActionTypeRaw = String(objEntry.actionType || "").trim().toLowerCase();
-        const vActionType: CoveredQueuedActionType = vActionTypeRaw === "sl"
-            ? "sl"
-            : (vActionTypeRaw === "tp"
-                ? "tp"
-                : (vActionTypeRaw === "covered_reentry"
-                    ? "covered_reentry"
-                    : (vActionTypeRaw === "expiry_rollover" ? "expiry_rollover" : "exec_batch")));
-        const vStatusRaw = String(objEntry.status || "").trim().toLowerCase();
-        return {
-            queueKey: String(objEntry.queueKey || "").trim(),
-            actionType: vActionType,
-            priority: Math.max(0, Math.floor(Number(objEntry.priority || getCoveredActionQueuePriority(vActionType)))),
-            status: vStatusRaw === "processing"
-                ? "processing"
-                : (vStatusRaw === "failed" ? "failed" : "pending"),
-            runAt: String(objEntry.runAt || "").trim(),
-            createdAt: String(objEntry.createdAt || "").trim(),
-            startedAt: String(objEntry.startedAt || "").trim(),
-            finishedAt: String(objEntry.finishedAt || "").trim(),
-            attemptCount: Math.max(0, Math.floor(Number(objEntry.attemptCount || 0))),
-            lastError: String(objEntry.lastError || "").trim(),
-            payload: objEntry.payload && typeof objEntry.payload === "object"
-                ? objEntry.payload as Record<string, unknown>
-                : {}
-        } satisfies CoveredPendingActionQueueItem;
-    }).filter((objEntry) => Boolean(objEntry.queueKey) && Boolean(objEntry.createdAt));
-}
-
-function buildRuntimeStateWithCoveredPendingActionQueue(
-    pRuntime: RollingFuturesLtRuntimeRecord | null,
-    pEntries: CoveredPendingActionQueueItem[]
-): Record<string, unknown> {
-    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
-    if (!Array.isArray(pEntries) || !pEntries.length) {
-        delete objState.pendingCoveredActionQueue;
-        return objState;
-    }
-    objState.pendingCoveredActionQueue = pEntries.map((objEntry) => ({
-        queueKey: String(objEntry.queueKey || "").trim(),
-        actionType: objEntry.actionType,
-        priority: Math.max(0, Math.floor(Number(objEntry.priority || getCoveredActionQueuePriority(objEntry.actionType)))),
-        status: objEntry.status === "processing" ? "processing" : (objEntry.status === "failed" ? "failed" : "pending"),
-        runAt: String(objEntry.runAt || "").trim(),
-        createdAt: String(objEntry.createdAt || "").trim(),
-        startedAt: String(objEntry.startedAt || "").trim(),
-        finishedAt: String(objEntry.finishedAt || "").trim(),
-        attemptCount: Math.max(0, Math.floor(Number(objEntry.attemptCount || 0))),
-        lastError: String(objEntry.lastError || "").trim(),
-        payload: objEntry.payload && typeof objEntry.payload === "object" ? objEntry.payload : {}
-    }));
-    return objState;
-}
-
-function getCoveredActionQueueHistoryState(
-    pRuntime: RollingFuturesLtRuntimeRecord | null
-): CoveredActionQueueHistoryItem[] {
-    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
-    const arrHistory = Array.isArray(objState.pendingCoveredActionQueueHistory)
-        ? objState.pendingCoveredActionQueueHistory as Array<Record<string, unknown>>
-        : [];
-    return arrHistory.map((objEntry) => {
-        const vActionTypeRaw = String(objEntry.actionType || "").trim().toLowerCase();
-        const vActionType: CoveredQueuedActionType = vActionTypeRaw === "sl"
-            ? "sl"
-            : (vActionTypeRaw === "tp"
-                ? "tp"
-                : (vActionTypeRaw === "covered_reentry"
-                    ? "covered_reentry"
-                    : (vActionTypeRaw === "expiry_rollover" ? "expiry_rollover" : "exec_batch")));
-        const vOutcomeRaw = String(objEntry.outcome || "").trim().toLowerCase();
-        const vOutcome: CoveredActionQueueHistoryItem["outcome"] = vOutcomeRaw === "queued"
-            ? "queued"
-            : (vOutcomeRaw === "started"
-                ? "started"
-                : (vOutcomeRaw === "succeeded"
-                    ? "succeeded"
-                    : (vOutcomeRaw === "skipped"
-                        ? "skipped"
-                        : (vOutcomeRaw === "retry_scheduled"
-                            ? "retry_scheduled"
-                            : (vOutcomeRaw === "recovered" ? "recovered" : "failed")))));
-        return {
-            historyKey: String(objEntry.historyKey || "").trim(),
-            queueKey: String(objEntry.queueKey || "").trim(),
-            actionType: vActionType,
-            outcome: vOutcome,
-            title: String(objEntry.title || "").trim(),
-            detail: String(objEntry.detail || "").trim(),
-            createdAt: String(objEntry.createdAt || "").trim(),
-            startedAt: String(objEntry.startedAt || "").trim(),
-            finishedAt: String(objEntry.finishedAt || "").trim(),
-            attemptCount: Math.max(0, Math.floor(Number(objEntry.attemptCount || 0))),
-            lastError: String(objEntry.lastError || "").trim()
-        } satisfies CoveredActionQueueHistoryItem;
-    }).filter((objEntry) => Boolean(objEntry.historyKey) && Boolean(objEntry.createdAt));
-}
-
-function buildRuntimeStateWithCoveredActionQueueHistory(
-    pRuntime: RollingFuturesLtRuntimeRecord | null,
-    pEntries: CoveredActionQueueHistoryItem[]
-): Record<string, unknown> {
-    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
-    if (!Array.isArray(pEntries) || !pEntries.length) {
-        delete objState.pendingCoveredActionQueueHistory;
-        return objState;
-    }
-    objState.pendingCoveredActionQueueHistory = pEntries.slice(0, gCoveredActionQueueHistoryLimit).map((objEntry) => ({
-        historyKey: String(objEntry.historyKey || "").trim(),
-        queueKey: String(objEntry.queueKey || "").trim(),
-        actionType: objEntry.actionType,
-        outcome: objEntry.outcome,
-        title: String(objEntry.title || "").trim(),
-        detail: String(objEntry.detail || "").trim(),
-        createdAt: String(objEntry.createdAt || "").trim(),
-        startedAt: String(objEntry.startedAt || "").trim(),
-        finishedAt: String(objEntry.finishedAt || "").trim(),
-        attemptCount: Math.max(0, Math.floor(Number(objEntry.attemptCount || 0))),
-        lastError: String(objEntry.lastError || "").trim()
-    }));
-    return objState;
-}
-
-function buildCoveredActionQueueHistoryTitle(
-    pActionType: CoveredQueuedActionType,
-    pOutcome: CoveredActionQueueHistoryItem["outcome"]
-): string {
-    const vActionLabel = pActionType === "sl"
-        ? "SL"
-        : (pActionType === "tp"
-            ? "TP"
-            : (pActionType === "covered_reentry"
-                ? "Covered Re-Entry"
-                : (pActionType === "expiry_rollover" ? "Expiry Rollover" : "Exec Strategy")));
-    if (pOutcome === "queued") {
-        return `${vActionLabel} Queued`;
-    }
-    if (pOutcome === "started") {
-        return `${vActionLabel} Started`;
-    }
-    if (pOutcome === "succeeded") {
-        return `${vActionLabel} Completed`;
-    }
-    if (pOutcome === "skipped") {
-        return `${vActionLabel} Skipped`;
-    }
-    if (pOutcome === "retry_scheduled") {
-        return `${vActionLabel} Retry Scheduled`;
-    }
-    if (pOutcome === "recovered") {
-        return `${vActionLabel} Recovered`;
-    }
-    return `${vActionLabel} Failed`;
-}
-
-function buildCoveredActionQueueHistoryDetail(
-    pItem: Pick<CoveredPendingActionQueueItem, "actionType" | "payload" | "queueKey">,
-    pFallbackMessage = ""
-): string {
-    const vPayload = pItem.payload && typeof pItem.payload === "object" ? pItem.payload : {};
-    const vContractName = String(vPayload.contractName || vPayload.closedContractName || "").trim();
-    const vReason = String(vPayload.reason || "").trim().replaceAll("_", " ");
-    const vRowIndex = Math.max(0, Math.floor(Number(vPayload.rowIndex || 0)));
-    const vLegSide = String(vPayload.legSide || "").trim().toUpperCase();
-    if (pItem.actionType === "covered_reentry") {
-        return vRowIndex && vLegSide
-            ? `Row ${vRowIndex} ${vLegSide}${vReason ? ` after ${vReason}` : ""}.`
-            : (pFallbackMessage || "Covered re-entry action.");
-    }
-    if (pItem.actionType === "exec_batch") {
-        const vInputCount = Array.isArray(vPayload.inputs) ? vPayload.inputs.length : 0;
-        return vInputCount > 0
-            ? `Exec Strategy for ${vInputCount} row${vInputCount === 1 ? "" : "s"}.`
-            : (pFallbackMessage || "Exec Strategy action.");
-    }
-    if (vContractName) {
-        return `${vContractName}${vReason ? ` (${vReason})` : ""}.`;
-    }
-    return pFallbackMessage || `Queue item ${pItem.queueKey}.`;
-}
-
-function appendCoveredActionQueueHistory(
-    pRuntime: RollingFuturesLtRuntimeRecord | null,
-    pItem: Pick<CoveredPendingActionQueueItem, "queueKey" | "actionType" | "startedAt" | "finishedAt" | "attemptCount" | "lastError" | "payload">,
-    pOutcome: CoveredActionQueueHistoryItem["outcome"],
-    pDetail = ""
-): Record<string, unknown> {
-    const arrHistory = getCoveredActionQueueHistoryState(pRuntime);
-    const objEntry: CoveredActionQueueHistoryItem = {
-        historyKey: crypto.randomUUID(),
-        queueKey: String(pItem.queueKey || "").trim(),
-        actionType: pItem.actionType,
-        outcome: pOutcome,
-        title: buildCoveredActionQueueHistoryTitle(pItem.actionType, pOutcome),
-        detail: buildCoveredActionQueueHistoryDetail(pItem, pDetail),
-        createdAt: new Date().toISOString(),
-        startedAt: String(pItem.startedAt || "").trim(),
-        finishedAt: String(pItem.finishedAt || "").trim(),
-        attemptCount: Math.max(0, Math.floor(Number(pItem.attemptCount || 0))),
-        lastError: String(pItem.lastError || "").trim()
-    };
-    return buildRuntimeStateWithCoveredActionQueueHistory(pRuntime, [
-        objEntry,
-        ...arrHistory
-    ]);
-}
-
-async function buildCoveredActionQueueSummary(
-    pRuntime: RollingFuturesLtRuntimeRecord | null
-): Promise<CoveredActionQueueSummary> {
-    const arrQueue = getCoveredPendingActionQueueState(pRuntime);
-    const arrHistory = getCoveredActionQueueHistoryState(pRuntime);
-    const vNowMs = Date.now();
-    const arrEligible = arrQueue.filter((objEntry) => {
-        if (objEntry.status === "processing") {
-            return false;
-        }
-        const vRunAtMs = new Date(objEntry.runAt).getTime();
-        return Number.isFinite(vRunAtMs) && vRunAtMs <= vNowMs;
-    }).sort((pLeft, pRight) => {
-        if (pLeft.priority !== pRight.priority) {
-            return pLeft.priority - pRight.priority;
-        }
-        return new Date(pLeft.createdAt).getTime() - new Date(pRight.createdAt).getTime();
-    });
-    const objNext = arrEligible[0];
-
-    let vThrottleMode: "shared" | "local" = "local";
-    let vCooldownEndsAt = getLocalCoveredActionQueueNextAvailableAt();
-    let vThrottleOwnerServerId = gServerId;
-
-    if (isPostgresConfigured()) {
-        vThrottleMode = "shared";
-        const objLease = await getStrategyLease(
-            gCoveredActionQueueLeaseUserId,
-            gCoveredActionQueueLeaseStrategyCode
-        );
-        if (isLeaseActive(objLease)) {
-            vCooldownEndsAt = String(objLease?.leaseExpiresAt || "").trim();
-            vThrottleOwnerServerId = String(objLease?.ownerServerId || "").trim();
-        }
-        else {
-            vCooldownEndsAt = "";
-            vThrottleOwnerServerId = "";
-        }
-    }
-
-    const vCooldownEndsAtMs = new Date(vCooldownEndsAt).getTime();
-    return {
-        total: arrQueue.length,
-        pending: arrQueue.filter((objEntry) => objEntry.status === "pending").length,
-        processing: arrQueue.filter((objEntry) => objEntry.status === "processing").length,
-        failed: arrQueue.filter((objEntry) => objEntry.status === "failed").length,
-        nextActionType: objNext?.actionType || "",
-        nextRunAt: String(objNext?.runAt || "").trim(),
-        cooldownEndsAt: vCooldownEndsAt,
-        cooldownActive: Number.isFinite(vCooldownEndsAtMs) && vCooldownEndsAtMs > vNowMs,
-        throttleMode: vThrottleMode,
-        throttleOwnerServerId: vThrottleOwnerServerId,
-        recentItems: [...arrQueue].sort((pLeft, pRight) => {
-            if (pLeft.status !== pRight.status) {
-                return pLeft.status === "processing" ? -1 : (pRight.status === "processing" ? 1 : 0);
-            }
-            if (pLeft.priority !== pRight.priority) {
-                return pLeft.priority - pRight.priority;
-            }
-            return new Date(pLeft.createdAt).getTime() - new Date(pRight.createdAt).getTime();
-        }).slice(0, 8),
-        recentHistory: arrHistory.slice(0, 8)
-    };
 }
 
 function getPendingOptionRecoveryRefreshState(pRuntime: RollingFuturesLtRuntimeRecord | null): {
@@ -8595,413 +8044,6 @@ async function processCoveredPendingOptionReEntries(
     return arrSavedPositions;
 }
 
-async function processCoveredPendingActionQueue(
-    pUserId: string,
-    pSelectedApiProfileId: string,
-    pProfile: RollingFuturesLtProfileRecord,
-    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
-): Promise<{
-    profile: RollingFuturesLtProfileRecord;
-    positions: RollingFuturesLtImportedPositionRecord[];
-}> {
-    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
-    let objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
-    objRuntime = await recoverStaleCoveredPendingActionQueue(pUserId, pStrategyCode, objRuntime);
-    const arrQueue = getCoveredPendingActionQueueState(objRuntime);
-    if (!arrQueue.length) {
-        return {
-            profile: pProfile,
-            positions: pTrackedPositions
-        };
-    }
-    const vNowMs = Date.now();
-    const arrEligible = arrQueue.filter((objEntry) => {
-        if (objEntry.status === "processing") {
-            return false;
-        }
-        const vRunAtMs = new Date(objEntry.runAt).getTime();
-        return Number.isFinite(vRunAtMs) && vRunAtMs <= vNowMs;
-    }).sort((pLeft, pRight) => {
-        if (pLeft.priority !== pRight.priority) {
-            return pLeft.priority - pRight.priority;
-        }
-        return new Date(pLeft.createdAt).getTime() - new Date(pRight.createdAt).getTime();
-    });
-    const objNext = arrEligible[0];
-    if (!objNext) {
-        return {
-            profile: pProfile,
-            positions: pTrackedPositions
-        };
-    }
-
-    const objThrottle = await acquireCoveredActionQueueProcessingSlot();
-    if (!objThrottle.allowed) {
-        return {
-            profile: pProfile,
-            positions: pTrackedPositions
-        };
-    }
-
-    const arrQueueProcessing = arrQueue.map((objEntry) => {
-        if (objEntry.queueKey !== objNext.queueKey) {
-            return objEntry;
-        }
-        return {
-            ...objEntry,
-            status: "processing" as const,
-            startedAt: new Date().toISOString(),
-            finishedAt: "",
-            lastError: ""
-        };
-    });
-    await saveRollingFuturesLtRuntime({
-        ...objRuntime,
-        userId: pUserId,
-        strategyCode: pStrategyCode,
-        state: appendCoveredActionQueueHistory({
-            ...objRuntime,
-            state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntime, arrQueueProcessing)
-        }, {
-            ...objNext,
-            startedAt: new Date().toISOString(),
-            finishedAt: "",
-            lastError: ""
-        }, "started")
-    });
-    await logFuturesEvent(
-        pUserId,
-        pStrategyCode,
-        "manual_action",
-        "info",
-        "Covered Action Queue Started",
-        `${buildCoveredActionQueueHistoryDetail(objNext)} Queue execution has started.`,
-        {
-            queueKey: objNext.queueKey,
-            actionType: objNext.actionType,
-            reason: "covered_action_queue_started"
-        }
-    );
-
-    let objProfile = await refreshModeDrivenExpiryDatesInProfile(pUserId, pStrategyCode, pProfile);
-    let arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
-    try {
-        if (objNext.actionType === "exec_batch") {
-            const arrInputs = buildCoveredQueuedExecBatchInputsFromPayload(objProfile, objNext.payload);
-            if (!arrInputs.length) {
-                throw new Error("The queued Exec Strategy no longer has valid rows.");
-            }
-            const objExecResult = await runCoveredExecStrategyBatchPlacement(
-                pUserId,
-                pStrategyCode,
-                pSelectedApiProfileId,
-                objProfile,
-                arrInputs,
-                "exec_strategy"
-            );
-            arrSavedPositions = objExecResult.trackedOpenPositions;
-            if (!Boolean(objNext.payload.suppressClosedFromDateUpdate)) {
-                objProfile = await syncCoveredRecoveryMetricsFromClosedHistory(
-                    pUserId,
-                    pStrategyCode,
-                    pSelectedApiProfileId,
-                    objProfile,
-                    arrSavedPositions
-                );
-            }
-        }
-        else if (objNext.actionType === "covered_reentry") {
-            const objRuntimeLatest = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-                || objRuntime;
-            const arrPendingReEntries = getCoveredPendingOptionReEntriesState(objRuntimeLatest);
-            const vDedupeKey = String(objNext.payload.dedupeKey || "").trim();
-            const objPendingReEntry = arrPendingReEntries.find((objEntry) => objEntry.dedupeKey === vDedupeKey);
-            if (!objPendingReEntry) {
-                const arrQueueAfterSkip = getCoveredPendingActionQueueState(objRuntimeLatest)
-                    .filter((objEntry) => objEntry.queueKey !== objNext.queueKey);
-                await saveRollingFuturesLtRuntime({
-                    ...objRuntimeLatest,
-                    userId: pUserId,
-                    strategyCode: pStrategyCode,
-                    state: appendCoveredActionQueueHistory({
-                        ...objRuntimeLatest,
-                        state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeLatest, arrQueueAfterSkip)
-                    }, {
-                        ...objNext,
-                        finishedAt: new Date().toISOString()
-                    }, "skipped", "Pending covered re-entry no longer exists.")
-                });
-                await logFuturesEvent(
-                    pUserId,
-                    pStrategyCode,
-                    "manual_action",
-                    "warning",
-                    "Covered Action Queue Skipped",
-                    "Pending covered re-entry no longer exists, so the queued action was removed.",
-                    {
-                        queueKey: objNext.queueKey,
-                        actionType: objNext.actionType,
-                        reason: "covered_action_queue_skipped_missing_reentry"
-                    }
-                );
-                return {
-                    profile: objProfile,
-                    positions: arrSavedPositions
-                };
-            }
-            const bOpened = await executeCoveredPendingReEntryNow(
-                pUserId,
-                pSelectedApiProfileId,
-                objProfile,
-                objPendingReEntry
-            );
-            if (!bOpened) {
-                const arrQueueAfterSkip = getCoveredPendingActionQueueState(objRuntimeLatest)
-                    .filter((objEntry) => objEntry.queueKey !== objNext.queueKey);
-                await saveRollingFuturesLtRuntime({
-                    ...objRuntimeLatest,
-                    userId: pUserId,
-                    strategyCode: pStrategyCode,
-                    state: appendCoveredActionQueueHistory({
-                        ...objRuntimeLatest,
-                        state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeLatest, arrQueueAfterSkip)
-                    }, {
-                        ...objNext,
-                        finishedAt: new Date().toISOString()
-                    }, "skipped", "Covered re-entry no longer needed.")
-                });
-                await logFuturesEvent(
-                    pUserId,
-                    pStrategyCode,
-                    "manual_action",
-                    "info",
-                    "Covered Action Queue Skipped",
-                    "Covered re-entry was no longer needed, so the queued action was removed.",
-                    {
-                        queueKey: objNext.queueKey,
-                        actionType: objNext.actionType,
-                        reason: "covered_action_queue_skipped_reentry_not_needed"
-                    }
-                );
-                return {
-                    profile: objProfile,
-                    positions: await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode)
-                };
-            }
-            arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
-        }
-        else {
-            const vImportId = String(objNext.payload.importId || "").trim();
-            const vContractName = String(objNext.payload.contractName || "").trim();
-            const vReason = objNext.actionType === "sl"
-                ? "sl"
-                : (objNext.actionType === "tp" ? "tp" : "expiry_cutoff");
-            const objPosition = arrSavedPositions.find((objRow) => String(objRow.importId || "").trim() === vImportId)
-                || arrSavedPositions.find((objRow) => String(objRow.contractName || "").trim() === vContractName);
-            if (!objPosition) {
-                const objRuntimeAfterSkip = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-                    || objRuntime;
-                const arrQueueAfterSkip = getCoveredPendingActionQueueState(objRuntimeAfterSkip)
-                    .filter((objEntry) => objEntry.queueKey !== objNext.queueKey);
-                await saveRollingFuturesLtRuntime({
-                    ...objRuntimeAfterSkip,
-                    userId: pUserId,
-                    strategyCode: pStrategyCode,
-                    state: appendCoveredActionQueueHistory({
-                        ...objRuntimeAfterSkip,
-                        state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterSkip, arrQueueAfterSkip)
-                    }, {
-                        ...objNext,
-                        finishedAt: new Date().toISOString()
-                    }, "skipped", "The tracked position no longer exists.")
-                });
-                await logFuturesEvent(
-                    pUserId,
-                    pStrategyCode,
-                    "manual_action",
-                    "warning",
-                    "Covered Action Queue Skipped",
-                    "The tracked position no longer exists, so the queued action was removed.",
-                    {
-                        queueKey: objNext.queueKey,
-                        actionType: objNext.actionType,
-                        reason: "covered_action_queue_skipped_missing_position"
-                    }
-                );
-                return {
-                    profile: objProfile,
-                    positions: arrSavedPositions
-                };
-            }
-            const arrTriggered = await findTriggeredTrackedOptions([objPosition], getMergedUiState(objProfile));
-            const objTriggered = arrTriggered.find((objEntry) => objEntry.reason === vReason);
-            if (!objTriggered) {
-                const objRuntimeAfterSkip = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-                    || objRuntime;
-                const arrQueueAfterSkip = getCoveredPendingActionQueueState(objRuntimeAfterSkip)
-                    .filter((objEntry) => objEntry.queueKey !== objNext.queueKey);
-                await saveRollingFuturesLtRuntime({
-                    ...objRuntimeAfterSkip,
-                    userId: pUserId,
-                    strategyCode: pStrategyCode,
-                    state: appendCoveredActionQueueHistory({
-                        ...objRuntimeAfterSkip,
-                        state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterSkip, arrQueueAfterSkip)
-                    }, {
-                        ...objNext,
-                        finishedAt: new Date().toISOString()
-                    }, "skipped", "The trigger condition no longer holds.")
-                });
-                await logFuturesEvent(
-                    pUserId,
-                    pStrategyCode,
-                    "manual_action",
-                    "info",
-                    "Covered Action Queue Skipped",
-                    "The trigger condition no longer holds, so the queued action was removed.",
-                    {
-                        queueKey: objNext.queueKey,
-                        actionType: objNext.actionType,
-                        reason: "covered_action_queue_skipped_trigger_cleared"
-                    }
-                );
-                return {
-                    profile: objProfile,
-                    positions: arrSavedPositions
-                };
-            }
-            arrSavedPositions = await applyTriggeredOptionRule(
-                pUserId,
-                pStrategyCode,
-                pSelectedApiProfileId,
-                objProfile,
-                objPosition,
-                objTriggered.currentDelta,
-                objTriggered.currentMarkPrice,
-                objTriggered.reason,
-                arrSavedPositions,
-                true
-            );
-        }
-
-        const objRuntimeAfterSuccess = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-            || objRuntime;
-        const arrQueueAfterSuccess = getCoveredPendingActionQueueState(objRuntimeAfterSuccess)
-            .filter((objEntry) => objEntry.queueKey !== objNext.queueKey);
-        await saveRollingFuturesLtRuntime({
-            ...objRuntimeAfterSuccess,
-            userId: pUserId,
-            strategyCode: pStrategyCode,
-            state: appendCoveredActionQueueHistory({
-                ...objRuntimeAfterSuccess,
-                state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterSuccess, arrQueueAfterSuccess)
-            }, {
-                ...objNext,
-                finishedAt: new Date().toISOString()
-            }, "succeeded")
-        });
-        await logFuturesEvent(
-            pUserId,
-            pStrategyCode,
-            "manual_action",
-            "success",
-            "Covered Action Queue Completed",
-            `${buildCoveredActionQueueHistoryDetail(objNext)} Queue execution completed successfully.`,
-            {
-                queueKey: objNext.queueKey,
-                actionType: objNext.actionType,
-                reason: "covered_action_queue_completed"
-            }
-        );
-        return {
-            profile: objProfile,
-            positions: arrSavedPositions
-        };
-    }
-    catch (objError) {
-        const objRuntimeAfterFailure = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-            || objRuntime;
-        const vNextAttemptCount = objNext.attemptCount + 1;
-        const bRetryAllowed = vNextAttemptCount < gCoveredActionQueueMaxAttempts;
-        const vLastError = getErrorMessage(objError, "Unable to process queued covered action.");
-        const arrQueueAfterFailure = getCoveredPendingActionQueueState(objRuntimeAfterFailure).map((objEntry) => {
-            if (objEntry.queueKey !== objNext.queueKey) {
-                return objEntry;
-            }
-            return {
-                ...objEntry,
-                status: "failed" as const,
-                runAt: bRetryAllowed ? new Date(Date.now() + gCoveredActionQueueRetryMs).toISOString() : "",
-                finishedAt: new Date().toISOString(),
-                attemptCount: vNextAttemptCount,
-                lastError: vLastError
-            };
-        });
-        const objFailedEntry = arrQueueAfterFailure.find((objEntry) => objEntry.queueKey === objNext.queueKey) || {
-            ...objNext,
-            status: "failed" as const,
-            runAt: bRetryAllowed ? new Date(Date.now() + gCoveredActionQueueRetryMs).toISOString() : "",
-            finishedAt: new Date().toISOString(),
-            attemptCount: vNextAttemptCount,
-            lastError: vLastError
-        };
-        await saveRollingFuturesLtRuntime({
-            ...objRuntimeAfterFailure,
-            userId: pUserId,
-            strategyCode: pStrategyCode,
-            state: appendCoveredActionQueueHistory({
-                ...objRuntimeAfterFailure,
-                state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntimeAfterFailure, arrQueueAfterFailure)
-            }, objFailedEntry, bRetryAllowed ? "retry_scheduled" : "failed", bRetryAllowed
-                ? `Retry will be attempted after ${Math.floor(gCoveredActionQueueRetryMs / 1000)} seconds.`
-                : "Retry limit reached.")
-        });
-        await logFuturesEvent(
-            pUserId,
-            pStrategyCode,
-            "engine_error",
-            bRetryAllowed ? "warning" : "error",
-            bRetryAllowed ? "Covered Action Queue Retry Scheduled" : "Covered Action Queue Failed",
-            bRetryAllowed
-                ? `${vLastError} Retry will be attempted after ${Math.floor(gCoveredActionQueueRetryMs / 1000)} seconds.`
-                : `${vLastError} Retry limit reached, so no further automatic retry will be attempted.`,
-            {
-                queueKey: objNext.queueKey,
-                actionType: objNext.actionType,
-                retryAt: bRetryAllowed ? objFailedEntry.runAt : "",
-                attemptCount: vNextAttemptCount,
-                reason: bRetryAllowed ? "covered_action_queue_retry" : "covered_action_queue_failed"
-            }
-        );
-        return {
-            profile: objProfile,
-            positions: arrSavedPositions
-        };
-    }
-}
-
-async function triggerCoveredPendingActionQueueNow(
-    pUserId: string,
-    pSelectedApiProfileId: string,
-    pProfile?: RollingFuturesLtProfileRecord
-): Promise<void> {
-    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
-    const vSelectedApiProfileId = String(pSelectedApiProfileId || "").trim();
-    if (!vSelectedApiProfileId) {
-        return;
-    }
-
-    const objProfile = pProfile || await readLiveProfile(pUserId, pStrategyCode);
-    const arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
-    await processCoveredPendingActionQueue(
-        pUserId,
-        vSelectedApiProfileId,
-        objProfile,
-        arrSavedPositions
-    );
-}
-
 async function ensureCoveredConfiguredLegPresence(
     pUserId: string,
     pProfile: RollingFuturesLtProfileRecord,
@@ -10235,9 +9277,6 @@ async function getRuntimeStatusInternal(req: Request, res: Response, pStrategyCo
     const objLease = isDualLeaseManagedStrategy(pStrategyCode)
         ? await getStrategyLease(vUserId, pStrategyCode)
         : null;
-    const objCoveredQueueSummary = pStrategyCode === "covered-options"
-        ? await buildCoveredActionQueueSummary(objRuntime)
-        : null;
     res.json({
         status: "success",
         data: {
@@ -10246,8 +9285,7 @@ async function getRuntimeStatusInternal(req: Request, res: Response, pStrategyCo
                 selectedApiProfileId: String(objProfile.selectedApiProfileId || "").trim()
             }),
             lease: objLease && isLeaseActive(objLease) ? objLease : null,
-            currentServerId: gServerId,
-            coveredQueueSummary: objCoveredQueueSummary
+            currentServerId: gServerId
         }
     });
 }
@@ -10269,86 +9307,6 @@ function getAutoTraderRuntimeKey(pUserId: string, pStrategyCode: RollingFuturesL
     return `${String(pUserId || "").trim()}::${pStrategyCode}`;
 }
 
-function getCoveredPendingQueueDrainKey(pUserId: string): string {
-    return `${getAutoTraderRuntimeKey(pUserId, "covered-options")}::covered-pending-drain`;
-}
-
-function stopCoveredPendingQueueDrain(pUserId: string): void {
-    const vDrainKey = getCoveredPendingQueueDrainKey(pUserId);
-    const objTimer = gCoveredPendingQueueDrainTimers.get(vDrainKey);
-    if (objTimer) {
-        clearTimeout(objTimer);
-    }
-    gCoveredPendingQueueDrainTimers.delete(vDrainKey);
-}
-
-function scheduleCoveredPendingQueueDrain(
-    pUserId: string,
-    pSelectedApiProfileId: string,
-    pAttempt: number = 1
-): void {
-    const vDrainKey = getCoveredPendingQueueDrainKey(pUserId);
-    const vSelectedApiProfileId = String(pSelectedApiProfileId || "").trim();
-    if (pAttempt <= 1) {
-        stopCoveredPendingQueueDrain(pUserId);
-    }
-    else {
-        const objExistingTimer = gCoveredPendingQueueDrainTimers.get(vDrainKey);
-        if (objExistingTimer) {
-            clearTimeout(objExistingTimer);
-        }
-    }
-
-    const objTimer = setTimeout(async () => {
-        gCoveredPendingQueueDrainTimers.delete(vDrainKey);
-        const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
-        try {
-            const objRuntimeBefore = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-                || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
-            const arrQueueBefore = getCoveredPendingActionQueueState(objRuntimeBefore);
-            if (!arrQueueBefore.length) {
-                return;
-            }
-
-            const objProfile = await readLiveProfile(pUserId, pStrategyCode);
-            const vProfileApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
-            const vEffectiveApiProfileId = vSelectedApiProfileId || vProfileApiProfileId;
-            if (!vEffectiveApiProfileId) {
-                return;
-            }
-
-            const arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
-            await processCoveredPendingActionQueue(
-                pUserId,
-                vEffectiveApiProfileId,
-                objProfile,
-                arrSavedPositions
-            );
-
-            const objRuntimeAfter = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
-                || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
-            const arrQueueAfter = getCoveredPendingActionQueueState(objRuntimeAfter);
-            if (!arrQueueAfter.length) {
-                return;
-            }
-        }
-        catch (objError) {
-            console.error("scheduleCoveredPendingQueueDrain failed:", objError);
-        }
-
-        if (pAttempt >= gCoveredPendingQueueDrainMaxAttempts) {
-            return;
-        }
-
-        scheduleCoveredPendingQueueDrain(
-            pUserId,
-            vSelectedApiProfileId,
-            pAttempt + 1
-        );
-    }, gCoveredPendingQueueDrainDelayMs);
-
-    gCoveredPendingQueueDrainTimers.set(vDrainKey, objTimer);
-}
 
 function getLocalSurvivalLeaseToken(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): string {
     return String(gLocalSurvivalLeaseTokens.get(getAutoTraderRuntimeKey(pUserId, pStrategyCode)) || "").trim();
@@ -11026,15 +9984,6 @@ async function runAutoTraderCycle(
         if (!await renewDualStrategyLease(pUserId, pStrategyCode, objRuntime, objProfile)) {
             stopAutoTraderCycle(pUserId, pStrategyCode);
             return;
-        }
-        if (isCoveredOptionsStrategy(pStrategyCode) && getCoveredPendingActionQueueState(objRuntime).length > 0) {
-            await saveRollingFuturesLtRuntime({
-                ...objRuntime,
-                userId: pUserId,
-                strategyCode: pStrategyCode,
-                state: buildRuntimeStateWithCoveredPendingActionQueue(objRuntime, [])
-            });
-            objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode) || objRuntime;
         }
         let objUiState = getMergedUiState(objProfile);
         const vSelectedApiProfileId = String(objRuntime.selectedApiProfileId || objProfile.selectedApiProfileId || "").trim();
@@ -14691,6 +13640,62 @@ export async function listRollingFuturesLtDualRunningUsers(req: Request, res: Re
         res.status(500).json({
             status: "danger",
             message: getErrorMessage(objError, "Unable to load running Dual users.")
+        });
+    }
+}
+
+export async function listCoveredOptionsVerifierRunningUsers(req: Request, res: Response): Promise<void> {
+    if (!req.authAccount?.isVerifier) {
+        res.status(403).json({
+            status: "warning",
+            message: "Verifier access is required."
+        });
+        return;
+    }
+
+    try {
+        const arrRuntimeRows = await listRollingFuturesLtRuntime();
+        const arrCoveredRunning = arrRuntimeRows.filter((objRuntime) => {
+            return objRuntime.strategyCode === "covered-options"
+                && objRuntime.autoTraderEnabled
+                && String(objRuntime.status || "").trim().toLowerCase() === "running";
+        });
+
+        const arrUsers = [];
+        for (const objRuntime of arrCoveredRunning) {
+            const objAccount = await getAccountById(objRuntime.userId);
+            if (!objAccount || objAccount.isVerifier || !objAccount.isActive) {
+                continue;
+            }
+            const arrImportedPositions = await listRollingFuturesLtImportedPositions(objRuntime.userId, objRuntime.strategyCode);
+            const vOpenPositionCount = arrImportedPositions.filter((objPosition) => Number(objPosition.qty || 0) > 0).length;
+            if (!vOpenPositionCount) {
+                continue;
+            }
+            arrUsers.push({
+                accountId: objAccount.accountId,
+                fullName: objAccount.fullName,
+                email: objAccount.email,
+                telegramChatId: objAccount.telegramChatId,
+                execStrategy: objAccount.execStrategy,
+                isActive: objAccount.isActive,
+                openPositionCount: vOpenPositionCount,
+                lastCycleAt: objRuntime.lastCycleAt,
+                updatedAt: objRuntime.updatedAt
+            });
+        }
+
+        res.json({
+            status: "success",
+            data: arrUsers
+                .filter((objUser) => String(objUser.accountId || "").trim() !== String(req.authAccount?.accountId || "").trim())
+                .sort((pLeft, pRight) => String(pLeft.fullName || "").localeCompare(String(pRight.fullName || "")))
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to load running Covered Options users.")
         });
     }
 }

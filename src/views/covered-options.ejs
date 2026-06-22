@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title><%= pageTitle %></title>
+    <%- include('partials/brand-head') %>
     <link rel="stylesheet" href="/css/app-shell.css" />
     <link rel="stylesheet" href="/css/account-menu.css" />
     <link rel="stylesheet" href="/css/rolling-options-pt-de.css" />
@@ -15,6 +16,7 @@
         data-exec-strategy-enabled="<%= currentAccount?.execStrategy ? 'true' : 'false' %>"
         data-current-account-id="<%= currentAccount?.accountId || '' %>"
         data-current-account-admin="<%= currentAccount?.isAdmin ? 'true' : 'false' %>"
+        data-current-account-verifier="<%= currentAccount?.isVerifier ? 'true' : 'false' %>"
         data-current-account-full-name="<%= currentAccount?.fullName || '' %>"
         data-current-account-email="<%= currentAccount?.email || '' %>"
         data-current-account-telegram-chat-id="<%= currentAccount?.telegramChatId || '' %>">
@@ -133,14 +135,14 @@
                 <div class="rolling-demo-card-head">
                     <h2>Exchange Connection</h2>
                     <div class="rolling-demo-card-tools">
-                        <% if (false && currentAccount?.isAdmin) { %>
+                        <% if (currentAccount?.isVerifier) { %>
                             <div class="rolling-live-admin-target-head">
                                 <div class="rolling-demo-field rolling-live-admin-target-field">
                                     <select id="ddlRollingDualAdminTargetUser">
-                                        <option value="<%= currentAccount?.accountId || '' %>">Loading running users...</option>
+                                        <option value="">Loading running users...</option>
                                     </select>
                                 </div>
-                                <div class="rolling-live-admin-target-meta" id="rollingDualAdminTargetMeta">Choose a running Dual strategy user to view or control.</div>
+                                <div class="rolling-live-admin-target-meta" id="rollingDualAdminTargetMeta">Select a running Covered Options user to load settings and positions.</div>
                             </div>
                         <% } %>
                         <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesCheckConnection" title="Check Delta connection" aria-label="Check Delta connection">
@@ -207,7 +209,6 @@
                 </div>
                 <div class="rolling-live-status" id="rollingDualFuturesConnectionStatus"></div>
                 <div class="rolling-live-status" id="rollingDualFuturesPageStatus"></div>
-                <div class="rolling-live-status" id="rollingDualFuturesQueueStatus"></div>
             </div>
         </section>
 
@@ -666,43 +667,6 @@
                     </div>
                     <div class="rolling-demo-event-log" id="rollingDualFuturesEventLog">
                         <div class="rolling-demo-event-empty">No live activity has been logged yet.</div>
-                    </div>
-                </div>
-
-                <div class="app-panel rolling-demo-card">
-                    <div class="rolling-demo-card-head">
-                        <span class="rolling-demo-manual-title">Queue Monitor</span>
-                    </div>
-                    <div class="rolling-demo-grid metrics rolling-demo-section rolling-live-balance-metrics">
-                        <div class="rolling-demo-metric">
-                            <div class="rolling-demo-metric-label">Queued</div>
-                            <div class="rolling-demo-metric-value" id="rollingDualFuturesQueueTotal">0</div>
-                        </div>
-                        <div class="rolling-demo-metric">
-                            <div class="rolling-demo-metric-label">Pending</div>
-                            <div class="rolling-demo-metric-value" id="rollingDualFuturesQueuePending">0</div>
-                        </div>
-                        <div class="rolling-demo-metric">
-                            <div class="rolling-demo-metric-label">Processing</div>
-                            <div class="rolling-demo-metric-value" id="rollingDualFuturesQueueProcessing">0</div>
-                        </div>
-                        <div class="rolling-demo-metric">
-                            <div class="rolling-demo-metric-label">Failed</div>
-                            <div class="rolling-demo-metric-value" id="rollingDualFuturesQueueFailed">0</div>
-                        </div>
-                    </div>
-                    <div class="rolling-live-status" id="rollingDualFuturesQueueMeta"></div>
-                    <div class="rolling-demo-section">
-                        <div class="rolling-demo-card-head">
-                            <span class="rolling-demo-manual-title">Recent Queue Items</span>
-                        </div>
-                        <div id="rollingDualFuturesQueueItems"></div>
-                    </div>
-                    <div class="rolling-demo-section">
-                        <div class="rolling-demo-card-head">
-                            <span class="rolling-demo-manual-title">Recent Queue History</span>
-                        </div>
-                        <div id="rollingDualFuturesQueueHistory"></div>
                     </div>
                 </div>
             </div>

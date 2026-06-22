@@ -45,6 +45,7 @@ export async function updateMyProfile(req: Request, res: Response): Promise<void
             isActive: objAccount.isActive,
             isAdmin: objAccount.isAdmin,
             isSurvivalAdmin: objAccount.isSurvivalAdmin,
+            isVerifier: objAccount.isVerifier,
             execStrategy: objAccount.execStrategy,
             mustChangePassword: objAccount.mustChangePassword
         });

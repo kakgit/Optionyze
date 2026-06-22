@@ -33,6 +33,7 @@ interface ManagedUserRow {
     account_active: boolean;
     is_admin: boolean;
     is_survival_admin: boolean;
+    is_verifier: boolean;
     exec_strategy: boolean;
     must_change_password: boolean;
     created_at: string | Date;
@@ -116,6 +117,7 @@ export async function loadManagedUsers(): Promise<ManagedUserRecord[]> {
             a.is_active AS account_active,
             a.is_admin,
             a.is_survival_admin,
+            a.is_verifier,
             a.exec_strategy,
             a.must_change_password,
             a.created_at,
@@ -140,6 +142,7 @@ export async function loadManagedUsers(): Promise<ManagedUserRecord[]> {
         isActive: Boolean(objRow.account_active),
         isAdmin: Boolean(objRow.is_admin),
         isSurvivalAdmin: Boolean(objRow.is_survival_admin),
+        isVerifier: Boolean(objRow.is_verifier),
         execStrategy: Boolean(objRow.exec_strategy),
         mustChangePassword: Boolean(objRow.must_change_password),
         createdAt: new Date(objRow.created_at).toISOString(),

@@ -148,6 +148,7 @@ export async function ensurePostgresSchema(): Promise<void> {
             is_active BOOLEAN NOT NULL DEFAULT true,
             is_admin BOOLEAN NOT NULL DEFAULT false,
             is_survival_admin BOOLEAN NOT NULL DEFAULT false,
+            is_verifier BOOLEAN NOT NULL DEFAULT false,
             exec_strategy BOOLEAN NOT NULL DEFAULT false,
             must_change_password BOOLEAN NOT NULL DEFAULT false,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -166,6 +167,10 @@ export async function ensurePostgresSchema(): Promise<void> {
     await objPool.query(`
         ALTER TABLE optionyze_accounts
         ADD COLUMN IF NOT EXISTS is_survival_admin BOOLEAN NOT NULL DEFAULT false;
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_accounts
+        ADD COLUMN IF NOT EXISTS is_verifier BOOLEAN NOT NULL DEFAULT false;
     `);
 
     await objPool.query(`
@@ -308,6 +313,7 @@ export async function ensurePostgresSchema(): Promise<void> {
             is_active BOOLEAN NOT NULL DEFAULT true,
             is_admin BOOLEAN NOT NULL DEFAULT false,
             is_survival_admin BOOLEAN NOT NULL DEFAULT false,
+            is_verifier BOOLEAN NOT NULL DEFAULT false,
             exec_strategy BOOLEAN NOT NULL DEFAULT false,
             must_change_password BOOLEAN NOT NULL DEFAULT false,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -326,6 +332,10 @@ export async function ensurePostgresSchema(): Promise<void> {
     await objPool.query(`
         ALTER TABLE optionyze_accounts
         ADD COLUMN IF NOT EXISTS is_survival_admin BOOLEAN NOT NULL DEFAULT false;
+    `);
+    await objPool.query(`
+        ALTER TABLE optionyze_accounts
+        ADD COLUMN IF NOT EXISTS is_verifier BOOLEAN NOT NULL DEFAULT false;
     `);
 
     await objPool.query(`

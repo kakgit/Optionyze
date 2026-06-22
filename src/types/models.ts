@@ -47,6 +47,7 @@ export interface AccountRecord {
     isActive: boolean;
     isAdmin: boolean;
     isSurvivalAdmin: boolean;
+    isVerifier: boolean;
     execStrategy: boolean;
     mustChangePassword: boolean;
     createdAt: string;
@@ -62,6 +63,7 @@ export interface ManagedUserRecord {
     isActive: boolean;
     isAdmin: boolean;
     isSurvivalAdmin: boolean;
+    isVerifier: boolean;
     execStrategy: boolean;
     mustChangePassword: boolean;
     createdAt: string;

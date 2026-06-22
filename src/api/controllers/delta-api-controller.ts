@@ -140,7 +140,7 @@ function getAccountId(req: Request): string {
     const vBodyTarget = typeof req.body?.targetUserId === "string" ? req.body.targetUserId : "";
     const vQueryTarget = typeof req.query?.targetUserId === "string" ? req.query.targetUserId : "";
     const vTargetAccountId = String(vBodyTarget || vQueryTarget || "").trim();
-    if (req.authAccount?.isAdmin && vTargetAccountId) {
+    if ((req.authAccount?.isAdmin || req.authAccount?.isVerifier) && vTargetAccountId) {
         return vTargetAccountId;
     }
     return vOwnAccountId;

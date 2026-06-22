@@ -4,12 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title><%= pageTitle %></title>
+    <%- include('partials/brand-head') %>
     <link rel="stylesheet" href="/css/app-shell.css" />
     <link rel="stylesheet" href="/css/account-menu.css" />
     <link rel="stylesheet" href="/css/mngusers.css" />
 </head>
 <body class="app-page">
-    <div class="app-layout mngusers-layout" id="mngUsersApp" data-current-account-id="<%= currentAccount?.accountId || '' %>" data-current-server-id="<%= currentServerId || '' %>">
+    <div class="app-layout mngusers-layout" id="mngUsersApp" data-current-account-id="<%= currentAccount?.accountId || '' %>">
         <%- include('partials/app-header', { currentAccount }) %>
 
         <section class="mngusers-hero">
@@ -26,39 +27,6 @@
                     <div class="app-stat mngusers-stat"><div class="mngusers-stat-label">Admins</div><div class="mngusers-stat-value" id="statAdmins">0</div></div>
                     <div class="app-stat mngusers-stat"><div class="mngusers-stat-label">Pwd Reset</div><div class="mngusers-stat-value" id="statForced">0</div></div>
                 </div>
-            </div>
-        </section>
-
-        <section class="app-panel mngusers-survival-panel">
-            <div class="mngusers-section-head">
-                <div>
-                    <h2>Survival Admin Access</h2>
-                    <p class="app-copy">Keep these links handy for outage-time control. Survival Admin is for failover visibility, takeover, and recovery only.</p>
-                </div>
-                <div class="mngusers-inline-tools">
-                    <a class="app-ghost-btn" href="https://optionyze.onrender.com/survival-admin/signin" target="_blank" rel="noopener noreferrer">Open Render Survival Admin</a>
-                    <a class="app-ghost-btn" href="https://optionyze-production.up.railway.app/survival-admin/signin" target="_blank" rel="noopener noreferrer">Open Railway Survival Admin</a>
-                </div>
-            </div>
-            <div class="mngusers-survival-grid">
-                <div class="mngusers-survival-card">
-                    <div class="mngusers-survival-label">Render</div>
-                    <a class="mngusers-survival-link" href="https://optionyze.onrender.com/survival-admin/signin" target="_blank" rel="noopener noreferrer">https://optionyze.onrender.com/survival-admin/signin</a>
-                </div>
-                <div class="mngusers-survival-card">
-                    <div class="mngusers-survival-label">Railway</div>
-                    <a class="mngusers-survival-link" href="https://optionyze-production.up.railway.app/survival-admin/signin" target="_blank" rel="noopener noreferrer">https://optionyze-production.up.railway.app/survival-admin/signin</a>
-                </div>
-            </div>
-            <div class="mngusers-runbook">
-                <div class="mngusers-runbook-title">Operator Steps</div>
-                <ol class="mngusers-runbook-list">
-                    <li>Use `MngUsers` or `Survival Admin` to confirm which live users are currently running and which server owns them.</li>
-                    <li>During a Primary DB outage, let the current owner continue automatically or use `Force Takeover Here` from the standby server if needed.</li>
-                    <li>Use `Survival Admin` only with dedicated `Survival Admin` accounts. These accounts should not run strategies themselves.</li>
-                    <li>After infrastructure recovers, verify ownership has stabilized before doing any manual recovery action.</li>
-                    <li>If `Handback To render` appears, use it only when you want ownership explicitly returned to the origin server.</li>
-                </ol>
             </div>
         </section>
 
@@ -95,85 +63,6 @@
             </div>
             <div id="userPager" class="mngusers-pager"></div>
         </section>
-
-        <section class="app-panel">
-            <div class="mngusers-section-head">
-                <div>
-                    <h2>Dual Running Users</h2>
-                    <p class="app-copy">Review active Dual live users, see whether they are in Survival DB mode, and manually return them to Primary DB when you decide the database is healthy again.</p>
-                </div>
-                <div class="mngusers-inline-tools">
-                    <button id="btnRefreshRunningUsers" class="mngusers-icon-btn" type="button" title="Refresh running dual users" aria-label="Refresh running dual users">
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-                            <path d="M20 4v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                        </svg>
-                    </button>
-                </div>
-            </div>
-            <p id="runningUsersCount" class="app-copy">0 running</p>
-            <div class="mngusers-table-wrap">
-                <table class="mngusers-table">
-                    <thead>
-                        <tr>
-                            <th class="mngusers-nowrap">User Name</th>
-                            <th class="mngusers-nowrap">Email ID</th>
-                            <th>Status</th>
-                            <th>Ownership</th>
-                            <th class="mngusers-nowrap">Last Cycle</th>
-                            <th class="mngusers-nowrap">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="runningUsersTableBody">
-                        <tr><td colspan="6" class="mngusers-empty">Loading running dual users...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-            <div id="runningUsersPager" class="mngusers-pager"></div>
-        </section>
-
-        <section class="app-panel">
-            <div class="mngusers-section-head">
-                <div>
-                    <h2>Pending Strategy Executions</h2>
-                    <p class="app-copy">Dual live Exec Strategy requests wait here for admin approval and execution.</p>
-                </div>
-                <div class="mngusers-inline-tools">
-                    <div class="mngusers-inline-checks mngusers-auto-exec-row">
-                        <span class="mngusers-inline-label">Auto Exec</span>
-                        <label class="mngusers-check"><input id="autoExecSl" type="checkbox" checked /> SL</label>
-                        <label class="mngusers-check"><input id="autoExecTp" type="checkbox" /> TP</label>
-                    </div>
-                    <button id="btnRefreshExecRequests" class="mngusers-icon-btn" type="button" title="Refresh pending executions" aria-label="Refresh pending executions">
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-                            <path d="M20 4v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                        </svg>
-                    </button>
-                </div>
-            </div>
-            <p id="execRequestCount" class="app-copy">0 pending</p>
-            <div class="mngusers-table-wrap">
-                <table class="mngusers-table">
-                    <thead>
-                        <tr>
-                            <th class="mngusers-nowrap">Date Time</th>
-                            <th class="mngusers-nowrap">User Name</th>
-                            <th class="mngusers-nowrap">Email ID</th>
-                            <th>Triggered By</th>
-                            <th>Qty</th>
-                            <th>Balance</th>
-                            <th>Strategy / Owner</th>
-                            <th class="mngusers-nowrap">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="execRequestTableBody">
-                        <tr><td colspan="8" class="mngusers-empty">Loading pending strategy executions...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-            <div id="execRequestPager" class="mngusers-pager"></div>
-        </section>
     </div>
 
     <div class="mngusers-overlay" id="overlay"></div>
@@ -201,8 +90,8 @@
                 <div class="mngusers-span-2 mngusers-check-grid">
                     <label class="mngusers-check"><input id="isActive" type="checkbox" checked /> Active</label>
                     <label class="mngusers-check"><input id="execStrategy" type="checkbox" /> Exec Strategy</label>
+                    <label class="mngusers-check"><input id="isVerifier" type="checkbox" /> Verifier</label>
                     <label class="mngusers-check"><input id="isAdmin" type="checkbox" /> Admin</label>
-                    <label class="mngusers-check"><input id="isSurvivalAdmin" type="checkbox" /> Survival Admin</label>
                     <label class="mngusers-check"><input id="mustChangePassword" type="checkbox" /> Force password change</label>
                 </div>
             </div>

@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title><%= pageTitle %></title>
+    <%- include('partials/brand-head') %>
     <link rel="stylesheet" href="/css/app-shell.css" />
     <link rel="stylesheet" href="/css/account-menu.css" />
     <link rel="stylesheet" href="/css/rolling-options-pt-de.css" />
@@ -15,6 +16,7 @@
         data-exec-strategy-enabled="<%= currentAccount?.execStrategy ? 'true' : 'false' %>"
         data-current-account-id="<%= currentAccount?.accountId || '' %>"
         data-current-account-admin="<%= currentAccount?.isAdmin ? 'true' : 'false' %>"
+        data-current-account-verifier="<%= currentAccount?.isVerifier ? 'true' : 'false' %>"
         data-current-account-full-name="<%= currentAccount?.fullName || '' %>"
         data-current-account-email="<%= currentAccount?.email || '' %>"
         data-current-account-telegram-chat-id="<%= currentAccount?.telegramChatId || '' %>">
