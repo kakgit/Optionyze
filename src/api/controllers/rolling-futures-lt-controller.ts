@@ -142,7 +142,7 @@ const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
     "rolling-futures-lt-short": "Short Rolling Futures",
     "rolling-futures-lt-dual": "Dual Rolling Futures",
     "covered-options": "Covered Options",
-    "options-scalper": "Options-Scalper"
+    "options-scalper": "Options Demo"
 };
 const gFutureLimitRetryDelayMs = 5000;
 const gFutureLimitRetryCount = 5;
@@ -1691,6 +1691,7 @@ function getDefaultManualTraderUiState(
         reEnterBlock: bIsDual,
         buyHedgeSellPremiumGate: isCoveredLikeStrategy(pStrategyCode),
         buyHedgeSellPremiumPct: "2",
+        buyHedgeOppositeLegOnGate: false,
         buyQtyPercentEnabled: false,
         buyQtyPercent: "100",
         autoConfirmLiveActions: isCoveredLikeStrategy(pStrategyCode),
@@ -1873,6 +1874,28 @@ function getCoveredBuyHedgeSellPremiumGateConfig(
         thresholdPct: vThresholdPct,
         minimumSellPremiumRatio: Math.max(0, 1 - (vThresholdPct / 100))
     };
+}
+
+function isCoveredBuyHedgeOppositeLegEnabled(
+    pUiState: Record<string, unknown>
+): boolean {
+    return normalizeBooleanValue(pUiState.buyHedgeOppositeLegOnGate, false);
+}
+
+function resolveCoveredBuyHedgeTargetLegSide(
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pUiState: Record<string, unknown>,
+    pRowIndex: 1 | 2,
+    pRequestedLegSide: "ce" | "pe"
+): "ce" | "pe" | null {
+    if (!isCoveredBuyHedgeOppositeLegEnabled(pUiState)) {
+        return pRequestedLegSide;
+    }
+    const vOppositeLegSide = pRequestedLegSide === "ce" ? "pe" : "ce";
+    if (hasTrackedOptionRowLeg(pTrackedPositions, pRowIndex, vOppositeLegSide, pUiState)) {
+        return null;
+    }
+    return vOppositeLegSide;
 }
 
 function getMatchingCoveredSellLegForBuyHedge(
@@ -3383,6 +3406,7 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
         buyHedgeSellPremiumGate: normalizeBooleanValue(objUiState.buyHedgeSellPremiumGate, Boolean(objDefaults.buyHedgeSellPremiumGate)),
         buyHedgeSellPremiumPct: normalizeStringValue(objUiState.buyHedgeSellPremiumPct, String(objDefaults.buyHedgeSellPremiumPct)),
+        buyHedgeOppositeLegOnGate: normalizeBooleanValue(objUiState.buyHedgeOppositeLegOnGate, Boolean(objDefaults.buyHedgeOppositeLegOnGate)),
         buyQtyPercentEnabled: normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.buyQtyPercentEnabled)),
         buyQtyPercent: normalizeCoveredBuyQtyPercentString(objUiState.buyQtyPercent ?? objDefaults.buyQtyPercent),
         autoConfirmLiveActions: normalizeBooleanValue(objUiState.autoConfirmLiveActions, Boolean(objDefaults.autoConfirmLiveActions)),
@@ -3697,6 +3721,7 @@ function normalizeProfileSaveInput(
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
         buyHedgeSellPremiumGate: normalizeBooleanValue(objUiState.buyHedgeSellPremiumGate, Boolean(objDefaults.buyHedgeSellPremiumGate)),
         buyHedgeSellPremiumPct: normalizeStringValue(objUiState.buyHedgeSellPremiumPct, String(objDefaults.buyHedgeSellPremiumPct)),
+        buyHedgeOppositeLegOnGate: normalizeBooleanValue(objUiState.buyHedgeOppositeLegOnGate, Boolean(objDefaults.buyHedgeOppositeLegOnGate)),
         buyQtyPercentEnabled: normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.buyQtyPercentEnabled)),
         buyQtyPercent: normalizeCoveredBuyQtyPercentString(objUiState.buyQtyPercent ?? objDefaults.buyQtyPercent),
         autoConfirmLiveActions: normalizeBooleanValue(objUiState.autoConfirmLiveActions, Boolean(objDefaults.autoConfirmLiveActions)),
@@ -6723,8 +6748,8 @@ async function applyServerSideNeutralityCheck(
             pStrategyCode,
             "future_opened",
             "warning",
-            "Delta Neutral Hedge Executed",
-            `${vHedgeAction} future hedge placed from server-side delta-neutral check.`,
+            "Live Hedge Executed",
+            `${vHedgeAction} future hedge placed from the server-side hedge check.`,
             {
                 symbol: pSymbol,
                 qty: vHedgeQty,
@@ -6975,7 +7000,32 @@ async function executeStrategyPlacement(
                 }
             };
         }
-        arrOptionSides = arrEligibleOptionSides;
+        const arrResolvedOptionSides = Array.from(new Set(
+            arrEligibleOptionSides.map((pOptionSide) => {
+                const vRequestedLegSide = pOptionSide === "PE" ? "pe" : "ce";
+                const vResolvedLegSide = resolveCoveredBuyHedgeTargetLegSide(arrExisting, objUiState, vRowIndex, vRequestedLegSide);
+                if (!vResolvedLegSide) {
+                    return "";
+                }
+                return vResolvedLegSide === "pe" ? "PE" : "CE";
+            }).filter(Boolean)
+        )) as Array<"CE" | "PE">;
+        if (!arrResolvedOptionSides.length) {
+            return {
+                profileLabel: profile.referenceName || profile.apiKey || "",
+                trackedOpenPositions: arrExisting,
+                contracts: [],
+                orders: [],
+                neutralCheck: {
+                    mode: "none",
+                    hedgePlaced: false,
+                    totalDelta: 0,
+                    totalTheta: 0,
+                    threshold: null
+                }
+            };
+        }
+        arrOptionSides = arrResolvedOptionSides;
     }
     const objConfig = {
         symbol: pInput.symbol,
@@ -7525,9 +7575,10 @@ async function openTrackedOptionReEntry(
         : normalizeOptionRowIndex(pStrategyCode, pMetadata.rowIndex);
     const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
     const vSymbol = normalizeSymbolValue(objUiState.symbol);
-    const vLegSide = pOptions?.forceLegSide === "pe"
+    const vRequestedLegSide = pOptions?.forceLegSide === "pe"
         ? "pe"
         : (pOptions?.forceLegSide === "ce" ? "ce" : getTrackedOptionLegSide(pClosedPosition.contractName));
+    let vLegSide = vRequestedLegSide;
     const bUseRowReEntryDelta = Boolean(pOptions?.useRowReEntryDelta) || bCoveredRowDriven;
     const vTargetDelta = Math.max(
         0,
@@ -7567,7 +7618,7 @@ async function openTrackedOptionReEntry(
     }
     if (isCoveredOptionsStrategy(pStrategyCode) && vOrderAction === "buy") {
         const arrTrackedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
-        const objGate = evaluateCoveredBuyHedgeSellPremiumGate(arrTrackedPositions, objUiState, vLegSide);
+        const objGate = evaluateCoveredBuyHedgeSellPremiumGate(arrTrackedPositions, objUiState, vRequestedLegSide);
         if (!objGate.allowed) {
             await logFuturesEvent(
                 pUserId,
@@ -7585,6 +7636,11 @@ async function openTrackedOptionReEntry(
             );
             return null;
         }
+        const vResolvedTargetLegSide = resolveCoveredBuyHedgeTargetLegSide(arrTrackedPositions, objUiState, vRowIndex, vRequestedLegSide);
+        if (!vResolvedTargetLegSide) {
+            return null;
+        }
+        vLegSide = vResolvedTargetLegSide;
     }
 
     if (isOptionsScalperStrategy(pStrategyCode)) {
@@ -8150,7 +8206,11 @@ async function ensureCoveredConfiguredLegPresence(
             continue;
         }
         for (const vLegSide of arrMissingLegs) {
-            const bAlreadyPending = arrPending.some((objEntry) => objEntry.rowIndex === vRowIndex && objEntry.legSide === vLegSide);
+            const vResolvedLegSide = resolveCoveredBuyHedgeTargetLegSide(pTrackedPositions, objUiState, vRowIndex, vLegSide);
+            if (!vResolvedLegSide) {
+                continue;
+            }
+            const bAlreadyPending = arrPending.some((objEntry) => objEntry.rowIndex === vRowIndex && objEntry.legSide === vResolvedLegSide);
             if (bAlreadyPending) {
                 continue;
             }
@@ -8167,7 +8227,7 @@ async function ensureCoveredConfiguredLegPresence(
                 pStrategyCode,
                 pProfile,
                 vRowIndex,
-                vLegSide,
+                vResolvedLegSide,
                 "missing_leg"
             );
             bScheduledAny = true;
@@ -8230,6 +8290,10 @@ async function restoreCoveredMissingBuyHedgesAfterImport(
             if (hasTrackedOptionRowLeg(arrSavedPositions, vRowIndex, vLegSide, objUiState)) {
                 continue;
             }
+            const vResolvedLegSide = resolveCoveredBuyHedgeTargetLegSide(arrSavedPositions, objUiState, vRowIndex, vLegSide);
+            if (!vResolvedLegSide) {
+                continue;
+            }
             const objNegativeSellCheck = isCoveredSellLegNegativeForBuyHedge(arrSavedPositions, vLegSide);
             if (!objNegativeSellCheck.negative) {
                 continue;
@@ -8243,7 +8307,7 @@ async function restoreCoveredMissingBuyHedgesAfterImport(
                 pStrategyCode,
                 pProfile,
                 vRowIndex,
-                vLegSide,
+                vResolvedLegSide,
                 "missing_leg"
             );
             bScheduledAny = true;
@@ -11945,7 +12009,7 @@ async function executeManualFutureInternal(req: Request, res: Response, pStrateg
         res.status(400).json({
             status: "warning",
             message: isOptionsScalperStrategy(pStrategyCode)
-                ? "Manual futures are disabled for Options-Scalper paper mode."
+                ? "Manual futures are disabled for Options Demo paper mode."
                 : "Manual futures are disabled for Covered Options."
         });
         return;
@@ -12132,7 +12196,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
 
     const vAction = String(req.body?.action || "").trim().toLowerCase();
     const vSymbol = normalizeSymbolValue(req.body?.symbol || getMergedUiState(objProfile).symbol);
-    const vLegSide = String(req.body?.legSide || "").trim().toLowerCase();
+    let vLegSide = String(req.body?.legSide || "").trim().toLowerCase();
     const vRowIndex = normalizeOptionRowIndex(pStrategyCode, req.body?.rowIndex);
     const vExpiryMode = String(req.body?.expiryMode || "5").trim() as "1" | "2" | "4" | "5" | "6" | "7";
     const vExpiryDate = normalizeRollingFuturesExpiryDate(vExpiryMode, req.body?.expiryDate);
@@ -12244,6 +12308,28 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
             if (!objGate.allowed) {
                 throw new Error(objGate.message || `Matching ${vLegSide.toUpperCase()} sell premium gate blocked buy hedge entry.`);
             }
+            const vResolvedLegSide = resolveCoveredBuyHedgeTargetLegSide(
+                arrExisting,
+                objUiState,
+                vRowIndex,
+                vLegSide === "pe" ? "pe" : "ce"
+            );
+            if (!vResolvedLegSide) {
+                res.json({
+                    status: "success",
+                    message: "Covered buy hedge was already open. No duplicate order was placed.",
+                    data: {
+                        action: vAction,
+                        legSide: vLegSide,
+                        rowIndex: vRowIndex,
+                        qty: vQty,
+                        targetDelta: vTargetDelta,
+                        trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, arrExisting)
+                    }
+                });
+                return;
+            }
+            vLegSide = vResolvedLegSide;
         }
         const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(objUiState, "manual_option_open", pStrategyCode, vRowIndex);
         const objConfig = {
@@ -14418,7 +14504,7 @@ export async function calculateOptionsScalperRecommendedStartQty(req: Request, r
     await calculateRecommendedStartQtyInternal(req, res, "options-scalper");
 }
 export async function executeOptionsScalperManualFuture(req: Request, res: Response): Promise<void> {
-    await respondOptionsScalperPaperActionNotReady(req, res, "Options-Scalper paper future entries are not wired yet.");
+    await respondOptionsScalperPaperActionNotReady(req, res, "Options Demo paper future entries are not wired yet.");
 }
 export async function executeOptionsScalperManualOption(req: Request, res: Response): Promise<void> {
     await executeManualOptionInternal(req, res, "options-scalper");
@@ -14429,13 +14515,13 @@ export async function executeOptionsScalperStrategy(req: Request, res: Response)
 export async function confirmOptionsScalperLiveAction(req: Request, res: Response): Promise<void> {
     res.status(400).json({
         status: "warning",
-        message: "Paper actions do not need confirmation on Options-Scalper."
+        message: "Paper actions do not need confirmation on Options Demo."
     });
 }
 export async function rejectOptionsScalperLiveAction(req: Request, res: Response): Promise<void> {
     res.status(400).json({
         status: "warning",
-        message: "Paper actions do not need confirmation on Options-Scalper."
+        message: "Paper actions do not need confirmation on Options Demo."
     });
 }
 export async function getOptionsScalperImportableOpenPositions(req: Request, res: Response): Promise<void> {

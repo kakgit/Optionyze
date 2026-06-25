@@ -1,23 +1,38 @@
 (function () {
     const rawMode = String(document.body?.dataset?.rollingFuturesLive || "").trim().toLowerCase();
-    const mode = rawMode === "short" || rawMode === "dual" || rawMode === "covered" ? rawMode : "long";
+    const pageVariant = String(document.body?.dataset?.rollingFuturesVariant || "").trim().toLowerCase();
+    const isDemoVariant = pageVariant === "demo";
+    const endpointBaseOverride = String(document.body?.dataset?.rollingFuturesEndpointBase || "").trim();
+    const mode = rawMode === "short" || rawMode === "covered" ? rawMode : "long";
     const initialExecStrategyEnabled = String(document.body?.dataset?.execStrategyEnabled || "").trim().toLowerCase() === "true";
     const prefix = mode === "short"
         ? "rollingShortFutures"
-        : ((mode === "dual" || mode === "covered") ? "rollingDualFutures" : "rollingLongFutures");
+        : (mode === "covered" ? "rollingDualFutures" : "rollingLongFutures");
     const idPrefix = mode === "short"
         ? "RollingShortFutures"
-        : ((mode === "dual" || mode === "covered") ? "RollingDualFutures" : "RollingLongFutures");
-    const endpointBase = mode === "short"
+        : (mode === "covered" ? "RollingDualFutures" : "RollingLongFutures");
+    const endpointBase = endpointBaseOverride || (mode === "short"
         ? "/api/rollingfutures-lt-short"
-        : (mode === "dual"
-            ? "/api/rollingfutures-lt-dual"
-            : (mode === "covered" ? "/api/covered-options" : "/api/rollingfutures-lt-long"));
+        : (mode === "covered" ? "/api/covered-options" : "/api/rollingfutures-lt-long"));
     const modeLabel = mode === "short"
         ? "Short Mode"
-        : (mode === "covered" ? "Covered Options" : (mode === "dual" ? "Dual Mode" : "Long Mode"));
+        : (mode === "covered" ? "Covered Options" : "Long Mode");
     const isCoveredMode = mode === "covered";
-    const isDualLikeMode = mode === "dual" || mode === "covered";
+    const isDualLikeMode = mode === "covered";
+    const openPositionsEmptyText = isDemoVariant
+        ? "No demo positions are currently shown."
+        : "No imported live positions are currently shown.";
+    const closedPositionsEmptyText = isDemoVariant
+        ? "No demo trade history found for the selected date range."
+        : "No Delta fill history found for the selected date range.";
+    const eventLogEmptyText = isDemoVariant
+        ? "No demo activity has been logged yet."
+        : "No live activity has been logged yet.";
+    const importableEmptyText = isCoveredMode
+        ? (isDemoVariant
+            ? "No importable demo option positions are available."
+            : "No live option positions are open on Delta Exchange for the selected symbol.")
+        : "No live futures positions are open on Delta Exchange for the selected symbol.";
     const deltaUiTimezoneOffsetMinutes = 5.5 * 60;
     const currentAccountId = String(document.body?.dataset?.currentAccountId || "").trim();
     const currentAccountIsAdmin = String(document.body?.dataset?.currentAccountAdmin || "").trim().toLowerCase() === "true";
@@ -25,7 +40,7 @@
     const currentAccountFullName = String(document.body?.dataset?.currentAccountFullName || "").trim();
     const currentAccountEmail = String(document.body?.dataset?.currentAccountEmail || "").trim();
     const currentAccountTelegramChatId = String(document.body?.dataset?.currentAccountTelegramChatId || "").trim();
-    const requiresExplicitTargetSelection = isCoveredMode && currentAccountIsVerifier;
+    const requiresExplicitTargetSelection = isCoveredMode && currentAccountIsVerifier && !isDemoVariant;
     const symbolConfig = {
         BTC: { contractName: "BTCUSD", lotSize: 0.001 },
         ETH: { contractName: "ETHUSD", lotSize: 0.01 }
@@ -113,6 +128,7 @@
         reEnterBlock: document.getElementById("chkRollingFuturesReEnterBlock"),
         buyHedgeSellPremiumGate: document.getElementById("chkRollingFuturesBuyHedgeSellPremiumGate"),
         buyHedgeSellPremiumPct: document.getElementById("txtRollingFuturesBuyHedgeSellPremiumPct"),
+        buyHedgeOppositeLegOnGate: document.getElementById("chkRollingFuturesBuyHedgeOppositeLegOnGate"),
         buyQtyPercentEnabled: document.getElementById("chkRollingFuturesBuyQtyPercentEnabled"),
         buyQtyPercent: document.getElementById("txtRollingFuturesBuyQtyPercent"),
         autoConfirmLiveActions: document.getElementById("chkRollingFuturesAutoConfirmLiveActions"),
@@ -366,6 +382,7 @@
                 <div class="rolling-futures-saved-profile-grid">
                     <span>Enabled: <strong>${escapeHtml(String(Boolean(state.buyHedgeSellPremiumGate)) === "true" ? "ON" : "OFF")}</strong></span>
                     <span>Threshold %: <strong>${escapeHtml(formatSavedProfileValue(state.buyHedgeSellPremiumPct, "2"))}</strong></span>
+                    <span>Opposite Leg: <strong>${escapeHtml(String(Boolean(state.buyHedgeOppositeLegOnGate)) === "true" ? "ON" : "OFF")}</strong></span>
                 </div>
             </div>
             <div class="rolling-futures-saved-profile-card">
@@ -618,6 +635,7 @@
             reEnterBlock: true,
             buyHedgeSellPremiumGate: true,
             buyHedgeSellPremiumPct: "2",
+            buyHedgeOppositeLegOnGate: false,
             buyQtyPercentEnabled: false,
             buyQtyPercent: "100",
             autoConfirmLiveActions: true,
@@ -1433,6 +1451,7 @@
             reEnterBlock: getCheckboxValue(ids.reEnterBlock, false),
             buyHedgeSellPremiumGate: getCheckboxValue(ids.buyHedgeSellPremiumGate, false),
             buyHedgeSellPremiumPct: getInputValue(ids.buyHedgeSellPremiumPct, "2"),
+            buyHedgeOppositeLegOnGate: getCheckboxValue(ids.buyHedgeOppositeLegOnGate, false),
             buyQtyPercentEnabled: getCheckboxValue(ids.buyQtyPercentEnabled, false),
             buyQtyPercent: getInputValue(ids.buyQtyPercent, "100"),
             autoConfirmLiveActions: getCheckboxValue(ids.autoConfirmLiveActions, false),
@@ -1480,6 +1499,7 @@
             setCheckboxValue(ids.reEnterBlock, objUiState.reEnterBlock);
             setCheckboxValue(ids.buyHedgeSellPremiumGate, objUiState.buyHedgeSellPremiumGate);
             setInputValue(ids.buyHedgeSellPremiumPct, objUiState.buyHedgeSellPremiumPct);
+            setCheckboxValue(ids.buyHedgeOppositeLegOnGate, objUiState.buyHedgeOppositeLegOnGate);
             setCheckboxValue(ids.buyQtyPercentEnabled, objUiState.buyQtyPercentEnabled);
             setInputValue(ids.buyQtyPercent, objUiState.buyQtyPercent);
             setCheckboxValue(ids.autoConfirmLiveActions, objUiState.autoConfirmLiveActions);
@@ -2170,7 +2190,7 @@
         if (!arrRows.length) {
             previousOpenPositionLtps = new Map();
             const openPositionsColumnCount = isCoveredMode ? 13 : 14;
-            ids.openPositionsBody.innerHTML = `<tr><td colspan="${openPositionsColumnCount}" class="rolling-demo-empty">No imported live positions are currently shown.</td></tr>`;
+            ids.openPositionsBody.innerHTML = `<tr><td colspan="${openPositionsColumnCount}" class="rolling-demo-empty">${escapeHtml(openPositionsEmptyText)}</td></tr>`;
             if (ids.openCount) {
                 ids.openCount.textContent = "0";
             }
@@ -2191,6 +2211,18 @@
             const greeks = row.greeks || {};
             const coveredSideRowClass = isCoveredMode && (side === "BUY" || side === "SELL")
                 ? `rolling-covered-side-row ${side.toLowerCase()}`
+                : "";
+            const swapActionButton = isCoveredMode && !isDemoVariant
+                ? `
+                            <button class="rolling-demo-icon-btn rolling-live-swap-open-position" type="button" data-import-id="${escapeHtml(importId)}" title="Replace this position using Manual Trader settings" aria-label="Replace this position using Manual Trader settings">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M17 1v6h-6" />
+                                    <path d="M3 11a8 8 0 0 1 14-5l0 1" />
+                                    <path d="M7 23v-6h6" />
+                                    <path d="M21 13a8 8 0 0 1-14 5l0-1" />
+                                </svg>
+                            </button>
+                `
                 : "";
             return `
                 <tr class="${coveredSideRowClass}">
@@ -2216,14 +2248,7 @@
                     ${isCoveredMode ? "" : "<td>LIVE</td>"}
                     <td>
                         <div class="rolling-demo-table-actions">
-                            <button class="rolling-demo-icon-btn rolling-live-swap-open-position" type="button" data-import-id="${escapeHtml(importId)}" title="Replace this position using Manual Trader settings" aria-label="Replace this position using Manual Trader settings">
-                                <svg viewBox="0 0 24 24" aria-hidden="true">
-                                    <path d="M17 1v6h-6" />
-                                    <path d="M3 11a8 8 0 0 1 14-5l0 1" />
-                                    <path d="M7 23v-6h6" />
-                                    <path d="M21 13a8 8 0 0 1-14 5l0-1" />
-                                </svg>
-                            </button>
+                            ${swapActionButton}
                             <button class="rolling-demo-icon-btn sell rolling-live-close-open-position" type="button" data-import-id="${escapeHtml(importId)}" title="Close this open position" aria-label="Close this open position">
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="M12 2v10" />
@@ -2326,7 +2351,7 @@
         }
         if (!closedPositions.length) {
             const closedPositionsColumnCount = isCoveredMode ? 9 : 10;
-            ids.closedPositionsBody.innerHTML = `<tr><td colspan="${closedPositionsColumnCount}" class="rolling-demo-empty">No Delta fill history found for the selected date range.</td></tr>`;
+            ids.closedPositionsBody.innerHTML = `<tr><td colspan="${closedPositionsColumnCount}" class="rolling-demo-empty">${escapeHtml(closedPositionsEmptyText)}</td></tr>`;
             if (ids.closedPageInfo) {
                 ids.closedPageInfo.textContent = "Page 0 of 0";
             }
@@ -2428,7 +2453,7 @@
             return;
         }
         if (!arrRows.length) {
-            ids.eventLog.innerHTML = "<div class=\"rolling-demo-event-empty\">No live activity has been logged yet.</div>";
+            ids.eventLog.innerHTML = `<div class="rolling-demo-event-empty">${escapeHtml(eventLogEmptyText)}</div>`;
             return;
         }
         ids.eventLog.innerHTML = arrRows.map(function (row) {
@@ -2493,9 +2518,7 @@
             return;
         }
         if (!importablePositions.length) {
-            ids.importList.innerHTML = isCoveredMode
-                ? "<div class=\"rolling-demo-event-empty\">No live option positions are open on Delta Exchange for the selected symbol.</div>"
-                : "<div class=\"rolling-demo-event-empty\">No live futures positions are open on Delta Exchange for the selected symbol.</div>";
+            ids.importList.innerHTML = `<div class="rolling-demo-event-empty">${escapeHtml(importableEmptyText)}</div>`;
             return;
         }
         ids.importList.innerHTML = importablePositions.map(function (row) {
@@ -2735,6 +2758,7 @@
         ids.reEnterBlock,
         ids.buyHedgeSellPremiumGate,
         ids.buyHedgeSellPremiumPct,
+        ids.buyHedgeOppositeLegOnGate,
         ids.buyQtyPercentEnabled,
         ids.buyQtyPercent,
         ids.autoConfirmLiveActions

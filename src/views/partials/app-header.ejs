@@ -3,10 +3,15 @@
     <div class="app-top-actions">
         <a class="app-link-btn" href="/dashboard">Dashboard</a>
         <div class="app-nav-dropdown">
-            <button class="app-link-btn app-nav-trigger" type="button">Live Trading</button>
+            <button class="app-link-btn app-nav-trigger" type="button">Delta Live</button>
             <div class="app-nav-menu">
-                <a class="app-nav-item" href="/rollingfutures-lt-dual">Delta Neutral</a>
                 <a class="app-nav-item" href="/covered-options">Covered Options</a>
+            </div>
+        </div>
+        <div class="app-nav-dropdown">
+            <button class="app-link-btn app-nav-trigger" type="button">Delta Demo</button>
+            <div class="app-nav-menu">
+                <a class="app-nav-item" href="/options-demo">Options Demo</a>
             </div>
         </div>
         <%- include('account-menu', { currentAccount }) %>

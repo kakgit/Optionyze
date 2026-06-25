@@ -229,7 +229,7 @@ async function assertSurvivalAdminEligibilityForUpdate(req: Request, pAccountId:
     );
     const bHasRunningDualStrategy = bRuntimeSaysRunning && (bActiveLease || bActiveSurvival);
     if (bHasRunningDualStrategy) {
-        throw new Error("A Survival Admin account cannot have an active Delta Neutral strategy running.");
+        throw new Error("A Survival Admin account cannot have an active live strategy running.");
     }
 }
 

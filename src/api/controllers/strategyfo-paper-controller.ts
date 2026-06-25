@@ -15,18 +15,20 @@ const gRollingFuturesTelegramEventTypes = [
     "kill_switch"
 ] as const;
 
-export function renderRollingFuturesLiveDualPage(req: Request, res: Response): void {
-    res.render("rolling-futures-lt-dual", {
-        pageTitle: "Delta Neutral - Live | Optionyze",
+export function renderCoveredOptionsPage(req: Request, res: Response): void {
+    res.render("covered-options", {
+        pageTitle: "Covered Options - Live | Optionyze",
+        pageVariant: "live",
         currentAccount: req.authAccount,
         defaultUserId: req.authAccount?.accountId || "demo-paper",
         rollingTelegramEventTypes: gRollingFuturesTelegramEventTypes
     });
 }
 
-export function renderCoveredOptionsPage(req: Request, res: Response): void {
+export function renderOptionsDemoPage(req: Request, res: Response): void {
     res.render("covered-options", {
-        pageTitle: "Covered Options - Live | Optionyze",
+        pageTitle: "Options Demo | Optionyze",
+        pageVariant: "demo",
         currentAccount: req.authAccount,
         defaultUserId: req.authAccount?.accountId || "demo-paper",
         rollingTelegramEventTypes: gRollingFuturesTelegramEventTypes

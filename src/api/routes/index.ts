@@ -11,26 +11,39 @@ import {
 import { listSurvivalAdminRunningUsers } from "../controllers/survival-admin-controller";
 import {
     calculateCoveredOptionsRecommendedStartQty,
+    calculateOptionsScalperRecommendedStartQty,
     checkRollingFuturesLtDualConnection,
     checkCoveredOptionsConnection,
+    checkOptionsScalperConnection,
     calculateRollingFuturesLtDualRecommendedStartQty,
     clearCoveredOptionsEventsController,
+    clearOptionsScalperEventsController,
     clearRollingFuturesLtDualEventsController,
     closeCoveredOptionsImportedOpenPosition,
+    closeOptionsScalperImportedOpenPosition,
     deleteRollingFuturesLtDualEventController,
     deleteCoveredOptionsEventController,
+    deleteOptionsScalperEventController,
     closeRollingFuturesLtDualImportedOpenPosition,
     deleteCoveredOptionsOpenPosition,
+    deleteOptionsScalperOpenPosition,
     deleteRollingFuturesLtDualOpenPosition,
     disableCoveredOptionsAutoTrader,
+    disableOptionsScalperAutoTrader,
     disableRollingFuturesLtDualAutoTrader,
     enableCoveredOptionsAutoTrader,
+    enableOptionsScalperAutoTrader,
     enableRollingFuturesLtDualAutoTrader,
     executeCoveredOptionsKillSwitch,
     confirmCoveredOptionsLiveAction,
     executeCoveredOptionsManualFuture,
     executeCoveredOptionsManualOption,
     executeCoveredOptionsStrategy,
+    executeOptionsScalperKillSwitch,
+    confirmOptionsScalperLiveAction,
+    executeOptionsScalperManualFuture,
+    executeOptionsScalperManualOption,
+    executeOptionsScalperStrategy,
     executeRollingFuturesLtDualKillSwitch,
     executeRollingFuturesLtDualManualFuture,
     executeRollingFuturesLtDualManualOption,
@@ -45,6 +58,14 @@ import {
     getCoveredOptionsOpenPositions,
     getCoveredOptionsProfile,
     getCoveredOptionsRuntimeStatus,
+    getOptionsScalperAccountSummary,
+    getOptionsScalperClosedPositions,
+    getOptionsScalperConnectionStatus,
+    getOptionsScalperEvents,
+    getOptionsScalperImportableOpenPositions,
+    getOptionsScalperOpenPositions,
+    getOptionsScalperProfile,
+    getOptionsScalperRuntimeStatus,
     listCoveredOptionsVerifierRunningUsers,
     getRollingFuturesLtDualAccountSummary,
     getRollingFuturesLtDualClosedPositions,
@@ -58,17 +79,24 @@ import {
     disableRollingFuturesLtDualSimulatedPrimaryOutageController,
     switchRollingFuturesLtDualBackToPrimaryController,
     recalculateCoveredOptionsRecoveryTotalPnl,
+    recalculateOptionsScalperRecoveryTotalPnl,
     recalculateRollingFuturesLtDualRecoveryTotalPnl,
     updateCoveredOptionsRecoveryMetrics,
+    updateOptionsScalperRecoveryMetrics,
     updateRollingFuturesLtDualRecoveryMetrics,
     reconcileCoveredOptionsOpenPositions,
     rejectCoveredOptionsLiveAction,
+    rejectOptionsScalperLiveAction,
+    reconcileOptionsScalperOpenPositions,
     reconcileRollingFuturesLtDualOpenPositions,
     saveCoveredOptionsOpenPositions,
     saveCoveredOptionsProfile,
+    saveOptionsScalperOpenPositions,
+    saveOptionsScalperProfile,
     saveRollingFuturesLtDualOpenPositions,
     saveRollingFuturesLtDualProfile,
     clearCoveredOptionsOpenPositions,
+    clearOptionsScalperOpenPositions,
     swapCoveredOptionsImportedOpenPosition,
     handleTelegramWebhook
 } from "../controllers/rolling-futures-lt-controller";
@@ -129,109 +157,18 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
         await testDeltaApiProfileLoginController(req, res);
     });
 
-    objRouter.get("/rollingfutures-lt-dual/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await getRollingFuturesLtDualProfile(req, res);
-    });
-    objRouter.get("/rollingfutures-lt-dual/admin/running-users", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
-        await listRollingFuturesLtDualRunningUsers(req, res);
-    });
     objRouter.get("/covered-options/admin/running-users", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await listCoveredOptionsVerifierRunningUsers(req, res);
     });
     objRouter.get("/survival-admin/running-users", requireSurvivalAdminApi, async (req, res) => {
         await listSurvivalAdminRunningUsers(req, res);
     });
-    objRouter.post("/rollingfutures-lt-dual/admin/running-users/:accountId/simulate-primary-outage", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
-        await enableRollingFuturesLtDualSimulatedPrimaryOutageController(req, res);
-    });
-    objRouter.delete("/rollingfutures-lt-dual/admin/running-users/:accountId/simulate-primary-outage", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
-        await disableRollingFuturesLtDualSimulatedPrimaryOutageController(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/admin/running-users/:accountId/switch-primary", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
-        await switchRollingFuturesLtDualBackToPrimaryController(req, res);
-    });
     objRouter.post("/survival-admin/running-users/:accountId/switch-primary", requireSurvivalAdminApi, async (req, res) => {
         await switchRollingFuturesLtDualBackToPrimaryController(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/admin/running-users/:accountId/force-takeover-here", requireAdminApi, requireFreshPasswordApi, async (req, res) => {
-        await forceRollingFuturesLtDualTakeoverHereController(req, res);
     });
     objRouter.post("/survival-admin/running-users/:accountId/force-takeover-here", requireSurvivalAdminApi, async (req, res) => {
         await forceRollingFuturesLtDualTakeoverHereController(req, res);
     });
-    objRouter.post("/rollingfutures-lt-dual/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await saveRollingFuturesLtDualProfile(req, res);
-    });
-    objRouter.get("/rollingfutures-lt-dual/connection/status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await getRollingFuturesLtDualConnectionStatus(req, res);
-    });
-    objRouter.get("/rollingfutures-lt-dual/runtime", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await getRollingFuturesLtDualRuntimeStatus(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/connection/check", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await checkRollingFuturesLtDualConnection(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/auto-trader/start", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await enableRollingFuturesLtDualAutoTrader(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/auto-trader/stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await disableRollingFuturesLtDualAutoTrader(req, res);
-    });
-    objRouter.get("/rollingfutures-lt-dual/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await getRollingFuturesLtDualAccountSummary(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/start-qty/calculate", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await calculateRollingFuturesLtDualRecommendedStartQty(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await executeRollingFuturesLtDualManualFuture(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/manual/option", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await executeRollingFuturesLtDualManualOption(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/strategy/execute", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await executeRollingFuturesLtDualStrategy(req, res);
-    });
-    objRouter.get("/rollingfutures-lt-dual/open-positions/importable", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await getRollingFuturesLtDualImportableOpenPositions(req, res);
-    });
-    objRouter.get("/rollingfutures-lt-dual/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await getRollingFuturesLtDualOpenPositions(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await saveRollingFuturesLtDualOpenPositions(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/open-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await deleteRollingFuturesLtDualOpenPosition(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/open-positions/reconcile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await reconcileRollingFuturesLtDualOpenPositions(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await closeRollingFuturesLtDualImportedOpenPosition(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await executeRollingFuturesLtDualKillSwitch(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await updateRollingFuturesLtDualRecoveryMetrics(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/metrics/recalculate-total-pnl", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await recalculateRollingFuturesLtDualRecoveryTotalPnl(req, res);
-    });
-    objRouter.get("/rollingfutures-lt-dual/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await getRollingFuturesLtDualClosedPositions(req, res);
-    });
-    objRouter.get("/rollingfutures-lt-dual/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await getRollingFuturesLtDualEvents(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/events/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await deleteRollingFuturesLtDualEventController(req, res);
-    });
-    objRouter.post("/rollingfutures-lt-dual/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await clearRollingFuturesLtDualEventsController(req, res);
-    });
-
     objRouter.get("/covered-options/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getCoveredOptionsProfile(req, res);
     });
@@ -318,6 +255,91 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/covered-options/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await clearCoveredOptionsEventsController(req, res);
+    });
+
+    objRouter.get("/options-demo/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperProfile(req, res);
+    });
+    objRouter.post("/options-demo/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveOptionsScalperProfile(req, res);
+    });
+    objRouter.get("/options-demo/connection/status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperConnectionStatus(req, res);
+    });
+    objRouter.get("/options-demo/runtime", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperRuntimeStatus(req, res);
+    });
+    objRouter.post("/options-demo/connection/check", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await checkOptionsScalperConnection(req, res);
+    });
+    objRouter.post("/options-demo/auto-trader/start", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await enableOptionsScalperAutoTrader(req, res);
+    });
+    objRouter.post("/options-demo/auto-trader/stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await disableOptionsScalperAutoTrader(req, res);
+    });
+    objRouter.get("/options-demo/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperAccountSummary(req, res);
+    });
+    objRouter.post("/options-demo/start-qty/calculate", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await calculateOptionsScalperRecommendedStartQty(req, res);
+    });
+    objRouter.post("/options-demo/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeOptionsScalperManualFuture(req, res);
+    });
+    objRouter.post("/options-demo/manual/option", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeOptionsScalperManualOption(req, res);
+    });
+    objRouter.post("/options-demo/strategy/execute", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeOptionsScalperStrategy(req, res);
+    });
+    objRouter.post("/options-demo/live-action/confirm", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await confirmOptionsScalperLiveAction(req, res);
+    });
+    objRouter.post("/options-demo/live-action/reject", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await rejectOptionsScalperLiveAction(req, res);
+    });
+    objRouter.get("/options-demo/open-positions/importable", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperImportableOpenPositions(req, res);
+    });
+    objRouter.get("/options-demo/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperOpenPositions(req, res);
+    });
+    objRouter.post("/options-demo/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveOptionsScalperOpenPositions(req, res);
+    });
+    objRouter.post("/options-demo/open-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteOptionsScalperOpenPosition(req, res);
+    });
+    objRouter.post("/options-demo/open-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearOptionsScalperOpenPositions(req, res);
+    });
+    objRouter.post("/options-demo/open-positions/reconcile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await reconcileOptionsScalperOpenPositions(req, res);
+    });
+    objRouter.post("/options-demo/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await closeOptionsScalperImportedOpenPosition(req, res);
+    });
+    objRouter.post("/options-demo/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeOptionsScalperKillSwitch(req, res);
+    });
+    objRouter.post("/options-demo/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateOptionsScalperRecoveryMetrics(req, res);
+    });
+    objRouter.post("/options-demo/metrics/recalculate-total-pnl", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await recalculateOptionsScalperRecoveryTotalPnl(req, res);
+    });
+    objRouter.get("/options-demo/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperClosedPositions(req, res);
+    });
+    objRouter.get("/options-demo/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperEvents(req, res);
+    });
+    objRouter.post("/options-demo/events/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteOptionsScalperEventController(req, res);
+    });
+    objRouter.post("/options-demo/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearOptionsScalperEventsController(req, res);
     });
 
     return objRouter;

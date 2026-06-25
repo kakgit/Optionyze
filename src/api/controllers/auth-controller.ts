@@ -32,7 +32,7 @@ export function renderSignUpPage(_req: Request, res: Response): void {
 
 export function renderDashboardPage(req: Request, res: Response): void {
     res.render("dashboard", {
-        pageTitle: "Delta Neutral Dashboard | Optionyze",
+        pageTitle: "Covered Options Dashboard | Optionyze",
         currentAccount: req.authAccount,
         infoMessage: req.query.message === "password-changed" ? "Password updated successfully." : ""
     });

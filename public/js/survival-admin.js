@@ -55,7 +55,7 @@ function renderRunningUsers() {
     }
 
     if (!gSurvivalState.runningUsers.length) {
-        sEls.runningUsersTableBody.innerHTML = `<tr><td colspan="6" class="mngusers-empty">No running Delta Neutral users right now.</td></tr>`;
+        sEls.runningUsersTableBody.innerHTML = `<tr><td colspan="6" class="mngusers-empty">No running strategy users right now.</td></tr>`;
         renderPager(sEls.runningUsersPager, 1, 0, 0, () => undefined);
         return;
     }
