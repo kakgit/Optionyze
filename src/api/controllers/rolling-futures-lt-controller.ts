@@ -491,14 +491,27 @@ function normalizeExecStrategyInput(
 
 function normalizeCoveredMultiplierValue(pValue: unknown): number {
     const vRaw = Math.floor(Number(pValue || 0));
-    if (!Number.isFinite(vRaw) || vRaw < 1) {
-        return 1;
+    if (!Number.isFinite(vRaw) || vRaw < 2) {
+        return 2;
     }
-    return Math.min(gCoveredMultiplierMax, vRaw);
+    const vClamped = Math.min(gCoveredMultiplierMax, vRaw);
+    return vClamped % 2 === 0 ? vClamped : Math.max(2, vClamped - 1);
 }
 
 function normalizeCoveredMultiplierString(pValue: unknown): string {
     return String(normalizeCoveredMultiplierValue(pValue));
+}
+
+function normalizeCoveredBuyQtyPercentValue(pValue: unknown): number {
+    const vRaw = Math.floor(Number(pValue || 0));
+    if (!Number.isFinite(vRaw) || vRaw < 1) {
+        return 1;
+    }
+    return Math.min(200, vRaw);
+}
+
+function normalizeCoveredBuyQtyPercentString(pValue: unknown): string {
+    return String(normalizeCoveredBuyQtyPercentValue(pValue));
 }
 
 function getCoveredRequiredMarginForMultiplier(pMultiplier: unknown): number {
@@ -1661,7 +1674,7 @@ function getDefaultManualTraderUiState(
     const bIsShort = pStrategyCode === "rolling-futures-lt-short";
     const bIsDual = isDualRollingFuturesStrategy(pStrategyCode);
     const objState: Record<string, unknown> = {
-        startQty: "1",
+        startQty: isCoveredOptionsStrategy(pStrategyCode) ? "2" : "1",
         symbol: "BTC",
         manualFutOrderType: "market_order",
         bsFutQty: "1",
@@ -1678,6 +1691,8 @@ function getDefaultManualTraderUiState(
         reEnterBlock: bIsDual,
         buyHedgeSellPremiumGate: isCoveredLikeStrategy(pStrategyCode),
         buyHedgeSellPremiumPct: "2",
+        buyQtyPercentEnabled: false,
+        buyQtyPercent: "100",
         autoConfirmLiveActions: isCoveredLikeStrategy(pStrategyCode),
         telegramAlertTypes: [
             "engine_stopped",
@@ -3368,6 +3383,8 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
         buyHedgeSellPremiumGate: normalizeBooleanValue(objUiState.buyHedgeSellPremiumGate, Boolean(objDefaults.buyHedgeSellPremiumGate)),
         buyHedgeSellPremiumPct: normalizeStringValue(objUiState.buyHedgeSellPremiumPct, String(objDefaults.buyHedgeSellPremiumPct)),
+        buyQtyPercentEnabled: normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.buyQtyPercentEnabled)),
+        buyQtyPercent: normalizeCoveredBuyQtyPercentString(objUiState.buyQtyPercent ?? objDefaults.buyQtyPercent),
         autoConfirmLiveActions: normalizeBooleanValue(objUiState.autoConfirmLiveActions, Boolean(objDefaults.autoConfirmLiveActions)),
         telegramAlertTypes: Array.from(new Set(arrTelegramPrefs)),
         closedFromDate: String(objUiState.closedFromDate || "").trim(),
@@ -3680,6 +3697,8 @@ function normalizeProfileSaveInput(
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
         buyHedgeSellPremiumGate: normalizeBooleanValue(objUiState.buyHedgeSellPremiumGate, Boolean(objDefaults.buyHedgeSellPremiumGate)),
         buyHedgeSellPremiumPct: normalizeStringValue(objUiState.buyHedgeSellPremiumPct, String(objDefaults.buyHedgeSellPremiumPct)),
+        buyQtyPercentEnabled: normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.buyQtyPercentEnabled)),
+        buyQtyPercent: normalizeCoveredBuyQtyPercentString(objUiState.buyQtyPercent ?? objDefaults.buyQtyPercent),
         autoConfirmLiveActions: normalizeBooleanValue(objUiState.autoConfirmLiveActions, Boolean(objDefaults.autoConfirmLiveActions)),
         telegramAlertTypes: Array.from(new Set(arrTelegramPrefs)),
         closedFromDate: String(objUiState.closedFromDate || "").trim(),
@@ -7490,6 +7509,7 @@ async function openTrackedOptionReEntry(
         forceExpiryDate?: string;
         useRowAction?: boolean;
         useRowQty?: boolean;
+        useRowReEntryDelta?: boolean;
         forceLegSide?: "ce" | "pe";
         forceTargetDelta?: number;
     }
@@ -7499,6 +7519,7 @@ async function openTrackedOptionReEntry(
     placedAt: string;
 } | null> {
     const objUiState = getMergedUiState(pProfile);
+    const bCoveredRowDriven = isCoveredOptionsStrategy(pStrategyCode);
     const vRowIndex = isCoveredOptionsStrategy(pStrategyCode)
         ? resolveCoveredTrackedPositionRowIndex(objUiState, pClosedPosition, pMetadata.rowIndex)
         : normalizeOptionRowIndex(pStrategyCode, pMetadata.rowIndex);
@@ -7507,17 +7528,40 @@ async function openTrackedOptionReEntry(
     const vLegSide = pOptions?.forceLegSide === "pe"
         ? "pe"
         : (pOptions?.forceLegSide === "ce" ? "ce" : getTrackedOptionLegSide(pClosedPosition.contractName));
+    const bUseRowReEntryDelta = Boolean(pOptions?.useRowReEntryDelta) || bCoveredRowDriven;
     const vTargetDelta = Math.max(
         0,
-        Number(pOptions?.forceTargetDelta ?? pMetadata.reEntryDelta ?? objRowState.reD ?? 0.53)
+        Number(
+            pOptions?.forceTargetDelta
+            ?? (bUseRowReEntryDelta ? objRowState.reD : undefined)
+            ?? pMetadata.reEntryDelta
+            ?? objRowState.reD
+            ?? 0.53
+        )
     );
     const vExpiryDate = normalizeIsoDateOnly(pOptions?.forceExpiryDate) || String(objRowState.expiryDate || "").trim();
-    const vOrderAction = pOptions?.useRowAction
+    const vOrderAction = (pOptions?.useRowAction || bCoveredRowDriven)
         ? (String(objRowState.action || "sell").trim().toLowerCase() === "buy" ? "buy" as const : "sell" as const)
         : (String(pClosedPosition.side || "").trim().toUpperCase() === "BUY" ? "buy" as const : "sell" as const);
-    const vOptionQty = pOptions?.useRowQty
+    const vOptionQty = (pOptions?.useRowQty || bCoveredRowDriven)
         ? Math.max(1, Math.floor(Number(objRowState.qty || pClosedPosition.qty || 1)))
         : Math.max(1, Math.floor(Number(pClosedPosition.qty || 1)));
+    const vTakeProfitDelta = Math.max(
+        0,
+        Number(
+            bCoveredRowDriven
+                ? (objRowState.tpD ?? pMetadata.takeProfitDelta ?? 0.25)
+                : (pMetadata.takeProfitDelta ?? objRowState.tpD ?? 0.25)
+        )
+    );
+    const vStopLossDelta = Math.max(
+        0,
+        Number(
+            bCoveredRowDriven
+                ? (objRowState.slD ?? pMetadata.stopLossDelta ?? 0.65)
+                : (pMetadata.stopLossDelta ?? objRowState.slD ?? 0.65)
+        )
+    );
     if (!(vTargetDelta > 0)) {
         return null;
     }
@@ -7562,8 +7606,8 @@ async function openTrackedOptionReEntry(
                 openedReason: pReason === "sl"
                     ? "sl_reentry"
                     : (pReason === "tp" ? "tp_reentry" : "expiry_cutoff_reentry"),
-                takeProfitDelta: Math.max(0, Number(pMetadata.takeProfitDelta || objRowState.tpD || 0.25)),
-                stopLossDelta: Math.max(0, Number(pMetadata.stopLossDelta || objRowState.slD || 0.65)),
+                takeProfitDelta: vTakeProfitDelta,
+                stopLossDelta: vStopLossDelta,
                 reEntryDelta: vTargetDelta,
                 reEnterEnabled: Boolean(pMetadata.reEnterEnabled)
             }
@@ -7593,8 +7637,8 @@ async function openTrackedOptionReEntry(
         greenOptionQtyPct: 100,
         newDelta: vTargetDelta,
         reDelta: vTargetDelta,
-        deltaTakeProfit: Math.max(0, Number(pMetadata.takeProfitDelta || objRowState.tpD || 0.25)),
-        deltaStopLoss: Math.max(0, Number(pMetadata.stopLossDelta || objRowState.slD || 0.65)),
+        deltaTakeProfit: vTakeProfitDelta,
+        deltaStopLoss: vStopLossDelta,
         reEnter: Boolean(pMetadata.reEnterEnabled),
         addOneLotFuture: false,
         renkoEnabled: false,
@@ -7678,8 +7722,8 @@ async function openTrackedOptionReEntry(
                 rowIndex: vRowIndex,
                 baseDelta: getSignedOptionBaseDelta(String(objContract.contractSymbol || "").trim(), vAbsoluteDelta),
                 baseTheta: Math.abs(Number(objContract.theta || 0)),
-                takeProfitDelta: Math.max(0, Number(pMetadata.takeProfitDelta || objRowState.tpD || 0.25)),
-                stopLossDelta: Math.max(0, Number(pMetadata.stopLossDelta || objRowState.slD || 0.65)),
+                takeProfitDelta: vTakeProfitDelta,
+                stopLossDelta: vStopLossDelta,
                 reEntryDelta: vTargetDelta,
                 reEnterEnabled: Boolean(pMetadata.reEnterEnabled),
                 openedReason: pReason === "sl"
@@ -7737,10 +7781,12 @@ async function executeCoveredPendingReEntryNow(
         objMetadata,
         pPending.reason === "tp" || pPending.reason === "expiry_cutoff" ? pPending.reason : "sl",
         {
+            useRowAction: true,
+            useRowQty: true,
+            useRowReEntryDelta: true,
             forceLegSide: pPending.legSide,
             forceTargetDelta: pPending.targetDelta,
             forceExpiryDate: vResolvedPendingExpiryDate,
-            useRowQty: true
         }
     );
     if (!objReEntry) {
@@ -8387,16 +8433,19 @@ async function applyTriggeredOptionRule(
                     pPosition,
                     objMetadata,
                     pReason,
-                    pReason === "expiry_cutoff"
-                        ? {
-                            forceExpiryDate: resolveCoveredCutoffReEntryExpiryDate(
-                                objPaperRowState.expiryMode,
-                                getTrackedOptionResolvedExpiryDate(pPosition)
-                            ),
-                            useRowAction: true,
-                            useRowQty: true
-                        }
-                        : undefined
+                    {
+                        ...(pReason === "expiry_cutoff"
+                            ? {
+                                forceExpiryDate: resolveCoveredCutoffReEntryExpiryDate(
+                                    objPaperRowState.expiryMode,
+                                    getTrackedOptionResolvedExpiryDate(pPosition)
+                                )
+                            }
+                            : {}),
+                        useRowAction: true,
+                        useRowQty: true,
+                        useRowReEntryDelta: true
+                    }
                 );
                 if (objReEntry) {
                     arrNextPositions = [...arrNextPositions, objReEntry.position];
@@ -8485,16 +8534,19 @@ async function applyTriggeredOptionRule(
                 pPosition,
                 objMetadata,
                 pReason,
-                pReason === "expiry_cutoff" && isCoveredOptionsStrategy(pStrategyCode)
-                    ? {
-                        forceExpiryDate: resolveCoveredCutoffReEntryExpiryDate(
-                            objRowState.expiryMode,
-                            getTrackedOptionResolvedExpiryDate(pPosition)
-                        ),
-                        useRowAction: true,
-                        useRowQty: true
-                    }
-                    : undefined
+                {
+                    ...(pReason === "expiry_cutoff" && isCoveredOptionsStrategy(pStrategyCode)
+                        ? {
+                            forceExpiryDate: resolveCoveredCutoffReEntryExpiryDate(
+                                objRowState.expiryMode,
+                                getTrackedOptionResolvedExpiryDate(pPosition)
+                            )
+                        }
+                        : {}),
+                    useRowAction: true,
+                    useRowQty: true,
+                    useRowReEntryDelta: true
+                }
             );
             if (objReEntry) {
                 arrNextPositions = [...arrNextPositions, objReEntry.position];
@@ -8765,7 +8817,11 @@ async function findTriggeredTrackedOptions(
             });
         }
     }
-    return arrTriggered;
+    return arrTriggered.sort((pLeft, pRight) => {
+        const vLeftPriority = pLeft.reason === "expiry_cutoff" ? 0 : (pLeft.reason === "sl" ? 1 : 2);
+        const vRightPriority = pRight.reason === "expiry_cutoff" ? 0 : (pRight.reason === "sl" ? 1 : 2);
+        return vLeftPriority - vRightPriority;
+    });
 }
 
 async function closeTrackedPositionsOnDelta(
@@ -9734,16 +9790,19 @@ async function applyTriggeredOptionRuleSurvivalOnly(
             pPosition,
             objMetadata,
             pReason,
-            pReason === "expiry_cutoff" && isCoveredOptionsStrategy(pStrategyCode)
-                ? {
-                    forceExpiryDate: resolveCoveredCutoffReEntryExpiryDate(
-                        getNormalizedOptionRowUiState(getMergedUiState(pProfile), pStrategyCode, objMetadata.rowIndex).expiryMode,
-                        getTrackedOptionResolvedExpiryDate(pPosition)
-                    ),
-                    useRowAction: true,
-                    useRowQty: true
-                }
-                : undefined
+            {
+                ...(pReason === "expiry_cutoff" && isCoveredOptionsStrategy(pStrategyCode)
+                    ? {
+                        forceExpiryDate: resolveCoveredCutoffReEntryExpiryDate(
+                            getNormalizedOptionRowUiState(getMergedUiState(pProfile), pStrategyCode, objMetadata.rowIndex).expiryMode,
+                            getTrackedOptionResolvedExpiryDate(pPosition)
+                        )
+                    }
+                    : {}),
+                useRowAction: true,
+                useRowQty: true,
+                useRowReEntryDelta: true
+            }
         );
         if (objReEntry) {
             arrNextPositions = [...arrNextPositions, objReEntry.position];
@@ -10961,9 +11020,11 @@ async function calculateRecommendedStartQtyInternal(req: Request, res: Response,
         }
 
         if (isCoveredOptionsStrategy(pStrategyCode)) {
-            const vRecommendedQty = Math.min(
-                gCoveredMultiplierMax,
-                Math.max(0, Math.floor(vAvailableBalance / gCoveredMultiplierMarginUsd))
+            const vRecommendedQty = normalizeCoveredMultiplierValue(
+                Math.min(
+                    gCoveredMultiplierMax,
+                    Math.max(0, Math.floor(vAvailableBalance / gCoveredMultiplierMarginUsd))
+                )
             );
             const objEstimate: RollingFuturesLtRecommendedStartQty = {
                 recommendedQty: vRecommendedQty,
@@ -10980,10 +11041,10 @@ async function calculateRecommendedStartQtyInternal(req: Request, res: Response,
                 basketUpliftFactor: 1,
                 contracts: []
             };
-            if (vRecommendedQty < 1) {
+            if (vRecommendedQty < 2) {
                 res.json({
                     status: "warning",
-                    message: `Available Balance ${vAvailableBalance.toFixed(2)} is below the required ${gCoveredMultiplierMarginUsd.toFixed(2)} USD for Multiplier 1.`,
+                    message: `Available Balance ${vAvailableBalance.toFixed(2)} is below the required ${(gCoveredMultiplierMarginUsd * 2).toFixed(2)} USD for Multiplier 2.`,
                     data: objEstimate
                 });
                 return;

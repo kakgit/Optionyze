@@ -50,7 +50,7 @@
                             </button>
                         </div>
                         <div class="rolling-futures-start-qty-row">
-                            <input class="rolling-futures-start-qty" type="number" min="1" max="1000" step="1" id="txtRollingFuturesStartQty" value="1" />
+                            <input class="rolling-futures-start-qty" type="number" min="2" max="1000" step="2" id="txtRollingFuturesStartQty" value="2" />
                         </div>
                     </div>
                     <div class="rolling-futures-hero-badge action">
@@ -403,6 +403,27 @@
                                     </button>
                                     <span class="rolling-futures-help-popout floating">
                                         For covered buy-leg opens and re-entries, the same CE or PE sell premium can drop only up to the configured percentage from its sold premium. Example: at <code>2%</code>, a leg sold at <code>100</code> must stay at <code>98</code> or higher.
+                                    </span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field rolling-futures-buy-gate-field">
+                        <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
+                            <div class="rolling-futures-buy-gate-row">
+                                <div class="rolling-futures-buy-gate-text">Execute only the X% Buy Qty of Sell Qty</div>
+                                <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesBuyQtyPercentEnabled">
+                                    <input type="checkbox" id="chkRollingFuturesBuyQtyPercentEnabled" />
+                                </label>
+                                <div class="rolling-demo-field rolling-futures-help-input-field">
+                                    <input type="number" id="txtRollingFuturesBuyQtyPercent" min="1" max="200" step="1" value="100" />
+                                </div>
+                                <span class="rolling-futures-help-icon-wrap">
+                                    <button type="button" class="rolling-futures-help-trigger" aria-label="Show buy qty percentage help">
+                                        ?
+                                    </button>
+                                    <span class="rolling-futures-help-popout floating">
+                                        When enabled, the row whose <code>Action</code> is <code>Buy</code> will use only the configured percentage of the current <code>Multiplier</code>. Example: at <code>50%</code> and Multiplier <code>10</code>, the buy row Qty becomes <code>5</code>.
                                     </span>
                                 </span>
                             </div>

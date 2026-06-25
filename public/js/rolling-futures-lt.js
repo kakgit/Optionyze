@@ -113,6 +113,8 @@
         reEnterBlock: document.getElementById("chkRollingFuturesReEnterBlock"),
         buyHedgeSellPremiumGate: document.getElementById("chkRollingFuturesBuyHedgeSellPremiumGate"),
         buyHedgeSellPremiumPct: document.getElementById("txtRollingFuturesBuyHedgeSellPremiumPct"),
+        buyQtyPercentEnabled: document.getElementById("chkRollingFuturesBuyQtyPercentEnabled"),
+        buyQtyPercent: document.getElementById("txtRollingFuturesBuyQtyPercent"),
         autoConfirmLiveActions: document.getElementById("chkRollingFuturesAutoConfirmLiveActions"),
         recalculateTotalPnlButton: document.getElementById(`btn${idPrefix}RecalculateTotalPnl`),
         importButton: document.getElementById(`btn${idPrefix}ImportPositions`),
@@ -205,21 +207,47 @@
 
     function clampCoveredMultiplierValue(value) {
         const vRaw = Math.floor(Number(value || 0));
-        if (!Number.isFinite(vRaw) || vRaw < 1) {
-            return 1;
+        if (!Number.isFinite(vRaw) || vRaw < 2) {
+            return 2;
         }
-        return Math.min(1000, vRaw);
+        const vClamped = Math.min(1000, vRaw);
+        return vClamped % 2 === 0 ? vClamped : Math.max(2, vClamped - 1);
     }
 
     function getCoveredMultiplierValue() {
         if (!(ids.startQty instanceof HTMLInputElement)) {
-            return 1;
+            return 2;
         }
         return clampCoveredMultiplierValue(ids.startQty.value);
     }
 
     function getCoveredRequiredBlockedMargin(multiplierValue) {
         return Number((clampCoveredMultiplierValue(multiplierValue) * coveredMultiplierMarginPerUnit).toFixed(2));
+    }
+
+    function clampCoveredBuyQtyPercentValue(value) {
+        const vRaw = Math.floor(Number(value || 0));
+        if (!Number.isFinite(vRaw) || vRaw < 1) {
+            return 1;
+        }
+        return Math.min(200, vRaw);
+    }
+
+    function getCoveredBuyQtyPercentValue() {
+        if (!(ids.buyQtyPercent instanceof HTMLInputElement)) {
+            return 100;
+        }
+        return clampCoveredBuyQtyPercentValue(ids.buyQtyPercent.value);
+    }
+
+    function resolveCoveredBuyRowQty(multiplierValue) {
+        const vMultiplier = clampCoveredMultiplierValue(multiplierValue);
+        const bEnabled = ids.buyQtyPercentEnabled instanceof HTMLInputElement && ids.buyQtyPercentEnabled.checked;
+        if (!bEnabled) {
+            return vMultiplier;
+        }
+        const vPercent = getCoveredBuyQtyPercentValue();
+        return Math.max(1, Math.floor((vMultiplier * vPercent) / 100));
     }
 
     function refreshCoveredBalanceSummaryDisplay() {
@@ -338,6 +366,13 @@
                 <div class="rolling-futures-saved-profile-grid">
                     <span>Enabled: <strong>${escapeHtml(String(Boolean(state.buyHedgeSellPremiumGate)) === "true" ? "ON" : "OFF")}</strong></span>
                     <span>Threshold %: <strong>${escapeHtml(formatSavedProfileValue(state.buyHedgeSellPremiumPct, "2"))}</strong></span>
+                </div>
+            </div>
+            <div class="rolling-futures-saved-profile-card">
+                <div class="rolling-futures-saved-profile-title">Buy Qty Rule</div>
+                <div class="rolling-futures-saved-profile-grid">
+                    <span>Enabled: <strong>${escapeHtml(String(Boolean(state.buyQtyPercentEnabled)) === "true" ? "ON" : "OFF")}</strong></span>
+                    <span>Buy Qty %: <strong>${escapeHtml(formatSavedProfileValue(state.buyQtyPercent, "100"))}</strong></span>
                 </div>
             </div>
         ` : "";
@@ -566,7 +601,7 @@
 
     function getDefaultUiState() {
         const defaultState = {
-            startQty: "1",
+            startQty: isCoveredMode ? "2" : "1",
             symbol: "BTC",
             manualFutOrderType: "market_order",
             bsFutQty: "1",
@@ -583,6 +618,8 @@
             reEnterBlock: true,
             buyHedgeSellPremiumGate: true,
             buyHedgeSellPremiumPct: "2",
+            buyQtyPercentEnabled: false,
+            buyQtyPercent: "100",
             autoConfirmLiveActions: true,
             onlyDeltaNeutral: !isDualLikeMode && !isCoveredMode,
             rangeDeltaNeutral: isDualLikeMode && !isCoveredMode,
@@ -1379,7 +1416,7 @@
 
     function getUiState() {
         const state = {
-            startQty: getInputValue(ids.startQty, "1"),
+            startQty: getInputValue(ids.startQty, isCoveredMode ? "2" : "1"),
             symbol: String(ids.symbol?.value || "BTC").trim().toUpperCase(),
             manualFutOrderType: String(ids.futureOrderType?.value || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
             bsFutQty: getInputValue(ids.bsFutQty, "1"),
@@ -1396,6 +1433,8 @@
             reEnterBlock: getCheckboxValue(ids.reEnterBlock, false),
             buyHedgeSellPremiumGate: getCheckboxValue(ids.buyHedgeSellPremiumGate, false),
             buyHedgeSellPremiumPct: getInputValue(ids.buyHedgeSellPremiumPct, "2"),
+            buyQtyPercentEnabled: getCheckboxValue(ids.buyQtyPercentEnabled, false),
+            buyQtyPercent: getInputValue(ids.buyQtyPercent, "100"),
             autoConfirmLiveActions: getCheckboxValue(ids.autoConfirmLiveActions, false),
             telegramAlertTypes: ids.telegramEventCheckboxes.filter(function (checkbox) {
                 return checkbox instanceof HTMLInputElement && checkbox.checked;
@@ -1441,6 +1480,8 @@
             setCheckboxValue(ids.reEnterBlock, objUiState.reEnterBlock);
             setCheckboxValue(ids.buyHedgeSellPremiumGate, objUiState.buyHedgeSellPremiumGate);
             setInputValue(ids.buyHedgeSellPremiumPct, objUiState.buyHedgeSellPremiumPct);
+            setCheckboxValue(ids.buyQtyPercentEnabled, objUiState.buyQtyPercentEnabled);
+            setInputValue(ids.buyQtyPercent, objUiState.buyQtyPercent);
             setCheckboxValue(ids.autoConfirmLiveActions, objUiState.autoConfirmLiveActions);
             setInputValue(ids.closedFromDate, String(objUiState.closedFromDate || "").trim());
             setInputValue(ids.closedToDate, String(objUiState.closedToDate || "").trim());
@@ -1454,6 +1495,7 @@
             });
             applySymbolDefaults();
             applyExpiryModeDefaults(false);
+            syncQtyFromStartQty();
             syncNeutralModeCheckboxes(getActiveNeutralModeKey());
             updateNeutralBadges(lastNeutralStatus);
             refreshCoveredBalanceSummaryDisplay();
@@ -1473,11 +1515,22 @@
         if (isCoveredMode) {
             ids.startQty.value = String(clampCoveredMultiplierValue(ids.startQty.value));
         }
-        const vStartQty = String(ids.startQty.value || "").trim() || "1";
+        if (isCoveredMode && ids.buyQtyPercent instanceof HTMLInputElement) {
+            ids.buyQtyPercent.value = String(clampCoveredBuyQtyPercentValue(ids.buyQtyPercent.value));
+        }
+        const vStartQty = String(ids.startQty.value || "").trim() || (isCoveredMode ? "2" : "1");
+        const vCoveredMultiplierQty = isCoveredMode ? clampCoveredMultiplierValue(vStartQty) : Math.max(1, Math.floor(Number(vStartQty || 1)));
+        const vCoveredBuyQty = isCoveredMode ? resolveCoveredBuyRowQty(vCoveredMultiplierQty) : vCoveredMultiplierQty;
         getSupportedOptionRowIndexes().forEach(function (rowIndex) {
             const nodes = getOptionRowNodes(rowIndex);
             if (nodes.qty instanceof HTMLInputElement) {
-                nodes.qty.value = vStartQty;
+                if (isCoveredMode) {
+                    const vAction = String(nodes.action?.value || "").trim().toLowerCase();
+                    nodes.qty.value = String(vAction === "buy" ? vCoveredBuyQty : vCoveredMultiplierQty);
+                }
+                else {
+                    nodes.qty.value = vStartQty;
+                }
             }
         });
         refreshCoveredBalanceSummaryDisplay();
@@ -2629,11 +2682,7 @@
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to load saved Manual Trader values.", "danger");
         });
     });
-    ids.startQty?.addEventListener("input", function () {
-        syncQtyFromStartQty();
-        queueProfileSave();
-    });
-    ids.startQty?.addEventListener("change", function () {
+    ids.startQty?.addEventListener("blur", function () {
         syncQtyFromStartQty();
         queueProfileSave();
     });
@@ -2644,7 +2693,7 @@
             if (!(ids.startQty instanceof HTMLInputElement)) {
                 return;
             }
-            if (vQty < 1) {
+            if (vQty < (isCoveredMode ? 2 : 1)) {
                 setStatus(ids.pageStatus, String(objResult?.message || (isCoveredMode ? "Available Balance is too low for the selected multiplier estimate." : "Available Balance is too low for a safe Start Qty estimate.")), "warning");
                 return;
             }
@@ -2686,6 +2735,8 @@
         ids.reEnterBlock,
         ids.buyHedgeSellPremiumGate,
         ids.buyHedgeSellPremiumPct,
+        ids.buyQtyPercentEnabled,
+        ids.buyQtyPercent,
         ids.autoConfirmLiveActions
     ].forEach(function (node) {
         node?.addEventListener("change", queueProfileSave);
@@ -2703,10 +2754,21 @@
             });
         }
     });
+    [ids.buyQtyPercentEnabled, ids.buyQtyPercent].forEach(function (node) {
+        node?.addEventListener("change", function () {
+            syncQtyFromStartQty();
+            queueProfileSave();
+        });
+        if (node instanceof HTMLInputElement && node.type !== "checkbox") {
+            node.addEventListener("input", function () {
+                syncQtyFromStartQty();
+                queueProfileSave();
+            });
+        }
+    });
     getSupportedOptionRowIndexes().forEach(function (rowIndex) {
         const nodes = getOptionRowNodes(rowIndex);
         [
-            nodes.action,
             nodes.legs,
             nodes.qty,
             nodes.newD,
@@ -2720,6 +2782,26 @@
                 node.addEventListener("input", queueProfileSave);
             }
         });
+        nodes.action?.addEventListener("change", function () {
+            syncQtyFromStartQty();
+            queueProfileSave();
+        });
+        nodes.qty?.addEventListener("change", function () {
+            if (!isCoveredMode) {
+                return;
+            }
+            syncQtyFromStartQty();
+            queueProfileSave();
+        });
+        if (nodes.qty instanceof HTMLInputElement) {
+            nodes.qty.addEventListener("input", function () {
+                if (!isCoveredMode) {
+                    return;
+                }
+                syncQtyFromStartQty();
+                queueProfileSave();
+            });
+        }
         nodes.expiryMode?.addEventListener("change", function () {
             applyExpiryModeDefaults(true, rowIndex);
             queueProfileSave();
