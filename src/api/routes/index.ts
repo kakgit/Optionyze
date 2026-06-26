@@ -11,34 +11,47 @@ import {
 import { listSurvivalAdminRunningUsers } from "../controllers/survival-admin-controller";
 import {
     calculateCoveredOptionsRecommendedStartQty,
+    calculateStrangleOptionsRecommendedStartQty,
     calculateOptionsScalperRecommendedStartQty,
     checkRollingFuturesLtDualConnection,
     checkCoveredOptionsConnection,
+    checkStrangleOptionsConnection,
     checkOptionsScalperConnection,
     calculateRollingFuturesLtDualRecommendedStartQty,
     clearCoveredOptionsEventsController,
+    clearStrangleOptionsEventsController,
     clearOptionsScalperEventsController,
     clearRollingFuturesLtDualEventsController,
     closeCoveredOptionsImportedOpenPosition,
+    closeStrangleOptionsImportedOpenPosition,
     closeOptionsScalperImportedOpenPosition,
     deleteRollingFuturesLtDualEventController,
     deleteCoveredOptionsEventController,
+    deleteStrangleOptionsEventController,
     deleteOptionsScalperEventController,
     closeRollingFuturesLtDualImportedOpenPosition,
     deleteCoveredOptionsOpenPosition,
+    deleteStrangleOptionsOpenPosition,
     deleteOptionsScalperOpenPosition,
     deleteRollingFuturesLtDualOpenPosition,
     disableCoveredOptionsAutoTrader,
+    disableStrangleOptionsAutoTrader,
     disableOptionsScalperAutoTrader,
     disableRollingFuturesLtDualAutoTrader,
     enableCoveredOptionsAutoTrader,
+    enableStrangleOptionsAutoTrader,
     enableOptionsScalperAutoTrader,
     enableRollingFuturesLtDualAutoTrader,
     executeCoveredOptionsKillSwitch,
+    executeStrangleOptionsKillSwitch,
     confirmCoveredOptionsLiveAction,
+    confirmStrangleOptionsLiveAction,
     executeCoveredOptionsManualFuture,
     executeCoveredOptionsManualOption,
     executeCoveredOptionsStrategy,
+    executeStrangleOptionsManualFuture,
+    executeStrangleOptionsManualOption,
+    executeStrangleOptionsStrategy,
     executeOptionsScalperKillSwitch,
     confirmOptionsScalperLiveAction,
     executeOptionsScalperManualFuture,
@@ -58,7 +71,16 @@ import {
     getCoveredOptionsOpenPositions,
     getCoveredOptionsProfile,
     getCoveredOptionsRuntimeStatus,
+    getStrangleOptionsAccountSummary,
+    getStrangleOptionsClosedPositions,
+    getStrangleOptionsConnectionStatus,
+    getStrangleOptionsEvents,
+    getStrangleOptionsImportableOpenPositions,
+    getStrangleOptionsOpenPositions,
+    getStrangleOptionsProfile,
+    getStrangleOptionsRuntimeStatus,
     getOptionsScalperAccountSummary,
+    getOptionsScalperIndicator,
     getOptionsScalperClosedPositions,
     getOptionsScalperConnectionStatus,
     getOptionsScalperEvents,
@@ -67,6 +89,7 @@ import {
     getOptionsScalperProfile,
     getOptionsScalperRuntimeStatus,
     listCoveredOptionsVerifierRunningUsers,
+    listStrangleOptionsVerifierRunningUsers,
     getRollingFuturesLtDualAccountSummary,
     getRollingFuturesLtDualClosedPositions,
     getRollingFuturesLtDualConnectionStatus,
@@ -79,25 +102,33 @@ import {
     disableRollingFuturesLtDualSimulatedPrimaryOutageController,
     switchRollingFuturesLtDualBackToPrimaryController,
     recalculateCoveredOptionsRecoveryTotalPnl,
+    recalculateStrangleOptionsRecoveryTotalPnl,
     recalculateOptionsScalperRecoveryTotalPnl,
     recalculateRollingFuturesLtDualRecoveryTotalPnl,
     updateCoveredOptionsRecoveryMetrics,
+    updateStrangleOptionsRecoveryMetrics,
     updateOptionsScalperRecoveryMetrics,
     updateRollingFuturesLtDualRecoveryMetrics,
     reconcileCoveredOptionsOpenPositions,
     rejectCoveredOptionsLiveAction,
+    rejectStrangleOptionsLiveAction,
+    reconcileStrangleOptionsOpenPositions,
     rejectOptionsScalperLiveAction,
     reconcileOptionsScalperOpenPositions,
     reconcileRollingFuturesLtDualOpenPositions,
     saveCoveredOptionsOpenPositions,
     saveCoveredOptionsProfile,
+    saveStrangleOptionsOpenPositions,
+    saveStrangleOptionsProfile,
     saveOptionsScalperOpenPositions,
     saveOptionsScalperProfile,
     saveRollingFuturesLtDualOpenPositions,
     saveRollingFuturesLtDualProfile,
     clearCoveredOptionsOpenPositions,
+    clearStrangleOptionsOpenPositions,
     clearOptionsScalperOpenPositions,
     swapCoveredOptionsImportedOpenPosition,
+    swapStrangleOptionsImportedOpenPosition,
     handleTelegramWebhook
 } from "../controllers/rolling-futures-lt-controller";
 import {
@@ -159,6 +190,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
 
     objRouter.get("/covered-options/admin/running-users", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await listCoveredOptionsVerifierRunningUsers(req, res);
+    });
+    objRouter.get("/strangle-options/admin/running-users", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await listStrangleOptionsVerifierRunningUsers(req, res);
     });
     objRouter.get("/survival-admin/running-users", requireSurvivalAdminApi, async (req, res) => {
         await listSurvivalAdminRunningUsers(req, res);
@@ -257,6 +291,94 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
         await clearCoveredOptionsEventsController(req, res);
     });
 
+    objRouter.get("/strangle-options/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleOptionsProfile(req, res);
+    });
+    objRouter.post("/strangle-options/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveStrangleOptionsProfile(req, res);
+    });
+    objRouter.get("/strangle-options/connection/status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleOptionsConnectionStatus(req, res);
+    });
+    objRouter.get("/strangle-options/runtime", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleOptionsRuntimeStatus(req, res);
+    });
+    objRouter.post("/strangle-options/connection/check", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await checkStrangleOptionsConnection(req, res);
+    });
+    objRouter.post("/strangle-options/auto-trader/start", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await enableStrangleOptionsAutoTrader(req, res);
+    });
+    objRouter.post("/strangle-options/auto-trader/stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await disableStrangleOptionsAutoTrader(req, res);
+    });
+    objRouter.get("/strangle-options/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleOptionsAccountSummary(req, res);
+    });
+    objRouter.post("/strangle-options/start-qty/calculate", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await calculateStrangleOptionsRecommendedStartQty(req, res);
+    });
+    objRouter.post("/strangle-options/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeStrangleOptionsManualFuture(req, res);
+    });
+    objRouter.post("/strangle-options/manual/option", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeStrangleOptionsManualOption(req, res);
+    });
+    objRouter.post("/strangle-options/strategy/execute", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeStrangleOptionsStrategy(req, res);
+    });
+    objRouter.post("/strangle-options/live-action/confirm", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await confirmStrangleOptionsLiveAction(req, res);
+    });
+    objRouter.post("/strangle-options/live-action/reject", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await rejectStrangleOptionsLiveAction(req, res);
+    });
+    objRouter.get("/strangle-options/open-positions/importable", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleOptionsImportableOpenPositions(req, res);
+    });
+    objRouter.get("/strangle-options/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleOptionsOpenPositions(req, res);
+    });
+    objRouter.post("/strangle-options/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveStrangleOptionsOpenPositions(req, res);
+    });
+    objRouter.post("/strangle-options/open-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteStrangleOptionsOpenPosition(req, res);
+    });
+    objRouter.post("/strangle-options/open-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearStrangleOptionsOpenPositions(req, res);
+    });
+    objRouter.post("/strangle-options/open-positions/reconcile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await reconcileStrangleOptionsOpenPositions(req, res);
+    });
+    objRouter.post("/strangle-options/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await closeStrangleOptionsImportedOpenPosition(req, res);
+    });
+    objRouter.post("/strangle-options/open-positions/swap", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await swapStrangleOptionsImportedOpenPosition(req, res);
+    });
+    objRouter.post("/strangle-options/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeStrangleOptionsKillSwitch(req, res);
+    });
+    objRouter.post("/strangle-options/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateStrangleOptionsRecoveryMetrics(req, res);
+    });
+    objRouter.post("/strangle-options/metrics/recalculate-total-pnl", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await recalculateStrangleOptionsRecoveryTotalPnl(req, res);
+    });
+    objRouter.get("/strangle-options/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleOptionsClosedPositions(req, res);
+    });
+    objRouter.get("/strangle-options/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleOptionsEvents(req, res);
+    });
+    objRouter.post("/strangle-options/events/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteStrangleOptionsEventController(req, res);
+    });
+    objRouter.post("/strangle-options/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearStrangleOptionsEventsController(req, res);
+    });
+
     objRouter.get("/options-demo/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getOptionsScalperProfile(req, res);
     });
@@ -280,6 +402,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.get("/options-demo/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getOptionsScalperAccountSummary(req, res);
+    });
+    objRouter.get("/options-demo/indicator", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperIndicator(req, res);
     });
     objRouter.post("/options-demo/start-qty/calculate", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await calculateOptionsScalperRecommendedStartQty(req, res);

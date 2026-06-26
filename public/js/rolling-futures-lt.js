@@ -2,7 +2,9 @@
     const rawMode = String(document.body?.dataset?.rollingFuturesLive || "").trim().toLowerCase();
     const pageVariant = String(document.body?.dataset?.rollingFuturesVariant || "").trim().toLowerCase();
     const isDemoVariant = pageVariant === "demo";
+    const isStranglePage = pageVariant === "strangle";
     const endpointBaseOverride = String(document.body?.dataset?.rollingFuturesEndpointBase || "").trim();
+    const strategyLabel = String(document.body?.dataset?.rollingFuturesStrategyLabel || "").trim() || "Covered Options";
     const mode = rawMode === "short" || rawMode === "covered" ? rawMode : "long";
     const initialExecStrategyEnabled = String(document.body?.dataset?.execStrategyEnabled || "").trim().toLowerCase() === "true";
     const prefix = mode === "short"
@@ -19,6 +21,7 @@
         : (mode === "covered" ? "Covered Options" : "Long Mode");
     const isCoveredMode = mode === "covered";
     const isDualLikeMode = mode === "covered";
+    const supportsTelegramAlerts = isCoveredMode && !isDemoVariant;
     const openPositionsEmptyText = isDemoVariant
         ? "No demo positions are currently shown."
         : "No imported live positions are currently shown.";
@@ -128,10 +131,30 @@
         reEnterBlock: document.getElementById("chkRollingFuturesReEnterBlock"),
         buyHedgeSellPremiumGate: document.getElementById("chkRollingFuturesBuyHedgeSellPremiumGate"),
         buyHedgeSellPremiumPct: document.getElementById("txtRollingFuturesBuyHedgeSellPremiumPct"),
+        strangleDeltaDiffReplaceEnabled: document.getElementById("chkRollingFuturesStrangleDeltaDiffReplaceEnabled"),
+        strangleDeltaDiffReplacePct: document.getElementById("txtRollingFuturesStrangleDeltaDiffReplacePct"),
         buyHedgeOppositeLegOnGate: document.getElementById("chkRollingFuturesBuyHedgeOppositeLegOnGate"),
+        strangleReopenAtNewD: document.getElementById("chkRollingFuturesStrangleReopenAtNewD"),
         buyQtyPercentEnabled: document.getElementById("chkRollingFuturesBuyQtyPercentEnabled"),
         buyQtyPercent: document.getElementById("txtRollingFuturesBuyQtyPercent"),
         autoConfirmLiveActions: document.getElementById("chkRollingFuturesAutoConfirmLiveActions"),
+        indicatorCard: document.getElementById("cardRollingFuturesDeltaDirec"),
+        indicatorOverall: document.getElementById("rollingFuturesIndicatorOverall"),
+        indicatorPcr: document.getElementById("rollingFuturesIndicatorPcr"),
+        indicatorSupport: document.getElementById("rollingFuturesIndicatorSupport"),
+        indicatorResistance: document.getElementById("rollingFuturesIndicatorResistance"),
+        indicatorOrderBook: document.getElementById("rollingFuturesIndicatorOrderBook"),
+        indicatorFlow: document.getElementById("rollingFuturesIndicatorFlow"),
+        indicatorTrend: document.getElementById("rollingFuturesIndicatorTrend"),
+        indicatorStrength: document.getElementById("rollingFuturesIndicatorStrength"),
+        indicatorStrengthBar: document.getElementById("rollingFuturesIndicatorStrengthBar"),
+        indicatorHistoryBar: document.getElementById("rollingFuturesIndicatorHistoryBar"),
+        indicatorMeta: document.getElementById("rollingFuturesIndicatorMeta"),
+        indicatorConfidence: document.getElementById("rollingFuturesIndicatorConfidence"),
+        indicatorHeadline: document.getElementById("rollingFuturesIndicatorHeadline"),
+        indicatorRefreshInput: document.getElementById("txtRollingFuturesIndicatorRefreshMins"),
+        indicatorRefreshButton: document.getElementById("btnRollingFuturesIndicatorRefresh"),
+        indicatorBody: document.getElementById("tBodyRollingFuturesDeltas"),
         recalculateTotalPnlButton: document.getElementById(`btn${idPrefix}RecalculateTotalPnl`),
         importButton: document.getElementById(`btn${idPrefix}ImportPositions`),
         clearOpenPositionsButton: document.getElementById(`btn${idPrefix}ClearOpenPositions`),
@@ -191,6 +214,7 @@
     let confirmationInFlight = false;
     let execStrategyEnabled = isDualLikeMode ? initialExecStrategyEnabled : true;
     let closedFiltersRefreshTimer = null;
+    let indicatorRefreshTimer = null;
     let lastClosedPositionsRefreshAt = "";
     let adminRunningUsers = [];
     let targetUserId = requiresExplicitTargetSelection ? "" : currentAccountId;
@@ -221,18 +245,22 @@
     const closedPositionsPageSize = 10;
     const coveredMultiplierMarginPerUnit = 1.5;
 
+    function getCoveredMultiplierMin() {
+        return isStranglePage ? 1 : 2;
+    }
+
     function clampCoveredMultiplierValue(value) {
         const vRaw = Math.floor(Number(value || 0));
-        if (!Number.isFinite(vRaw) || vRaw < 2) {
-            return 2;
+        const vMinimum = getCoveredMultiplierMin();
+        if (!Number.isFinite(vRaw) || vRaw < vMinimum) {
+            return vMinimum;
         }
-        const vClamped = Math.min(1000, vRaw);
-        return vClamped % 2 === 0 ? vClamped : Math.max(2, vClamped - 1);
+        return Math.min(1000, vRaw);
     }
 
     function getCoveredMultiplierValue() {
         if (!(ids.startQty instanceof HTMLInputElement)) {
-            return 2;
+            return getCoveredMultiplierMin();
         }
         return clampCoveredMultiplierValue(ids.startQty.value);
     }
@@ -368,7 +396,7 @@
                         <span>Expiry: <strong>${escapeHtml(formatSavedProfileValue(state[keys.expiryDate], "-"))}</strong></span>
                         <span>Qty: <strong>${escapeHtml(formatSavedProfileValue(state[keys.qty], "-"))}</strong></span>
                         <span>New D: <strong>${escapeHtml(formatSavedProfileValue(state[keys.newD], "-"))}</strong></span>
-                        <span>Re D: <strong>${escapeHtml(formatSavedProfileValue(state[keys.reD], "-"))}</strong></span>
+                        ${isStranglePage ? "" : `<span>Re D: <strong>${escapeHtml(formatSavedProfileValue(state[keys.reD], "-"))}</strong></span>`}
                         <span>TP D: <strong>${escapeHtml(formatSavedProfileValue(state[keys.tpD], "-"))}</strong></span>
                         <span>SL D: <strong>${escapeHtml(formatSavedProfileValue(state[keys.slD], "-"))}</strong></span>
                         <span>Re Enter: <strong>${escapeHtml(String(Boolean(state[keys.reEnter])) === "true" ? "ON" : "OFF")}</strong></span>
@@ -376,20 +404,28 @@
                 </div>
             `;
         }).join("");
+        const oppositeLegBlock = pageVariant === "strangle"
+            ? ""
+            : `<span>Opposite Leg: <strong>${escapeHtml(String(Boolean(state.buyHedgeOppositeLegOnGate)) === "true" ? "ON" : "OFF")}</strong></span>`;
         const gateBlock = isCoveredMode ? `
             <div class="rolling-futures-saved-profile-card">
-                <div class="rolling-futures-saved-profile-title">Buy Hedge Threshold</div>
+                <div class="rolling-futures-saved-profile-title">${isStranglePage ? "Delta Gap Replace Rule" : "Buy Hedge Threshold"}</div>
                 <div class="rolling-futures-saved-profile-grid">
-                    <span>Enabled: <strong>${escapeHtml(String(Boolean(state.buyHedgeSellPremiumGate)) === "true" ? "ON" : "OFF")}</strong></span>
+                    ${isStranglePage
+                        ? `<span>Enabled: <strong>${escapeHtml(String(Boolean(state.strangleDeltaDiffReplaceEnabled)) === "true" ? "ON" : "OFF")}</strong></span>
+                    <span>Threshold %: <strong>${escapeHtml(formatSavedProfileValue(state.strangleDeltaDiffReplacePct, "50"))}</strong></span>`
+                        : `<span>Enabled: <strong>${escapeHtml(String(Boolean(state.buyHedgeSellPremiumGate)) === "true" ? "ON" : "OFF")}</strong></span>
                     <span>Threshold %: <strong>${escapeHtml(formatSavedProfileValue(state.buyHedgeSellPremiumPct, "2"))}</strong></span>
-                    <span>Opposite Leg: <strong>${escapeHtml(String(Boolean(state.buyHedgeOppositeLegOnGate)) === "true" ? "ON" : "OFF")}</strong></span>
+                    ${oppositeLegBlock}`}
                 </div>
             </div>
             <div class="rolling-futures-saved-profile-card">
-                <div class="rolling-futures-saved-profile-title">Buy Qty Rule</div>
+                <div class="rolling-futures-saved-profile-title">${isStranglePage ? "Reopen Rule" : "Buy Qty Rule"}</div>
                 <div class="rolling-futures-saved-profile-grid">
-                    <span>Enabled: <strong>${escapeHtml(String(Boolean(state.buyQtyPercentEnabled)) === "true" ? "ON" : "OFF")}</strong></span>
-                    <span>Buy Qty %: <strong>${escapeHtml(formatSavedProfileValue(state.buyQtyPercent, "100"))}</strong></span>
+                    ${isStranglePage
+                        ? `<span>Reopen At New D: <strong>${escapeHtml(String(Boolean(state.strangleReopenAtNewD)) === "true" ? "ON" : "OFF")}</strong></span>`
+                        : `<span>Enabled: <strong>${escapeHtml(String(Boolean(state.buyQtyPercentEnabled)) === "true" ? "ON" : "OFF")}</strong></span>
+                    <span>Buy Qty %: <strong>${escapeHtml(formatSavedProfileValue(state.buyQtyPercent, "100"))}</strong></span>`}
                 </div>
             </div>
         ` : "";
@@ -538,7 +574,7 @@
             reEnter: true
         };
         if (isCoveredMode && vRowIndex === 2) {
-            return {
+            const coveredBuyDefaults = {
                 ...optionDefaults,
                 action: "buy",
                 expiryMode: "1",
@@ -547,9 +583,21 @@
                 tpD: "1.00",
                 slD: "0.05"
             };
+            return isStranglePage
+                ? {
+                    ...coveredBuyDefaults,
+                    action: "sell",
+                    legs: "pe",
+                    expiryMode: "6",
+                    newD: "0.33",
+                    reD: "0.33",
+                    tpD: "0.10",
+                    slD: "0.55"
+                }
+                : coveredBuyDefaults;
         }
         if (isCoveredMode && vRowIndex === 1) {
-            return {
+            const coveredSellDefaults = {
                 ...optionDefaults,
                 action: "sell",
                 expiryMode: "6",
@@ -558,6 +606,13 @@
                 tpD: "0.10",
                 slD: "0.50"
             };
+            return isStranglePage
+                ? {
+                    ...coveredSellDefaults,
+                    legs: "ce",
+                    slD: "0.55"
+                }
+                : coveredSellDefaults;
         }
         return optionDefaults;
     }
@@ -577,7 +632,9 @@
         rowState[keys.expiryDate] = String(nodes.expiryDate?.value || defaults.expiryDate).trim();
         rowState[keys.qty] = getInputValue(nodes.qty, defaults.qty);
         rowState[keys.newD] = getInputValue(nodes.newD, defaults.newD);
-        rowState[keys.reD] = getInputValue(nodes.reD, defaults.reD);
+        rowState[keys.reD] = isStranglePage
+            ? rowState[keys.newD]
+            : getInputValue(nodes.reD, defaults.reD);
         rowState[keys.tpD] = getInputValue(nodes.tpD, defaults.tpD);
         rowState[keys.slD] = getInputValue(nodes.slD, defaults.slD);
         rowState[keys.reEnter] = getCheckboxValue(nodes.reEnter, defaults.reEnter);
@@ -600,7 +657,7 @@
         setInputValue(nodes.expiryDate, String(uiState[keys.expiryDate] || defaults.expiryDate).trim());
         setInputValue(nodes.qty, uiState[keys.qty] ?? defaults.qty);
         setInputValue(nodes.newD, uiState[keys.newD] ?? defaults.newD);
-        setInputValue(nodes.reD, uiState[keys.reD] ?? defaults.reD);
+        setInputValue(nodes.reD, isStranglePage ? (uiState[keys.newD] ?? defaults.newD) : (uiState[keys.reD] ?? defaults.reD));
         setInputValue(nodes.tpD, uiState[keys.tpD] ?? defaults.tpD);
         setInputValue(nodes.slD, uiState[keys.slD] ?? defaults.slD);
         setCheckboxValue(nodes.reEnter, uiState[keys.reEnter] ?? defaults.reEnter);
@@ -618,7 +675,7 @@
 
     function getDefaultUiState() {
         const defaultState = {
-            startQty: isCoveredMode ? "2" : "1",
+            startQty: isStranglePage ? "1" : "2",
             symbol: "BTC",
             manualFutOrderType: "market_order",
             bsFutQty: "1",
@@ -628,29 +685,34 @@
             rangeDeltaNeutral: false,
             gammaAwareNeutral: false,
             closeNetProfitBrokerage: false,
-            brokerageMultiplier: "10",
+            brokerageMultiplier: isStranglePage ? "5" : "10",
             reEnterBrok: true,
             closeBlockedMargin: false,
-            blockedMarginPct: "20",
+            blockedMarginPct: isStranglePage ? "10" : "20",
             reEnterBlock: true,
             buyHedgeSellPremiumGate: true,
             buyHedgeSellPremiumPct: "2",
+            strangleDeltaDiffReplaceEnabled: isStranglePage,
+            strangleDeltaDiffReplacePct: isStranglePage ? "40" : "50",
             buyHedgeOppositeLegOnGate: false,
+            strangleReopenAtNewD: false,
             buyQtyPercentEnabled: false,
             buyQtyPercent: "100",
             autoConfirmLiveActions: true,
             onlyDeltaNeutral: !isDualLikeMode && !isCoveredMode,
             rangeDeltaNeutral: isDualLikeMode && !isCoveredMode,
             gammaAwareNeutral: false,
-            telegramAlertTypes: [
-                "engine_stopped",
-                "engine_error",
-                "future_opened",
-                "future_closed",
-                "option_opened",
-                "option_closed",
-                "sl_triggered"
-            ],
+            telegramAlertTypes: supportsTelegramAlerts
+                ? [
+                    "engine_stopped",
+                    "engine_error",
+                    "future_opened",
+                    "future_closed",
+                    "option_opened",
+                    "option_closed",
+                    "sl_triggered"
+                ]
+                : [],
             closedFromDate: "",
             closedToDate: ""
         };
@@ -806,7 +868,7 @@
         const vFullName = String(objTarget.fullName || "").trim();
         const vEmail = String(objTarget.email || "").trim();
         if (requiresExplicitTargetSelection && !String(objTarget.accountId || "").trim()) {
-            ids.adminTargetMeta.textContent = "Select a running Covered Options user to load settings and positions.";
+            ids.adminTargetMeta.textContent = `Select a running ${strategyLabel} user to load settings and positions.`;
             return;
         }
         ids.adminTargetMeta.textContent = vFullName
@@ -815,14 +877,14 @@
     }
 
     function updateTelegramNotice() {
-        if (!ids.telegramNotice) {
+        if (!supportsTelegramAlerts || !ids.telegramNotice) {
             return;
         }
         const objTarget = currentTargetAccount || {};
         const vChatId = String(objTarget.telegramChatId || "").trim();
         const vFullName = String(objTarget.fullName || "").trim();
         if (requiresExplicitTargetSelection && !String(objTarget.accountId || "").trim()) {
-            ids.telegramNotice.innerHTML = "Select a running Covered Options user to view Telegram details.";
+            ids.telegramNotice.innerHTML = `Select a running ${escapeHtml(strategyLabel)} user to view Telegram details.`;
             return;
         }
         if (vChatId) {
@@ -1373,6 +1435,7 @@
 
     function clearAccountSummary() {
         lastAccountSummary = null;
+        clearOptionsDemoIndicator();
         [
             ids.oneLotValue,
             ids.totalBalanceValue,
@@ -1387,9 +1450,651 @@
         });
     }
 
+    function formatIndicatorOi(value) {
+        const numberValue = Number(value);
+        if (!Number.isFinite(numberValue)) {
+            return "-";
+        }
+        const absValue = Math.abs(numberValue);
+        const digits = absValue >= 1000 ? 0 : 2;
+        return numberValue.toLocaleString(undefined, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: digits
+        });
+    }
+
+    function getIndicatorDirectionText(direction) {
+        const normalized = String(direction || "").trim().toLowerCase();
+        if (normalized === "bullish") {
+            return "Bullish";
+        }
+        if (normalized === "bearish") {
+            return "Bearish";
+        }
+        return "Neutral";
+    }
+
+    function getIndicatorBadgeTone(direction) {
+        const normalized = String(direction || "").trim().toLowerCase();
+        if (normalized === "bullish") {
+            return "success";
+        }
+        if (normalized === "bearish") {
+            return "danger";
+        }
+        return "warning";
+    }
+
+    function clearOptionsDemoIndicator() {
+        if (!isDemoVariant || !ids.indicatorCard || !ids.indicatorBody) {
+            return;
+        }
+        ids.indicatorCard.classList.add("rolling-futures-hidden");
+        ids.indicatorCard.classList.remove(
+            "indicator-strength-weak",
+            "indicator-strength-medium",
+            "indicator-strength-strong",
+            "indicator-strength-neutral"
+        );
+        ids.indicatorBody.innerHTML = "<tr class=\"rolling-futures-empty-body\"><td colspan=\"12\">No indicator data yet.</td></tr>";
+        if (ids.indicatorOverall) {
+            ids.indicatorOverall.className = "rolling-futures-badge";
+            ids.indicatorOverall.textContent = "Overall: Waiting";
+        }
+        if (ids.indicatorPcr) {
+            ids.indicatorPcr.className = "rolling-futures-badge";
+            ids.indicatorPcr.textContent = "PCR: -";
+        }
+        if (ids.indicatorSupport) {
+            ids.indicatorSupport.className = "rolling-futures-badge";
+            ids.indicatorSupport.textContent = "Support: -";
+        }
+        if (ids.indicatorResistance) {
+            ids.indicatorResistance.className = "rolling-futures-badge";
+            ids.indicatorResistance.textContent = "Resistance: -";
+        }
+        if (ids.indicatorOrderBook) {
+            ids.indicatorOrderBook.className = "rolling-futures-badge";
+            ids.indicatorOrderBook.textContent = "Order Book: -";
+        }
+        if (ids.indicatorFlow) {
+            ids.indicatorFlow.className = "rolling-futures-badge";
+            ids.indicatorFlow.textContent = "Flow: -";
+        }
+        if (ids.indicatorTrend) {
+            ids.indicatorTrend.className = "rolling-futures-badge";
+            ids.indicatorTrend.textContent = "Trend: -";
+        }
+        if (ids.indicatorStrength) {
+            ids.indicatorStrength.className = "rolling-futures-badge";
+            ids.indicatorStrength.textContent = "Strength: -";
+        }
+        if (ids.indicatorStrengthBar) {
+            ids.indicatorStrengthBar.querySelectorAll(".rolling-futures-strength-step").forEach(function (step) {
+                step.classList.remove("active");
+                step.removeAttribute("data-tone");
+            });
+        }
+        if (ids.indicatorHistoryBar) {
+            ids.indicatorHistoryBar.querySelectorAll(".rolling-futures-history-step").forEach(function (step) {
+                step.classList.remove("active");
+                step.removeAttribute("data-tone");
+                step.style.height = "";
+            });
+        }
+        if (ids.indicatorMeta) {
+            ids.indicatorMeta.textContent = "Open interest direction will appear after the latest market snapshot loads.";
+        }
+        if (ids.indicatorConfidence) {
+            ids.indicatorConfidence.className = "rolling-futures-indicator-confidence";
+            ids.indicatorConfidence.textContent = "Confidence: -";
+        }
+        if (ids.indicatorHeadline) {
+            ids.indicatorHeadline.className = "rolling-futures-indicator-headline";
+            ids.indicatorHeadline.textContent = "Headline: -";
+        }
+    }
+
+    function getIndicatorRefreshMinutes() {
+        const value = Number(ids.indicatorRefreshInput?.value || 5);
+        if (!Number.isFinite(value) || value < 1) {
+            return 5;
+        }
+        return Math.min(60, Math.max(1, Math.trunc(value)));
+    }
+
+    function scheduleIndicatorAutoRefresh() {
+        if (!isDemoVariant) {
+            return;
+        }
+        if (indicatorRefreshTimer) {
+            clearInterval(indicatorRefreshTimer);
+            indicatorRefreshTimer = null;
+        }
+        const minutes = getIndicatorRefreshMinutes();
+        indicatorRefreshTimer = window.setInterval(function () {
+            void loadOptionsDemoIndicator().catch(function () { return undefined; });
+        }, minutes * 60 * 1000);
+    }
+
+    function formatIndicatorWall(wall) {
+        const strike = Number(wall?.strike);
+        const oi = Number(wall?.oi);
+        if (!Number.isFinite(strike) || !Number.isFinite(oi)) {
+            return "-";
+        }
+        return `${fmt(strike, 0)} (${formatIndicatorOi(oi)})`;
+    }
+
+    function formatOrderBookImbalance(value) {
+        const numberValue = Number(value);
+        if (!Number.isFinite(numberValue)) {
+            return "-";
+        }
+        return `${Math.abs(numberValue * 100).toFixed(1)}%`;
+    }
+
+    function getOrderBookTone(direction) {
+        const normalized = String(direction || "").trim().toLowerCase();
+        if (normalized === "bullish") {
+            return "success";
+        }
+        if (normalized === "bearish") {
+            return "danger";
+        }
+        return "warning";
+    }
+
+    function getOrderBookLabel(indicator) {
+        const direction = getIndicatorDirectionText(indicator?.orderBookDirection);
+        const imbalance = Number(indicator?.orderBookImbalance);
+        const source = String(indicator?.orderBookSource || "").trim().replaceAll("_", " ");
+        if (!Number.isFinite(imbalance)) {
+            return `Order Book: ${direction}`;
+        }
+        return `Order Book: ${direction} ${formatOrderBookImbalance(imbalance)}${source ? ` (${source})` : ""}`;
+    }
+
+    function getFlowTone(flow) {
+        const bias = String(flow?.bias || "").trim().toLowerCase();
+        if (bias === "bullish") {
+            return "success";
+        }
+        if (bias === "bearish") {
+            return "danger";
+        }
+        return "warning";
+    }
+
+    function getFlowLabel(flow) {
+        const classification = String(flow?.classification || "").trim().toLowerCase();
+        if (classification === "long_buildup") {
+            return "Long Buildup";
+        }
+        if (classification === "short_buildup") {
+            return "Short Buildup";
+        }
+        if (classification === "short_covering") {
+            return "Short Covering";
+        }
+        if (classification === "long_unwinding") {
+            return "Long Unwinding";
+        }
+        return "Flat";
+    }
+
+    function getTrendTone(trend) {
+        const normalized = String(trend || "").trim().toLowerCase();
+        if (normalized === "improving") {
+            return "success";
+        }
+        if (normalized === "weakening") {
+            return "danger";
+        }
+        return "warning";
+    }
+
+    function getTrendLabel(trend) {
+        const normalized = String(trend || "").trim().toLowerCase();
+        if (normalized === "improving") {
+            return "Improving";
+        }
+        if (normalized === "weakening") {
+            return "Weakening";
+        }
+        return "Stable";
+    }
+
+    function getStrengthLabel(score) {
+        const vScore = Number(score);
+        if (!Number.isFinite(vScore)) {
+            return { label: "Unknown", tone: "warning" };
+        }
+        if (vScore >= 5) {
+            return { label: "Very Strong", tone: "success" };
+        }
+        if (vScore >= 4) {
+            return { label: "Strong", tone: "success" };
+        }
+        if (vScore >= 3) {
+            return { label: "Moderate", tone: "warning" };
+        }
+        if (vScore >= 2) {
+            return { label: "Weak", tone: "warning" };
+        }
+        return { label: "Very Weak", tone: "danger" };
+    }
+
+    function getSummaryStrengthWord(strength) {
+        const value = Number(strength);
+        if (!Number.isFinite(value)) {
+            return "Neutral";
+        }
+        if (value >= 4) {
+            return "Strong";
+        }
+        if (value >= 3) {
+            return "Moderate";
+        }
+        return "Weak";
+    }
+
+    function getOverallSummaryLabel(direction, strength) {
+        const normalizedDirection = String(direction || "").trim().toLowerCase();
+        const strengthWord = getSummaryStrengthWord(strength);
+        if (normalizedDirection === "bullish") {
+            return `${strengthWord} Bullish`;
+        }
+        if (normalizedDirection === "bearish") {
+            return `${strengthWord} Bearish`;
+        }
+        return `${strengthWord} Neutral`;
+    }
+
+    function getTrendDelta(currentScore, previousScore, direction) {
+        const current = Number(currentScore);
+        const previous = Number(previousScore);
+        if (!Number.isFinite(current) || !Number.isFinite(previous)) {
+            return { trend: "stable", delta: 0 };
+        }
+        const delta = Number((current - previous).toFixed(4));
+        const dir = String(direction || "").trim().toLowerCase();
+        if (Math.abs(delta) < 0.03) {
+            return { trend: "stable", delta };
+        }
+        const improving = (dir === "bullish" && delta > 0) || (dir === "bearish" && delta < 0);
+        const weakening = (dir === "bullish" && delta < 0) || (dir === "bearish" && delta > 0);
+        return {
+            trend: improving ? "improving" : (weakening ? "weakening" : "stable"),
+            delta
+        };
+    }
+
+    function loadIndicatorMemory(symbol) {
+        if (!isDemoVariant) {
+            return null;
+        }
+        try {
+            const key = `optionyze.options-demo.indicator.${String(symbol || "BTC").trim().toUpperCase()}`;
+            const raw = window.localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : null;
+        }
+        catch {
+            return null;
+        }
+    }
+
+    function saveIndicatorMemory(symbol, payload) {
+        if (!isDemoVariant) {
+            return;
+        }
+        try {
+            const key = `optionyze.options-demo.indicator.${String(symbol || "BTC").trim().toUpperCase()}`;
+            const currentHistory = Array.isArray(payload?.history) ? payload.history : [];
+            const prior = loadIndicatorMemory(symbol) || {};
+            const mergedHistory = Array.isArray(prior.history) ? prior.history.slice(-7) : [];
+            const nextHistory = mergedHistory.concat(currentHistory).slice(-8);
+            window.localStorage.setItem(key, JSON.stringify({
+                ...prior,
+                ...payload,
+                history: nextHistory
+            }));
+        }
+        catch {
+            // best effort
+        }
+    }
+
+    function calculateSignalStrength(indicator, trend, orderBookDirection) {
+        const score = Math.abs(Number(indicator?.overallScore));
+        let strength = 1;
+        if (score >= 0.10) {
+            strength += 1;
+        }
+        if (score >= 0.22) {
+            strength += 1;
+        }
+        if (String(indicator?.overallFlow?.classification || "").trim().toLowerCase() !== "flat") {
+            strength += 1;
+        }
+        if (String(trend || "").trim().toLowerCase() === "improving") {
+            strength += 1;
+        }
+        const direction = String(indicator?.overallDirection || "").trim().toLowerCase();
+        const bookDirection = String(orderBookDirection || "").trim().toLowerCase();
+        if (bookDirection && bookDirection !== "neutral" && direction === bookDirection) {
+            strength += 1;
+        }
+        return Math.max(1, Math.min(5, strength));
+    }
+
+    function getSignalStrengthTone(strength) {
+        const value = Number(strength);
+        if (!Number.isFinite(value)) {
+            return "warning";
+        }
+        if (value >= 4) {
+            return "success";
+        }
+        if (value >= 2) {
+            return "warning";
+        }
+        return "danger";
+    }
+
+    function getSignalStrengthCardClass(strength) {
+        const value = Number(strength);
+        if (!Number.isFinite(value)) {
+            return "indicator-strength-neutral";
+        }
+        if (value >= 4) {
+            return "indicator-strength-strong";
+        }
+        if (value >= 2) {
+            return "indicator-strength-medium";
+        }
+        return "indicator-strength-weak";
+    }
+
+    function getBucketGroupLabel(horizon) {
+        const normalized = String(horizon || "").trim().toLowerCase();
+        if (normalized === "short_term") {
+            return "Short Term";
+        }
+        if (normalized === "medium_term") {
+            return "Medium Term";
+        }
+        if (normalized === "long_term") {
+            return "Long Term";
+        }
+        return "Other";
+    }
+
+    function updateStrengthBar(strength) {
+        if (!ids.indicatorStrengthBar) {
+            return;
+        }
+        const value = Math.max(1, Math.min(5, Math.trunc(Number(strength) || 1)));
+        const tone = getSignalStrengthTone(value);
+        ids.indicatorStrengthBar.querySelectorAll(".rolling-futures-strength-step").forEach(function (step) {
+            const stepValue = Number(step.dataset.step || 0);
+            step.classList.toggle("active", stepValue <= value);
+            step.setAttribute("data-tone", tone);
+        });
+    }
+
+    function updateHistoryBar(history) {
+        if (!ids.indicatorHistoryBar) {
+            return;
+        }
+        const arrHistory = Array.isArray(history) ? history.slice(-8) : [];
+        const arrSteps = Array.from(ids.indicatorHistoryBar.querySelectorAll(".rolling-futures-history-step"));
+        arrSteps.forEach(function (step, index) {
+            const value = Number(arrHistory[index]);
+            const tone = getSignalStrengthTone(value);
+            const isActive = Number.isFinite(value);
+            step.classList.toggle("active", isActive);
+            step.setAttribute("data-tone", tone);
+            step.style.height = isActive ? `${Math.max(18, Math.min(34, 8 + (value * 5)))}px` : "8px";
+        });
+    }
+
+    function updateIndicatorCardTone(strength) {
+        if (!ids.indicatorCard) {
+            return;
+        }
+        ids.indicatorCard.classList.remove(
+            "indicator-strength-weak",
+            "indicator-strength-medium",
+            "indicator-strength-strong",
+            "indicator-strength-neutral"
+        );
+        ids.indicatorCard.classList.add(getSignalStrengthCardClass(strength));
+    }
+
+    function getConfidenceTone(level) {
+        const normalized = String(level || "").trim().toLowerCase();
+        if (normalized === "high") {
+            return "high";
+        }
+        if (normalized === "medium") {
+            return "medium";
+        }
+        return "low";
+    }
+
+    function summarizeConfidence(indicator, signalStrength, overallTrend, memory) {
+        const direction = String(indicator?.overallDirection || "").trim().toLowerCase();
+        const orderBookDirection = String(indicator?.orderBookDirection || "").trim().toLowerCase();
+        const flowBias = String(indicator?.overallFlow?.bias || "").trim().toLowerCase();
+        const flowClassification = String(indicator?.overallFlow?.classification || "").trim().toLowerCase();
+        const trend = String(overallTrend || "").trim().toLowerCase();
+        const support = Number(indicator?.overallSupport?.strike);
+        const resistance = Number(indicator?.overallResistance?.strike);
+        const spot = Number(indicator?.markPrice ?? indicator?.spotPrice);
+        const wallAgreement = Number.isFinite(support) && Number.isFinite(resistance) && Number.isFinite(spot)
+            ? (direction === "bullish" ? (support < spot && resistance > spot) : (direction === "bearish" ? (support < spot && resistance > spot) : true))
+            : false;
+        const alignments = [
+            direction && flowBias && ((direction === "bullish" && (flowBias === "bullish" || flowClassification === "short_covering")) || (direction === "bearish" && (flowBias === "bearish" || flowClassification === "long_unwinding"))),
+            direction && trend && ((direction === "bullish" && trend === "improving") || (direction === "bearish" && trend === "improving")),
+            direction && orderBookDirection && ((direction === "bullish" && orderBookDirection === "bullish") || (direction === "bearish" && orderBookDirection === "bearish")),
+            wallAgreement,
+            Number(signalStrength) >= 4,
+            Number(memory?.history?.length || 0) >= 3
+        ].filter(Boolean).length;
+        if (alignments >= 4) {
+            return { level: "high", text: "Confidence: High, because trend, flow, order book, and walls agree." };
+        }
+        if (alignments >= 2) {
+            return { level: "medium", text: "Confidence: Medium, because most signals agree." };
+        }
+        return { level: "low", text: "Confidence: Low, because the signals are mixed." };
+    }
+
+    function summarizeHeadline(indicator, signalStrength, overallTrend, confidence, memory) {
+        const direction = String(indicator?.overallDirection || "").trim().toLowerCase();
+        const orderBookDirection = String(indicator?.orderBookDirection || "").trim().toLowerCase();
+        const flow = String(indicator?.overallFlow?.classification || "").trim().toLowerCase();
+        const trend = String(overallTrend || "").trim().toLowerCase();
+        const support = Number(indicator?.overallSupport?.strike);
+        const resistance = Number(indicator?.overallResistance?.strike);
+        const spot = Number(indicator?.markPrice ?? indicator?.spotPrice);
+        const strengthWord = getSummaryStrengthWord(signalStrength);
+        const directionWord = direction === "bullish" ? "bullish" : (direction === "bearish" ? "bearish" : "neutral");
+        const trendWord = trend === "improving" ? "strengthening" : (trend === "weakening" ? "softening" : "steady");
+        const flowWord = flow === "long_buildup" || flow === "short_covering"
+            ? "supportive flow"
+            : (flow === "short_buildup" || flow === "long_unwinding"
+                ? "pressured flow"
+                : "balanced flow");
+        const wallWord = Number.isFinite(support) && Number.isFinite(resistance) && Number.isFinite(spot)
+            ? `walls around ${fmt(spot, 0)}`
+            : "key walls nearby";
+        const confidenceWord = String(confidence?.level || "").trim().toLowerCase() === "high"
+            ? "high confidence"
+            : (String(confidence?.level || "").trim().toLowerCase() === "medium" ? "moderate confidence" : "limited confidence");
+        const historyWord = Number(Array.isArray(memory?.history) ? memory.history.length : 0) >= 3 ? "with history agreeing" : "with limited history";
+        const bookWord = orderBookDirection === "bullish"
+            ? "order book leaning bullish"
+            : (orderBookDirection === "bearish" ? "order book leaning bearish" : "order book balanced");
+        if (directionWord === "neutral") {
+            return `Headline: ${strengthWord} neutral bias, ${trendWord}, ${flowWord}, ${bookWord}, ${wallWord}, ${confidenceWord}, ${historyWord}.`;
+        }
+        return `Headline: ${strengthWord} ${directionWord} bias, ${trendWord}, ${flowWord}, ${bookWord}, ${wallWord}, ${confidenceWord}, ${historyWord}.`;
+    }
+
+    function pulseOverallBadge() {
+        if (!ids.indicatorOverall) {
+            return;
+        }
+        ids.indicatorOverall.classList.remove("badge-pulse");
+        void ids.indicatorOverall.offsetWidth;
+        ids.indicatorOverall.classList.add("badge-pulse");
+        window.setTimeout(function () {
+            ids.indicatorOverall?.classList.remove("badge-pulse");
+        }, 700);
+    }
+
+    function renderOptionsDemoIndicator(indicator) {
+        if (!isDemoVariant || !ids.indicatorCard || !ids.indicatorBody) {
+            return;
+        }
+        const buckets = Array.isArray(indicator?.buckets) ? indicator.buckets : [];
+        if (!buckets.length) {
+            clearOptionsDemoIndicator();
+            return;
+        }
+        const overallDirection = getIndicatorDirectionText(indicator?.overallDirection);
+        const overallTone = getIndicatorBadgeTone(indicator?.overallDirection);
+        const overallPcr = Number(indicator?.overallPutCallRatio);
+        const asOfText = indicator?.asOf ? formatDateTimeDisplay(indicator.asOf) : "-";
+        const markPrice = Number(indicator?.markPrice);
+        const spotPrice = Number(indicator?.spotPrice);
+        const overallSupportText = formatIndicatorWall(indicator?.overallSupport);
+        const overallResistanceText = formatIndicatorWall(indicator?.overallResistance);
+        const orderBookText = getOrderBookLabel(indicator);
+        const overallFlowLabel = getFlowLabel(indicator?.overallFlow);
+        const memory = loadIndicatorMemory(indicator?.symbol || ids.symbol?.value || "BTC");
+        const overallTrend = getTrendDelta(indicator?.overallScore, memory?.overallScore, indicator?.overallDirection);
+        const signalStrength = calculateSignalStrength(indicator, overallTrend.trend, indicator?.orderBookDirection);
+        const strengthInfo = getStrengthLabel(signalStrength);
+        const overallSummaryLabel = getOverallSummaryLabel(indicator?.overallDirection, signalStrength);
+        const previousBucketByWindow = new Map(Array.isArray(memory?.buckets) ? memory.buckets.map(function (bucket) {
+            return [String(bucket?.window || ""), bucket];
+        }) : []);
+        const history = Array.isArray(memory?.history) ? memory.history.slice(-7) : [];
+        const nextHistory = history.concat(signalStrength).slice(-8);
+        const confidence = summarizeConfidence(indicator, signalStrength, overallTrend.trend, memory);
+        const headline = summarizeHeadline(indicator, signalStrength, overallTrend.trend, confidence, memory);
+        ids.indicatorCard.classList.remove("rolling-futures-hidden");
+        let lastGroupLabel = "";
+        ids.indicatorBody.innerHTML = buckets.map(function (bucket) {
+            const tone = getIndicatorBadgeTone(bucket?.direction);
+            const horizonText = String(bucket?.horizon || "").trim().replaceAll("_", " ");
+            const flowTone = getFlowTone(bucket?.flow);
+            const flowLabel = getFlowLabel(bucket?.flow);
+            const prevBucket = previousBucketByWindow.get(String(bucket?.window || ""));
+            const bucketTrend = getTrendDelta(bucket?.score, prevBucket?.score, bucket?.direction);
+            const groupLabel = getBucketGroupLabel(bucket?.horizon);
+            const groupRow = groupLabel !== lastGroupLabel
+                ? `<tr class="rolling-futures-section-row"><td colspan="12">${escapeHtml(groupLabel)}</td></tr>`
+                : "";
+            lastGroupLabel = groupLabel;
+            return `
+                ${groupRow}
+                <tr>
+                    <td>${escapeHtml(horizonText.replace(/\b\w/g, function (char) { return char.toUpperCase(); }))}</td>
+                    <td>${escapeHtml(String(bucket?.label || "-"))}</td>
+                    <td>${escapeHtml(String(bucket?.expiry || "-"))}</td>
+                    <td>${Number.isFinite(Number(bucket?.dte)) ? escapeHtml(fmt(bucket.dte, 1)) : "-"}</td>
+                    <td>${escapeHtml(formatIndicatorOi(bucket?.callOi))}</td>
+                    <td>${escapeHtml(formatIndicatorOi(bucket?.putOi))}</td>
+                    <td>${Number.isFinite(Number(bucket?.putCallRatio)) ? escapeHtml(Number(bucket.putCallRatio).toFixed(2)) : "-"}</td>
+                    <td>${escapeHtml(formatIndicatorWall(bucket?.support))}</td>
+                    <td>${escapeHtml(formatIndicatorWall(bucket?.resistance))}</td>
+                    <td><span class="rolling-futures-badge ${flowTone}">${escapeHtml(flowLabel)}</span></td>
+                    <td><span class="rolling-futures-badge ${getTrendTone(bucketTrend.trend)}">${escapeHtml(getTrendLabel(bucketTrend.trend))}</span></td>
+                    <td><span class="rolling-futures-badge ${tone}">${escapeHtml(getIndicatorDirectionText(bucket?.direction))}</span></td>
+                </tr>
+            `;
+        }).join("");
+        if (ids.indicatorOverall) {
+            ids.indicatorOverall.className = `rolling-futures-badge ${overallTone}`;
+            ids.indicatorOverall.textContent = `Overall: ${overallSummaryLabel}`;
+            pulseOverallBadge();
+        }
+        if (ids.indicatorPcr) {
+            ids.indicatorPcr.className = "rolling-futures-badge";
+            ids.indicatorPcr.textContent = `PCR: ${Number.isFinite(overallPcr) ? overallPcr.toFixed(2) : "-"}`;
+        }
+        if (ids.indicatorSupport) {
+            ids.indicatorSupport.className = "rolling-futures-badge success";
+            ids.indicatorSupport.textContent = `Support: ${overallSupportText}`;
+        }
+        if (ids.indicatorResistance) {
+            ids.indicatorResistance.className = "rolling-futures-badge danger";
+            ids.indicatorResistance.textContent = `Resistance: ${overallResistanceText}`;
+        }
+        if (ids.indicatorOrderBook) {
+            ids.indicatorOrderBook.className = `rolling-futures-badge ${getOrderBookTone(indicator?.orderBookDirection)}`;
+            ids.indicatorOrderBook.textContent = orderBookText;
+        }
+        if (ids.indicatorFlow) {
+            ids.indicatorFlow.className = `rolling-futures-badge ${getFlowTone(indicator?.overallFlow)}`;
+            ids.indicatorFlow.textContent = `Flow: ${overallFlowLabel}`;
+        }
+        if (ids.indicatorTrend) {
+            ids.indicatorTrend.className = `rolling-futures-badge ${getTrendTone(overallTrend.trend)}`;
+            ids.indicatorTrend.textContent = `Trend: ${getTrendLabel(overallTrend.trend)}`;
+        }
+        if (ids.indicatorStrength) {
+            ids.indicatorStrength.className = `rolling-futures-badge ${strengthInfo.tone}`;
+            ids.indicatorStrength.textContent = `Strength: ${signalStrength}/5 (${strengthInfo.label})`;
+        }
+        updateStrengthBar(signalStrength);
+        updateIndicatorCardTone(signalStrength);
+        updateHistoryBar(nextHistory);
+        if (ids.indicatorMeta) {
+            const priceChange = Number(indicator?.overallFlow?.priceChange);
+            const oiChange = Number(indicator?.overallFlow?.oiChange);
+            const parts = [
+                `Symbol ${String(indicator?.symbol || ids.symbol?.value || "BTC").trim().toUpperCase()}`,
+                `Mark ${Number.isFinite(markPrice) ? fmt(markPrice, 2) : "-"}`,
+                `Spot ${Number.isFinite(spotPrice) ? fmt(spotPrice, 2) : "-"}`,
+                `Price Chg ${Number.isFinite(priceChange) ? fmt(priceChange, 2) : "-"}`,
+                `OI Chg ${Number.isFinite(oiChange) ? formatIndicatorOi(oiChange) : "-"}`,
+                `Updated ${asOfText}`
+            ];
+            ids.indicatorMeta.textContent = parts.join(" | ");
+        }
+        if (ids.indicatorConfidence) {
+            ids.indicatorConfidence.className = `rolling-futures-indicator-confidence ${getConfidenceTone(confidence.level)}`;
+            ids.indicatorConfidence.textContent = confidence.text;
+        }
+        if (ids.indicatorHeadline) {
+            ids.indicatorHeadline.className = `rolling-futures-indicator-headline ${getConfidenceTone(confidence.level)}`;
+            ids.indicatorHeadline.textContent = headline;
+        }
+        saveIndicatorMemory(indicator?.symbol || ids.symbol?.value || "BTC", {
+            overallScore: indicator?.overallScore,
+            signalStrength: signalStrength,
+            history: nextHistory,
+            buckets: buckets.map(function (bucket) {
+                return {
+                    window: bucket?.window,
+                    score: bucket?.score
+                };
+            })
+        });
+    }
+
     function applyAccountSummaryData(objData) {
         lastAccountSummary = objData || null;
         execStrategyEnabled = mode === "dual" ? Boolean(objData.execStrategy) : true;
+        if (isDemoVariant && Object.prototype.hasOwnProperty.call(objData || {}, "indicator")) {
+            renderOptionsDemoIndicator(objData.indicator || null);
+        }
         if (ids.oneLotValue) {
             ids.oneLotValue.textContent = fmtUsd(objData.oneLotValue);
         }
@@ -1434,7 +2139,7 @@
 
     function getUiState() {
         const state = {
-            startQty: getInputValue(ids.startQty, isCoveredMode ? "2" : "1"),
+            startQty: getInputValue(ids.startQty, isStranglePage ? "1" : "2"),
             symbol: String(ids.symbol?.value || "BTC").trim().toUpperCase(),
             manualFutOrderType: String(ids.futureOrderType?.value || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
             bsFutQty: getInputValue(ids.bsFutQty, "1"),
@@ -1449,17 +2154,22 @@
             closeBlockedMargin: getCheckboxValue(ids.closeBlockedMargin, false),
             blockedMarginPct: getInputValue(ids.blockedMarginPct, "20"),
             reEnterBlock: getCheckboxValue(ids.reEnterBlock, false),
-            buyHedgeSellPremiumGate: getCheckboxValue(ids.buyHedgeSellPremiumGate, false),
-            buyHedgeSellPremiumPct: getInputValue(ids.buyHedgeSellPremiumPct, "2"),
+            buyHedgeSellPremiumGate: isStranglePage ? false : getCheckboxValue(ids.buyHedgeSellPremiumGate, false),
+            buyHedgeSellPremiumPct: isStranglePage ? "2" : getInputValue(ids.buyHedgeSellPremiumPct, "2"),
+            strangleDeltaDiffReplaceEnabled: isStranglePage ? getCheckboxValue(ids.strangleDeltaDiffReplaceEnabled, false) : false,
+            strangleDeltaDiffReplacePct: isStranglePage ? getInputValue(ids.strangleDeltaDiffReplacePct, "50") : "50",
             buyHedgeOppositeLegOnGate: getCheckboxValue(ids.buyHedgeOppositeLegOnGate, false),
-            buyQtyPercentEnabled: getCheckboxValue(ids.buyQtyPercentEnabled, false),
-            buyQtyPercent: getInputValue(ids.buyQtyPercent, "100"),
+            strangleReopenAtNewD: isStranglePage ? getCheckboxValue(ids.strangleReopenAtNewD, false) : false,
+            buyQtyPercentEnabled: isStranglePage ? false : getCheckboxValue(ids.buyQtyPercentEnabled, false),
+            buyQtyPercent: isStranglePage ? "100" : getInputValue(ids.buyQtyPercent, "100"),
             autoConfirmLiveActions: getCheckboxValue(ids.autoConfirmLiveActions, false),
-            telegramAlertTypes: ids.telegramEventCheckboxes.filter(function (checkbox) {
-                return checkbox instanceof HTMLInputElement && checkbox.checked;
-            }).map(function (checkbox) {
-                return String(checkbox.value || "").trim();
-            }).filter(Boolean),
+            telegramAlertTypes: supportsTelegramAlerts
+                ? ids.telegramEventCheckboxes.filter(function (checkbox) {
+                    return checkbox instanceof HTMLInputElement && checkbox.checked;
+                }).map(function (checkbox) {
+                    return String(checkbox.value || "").trim();
+                }).filter(Boolean)
+                : [],
             closedFromDate: String(ids.closedFromDate?.value || "").trim(),
             closedToDate: String(ids.closedToDate?.value || "").trim()
         };
@@ -1497,22 +2207,27 @@
             setCheckboxValue(ids.closeBlockedMargin, objUiState.closeBlockedMargin);
             setInputValue(ids.blockedMarginPct, objUiState.blockedMarginPct);
             setCheckboxValue(ids.reEnterBlock, objUiState.reEnterBlock);
-            setCheckboxValue(ids.buyHedgeSellPremiumGate, objUiState.buyHedgeSellPremiumGate);
-            setInputValue(ids.buyHedgeSellPremiumPct, objUiState.buyHedgeSellPremiumPct);
+            setCheckboxValue(ids.buyHedgeSellPremiumGate, isStranglePage ? false : objUiState.buyHedgeSellPremiumGate);
+            setInputValue(ids.buyHedgeSellPremiumPct, isStranglePage ? "2" : objUiState.buyHedgeSellPremiumPct);
+            setCheckboxValue(ids.strangleDeltaDiffReplaceEnabled, objUiState.strangleDeltaDiffReplaceEnabled);
+            setInputValue(ids.strangleDeltaDiffReplacePct, objUiState.strangleDeltaDiffReplacePct);
             setCheckboxValue(ids.buyHedgeOppositeLegOnGate, objUiState.buyHedgeOppositeLegOnGate);
-            setCheckboxValue(ids.buyQtyPercentEnabled, objUiState.buyQtyPercentEnabled);
-            setInputValue(ids.buyQtyPercent, objUiState.buyQtyPercent);
+            setCheckboxValue(ids.strangleReopenAtNewD, objUiState.strangleReopenAtNewD);
+            setCheckboxValue(ids.buyQtyPercentEnabled, isStranglePage ? false : objUiState.buyQtyPercentEnabled);
+            setInputValue(ids.buyQtyPercent, isStranglePage ? "100" : objUiState.buyQtyPercent);
             setCheckboxValue(ids.autoConfirmLiveActions, objUiState.autoConfirmLiveActions);
             setInputValue(ids.closedFromDate, String(objUiState.closedFromDate || "").trim());
             setInputValue(ids.closedToDate, String(objUiState.closedToDate || "").trim());
             closedFiltersChanged = previousClosedFromDate !== String(ids.closedFromDate?.value || "").trim()
                 || previousClosedToDate !== String(ids.closedToDate?.value || "").trim();
-            const selectedTypes = new Set(Array.isArray(objUiState.telegramAlertTypes) ? objUiState.telegramAlertTypes.map(String) : []);
-            ids.telegramEventCheckboxes.forEach(function (checkbox) {
-                if (checkbox instanceof HTMLInputElement) {
-                    checkbox.checked = selectedTypes.has(String(checkbox.value || ""));
-                }
-            });
+            if (supportsTelegramAlerts) {
+                const selectedTypes = new Set(Array.isArray(objUiState.telegramAlertTypes) ? objUiState.telegramAlertTypes.map(String) : []);
+                ids.telegramEventCheckboxes.forEach(function (checkbox) {
+                    if (checkbox instanceof HTMLInputElement) {
+                        checkbox.checked = selectedTypes.has(String(checkbox.value || ""));
+                    }
+                });
+            }
             applySymbolDefaults();
             applyExpiryModeDefaults(false);
             syncQtyFromStartQty();
@@ -1538,7 +2253,7 @@
         if (isCoveredMode && ids.buyQtyPercent instanceof HTMLInputElement) {
             ids.buyQtyPercent.value = String(clampCoveredBuyQtyPercentValue(ids.buyQtyPercent.value));
         }
-        const vStartQty = String(ids.startQty.value || "").trim() || (isCoveredMode ? "2" : "1");
+        const vStartQty = String(ids.startQty.value || "").trim() || String(getCoveredMultiplierMin());
         const vCoveredMultiplierQty = isCoveredMode ? clampCoveredMultiplierValue(vStartQty) : Math.max(1, Math.floor(Number(vStartQty || 1)));
         const vCoveredBuyQty = isCoveredMode ? resolveCoveredBuyRowQty(vCoveredMultiplierQty) : vCoveredMultiplierQty;
         getSupportedOptionRowIndexes().forEach(function (rowIndex) {
@@ -2060,6 +2775,16 @@
         applyAccountSummaryData(objResult?.data || {});
     }
 
+    async function loadOptionsDemoIndicator() {
+        if (!isDemoVariant) {
+            return;
+        }
+        const query = new URLSearchParams();
+        query.set("symbol", String(ids.symbol?.value || "BTC").trim().toUpperCase());
+        const objResult = await getJson(`${endpointBase}/indicator?${query.toString()}`);
+        renderOptionsDemoIndicator(objResult?.data || null);
+    }
+
     function getLtpBlinkClass(positionId, markPrice) {
         const currentLtp = Number(markPrice);
         if (!positionId || !Number.isFinite(currentLtp)) {
@@ -2133,6 +2858,22 @@
 
     function renderCoveredHedgeGateSummary(rows) {
         if (!isCoveredMode || !ids.hedgeGateSummary) {
+            return;
+        }
+        if (isStranglePage) {
+            const bEnabled = ids.strangleDeltaDiffReplaceEnabled instanceof HTMLInputElement
+                && ids.strangleDeltaDiffReplaceEnabled.checked;
+            const vThresholdPctRaw = Number(ids.strangleDeltaDiffReplacePct instanceof HTMLInputElement
+                ? ids.strangleDeltaDiffReplacePct.value
+                : 50);
+            const vThresholdPct = Number.isFinite(vThresholdPctRaw)
+                ? Math.min(100, Math.max(0, vThresholdPctRaw))
+                : 50;
+            if (!bEnabled) {
+                ids.hedgeGateSummary.innerHTML = '<span class="rolling-covered-hedge-chip off">Replace Off</span>';
+                return;
+            }
+            ids.hedgeGateSummary.innerHTML = `<span class="rolling-covered-hedge-chip gate">Replace ${escapeHtml(fmt(vThresholdPct, 0))}%</span>`;
             return;
         }
         const gateEnabled = ids.buyHedgeSellPremiumGate instanceof HTMLInputElement
@@ -2687,9 +3428,20 @@
         applySymbolDefaults();
         queueProfileSave();
         void Promise.all([
+            loadOptionsDemoIndicator().catch(function () { return undefined; }),
             loadAccountSummary().catch(function () { return undefined; }),
             loadClosedPositions().catch(function () { return undefined; })
         ]);
+    });
+    ids.indicatorRefreshButton?.addEventListener("click", function () {
+        void loadOptionsDemoIndicator().catch(function () { return undefined; });
+    });
+    ids.indicatorRefreshInput?.addEventListener("change", function () {
+        scheduleIndicatorAutoRefresh();
+        void loadOptionsDemoIndicator().catch(function () { return undefined; });
+    });
+    ids.indicatorRefreshInput?.addEventListener("input", function () {
+        scheduleIndicatorAutoRefresh();
     });
     ids.resetDefaultsButton?.addEventListener("click", function () {
         void resetManualTraderDefaults().then(function () {
@@ -2758,7 +3510,10 @@
         ids.reEnterBlock,
         ids.buyHedgeSellPremiumGate,
         ids.buyHedgeSellPremiumPct,
+        ids.strangleDeltaDiffReplaceEnabled,
+        ids.strangleDeltaDiffReplacePct,
         ids.buyHedgeOppositeLegOnGate,
+        ids.strangleReopenAtNewD,
         ids.buyQtyPercentEnabled,
         ids.buyQtyPercent,
         ids.autoConfirmLiveActions
@@ -2768,7 +3523,7 @@
             node.addEventListener("input", queueProfileSave);
         }
     });
-    [ids.buyHedgeSellPremiumGate, ids.buyHedgeSellPremiumPct].forEach(function (node) {
+    [ids.buyHedgeSellPremiumGate, ids.buyHedgeSellPremiumPct, ids.strangleDeltaDiffReplaceEnabled, ids.strangleDeltaDiffReplacePct].forEach(function (node) {
         node?.addEventListener("change", function () {
             renderCoveredHedgeGateSummary(displayedPositions);
         });
@@ -3493,7 +4248,7 @@
         applyConnectionStatus({
             state: "not_selected",
             message: requiresExplicitTargetSelection && !getEffectiveTargetUserId()
-                ? "Select a running Covered Options user to load settings."
+                ? `Select a running ${strategyLabel} user to load settings.`
                 : ""
         });
         applyRuntimeStatus({
@@ -3512,6 +4267,10 @@
         }
         await loadApiProfiles();
         await loadProfile();
+        if (isDemoVariant) {
+            await loadOptionsDemoIndicator().catch(function () { return undefined; });
+            scheduleIndicatorAutoRefresh();
+        }
         await Promise.all([
             loadRuntimeStatus().catch(function () { return undefined; }),
             loadSavedOpenPositions().catch(function () { return []; }),
@@ -3564,12 +4323,12 @@
             setStatus(
                 ids.pageStatus,
                 currentTargetAccount.fullName
-                    ? `Loaded ${isCoveredMode ? "Covered Options" : "Dual"} view for ${currentTargetAccount.fullName}.`
+                    ? `Loaded ${isCoveredMode ? strategyLabel : "Dual"} view for ${currentTargetAccount.fullName}.`
                     : (isCoveredMode ? "Waiting for user selection." : "Loaded strategy view."),
                 currentTargetAccount.fullName ? "success" : "info"
             );
         }).catch(function (error) {
-            setStatus(ids.pageStatus, error instanceof Error ? error.message : `Unable to load the selected ${isCoveredMode ? "Covered Options" : "Dual"} user.`, "danger");
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : `Unable to load the selected ${isCoveredMode ? strategyLabel : "Dual"} user.`, "danger");
         });
     });
 

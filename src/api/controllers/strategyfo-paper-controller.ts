@@ -25,12 +25,21 @@ export function renderCoveredOptionsPage(req: Request, res: Response): void {
     });
 }
 
+export function renderStrangleOptionsPage(req: Request, res: Response): void {
+    res.render("covered-options", {
+        pageTitle: "Strangle Options - Live | Optionyze",
+        pageVariant: "strangle",
+        currentAccount: req.authAccount,
+        defaultUserId: req.authAccount?.accountId || "demo-paper",
+        rollingTelegramEventTypes: gRollingFuturesTelegramEventTypes
+    });
+}
+
 export function renderOptionsDemoPage(req: Request, res: Response): void {
     res.render("covered-options", {
         pageTitle: "Options Demo | Optionyze",
         pageVariant: "demo",
         currentAccount: req.authAccount,
-        defaultUserId: req.authAccount?.accountId || "demo-paper",
-        rollingTelegramEventTypes: gRollingFuturesTelegramEventTypes
+        defaultUserId: req.authAccount?.accountId || "demo-paper"
     });
 }

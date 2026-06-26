@@ -32,12 +32,24 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row1-break-tpd {
     grid-column: 3;
 }
 
+body[data-rolling-futures-live="covered"][data-rolling-futures-variant="strangle"] .rolling-covered-row1-break-tpd {
+    grid-column: 2;
+}
+
 body[data-rolling-futures-live="covered"] .rolling-covered-row1-break-sld {
     grid-column: 4;
 }
 
+body[data-rolling-futures-live="covered"][data-rolling-futures-variant="strangle"] .rolling-covered-row1-break-sld {
+    grid-column: 3;
+}
+
 body[data-rolling-futures-live="covered"] .rolling-covered-row1-break-reenter {
     grid-column: 5;
+}
+
+body[data-rolling-futures-live="covered"][data-rolling-futures-variant="strangle"] .rolling-covered-row1-break-reenter {
+    grid-column: 4;
 }
 
 body[data-rolling-futures-live="covered"] .rolling-covered-row1-inline-action {
@@ -87,12 +99,24 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-tpd {
     grid-column: 3;
 }
 
+body[data-rolling-futures-live="covered"][data-rolling-futures-variant="strangle"] .rolling-covered-row2-break-tpd {
+    grid-column: 2;
+}
+
 body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-sld {
     grid-column: 4;
 }
 
+body[data-rolling-futures-live="covered"][data-rolling-futures-variant="strangle"] .rolling-covered-row2-break-sld {
+    grid-column: 3;
+}
+
 body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-reenter {
     grid-column: 5;
+}
+
+body[data-rolling-futures-live="covered"][data-rolling-futures-variant="strangle"] .rolling-covered-row2-break-reenter {
+    grid-column: 4;
 }
 
 body[data-rolling-futures-live="covered"] .rolling-covered-row2-inline-action-buyce {
@@ -1370,10 +1394,264 @@ body[data-rolling-futures-live="covered"] .rolling-covered-pnl-value.total {
     display: none;
 }
 
+.rolling-futures-indicator-head {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.rolling-futures-indicator-head-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.rolling-futures-indicator-controls {
+    display: inline-flex;
+    align-items: end;
+    gap: 10px;
+    margin-left: auto;
+    flex-wrap: wrap;
+}
+
+.rolling-futures-indicator-refresh-interval {
+    display: grid;
+    gap: 6px;
+    color: var(--app-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.rolling-futures-indicator-refresh-interval input {
+    width: 110px;
+    min-height: 42px;
+    padding: 0 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--app-text);
+    font: inherit;
+}
+
+.rolling-futures-indicator-refresh-interval input:focus {
+    outline: none;
+    border-color: rgba(80, 227, 194, 0.45);
+    box-shadow: 0 0 0 3px rgba(80, 227, 194, 0.12);
+}
+
+.rolling-futures-indicator-card {
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.rolling-futures-indicator-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+    background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.08), transparent 42%);
+}
+
+.rolling-futures-indicator-card.indicator-strength-weak {
+    border-color: rgba(248, 113, 113, 0.26);
+    box-shadow: 0 24px 80px rgba(248, 113, 113, 0.12);
+}
+
+.rolling-futures-indicator-card.indicator-strength-medium {
+    border-color: rgba(245, 158, 11, 0.26);
+    box-shadow: 0 24px 80px rgba(245, 158, 11, 0.12);
+}
+
+.rolling-futures-indicator-card.indicator-strength-strong {
+    border-color: rgba(34, 197, 94, 0.26);
+    box-shadow: 0 24px 80px rgba(34, 197, 94, 0.14);
+}
+
+.rolling-futures-indicator-card.indicator-strength-weak::before,
+.rolling-futures-indicator-card.indicator-strength-medium::before,
+.rolling-futures-indicator-card.indicator-strength-strong::before {
+    opacity: 1;
+}
+
+.rolling-futures-strength-wrap {
+    display: grid;
+    gap: 8px;
+}
+
+.rolling-futures-strength-label {
+    color: var(--app-muted);
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.rolling-futures-strength-bar {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.rolling-futures-strength-step {
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+    transition: transform 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.rolling-futures-strength-step.active {
+    transform: translateY(-1px);
+}
+
+.rolling-futures-strength-step[data-tone="danger"].active {
+    background: linear-gradient(135deg, #ff8a8a, #ef4444);
+    box-shadow: 0 0 18px rgba(239, 68, 68, 0.28);
+}
+
+.rolling-futures-strength-step[data-tone="warning"].active {
+    background: linear-gradient(135deg, #ffd27d, #f59e0b);
+    box-shadow: 0 0 18px rgba(245, 158, 11, 0.28);
+}
+
+.rolling-futures-strength-step[data-tone="success"].active {
+    background: linear-gradient(135deg, #9ef0b2, #22c55e);
+    box-shadow: 0 0 18px rgba(34, 197, 94, 0.28);
+}
+
+.rolling-futures-history-bar {
+    display: grid;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    align-items: end;
+    gap: 6px;
+    min-height: 32px;
+}
+
+.rolling-futures-history-step {
+    display: block;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    opacity: 0.55;
+    transform-origin: center bottom;
+    transition: transform 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+}
+
+.rolling-futures-history-step.active {
+    opacity: 1;
+}
+
+.rolling-futures-history-step[data-tone="danger"].active {
+    background: linear-gradient(135deg, #ffb5b5, #ef4444);
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.2);
+}
+
+.rolling-futures-history-step[data-tone="warning"].active {
+    background: linear-gradient(135deg, #ffe09a, #f59e0b);
+    box-shadow: 0 0 14px rgba(245, 158, 11, 0.2);
+}
+
+.rolling-futures-history-step[data-tone="success"].active {
+    background: linear-gradient(135deg, #bef7ca, #22c55e);
+    box-shadow: 0 0 14px rgba(34, 197, 94, 0.2);
+}
+
+@keyframes rollingFuturesBadgePulse {
+    0% {
+        transform: translateY(0) scale(1);
+    }
+    45% {
+        transform: translateY(-1px) scale(1.04);
+    }
+    100% {
+        transform: translateY(0) scale(1);
+    }
+}
+
+.rolling-futures-badge.badge-pulse {
+    animation: rollingFuturesBadgePulse 0.55s ease;
+}
+
+.rolling-futures-indicator-meta {
+    color: var(--app-muted);
+    font-size: 0.84rem;
+    line-height: 1.5;
+}
+
+.rolling-futures-indicator-confidence {
+    color: var(--app-text);
+    font-size: 0.88rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+.rolling-futures-indicator-confidence.low {
+    color: var(--app-danger);
+}
+
+.rolling-futures-indicator-confidence.medium {
+    color: var(--app-warn);
+}
+
+.rolling-futures-indicator-confidence.high {
+    color: var(--app-good);
+}
+
+.rolling-futures-indicator-headline {
+    color: var(--app-text);
+    font-size: 0.94rem;
+    font-weight: 700;
+    line-height: 1.45;
+    padding-top: 2px;
+}
+
+.rolling-futures-indicator-headline.low {
+    color: var(--app-danger);
+}
+
+.rolling-futures-indicator-headline.medium {
+    color: var(--app-warn);
+}
+
+.rolling-futures-indicator-headline.high {
+    color: var(--app-good);
+}
+
+@media (max-width: 720px) {
+    .rolling-futures-indicator-head-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .rolling-futures-indicator-controls {
+        justify-content: flex-start;
+        margin-left: 0;
+    }
+}
+
 .rolling-futures-empty-body td {
     text-align: center;
     color: var(--app-muted);
     padding: 22px 12px;
+}
+
+.rolling-futures-section-row td {
+    padding: 12px 12px 10px;
+    color: var(--app-text);
+    font-size: 0.74rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(90deg, rgba(80, 227, 194, 0.08), transparent 60%);
 }
 
 @media (max-width: 1200px) {

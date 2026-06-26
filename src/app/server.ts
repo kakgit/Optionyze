@@ -11,6 +11,7 @@ import { ensurePostgresSchema, isPostgresConfigured } from "../storage/postgres"
 import { ensureSurvivalPostgresSchema } from "../storage/survival-postgres";
 import {
     renderCoveredOptionsPage,
+    renderStrangleOptionsPage,
     renderOptionsDemoPage
 } from "../api/controllers/strategyfo-paper-controller";
 import { recoverRollingFuturesLtAutoTraderCycles } from "../api/controllers/rolling-futures-lt-controller";
@@ -95,6 +96,7 @@ async function bootstrap(): Promise<void> {
     app.get("/survival-admin/running-users", requireSurvivalAdminPage, renderSurvivalAdminRunningUsersPage);
     app.get("/dashboard", requireAuthPage, requireFreshPasswordPage, renderDashboardPage);
     app.get("/covered-options", requireAuthPage, requireFreshPasswordPage, renderCoveredOptionsPage);
+    app.get("/strangle-options", requireAuthPage, requireFreshPasswordPage, renderStrangleOptionsPage);
     app.get("/options-demo", requireAuthPage, requireFreshPasswordPage, renderOptionsDemoPage);
     app.get("/mngusers", requireAuthPage, requireFreshPasswordPage, requireAdminPage, renderMngUsersPage);
     app.get("/account/profile", requireAuthPage, renderMyProfilePage);

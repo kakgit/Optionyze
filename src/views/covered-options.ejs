@@ -12,18 +12,23 @@
     <link rel="stylesheet" href="/css/rolling-futures-lt-dual.css" />
 </head>
   <%
-    const vPageVariant = String(pageVariant || "live").trim().toLowerCase() === "demo" ? "demo" : "live";
+    const vPageVariantRaw = String(pageVariant || "live").trim().toLowerCase();
+    const vPageVariant = vPageVariantRaw === "demo"
+        ? "demo"
+        : (vPageVariantRaw === "strangle" ? "strangle" : "live");
     const bIsDemoPage = vPageVariant === "demo";
-    const vPageHeading = bIsDemoPage ? "Options Demo" : "Covered Options - Live";
-    const vEndpointBase = bIsDemoPage ? "/api/options-demo" : "/api/covered-options";
+    const bIsStranglePage = vPageVariant === "strangle";
+    const vStrategyLabel = bIsDemoPage ? "Options Demo" : (bIsStranglePage ? "Strangle Options" : "Covered Options");
+    const vPageHeading = bIsDemoPage ? "Options Demo" : `${vStrategyLabel} - Live`;
+    const vEndpointBase = bIsDemoPage ? "/api/options-demo" : (bIsStranglePage ? "/api/strangle-options" : "/api/covered-options");
     const vOpenPositionsEmpty = bIsDemoPage
         ? "No demo positions are currently shown."
-        : "Select an API profile and load live covered-option positions from Delta Exchange.";
+        : `Select an API profile and load live ${bIsStranglePage ? "strangle-option" : "covered-option"} positions from Delta Exchange.`;
     const vClosedPositionsEmpty = bIsDemoPage
         ? "No demo trade history found for the selected date range."
         : "No Delta fill history found for the selected date range.";
-    const vConfirmationHeading = bIsDemoPage ? "Demo Confirmation" : "Live Confirmation";
-    const vConfirmationAutoText = bIsDemoPage ? "Auto-confirm all demo actions" : "Auto-confirm all covered live actions";
+    const vConfirmationHeading = bIsDemoPage ? "Demo Confirmation" : `${vStrategyLabel} Confirmation`;
+    const vConfirmationAutoText = bIsDemoPage ? "Auto-confirm all demo actions" : `Auto-confirm all ${bIsStranglePage ? "strangle" : "covered"} live actions`;
     const vConfirmationEmpty = bIsDemoPage ? "No demo action is waiting for confirmation." : "No live action is waiting for confirmation.";
     const vActivityEmpty = bIsDemoPage ? "No demo activity has been logged yet." : "No live activity has been logged yet.";
     const vClearOpenPositionsTitle = bIsDemoPage ? "Clear all demo open positions locally" : "Clear all imported open positions locally";
@@ -35,6 +40,7 @@
         data-rolling-futures-live="covered"
         data-rolling-futures-variant="<%= vPageVariant %>"
         data-rolling-futures-endpoint-base="<%= vEndpointBase %>"
+        data-rolling-futures-strategy-label="<%= vStrategyLabel %>"
         data-exec-strategy-enabled="<%= currentAccount?.execStrategy ? 'true' : 'false' %>"
         data-current-account-id="<%= currentAccount?.accountId || '' %>"
         data-current-account-admin="<%= currentAccount?.isAdmin ? 'true' : 'false' %>"
@@ -72,7 +78,7 @@
                             </button>
                         </div>
                         <div class="rolling-futures-start-qty-row">
-                            <input class="rolling-futures-start-qty" type="number" min="2" max="1000" step="2" id="txtRollingFuturesStartQty" value="2" />
+                            <input class="rolling-futures-start-qty" type="number" min="<%= bIsStranglePage ? '1' : '2' %>" max="1000" step="1" id="txtRollingFuturesStartQty" value="<%= bIsStranglePage ? '1' : '2' %>" />
                         </div>
                     </div>
                     <div class="rolling-futures-hero-badge action">
@@ -98,7 +104,7 @@
                             </div>
                             <div class="rolling-futures-help-inline-bottom">
                                 <div class="rolling-demo-field rolling-futures-help-input-field">
-                                    <input type="number" id="txtRollingFuturesBrokerageMultiplier" value="10" />
+                                    <input type="number" id="txtRollingFuturesBrokerageMultiplier" value="<%= bIsStranglePage ? '5' : '10' %>" />
                                 </div>
                                 <label class="rolling-futures-neutral-mode rolling-futures-help-mode rolling-futures-help-side-check" for="chkRollingFuturesReEnterBrok">
                                     <input type="checkbox" id="chkRollingFuturesReEnterBrok" checked />
@@ -125,7 +131,7 @@
                             </div>
                             <div class="rolling-futures-help-inline-bottom">
                                 <div class="rolling-demo-field rolling-futures-help-input-field">
-                                    <input type="number" id="txtRollingFuturesBlockedMarginPct" value="20" />
+                                    <input type="number" id="txtRollingFuturesBlockedMarginPct" value="<%= bIsStranglePage ? '10' : '20' %>" />
                                 </div>
                                 <label class="rolling-futures-neutral-mode rolling-futures-help-mode rolling-futures-help-side-check" for="chkRollingFuturesReEnterBlock">
                                     <input type="checkbox" id="chkRollingFuturesReEnterBlock" checked />
@@ -164,7 +170,7 @@
                                         <option value="">Loading running users...</option>
                                     </select>
                                 </div>
-                                <div class="rolling-live-admin-target-meta" id="rollingDualAdminTargetMeta">Select a running Covered Options user to load settings and positions.</div>
+                                <div class="rolling-live-admin-target-meta" id="rollingDualAdminTargetMeta">Select a running <%= vStrategyLabel %> user to load settings and positions.</div>
                             </div>
                         <% } %>
                         <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesCheckConnection" title="Check Delta connection" aria-label="Check Delta connection">
@@ -268,8 +274,8 @@
                     <div class="rolling-demo-field">
                         <label for="ddlRollingFuturesLegs1">Legs</label>
                         <select id="ddlRollingFuturesLegs1">
-                            <option value="both" selected>Both</option>
-                            <option value="ce">CE</option>
+                            <option value="both" <%= bIsStranglePage ? '' : 'selected' %>>Both</option>
+                            <option value="ce" <%= bIsStranglePage ? 'selected' : '' %>>CE</option>
                             <option value="pe">PE</option>
                         </select>
                     </div>
@@ -304,17 +310,19 @@
                         <label for="txtRollingFuturesNewD1">New D</label>
                         <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD1" value="0.33" />
                     </div>
-                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-red">
-                        <label for="txtRollingFuturesReD1">Re D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesReD1" value="0.33" />
-                    </div>
+                    <% if (!bIsStranglePage) { %>
+                        <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-red">
+                            <label for="txtRollingFuturesReD1">Re D</label>
+                            <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesReD1" value="0.33" />
+                        </div>
+                    <% } %>
                     <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-tpd">
                         <label for="txtRollingFuturesTpD1">TP D</label>
                         <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD1" value="0.10" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-sld">
                         <label for="txtRollingFuturesSlD1">SL D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD1" value="0.50" />
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD1" value="<%= bIsStranglePage ? '0.55' : '0.50' %>" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-reenter">
                         <label for="chkRollingFuturesReEnter1">Re Enter</label>
@@ -337,26 +345,26 @@
                         <label for="ddlRollingFuturesAction2">Action</label>
                         <select id="ddlRollingFuturesAction2">
                             <option value="none">None</option>
-                            <option value="buy" selected>Buy</option>
-                            <option value="sell">Sell</option>
+                            <option value="buy" <%= bIsStranglePage ? '' : 'selected' %>>Buy</option>
+                            <option value="sell" <%= bIsStranglePage ? 'selected' : '' %>>Sell</option>
                         </select>
                     </div>
                     <div class="rolling-demo-field">
                         <label for="ddlRollingFuturesLegs2">Legs</label>
                         <select id="ddlRollingFuturesLegs2">
-                            <option value="both" selected>Both</option>
+                            <option value="both" <%= bIsStranglePage ? '' : 'selected' %>>Both</option>
                             <option value="ce">CE</option>
-                            <option value="pe">PE</option>
+                            <option value="pe" <%= bIsStranglePage ? 'selected' : '' %>>PE</option>
                         </select>
                     </div>
                     <div class="rolling-demo-field">
                         <label for="ddlRollingFuturesExpiryType2">Expiry Type</label>
                         <select id="ddlRollingFuturesExpiryType2">
-                            <option value="1" selected>DAILY T+1</option>
+                            <option value="1" <%= bIsStranglePage ? '' : 'selected' %>>DAILY T+1</option>
                             <option value="2">DAILY T+2</option>
                             <option value="4">WEEKLY</option>
                             <option value="5">BI-WEEKLY</option>
-                            <option value="6">MONTHLY</option>
+                            <option value="6" <%= bIsStranglePage ? 'selected' : '' %>>MONTHLY</option>
                             <option value="7">BI-MONTHLY</option>
                         </select>
                     </div>
@@ -378,19 +386,21 @@
                     </div>
                     <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-newd">
                         <label for="txtRollingFuturesNewD2">New D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD2" value="0.13" />
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD2" value="<%= bIsStranglePage ? '0.33' : '0.13' %>" />
                     </div>
-                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-red">
-                        <label for="txtRollingFuturesReD2">Re D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesReD2" value="0.13" />
-                    </div>
+                    <% if (!bIsStranglePage) { %>
+                        <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-red">
+                            <label for="txtRollingFuturesReD2">Re D</label>
+                            <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesReD2" value="0.13" />
+                        </div>
+                    <% } %>
                     <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-tpd">
                         <label for="txtRollingFuturesTpD2">TP D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD2" value="1.00" />
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD2" value="<%= bIsStranglePage ? '0.10' : '1.00' %>" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-sld">
                         <label for="txtRollingFuturesSlD2">SL D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD2" value="0.05" />
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD2" value="<%= bIsStranglePage ? '0.55' : '0.05' %>" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-reenter">
                         <label for="chkRollingFuturesReEnter2">Re Enter</label>
@@ -411,58 +421,95 @@
                 <div class="rolling-futures-demo-grid actions-row rolling-futures-actions-row-with-gate">
                     <div class="rolling-demo-field rolling-futures-buy-gate-field">
                         <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
-                            <div class="rolling-futures-buy-gate-row">
-                                <div class="rolling-futures-buy-gate-text">Open Buy Hedge Only If Same CE/PE Sell Premium Drop Stays Within Threshold %</div>
-                                <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesBuyHedgeSellPremiumGate">
-                                    <input type="checkbox" id="chkRollingFuturesBuyHedgeSellPremiumGate" checked />
-                                </label>
-                                <div class="rolling-demo-field rolling-futures-help-input-field">
-                                    <input type="number" id="txtRollingFuturesBuyHedgeSellPremiumPct" min="0" step="0.1" value="2" />
+                            <% if (bIsStranglePage) { %>
+                                <div class="rolling-futures-buy-gate-row">
+                                    <div class="rolling-futures-buy-gate-text">Replace weaker leg when delta gap exceeds X% of total live delta</div>
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesStrangleDeltaDiffReplaceEnabled">
+                                        <input type="checkbox" id="chkRollingFuturesStrangleDeltaDiffReplaceEnabled" checked />
+                                    </label>
+                                    <div class="rolling-demo-field rolling-futures-help-input-field">
+                                        <input type="number" id="txtRollingFuturesStrangleDeltaDiffReplacePct" min="0" max="100" step="1" value="40" />
+                                    </div>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show strangle delta gap replacement help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, if the weaker live sell leg delta falls behind the stronger live sell leg by more than the configured percentage of the total live delta, the weaker leg will be closed and reopened using the stronger leg's current live delta.
+                                        </span>
+                                    </span>
                                 </div>
-                                <span class="rolling-futures-help-icon-wrap">
-                                    <button type="button" class="rolling-futures-help-trigger" aria-label="Show buy hedge premium help">
-                                        ?
-                                    </button>
-                                    <span class="rolling-futures-help-popout floating">
-                                        For covered buy-leg opens and re-entries, the same CE or PE sell premium can drop only up to the configured percentage from its sold premium. Example: at <code>2%</code>, a leg sold at <code>100</code> must stay at <code>98</code> or higher.
+                            <% } else { %>
+                                <div class="rolling-futures-buy-gate-row">
+                                    <div class="rolling-futures-buy-gate-text">Open Buy Hedge Only If Same CE/PE Sell Premium Drop Stays Within Threshold %</div>
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesBuyHedgeSellPremiumGate">
+                                        <input type="checkbox" id="chkRollingFuturesBuyHedgeSellPremiumGate" checked />
+                                    </label>
+                                    <div class="rolling-demo-field rolling-futures-help-input-field">
+                                        <input type="number" id="txtRollingFuturesBuyHedgeSellPremiumPct" min="0" step="0.1" value="2" />
+                                    </div>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show buy hedge premium help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            For covered buy-leg opens and re-entries, the same CE or PE sell premium can drop only up to the configured percentage from its sold premium. Example: at <code>2%</code>, a leg sold at <code>100</code> must stay at <code>98</code> or higher.
+                                        </span>
                                     </span>
-                                </span>
-                            </div>
-                            <div class="rolling-futures-buy-gate-row">
-                                <div class="rolling-futures-buy-gate-text">Open Opposite leg if the above condition is Satisfied</div>
-                                <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesBuyHedgeOppositeLegOnGate">
-                                    <input type="checkbox" id="chkRollingFuturesBuyHedgeOppositeLegOnGate" />
-                                </label>
-                                <span class="rolling-futures-help-icon-wrap">
-                                    <button type="button" class="rolling-futures-help-trigger" aria-label="Show opposite buy leg help">
-                                        ?
-                                    </button>
-                                    <span class="rolling-futures-help-popout floating">
-                                        When enabled, a premium-gated covered buy-hedge trigger will try to open the opposite leg instead. Example: instead of <code>CE BUY</code>, it will try <code>PE BUY</code>. If that opposite leg is already open, nothing new will be placed.
+                                </div>
+                                <div class="rolling-futures-buy-gate-row">
+                                    <div class="rolling-futures-buy-gate-text">Open Opposite leg if the above condition is Satisfied</div>
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesBuyHedgeOppositeLegOnGate">
+                                        <input type="checkbox" id="chkRollingFuturesBuyHedgeOppositeLegOnGate" />
+                                    </label>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show opposite buy leg help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, a premium-gated covered buy-hedge trigger will try to open the opposite leg instead. Example: instead of <code>CE BUY</code>, it will try <code>PE BUY</code>. If that opposite leg is already open, nothing new will be placed.
+                                        </span>
                                     </span>
-                                </span>
-                            </div>
+                                </div>
+                            <% } %>
                         </div>
                     </div>
                     <div class="rolling-demo-field rolling-futures-buy-gate-field">
                         <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
-                            <div class="rolling-futures-buy-gate-row">
-                                <div class="rolling-futures-buy-gate-text">Execute only the X% Buy Qty of Sell Qty</div>
-                                <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesBuyQtyPercentEnabled">
-                                    <input type="checkbox" id="chkRollingFuturesBuyQtyPercentEnabled" />
-                                </label>
-                                <div class="rolling-demo-field rolling-futures-help-input-field">
-                                    <input type="number" id="txtRollingFuturesBuyQtyPercent" min="1" max="200" step="1" value="100" />
-                                </div>
-                                <span class="rolling-futures-help-icon-wrap">
-                                    <button type="button" class="rolling-futures-help-trigger" aria-label="Show buy qty percentage help">
-                                        ?
-                                    </button>
-                                    <span class="rolling-futures-help-popout floating">
-                                        When enabled, the row whose <code>Action</code> is <code>Buy</code> will use only the configured percentage of the current <code>Multiplier</code>. Example: at <code>50%</code> and Multiplier <code>10</code>, the buy row Qty becomes <code>5</code>.
+                            <% if (bIsStranglePage) { %>
+                                <div class="rolling-futures-buy-gate-row">
+                                    <div class="rolling-futures-buy-gate-text">Reopen leg at New D value</div>
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesStrangleReopenAtNewD">
+                                        <input type="checkbox" id="chkRollingFuturesStrangleReopenAtNewD" />
+                                    </label>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show strangle reopen help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, a triggered leg reopens using that row's <code>New D</code>. When disabled, re-entry uses the current live delta of the other still-open leg.
+                                        </span>
                                     </span>
-                                </span>
-                            </div>
+                                </div>
+                            <% } else { %>
+                                <div class="rolling-futures-buy-gate-row">
+                                    <div class="rolling-futures-buy-gate-text">Execute only the X% Buy Qty of Sell Qty</div>
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesBuyQtyPercentEnabled">
+                                        <input type="checkbox" id="chkRollingFuturesBuyQtyPercentEnabled" />
+                                    </label>
+                                    <div class="rolling-demo-field rolling-futures-help-input-field">
+                                        <input type="number" id="txtRollingFuturesBuyQtyPercent" min="1" max="200" step="1" value="100" />
+                                    </div>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show buy qty percentage help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, the row whose <code>Action</code> is <code>Buy</code> will use only the configured percentage of the current <code>Multiplier</code>. Example: at <code>50%</code> and Multiplier <code>10</code>, the buy row Qty becomes <code>5</code>.
+                                        </span>
+                                    </span>
+                                </div>
+                            <% } %>
                         </div>
                     </div>
                 </div>
@@ -619,30 +666,92 @@
                 </div>
             </div>
 
-            <div class="app-panel rolling-demo-card rolling-futures-hidden" id="cardRollingFuturesDeltaDirec">
-                <div class="rolling-demo-card-head">
-                    <h2>Delta Direction</h2>
+            <div class="app-panel rolling-demo-card rolling-futures-hidden rolling-futures-indicator-card" id="cardRollingFuturesDeltaDirec">
+                <div class="rolling-demo-card-head rolling-futures-indicator-head-row">
+                    <h2><%= bIsDemoPage ? "Indicator" : "Delta Direction" %></h2>
+                    <% if (bIsDemoPage) { %>
+                        <div class="rolling-futures-indicator-controls">
+                            <label class="rolling-futures-indicator-refresh-interval" for="txtRollingFuturesIndicatorRefreshMins">
+                                <span>Refresh Mins</span>
+                                <input id="txtRollingFuturesIndicatorRefreshMins" type="number" min="1" max="60" step="1" value="5" />
+                            </label>
+                            <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingFuturesIndicatorRefresh" title="Refresh indicator now" aria-label="Refresh indicator now">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                    <path d="M21 3v6h-6" />
+                                </svg>
+                            </button>
+                        </div>
+                    <% } %>
                 </div>
+                <% if (bIsDemoPage) { %>
+                    <div class="rolling-futures-indicator-head">
+                        <div class="rolling-futures-badges">
+                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorOverall">Overall: Waiting</span>
+                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorPcr">PCR: -</span>
+                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorSupport">Support: -</span>
+                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorResistance">Resistance: -</span>
+                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorOrderBook">Order Book: -</span>
+                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorFlow">Flow: -</span>
+                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorTrend">Trend: -</span>
+                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorStrength">Strength: -</span>
+                        </div>
+                        <div class="rolling-futures-strength-wrap">
+                            <div class="rolling-futures-strength-label">Signal Strength</div>
+                            <div class="rolling-futures-strength-bar" id="rollingFuturesIndicatorStrengthBar" aria-label="Signal strength meter">
+                                <% for (let i = 1; i <= 5; i += 1) { %>
+                                    <span class="rolling-futures-strength-step" data-step="<%= i %>"></span>
+                                <% } %>
+                            </div>
+                        </div>
+                        <div class="rolling-futures-strength-wrap">
+                            <div class="rolling-futures-strength-label">Strength History</div>
+                            <div class="rolling-futures-history-bar" id="rollingFuturesIndicatorHistoryBar" aria-label="Signal strength history">
+                                <% for (let i = 1; i <= 8; i += 1) { %>
+                                    <span class="rolling-futures-history-step" data-step="<%= i %>"></span>
+                                <% } %>
+                            </div>
+                        </div>
+                        <div class="rolling-futures-indicator-meta" id="rollingFuturesIndicatorMeta">Open interest direction will appear after the latest market snapshot loads.</div>
+                        <div class="rolling-futures-indicator-confidence" id="rollingFuturesIndicatorConfidence">Confidence: -</div>
+                        <div class="rolling-futures-indicator-headline" id="rollingFuturesIndicatorHeadline">Headline: -</div>
+                    </div>
+                <% } %>
                 <div class="rolling-demo-table-wrap">
                     <table class="rolling-demo-table">
                         <thead>
                             <tr>
-                                <th>Dated</th>
-                                <th>Daily Call</th>
-                                <th>Daily Put</th>
-                                <th>Direc</th>
-                                <th>Weekly Call</th>
-                                <th>Weekly Put</th>
-                                <th>Direc</th>
-                                <th>Monthly Call</th>
-                                <th>Monthly Put</th>
-                                <th>Direc</th>
-                                <th>OA Direc</th>
+                                <% if (bIsDemoPage) { %>
+                                    <th>Term</th>
+                                    <th>Window</th>
+                                    <th>Expiry</th>
+                                    <th>DTE</th>
+                                    <th>Call OI</th>
+                                    <th>Put OI</th>
+                                    <th>PCR</th>
+                                    <th>Support</th>
+                                    <th>Resistance</th>
+                                    <th>Flow</th>
+                                    <th>Trend</th>
+                                    <th>Direction</th>
+                                <% } else { %>
+                                    <th>Dated</th>
+                                    <th>Daily Call</th>
+                                    <th>Daily Put</th>
+                                    <th>Direc</th>
+                                    <th>Weekly Call</th>
+                                    <th>Weekly Put</th>
+                                    <th>Direc</th>
+                                    <th>Monthly Call</th>
+                                    <th>Monthly Put</th>
+                                    <th>Direc</th>
+                                    <th>OA Direc</th>
+                                <% } %>
                             </tr>
                         </thead>
                         <tbody id="tBodyRollingFuturesDeltas">
                             <tr class="rolling-futures-empty-body">
-                                <td colspan="11">No delta direction data yet.</td>
+                                <td colspan="<%= bIsDemoPage ? 12 : 11 %>"><%= bIsDemoPage ? "No indicator data yet." : "No delta direction data yet." %></td>
                             </tr>
                         </tbody>
                     </table>
@@ -681,27 +790,29 @@
                     </div>
                 </div>
 
-                <div class="app-panel rolling-demo-card">
-                    <div class="rolling-demo-card-head">
-                        <h2>Telegram Alerts</h2>
+                <% if (!bIsDemoPage) { %>
+                    <div class="app-panel rolling-demo-card">
+                        <div class="rolling-demo-card-head">
+                            <h2>Telegram Alerts</h2>
+                        </div>
+                        <p class="app-copy">Alert preferences can follow the same strategy-level model as the paper page while live execution wiring is added server-side.</p>
+                        <div class="rolling-demo-notice" id="rollingDualFuturesTelegramNotice">
+                            <% if (currentAccount?.telegramChatId) { %>
+                                Telegram Chat ID configured: <strong><%= currentAccount.telegramChatId %></strong>
+                            <% } else { %>
+                                Telegram Chat ID is not set on your profile yet. Add it in <a href="/account/profile">My Profile</a> to receive alerts.
+                            <% } %>
+                        </div>
+                        <div class="rolling-demo-event-prefs">
+                            <% for (const eventType of rollingTelegramEventTypes || []) { %>
+                                <label class="rolling-demo-check rolling-demo-check-wide" for="dual-live-pref-<%= eventType %>">
+                                    <input type="checkbox" class="rolling-demo-telegram-event" id="dual-live-pref-<%= eventType %>" value="<%= eventType %>" />
+                                    <span><%= String(eventType || '').split('_').join(' ') %></span>
+                                </label>
+                            <% } %>
+                        </div>
                     </div>
-                    <p class="app-copy"><%= bIsDemoPage ? "Alert preferences follow the same strategy-level model while demo trades stay isolated from live execution." : "Alert preferences can follow the same strategy-level model as the paper page while live execution wiring is added server-side." %></p>
-                    <div class="rolling-demo-notice" id="rollingDualFuturesTelegramNotice">
-                        <% if (currentAccount?.telegramChatId) { %>
-                            Telegram Chat ID configured: <strong><%= currentAccount.telegramChatId %></strong>
-                        <% } else { %>
-                            Telegram Chat ID is not set on your profile yet. Add it in <a href="/account/profile">My Profile</a> to receive alerts.
-                        <% } %>
-                    </div>
-                    <div class="rolling-demo-event-prefs">
-                        <% for (const eventType of rollingTelegramEventTypes || []) { %>
-                            <label class="rolling-demo-check rolling-demo-check-wide" for="dual-live-pref-<%= eventType %>">
-                                <input type="checkbox" class="rolling-demo-telegram-event" id="dual-live-pref-<%= eventType %>" value="<%= eventType %>" />
-                                <span><%= String(eventType || '').split('_').join(' ') %></span>
-                            </label>
-                        <% } %>
-                    </div>
-                </div>
+                <% } %>
 
                 <div class="app-panel rolling-demo-card">
                     <div class="rolling-demo-card-head">
