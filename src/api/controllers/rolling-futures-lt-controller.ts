@@ -4111,7 +4111,8 @@ async function fetchLiveFuturePositions(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
     pProfileId: string,
-    pSymbolOverride?: string
+    pSymbolOverride?: string,
+    pIncludeAllCoveredLikePositions = false
 ): Promise<RollingFuturesLtImportedPositionRecord[]> {
     let vSymbol: "BTC" | "ETH" = "BTC";
     let arrSavedPositions: RollingFuturesLtImportedPositionRecord[] = [];
@@ -4186,7 +4187,7 @@ async function fetchLiveFuturePositions(
         })
         .filter((objRow) => objRow.qty > 0);
 
-    if (!isCoveredLikeStrategy(pStrategyCode)) {
+    if (!isCoveredLikeStrategy(pStrategyCode) || pIncludeAllCoveredLikePositions) {
         return arrLivePositions;
     }
 
@@ -11698,7 +11699,7 @@ async function getImportableOpenPositionsInternal(req: Request, res: Response, p
     }
     try {
         const vUserId = getAccountId(req);
-        const arrPositions = await fetchLiveFuturePositions(vUserId, pStrategyCode, vProfileId);
+        const arrPositions = await fetchLiveFuturePositions(vUserId, pStrategyCode, vProfileId, undefined, true);
         res.json({
             status: "success",
             data: {
