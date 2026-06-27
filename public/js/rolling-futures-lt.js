@@ -2874,8 +2874,9 @@
                 return;
             }
             const sellRows = Array.isArray(rows) ? rows.filter(function (row) {
+                const legSide = getCoveredContractLegSide(String(row?.contractName || "").trim());
                 return String(row?.side || "").trim().toUpperCase() === "SELL"
-                    && isOptionContractSymbol(String(row?.contractName || "").trim());
+                    && (legSide === "CE" || legSide === "PE");
             }) : [];
             const liveDeltas = sellRows.map(function (row) {
                 const greeks = row?.greeks || {};
