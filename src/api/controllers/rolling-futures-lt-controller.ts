@@ -4162,7 +4162,7 @@ async function fetchLiveFuturePositions(
         });
     const objPayload = readResponsePayload(objResponse);
     const arrRows = Array.isArray(objPayload.result) ? objPayload.result as DeltaPositionRow[] : [];
-    return arrRows
+    const arrLivePositions = arrRows
         .filter((objRow) => {
             const vContract = String(objRow.product_symbol || objRow.symbol || "").trim().toUpperCase();
             return isTrackedContractForSymbol(vContract, vSymbol);
@@ -4185,6 +4185,26 @@ async function fetchLiveFuturePositions(
             } satisfies RollingFuturesLtImportedPositionRecord;
         })
         .filter((objRow) => objRow.qty > 0);
+
+    if (!isCoveredLikeStrategy(pStrategyCode)) {
+        return arrLivePositions;
+    }
+
+    const arrTrackedPositions = arrSavedPositions.filter((objRow) => {
+        const vContract = String(objRow.contractName || "").trim().toUpperCase();
+        const vSide = String(objRow.side || "").trim().toUpperCase();
+        return !!vContract && (vSide === "BUY" || vSide === "SELL");
+    });
+    if (!arrTrackedPositions.length) {
+        return [];
+    }
+
+    const objTrackedKeys = new Set(arrTrackedPositions.map((objRow) =>
+        `${String(objRow.contractName || "").trim().toUpperCase()}::${String(objRow.side || "").trim().toUpperCase()}`
+    ));
+    return arrLivePositions.filter((objRow) =>
+        objTrackedKeys.has(`${String(objRow.contractName || "").trim().toUpperCase()}::${String(objRow.side || "").trim().toUpperCase()}`)
+    );
 }
 
 async function fetchAccountSummarySnapshot(
@@ -5747,13 +5767,17 @@ function buildRuntimeStateWithStrategyRun(
 }
 
 function buildDeltaClientOrderId(
+    pStrategyCode: RollingFuturesLtStrategyCode,
     pRunTag: string,
     pOrderKind: "EN" | "HG" | "SL" | "TP" | "RE" | "CL",
     pSequence: number
 ): string {
+    const vPrefix = pStrategyCode === "covered-options"
+        ? "COV"
+        : (pStrategyCode === "strangle-options" ? "STG" : "RFD");
     const vRunTag = String(pRunTag || "").trim().toUpperCase().slice(0, 10);
     const vSequence = Math.max(1, Math.floor(Number(pSequence || 1))).toString(36).toUpperCase().padStart(2, "0").slice(-2);
-    return `RFD-${vRunTag}-${pOrderKind}${vSequence}`.slice(0, 32);
+    return `${vPrefix}-${vRunTag}-${pOrderKind}${vSequence}`.slice(0, 32);
 }
 
 async function ensureActiveStrategyRun(
@@ -5809,7 +5833,7 @@ async function allocateStrategyClientOrderId(
             return "";
         }
         const vSequence = getStrategyOrderSequenceState(objRuntime);
-        const vClientOrderId = buildDeltaClientOrderId(vRunTag, pOrderKind, vSequence);
+        const vClientOrderId = buildDeltaClientOrderId(pStrategyCode, vRunTag, pOrderKind, vSequence);
         await saveRollingFuturesLtRuntime({
             ...objRuntime,
             userId: pUserId,
@@ -5834,7 +5858,7 @@ async function allocateStrategyClientOrderId(
             return "";
         }
         const vSequence = Math.max(1, Math.floor(Number(objSurvival.runtimeState?.strategyOrderSequence || 1)));
-        const vClientOrderId = buildDeltaClientOrderId(objSurvival.runTag, pOrderKind, vSequence);
+        const vClientOrderId = buildDeltaClientOrderId(pStrategyCode, objSurvival.runTag, pOrderKind, vSequence);
         await upsertSurvivalState({
             userId: objSurvival.userId,
             strategyCode: objSurvival.strategyCode,
