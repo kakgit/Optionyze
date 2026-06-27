@@ -119,9 +119,11 @@ interface DeltaOrderHistoryRow {
     updated_at?: string | number | null;
     product_symbol?: string | null;
     order_id?: string | number | null;
+    client_order_id?: string | null;
     meta_data?: {
         pnl?: number | string | null;
         order_type?: string | null;
+        client_order_id?: string | null;
         [key: string]: unknown;
     } | null;
     [key: string]: unknown;
@@ -157,6 +159,7 @@ const gRestartCloseProtectionMs = 5 * 60 * 1000;
 const gOptionRecoveryRefreshDelayMs = 5 * 60 * 1000;
 const gNeutralityHedgeCooldownMs = 2 * 60 * 1000;
 const gSurvivalDebugPrefix = "[dual-survival]";
+const gCoveredLegacyHistoryCutoffDeltaUi = "2026-06-18T23:10:47";
 const gLocalSurvivalLeaseTokens = new Map<string, string>();
 let gSurvivalTakeoverInterval: NodeJS.Timeout | null = null;
 const gSimulatedPrimaryOutageUsers = new Map<string, {
@@ -5781,6 +5784,87 @@ function buildDeltaClientOrderId(
     return `${vPrefix}-${vRunTag}-${pOrderKind}${vSequence}`.slice(0, 32);
 }
 
+function getStrategyClientOrderIdPrefix(pStrategyCode: RollingFuturesLtStrategyCode): string {
+    if (pStrategyCode === "covered-options") {
+        return "COV-";
+    }
+    if (pStrategyCode === "strangle-options") {
+        return "STG-";
+    }
+    return "RFD-";
+}
+
+function getDeltaOrderHistoryClientOrderId(pRow: DeltaOrderHistoryRow): string {
+    const objMeta = pRow.meta_data && typeof pRow.meta_data === "object"
+        ? pRow.meta_data as Record<string, unknown>
+        : {};
+    const arrCandidates: unknown[] = [
+        pRow.client_order_id,
+        objMeta.client_order_id,
+        (pRow as Record<string, unknown>).clientOrderId,
+        objMeta.clientOrderId,
+        (pRow as Record<string, unknown>).cl_order_id,
+        objMeta.cl_order_id
+    ];
+    for (const pCandidate of arrCandidates) {
+        const vValue = String(pCandidate || "").trim().toUpperCase();
+        if (vValue) {
+            return vValue;
+        }
+    }
+    return "";
+}
+
+function getDeltaOrderHistoryEventEpochMs(pRow: DeltaOrderHistoryRow): number {
+    const arrCandidates: unknown[] = [
+        pRow.updated_at,
+        pRow.created_at,
+        (pRow as Record<string, unknown>).closed_at,
+        (pRow as Record<string, unknown>).closedAt
+    ];
+    for (const pCandidate of arrCandidates) {
+        const vIso = normalizeDeltaTimestampToIso(pCandidate);
+        if (!vIso) {
+            continue;
+        }
+        const vEpochMs = new Date(vIso).getTime();
+        if (Number.isFinite(vEpochMs)) {
+            return vEpochMs;
+        }
+    }
+    return Number.NaN;
+}
+
+function doesClosedOrderHistoryRowBelongToStrategy(
+    pRow: DeltaOrderHistoryRow,
+    pStrategyCode: RollingFuturesLtStrategyCode
+): boolean {
+    if (!isCoveredLikeStrategy(pStrategyCode)) {
+        return true;
+    }
+    const vClientOrderId = getDeltaOrderHistoryClientOrderId(pRow);
+    if (!vClientOrderId) {
+        if (pStrategyCode !== "covered-options") {
+            return false;
+        }
+        const vLegacyCutoffIso = parseDeltaUiDateTimeLocalToIsoString(gCoveredLegacyHistoryCutoffDeltaUi);
+        const vLegacyCutoffMs = vLegacyCutoffIso ? new Date(vLegacyCutoffIso).getTime() : Number.NaN;
+        const vEventEpochMs = getDeltaOrderHistoryEventEpochMs(pRow);
+        return Number.isFinite(vLegacyCutoffMs)
+            && Number.isFinite(vEventEpochMs)
+            && vEventEpochMs <= vLegacyCutoffMs;
+    }
+    if (pStrategyCode === "covered-options" && vClientOrderId.startsWith("RFD-")) {
+        const vLegacyCutoffIso = parseDeltaUiDateTimeLocalToIsoString(gCoveredLegacyHistoryCutoffDeltaUi);
+        const vLegacyCutoffMs = vLegacyCutoffIso ? new Date(vLegacyCutoffIso).getTime() : Number.NaN;
+        const vEventEpochMs = getDeltaOrderHistoryEventEpochMs(pRow);
+        return Number.isFinite(vLegacyCutoffMs)
+            && Number.isFinite(vEventEpochMs)
+            && vEventEpochMs <= vLegacyCutoffMs;
+    }
+    return vClientOrderId.startsWith(getStrategyClientOrderIdPrefix(pStrategyCode));
+}
+
 async function ensureActiveStrategyRun(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -7749,7 +7833,7 @@ async function syncCoveredRecoveryMetricsFromClosedHistory(
 
     if (vClosedFromDateIso && pSelectedApiProfileId) {
         const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
-        const arrClosedRows = await fetchTrackedClosedOrderHistoryRows(client, vSelectedSymbol, vClosedFromDateIso);
+        const arrClosedRows = await fetchTrackedClosedOrderHistoryRows(client, pStrategyCode, vSelectedSymbol, vClosedFromDateIso);
         vClosedBrokerageTotal = Number(arrClosedRows.reduce((pSum, pRow) => {
             return pSum + toFiniteNumber(pRow.paid_commission, 0);
         }, 0).toFixed(4));
@@ -13288,7 +13372,8 @@ async function getClosedPositionsInternal(req: Request, res: Response, pStrategy
             .filter((objRow) => String(objRow.state || "").trim().toLowerCase() === "closed")
             .filter((objRow) => {
                 const vContract = String(objRow.product_symbol || objRow.symbol || "").trim().toUpperCase();
-                return isTrackedContractForSymbol(vContract, vSelectedSymbol);
+                return isTrackedContractForSymbol(vContract, vSelectedSymbol)
+                    && doesClosedOrderHistoryRowBelongToStrategy(objRow, pStrategyCode);
             })
             .map(mapLiveClosedPosition);
         res.json({
@@ -13348,7 +13433,8 @@ async function calculateRecalculatedTotalPnl(
         .filter((objRow) => String(objRow.state || "").trim().toLowerCase() === "closed")
         .filter((objRow) => {
             const vContract = String(objRow.product_symbol || objRow.symbol || "").trim().toUpperCase();
-            return isTrackedContractForSymbol(vContract, vSelectedSymbol);
+            return isTrackedContractForSymbol(vContract, vSelectedSymbol)
+                && doesClosedOrderHistoryRowBelongToStrategy(objRow, pStrategyCode);
         })
         .reduce((pSum, objRow) => pSum + toFiniteNumber(objRow.meta_data?.pnl, 0), 0).toFixed(4));
 
@@ -13656,6 +13742,7 @@ async function updateRecoveryMetricsInternal(req: Request, res: Response, pStrat
 
 async function fetchTrackedClosedOrderHistoryRows(
     pClient: any,
+    pStrategyCode: RollingFuturesLtStrategyCode,
     pSelectedSymbol: "BTC" | "ETH",
     pStartTimeIso = "",
     pEndTimeIso = ""
@@ -13693,7 +13780,8 @@ async function fetchTrackedClosedOrderHistoryRows(
         .filter((objRow) => String(objRow.state || "").trim().toLowerCase() === "closed")
         .filter((objRow) => {
             const vContract = String(objRow.product_symbol || objRow.symbol || "").trim().toUpperCase();
-            return isTrackedContractForSymbol(vContract, pSelectedSymbol);
+            return isTrackedContractForSymbol(vContract, pSelectedSymbol)
+                && doesClosedOrderHistoryRowBelongToStrategy(objRow, pStrategyCode);
         });
 }
 
@@ -13752,6 +13840,7 @@ async function recalculateAndPersistRecoveryMetricsFromClosedHistory(
         const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
         const arrRows = await fetchTrackedClosedOrderHistoryRows(
             client,
+            pStrategyCode,
             vSelectedSymbol,
             vClosedFromDateIso,
             vClosedToDateIso
@@ -13789,7 +13878,7 @@ async function recalculateAndPersistRecoveryMetricsFromClosedHistory(
     const objUiState = getMergedUiState(objProfile);
     const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
     const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
-    const arrRows = await fetchTrackedClosedOrderHistoryRows(client, vSelectedSymbol, vStrategyStartedAt);
+    const arrRows = await fetchTrackedClosedOrderHistoryRows(client, pStrategyCode, vSelectedSymbol, vStrategyStartedAt);
     const objRecalculated = arrRows.reduce<RecoveryRefreshTotals>((pTotals, pRow) => {
         return {
             strategyStartedAt: vStrategyStartedAt,

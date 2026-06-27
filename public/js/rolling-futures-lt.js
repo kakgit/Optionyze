@@ -3698,7 +3698,10 @@
                 loadRuntimeStatus(),
                 loadAccountSummary().catch(function () { return undefined; }),
                 loadSavedOpenPositions().catch(function () { return undefined; }),
-                loadEvents().catch(function () { return undefined; })
+                loadEvents().catch(function () { return undefined; }),
+                loadProfile()
+                    .then(function () { return loadClosedPositions(); })
+                    .catch(function () { return undefined; })
             ]).then(function () {
                 setStatus(ids.pageStatus, String(objResult?.message || "Live action confirmed."), "success");
             });
@@ -3865,7 +3868,9 @@
             const vMessage = String(objResult?.message || "Exec Strategy placed live option order(s).").trim();
             setStatus(ids.pageStatus, bHedgePlaced ? `${vMessage} Server-side neutrality hedge also executed.` : vMessage, "success");
             return Promise.all([
-                loadProfile().catch(function () { return undefined; }),
+                loadProfile()
+                    .then(function () { return loadClosedPositions(); })
+                    .catch(function () { return undefined; }),
                 loadAccountSummary(),
                 loadConnectionStatus(),
                 loadEvents().catch(function () { return undefined; })
