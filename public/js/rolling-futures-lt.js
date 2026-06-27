@@ -2873,7 +2873,29 @@
                 ids.hedgeGateSummary.innerHTML = '<span class="rolling-covered-hedge-chip off">Replace Off</span>';
                 return;
             }
-            ids.hedgeGateSummary.innerHTML = `<span class="rolling-covered-hedge-chip gate">Replace ${escapeHtml(fmt(vThresholdPct, 0))}%</span>`;
+            const sellRows = Array.isArray(rows) ? rows.filter(function (row) {
+                return String(row?.side || "").trim().toUpperCase() === "SELL"
+                    && isOptionContractSymbol(String(row?.contractName || "").trim());
+            }) : [];
+            const liveDeltas = sellRows.map(function (row) {
+                const greeks = row?.greeks || {};
+                const rawDelta = Number(greeks.deltaPerContract);
+                return Math.abs(rawDelta);
+            }).filter(function (value) {
+                return Number.isFinite(value) && value > 0;
+            }).sort(function (left, right) {
+                return left - right;
+            });
+            let currentPctText = "—";
+            if (liveDeltas.length >= 2) {
+                const weakerDelta = liveDeltas[0];
+                const strongerDelta = liveDeltas[liveDeltas.length - 1];
+                const totalLiveDelta = weakerDelta + strongerDelta;
+                if (totalLiveDelta > 0) {
+                    currentPctText = fmt(((strongerDelta - weakerDelta) / totalLiveDelta) * 100, 0);
+                }
+            }
+            ids.hedgeGateSummary.innerHTML = `<span class="rolling-covered-hedge-chip gate">Replace at ${escapeHtml(fmt(vThresholdPct, 0))}% Current at ${escapeHtml(currentPctText)}%</span>`;
             return;
         }
         const gateEnabled = ids.buyHedgeSellPremiumGate instanceof HTMLInputElement
