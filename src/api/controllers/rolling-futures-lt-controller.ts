@@ -159,7 +159,6 @@ const gRestartCloseProtectionMs = 5 * 60 * 1000;
 const gOptionRecoveryRefreshDelayMs = 5 * 60 * 1000;
 const gNeutralityHedgeCooldownMs = 2 * 60 * 1000;
 const gSurvivalDebugPrefix = "[dual-survival]";
-const gCoveredLegacyHistoryCutoffDeltaUi = "2026-06-18T23:10:47";
 const gLocalSurvivalLeaseTokens = new Map<string, string>();
 let gSurvivalTakeoverInterval: NodeJS.Timeout | null = null;
 const gSimulatedPrimaryOutageUsers = new Map<string, {
@@ -5815,26 +5814,6 @@ function getDeltaOrderHistoryClientOrderId(pRow: DeltaOrderHistoryRow): string {
     return "";
 }
 
-function getDeltaOrderHistoryEventEpochMs(pRow: DeltaOrderHistoryRow): number {
-    const arrCandidates: unknown[] = [
-        pRow.updated_at,
-        pRow.created_at,
-        (pRow as Record<string, unknown>).closed_at,
-        (pRow as Record<string, unknown>).closedAt
-    ];
-    for (const pCandidate of arrCandidates) {
-        const vIso = normalizeDeltaTimestampToIso(pCandidate);
-        if (!vIso) {
-            continue;
-        }
-        const vEpochMs = new Date(vIso).getTime();
-        if (Number.isFinite(vEpochMs)) {
-            return vEpochMs;
-        }
-    }
-    return Number.NaN;
-}
-
 function doesClosedOrderHistoryRowBelongToStrategy(
     pRow: DeltaOrderHistoryRow,
     pStrategyCode: RollingFuturesLtStrategyCode
@@ -5844,23 +5823,10 @@ function doesClosedOrderHistoryRowBelongToStrategy(
     }
     const vClientOrderId = getDeltaOrderHistoryClientOrderId(pRow);
     if (!vClientOrderId) {
-        if (pStrategyCode !== "covered-options") {
-            return false;
-        }
-        const vLegacyCutoffIso = parseDeltaUiDateTimeLocalToIsoString(gCoveredLegacyHistoryCutoffDeltaUi);
-        const vLegacyCutoffMs = vLegacyCutoffIso ? new Date(vLegacyCutoffIso).getTime() : Number.NaN;
-        const vEventEpochMs = getDeltaOrderHistoryEventEpochMs(pRow);
-        return Number.isFinite(vLegacyCutoffMs)
-            && Number.isFinite(vEventEpochMs)
-            && vEventEpochMs <= vLegacyCutoffMs;
+        return pStrategyCode === "covered-options";
     }
     if (pStrategyCode === "covered-options" && vClientOrderId.startsWith("RFD-")) {
-        const vLegacyCutoffIso = parseDeltaUiDateTimeLocalToIsoString(gCoveredLegacyHistoryCutoffDeltaUi);
-        const vLegacyCutoffMs = vLegacyCutoffIso ? new Date(vLegacyCutoffIso).getTime() : Number.NaN;
-        const vEventEpochMs = getDeltaOrderHistoryEventEpochMs(pRow);
-        return Number.isFinite(vLegacyCutoffMs)
-            && Number.isFinite(vEventEpochMs)
-            && vEventEpochMs <= vLegacyCutoffMs;
+        return true;
     }
     return vClientOrderId.startsWith(getStrategyClientOrderIdPrefix(pStrategyCode));
 }
