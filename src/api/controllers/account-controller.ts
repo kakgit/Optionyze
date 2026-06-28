@@ -10,6 +10,32 @@ export function renderMyProfilePage(req: Request, res: Response): void {
     });
 }
 
+export function getMyProfileApi(req: Request, res: Response): void {
+    const objAccount = req.authAccount;
+    if (!objAccount) {
+        res.status(401).json({ status: "warning", message: "Please sign in to continue." });
+        return;
+    }
+
+    res.json({
+        status: "success",
+        data: {
+            accountId: objAccount.accountId,
+            email: objAccount.email,
+            fullName: objAccount.fullName,
+            mobileNo: objAccount.mobileNo,
+            telegramChatId: objAccount.telegramChatId,
+            isAdmin: objAccount.isAdmin,
+            isActive: objAccount.isActive,
+            isVerifier: objAccount.isVerifier,
+            isSurvivalAdmin: objAccount.isSurvivalAdmin,
+            execStrategy: objAccount.execStrategy,
+            mustChangePassword: objAccount.mustChangePassword,
+            createdAt: objAccount.createdAt
+        }
+    });
+}
+
 export async function updateMyProfile(req: Request, res: Response): Promise<void> {
     const objAccount = req.authAccount;
     if (!objAccount) {

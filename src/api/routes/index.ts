@@ -141,6 +141,7 @@ import {
     testDeltaApiProfileLoginController,
     updateDeltaApiProfileController
 } from "../controllers/delta-api-controller";
+import { getMyProfileApi } from "../controllers/account-controller";
 import { registerMobilePushTokenController } from "../controllers/mobile-push-controller";
 import type { RunnerManager } from "../../runners/runner-manager";
 import { requireAdminApi, requireAuthApi, requireFreshPasswordApi, requireSurvivalAdminApi } from "../middleware/auth-middleware";
@@ -182,6 +183,10 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
 
     objRouter.post("/account/mobile-push-tokens", requireAuthApi, async (req, res) => {
         await registerMobilePushTokenController(req, res);
+    });
+
+    objRouter.get("/account/profile", requireAuthApi, async (req, res) => {
+        getMyProfileApi(req, res);
     });
 
     objRouter.get("/account/delta-api-profiles", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
