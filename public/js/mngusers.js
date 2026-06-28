@@ -8,6 +8,9 @@ const gState = {
     currentAccountId: "",
     activeModal: "",
     isLoadingUsers: false,
+    pendingLiveActions: [],
+    isLoadingPendingLiveActions: false,
+    pendingLiveActionBusyId: "",
     isSavingUser: false,
     isResettingPassword: false
 };
@@ -33,6 +36,10 @@ document.addEventListener("DOMContentLoaded", () => {
     els.resetPasswordForm?.addEventListener("submit", submitResetPasswordForm);
     els.overlay?.addEventListener("click", closeActiveModal);
     els.userTableBody?.addEventListener("click", handleTableAction);
+    els.pendingLiveActionsBody?.addEventListener("click", handlePendingLiveAction);
+    els.refreshPendingLiveActionsButton?.addEventListener("click", () => {
+        void loadPendingLiveActions({ showSuccess: true });
+    });
     document.addEventListener("keydown", handleDocumentKeydown);
 
     void loadAdminData({ showSuccess: true });
@@ -47,6 +54,9 @@ function cacheElements() {
     els.resultCount = document.getElementById("resultCount");
     els.userPager = document.getElementById("userPager");
     els.userTableBody = document.getElementById("userTableBody");
+    els.pendingLiveActionsBody = document.getElementById("pendingLiveActionsBody");
+    els.pendingLiveActionsCount = document.getElementById("pendingLiveActionsCount");
+    els.refreshPendingLiveActionsButton = document.getElementById("btnRefreshPendingLiveActions");
     els.overlay = document.getElementById("overlay");
 
     els.userModal = document.getElementById("userModal");
@@ -103,15 +113,46 @@ async function loadUsers() {
     }
 }
 
+async function loadPendingLiveActions(pOptions) {
+    if (gState.isLoadingPendingLiveActions) {
+        return;
+    }
+
+    gState.isLoadingPendingLiveActions = true;
+    setButtonBusy(els.refreshPendingLiveActionsButton, true, "");
+    try {
+        const objResult = await requestJson("/api/admin/live-actions/pending", {
+            credentials: "same-origin"
+        }, "Unable to load pending live confirmations.");
+        gState.pendingLiveActions = Array.isArray(objResult.data) ? objResult.data : [];
+        renderPendingLiveActions();
+        if (pOptions?.showSuccess) {
+            setPageStatus(`${gState.pendingLiveActions.length} pending live confirmation${gState.pendingLiveActions.length === 1 ? "" : "s"} loaded.`, "success");
+        }
+    }
+    catch (objError) {
+        gState.pendingLiveActions = [];
+        renderPendingLiveActions();
+        setPageStatus(getErrorMessage(objError, "Unable to load pending live confirmations."), "error");
+    }
+    finally {
+        gState.isLoadingPendingLiveActions = false;
+        restoreIconButton(els.refreshPendingLiveActionsButton);
+    }
+}
+
 async function loadAdminData(pOptions) {
     const bShowSuccess = Boolean(pOptions?.showSuccess);
     setPageStatus("Loading admin data...", "info");
     setButtonBusy(els.refreshButton, true, "");
 
     try {
-        await loadUsers();
+        await Promise.all([
+            loadUsers(),
+            loadPendingLiveActions()
+        ]);
         if (bShowSuccess) {
-            setPageStatus(`Loaded ${gState.users.length} user account${gState.users.length === 1 ? "" : "s"}.`, "success");
+            setPageStatus(`Loaded ${gState.users.length} user account${gState.users.length === 1 ? "" : "s"} and ${gState.pendingLiveActions.length} pending live confirmation${gState.pendingLiveActions.length === 1 ? "" : "s"}.`, "success");
         }
     }
     finally {
@@ -224,6 +265,62 @@ function renderTable() {
     });
 }
 
+function renderPendingLiveActions() {
+    if (!(els.pendingLiveActionsBody instanceof HTMLElement)) {
+        return;
+    }
+    const arrRows = Array.isArray(gState.pendingLiveActions) ? gState.pendingLiveActions : [];
+    setTextNode(els.pendingLiveActionsCount, `${arrRows.length} pending`);
+    if (!arrRows.length) {
+        els.pendingLiveActionsBody.innerHTML = `<tr><td colspan="8" class="mngusers-empty">No pending live confirmations.</td></tr>`;
+        return;
+    }
+
+    els.pendingLiveActionsBody.innerHTML = arrRows.map((objRow) => {
+        const vActionId = String(objRow.actionId || "").trim();
+        const vBusy = gState.pendingLiveActionBusyId === vActionId;
+        const vContractText = String(objRow.contractName || objRow.symbol || "-").trim() || "-";
+        const vQueuedAt = formatDateTime(objRow.createdAt);
+        const vAge = formatAge(objRow.createdAt);
+        const vStrategy = String(objRow.strategyLabel || objRow.strategyCode || "-").trim();
+        const vType = String(objRow.typeLabel || objRow.kind || "Live Action").trim();
+        const vDetails = String(objRow.details || objRow.message || "-").trim() || "-";
+        const vUserSub = [objRow.email, objRow.mobileNo].filter(Boolean).join(" | ");
+        return `
+            <tr>
+                <td class="mngusers-nowrap">${escapeHtml(vQueuedAt)}</td>
+                <td class="mngusers-nowrap">${escapeHtml(vAge)}</td>
+                <td>
+                    <div class="mngusers-cell-title">${escapeHtml(String(objRow.fullName || "-"))}</div>
+                    <div class="mngusers-cell-sub">${escapeHtml(vUserSub || "-")}</div>
+                </td>
+                <td>${escapeHtml(vStrategy)}</td>
+                <td>${escapeHtml(vType)}</td>
+                <td>
+                    <div class="mngusers-cell-title">${escapeHtml(vContractText)}</div>
+                    <div class="mngusers-cell-sub">${escapeHtml(String(objRow.legSide || "").trim() || "-")}</div>
+                </td>
+                <td>${escapeHtml(vDetails)}</td>
+                <td>
+                    <div class="mngusers-actions">
+                        <button class="mngusers-icon-btn execute" type="button" data-live-action="confirm" data-action-id="${escapeHtml(vActionId)}" title="Confirm live action" aria-label="Confirm live action" ${vBusy ? "disabled" : ""}>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
+                        </button>
+                        <button class="mngusers-icon-btn cancel" type="button" data-live-action="reject" data-action-id="${escapeHtml(vActionId)}" title="Cancel live action" aria-label="Cancel live action" ${vBusy ? "disabled" : ""}>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                                <path d="m6 6 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join("");
+}
+
 function paginateRows(pRows, pPage, pPageSize) {
     const vTotalItems = Array.isArray(pRows) ? pRows.length : 0;
     const vTotalPages = Math.max(1, Math.ceil(vTotalItems / pPageSize));
@@ -295,6 +392,20 @@ function handleTableAction(objEvent) {
     if (vAction === "delete") {
         void deleteUser(objUser);
     }
+}
+
+function handlePendingLiveAction(objEvent) {
+    const objButton = objEvent.target instanceof Element ? objEvent.target.closest("button[data-live-action]") : null;
+    if (!(objButton instanceof HTMLButtonElement)) {
+        return;
+    }
+    const vAction = String(objButton.dataset.liveAction || "").trim();
+    const vActionId = String(objButton.dataset.actionId || "").trim();
+    const objPending = gState.pendingLiveActions.find((objRow) => String(objRow.actionId || "").trim() === vActionId);
+    if (!objPending || (vAction !== "confirm" && vAction !== "reject")) {
+        return;
+    }
+    void submitPendingLiveAction(objPending, vAction);
 }
 
 function openUserModal(pUser) {
@@ -526,6 +637,38 @@ async function deleteUser(pUser) {
     }
 }
 
+async function submitPendingLiveAction(pPending, pDecision) {
+    const vActionId = String(pPending?.actionId || "").trim();
+    const vUrl = pDecision === "confirm" ? "/api/admin/live-actions/confirm" : "/api/admin/live-actions/reject";
+    if (!vActionId || gState.pendingLiveActionBusyId) {
+        return;
+    }
+    gState.pendingLiveActionBusyId = vActionId;
+    renderPendingLiveActions();
+    try {
+        const objResult = await requestJson(vUrl, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                accountId: String(pPending.accountId || "").trim(),
+                strategyCode: String(pPending.strategyCode || "").trim(),
+                actionId: vActionId
+            })
+        }, `Unable to ${pDecision === "confirm" ? "confirm" : "cancel"} the live action.`);
+        setPageStatus(String(objResult.message || `Live action ${pDecision === "confirm" ? "confirmed" : "cancelled"}.`), "success");
+        await loadPendingLiveActions();
+    }
+    catch (objError) {
+        setPageStatus(getErrorMessage(objError, `Unable to ${pDecision === "confirm" ? "confirm" : "cancel"} the live action.`), "error");
+        await loadPendingLiveActions();
+    }
+    finally {
+        gState.pendingLiveActionBusyId = "";
+        renderPendingLiveActions();
+    }
+}
+
 function syncVerifierExecStrategyState(objEvent) {
     const objTarget = objEvent?.target;
     if (objTarget === els.execStrategy && getCheckedNode(els.execStrategy)) {
@@ -616,6 +759,27 @@ function setTextNode(pNode, pValue) {
     if (pNode) {
         pNode.textContent = String(pValue || "");
     }
+}
+
+function formatAge(pValue) {
+    const vEpochMs = new Date(String(pValue || "")).getTime();
+    if (!Number.isFinite(vEpochMs)) {
+        return "-";
+    }
+    const vDiffMs = Math.max(0, Date.now() - vEpochMs);
+    const vMinutes = Math.floor(vDiffMs / 60000);
+    if (vMinutes < 1) {
+        return "Just now";
+    }
+    if (vMinutes < 60) {
+        return `${vMinutes}m`;
+    }
+    const vHours = Math.floor(vMinutes / 60);
+    if (vHours < 24) {
+        return `${vHours}h ${vMinutes % 60}m`;
+    }
+    const vDays = Math.floor(vHours / 24);
+    return `${vDays}d ${vHours % 24}h`;
 }
 
 function setInputValue(pNode, pValue) {

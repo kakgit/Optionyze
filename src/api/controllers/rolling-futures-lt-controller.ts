@@ -14978,6 +14978,105 @@ export async function confirmStrangleOptionsLiveAction(req: Request, res: Respon
 export async function rejectStrangleOptionsLiveAction(req: Request, res: Response): Promise<void> {
     await rejectCoveredLiveActionInternal(req, res, "strangle-options");
 }
+export async function listAdminPendingCoveredLikeLiveActions(req: Request, res: Response): Promise<void> {
+    const arrRuntimeRows = await listRollingFuturesLtRuntime();
+    const arrPending = await Promise.all(arrRuntimeRows
+        .filter((objRuntime) => objRuntime.strategyCode === "covered-options" || objRuntime.strategyCode === "strangle-options")
+        .map(async (objRuntime) => {
+            const objPending = getCoveredLiveConfirmationState(objRuntime);
+            if (!objPending) {
+                return null;
+            }
+            const objAccount = await getAccountById(objRuntime.userId);
+            if (!objAccount) {
+                return null;
+            }
+            const objPayload = objPending.payload && typeof objPending.payload === "object"
+                ? objPending.payload
+                : {};
+            const arrInputs = Array.isArray(objPayload.inputs)
+                ? objPayload.inputs as Array<Record<string, unknown>>
+                : [];
+            const vContractName = String(
+                objPayload.contractName
+                || objPayload.closedContractName
+                || ""
+            ).trim();
+            const vSymbol = String(
+                objPayload.symbol
+                || arrInputs[0]?.symbol
+                || objRuntime.currentSymbol
+                || ""
+            ).trim().toUpperCase();
+            const vReason = String(objPayload.reason || "").trim().toLowerCase();
+            const vTypeLabel = objPending.kind === "option_rule_close"
+                ? (vReason === "sl"
+                    ? "SL Trigger"
+                    : (vReason === "tp"
+                        ? "TP Trigger"
+                        : (vReason === "expiry_cutoff" ? "Replacement Ready" : "Close Trigger")))
+                : (objPending.kind === "exec_batch"
+                    ? "Exec Strategy"
+                    : (objPending.kind === "covered_reentry"
+                        ? "Re-entry Ready"
+                        : (objPending.kind === "manual_swap" ? "Replacement Ready" : "Live Action")));
+            const vDetails = objPending.kind === "exec_batch"
+                ? `Ready to place ${Math.max(1, arrInputs.length)} row${Math.max(1, arrInputs.length) === 1 ? "" : "s"}${vSymbol ? ` for ${vSymbol}` : ""}.`
+                : objPending.message;
+            return {
+                actionId: objPending.actionId,
+                accountId: objAccount.accountId,
+                fullName: objAccount.fullName,
+                email: objAccount.email,
+                mobileNo: objAccount.mobileNo,
+                telegramChatId: objAccount.telegramChatId,
+                strategyCode: objRuntime.strategyCode,
+                strategyLabel: getCoveredLikeStrategyLabel(objRuntime.strategyCode),
+                kind: objPending.kind,
+                typeLabel: vTypeLabel,
+                title: objPending.title,
+                message: objPending.message,
+                details: vDetails,
+                contractName: vContractName,
+                symbol: vSymbol,
+                rowIndex: Number(objPayload.rowIndex || 0) || null,
+                legSide: String(objPayload.legSide || "").trim().toUpperCase(),
+                reason: vReason,
+                createdAt: objPending.createdAt,
+                autoTraderEnabled: Boolean(objRuntime.autoTraderEnabled),
+                runtimeStatus: String(objRuntime.status || "").trim().toLowerCase()
+            };
+        }));
+
+    res.json({
+        status: "success",
+        data: arrPending
+            .filter(Boolean)
+            .sort((left, right) => new Date(String(left?.createdAt || "")).getTime() - new Date(String(right?.createdAt || "")).getTime())
+    });
+}
+export async function confirmAdminPendingCoveredLikeLiveAction(req: Request, res: Response): Promise<void> {
+    const vAccountId = String(req.body?.accountId || "").trim();
+    const vStrategyCode = String(req.body?.strategyCode || "").trim() as RollingFuturesLtStrategyCode;
+    const vActionId = String(req.body?.actionId || "").trim();
+    if (!vAccountId || (vStrategyCode !== "covered-options" && vStrategyCode !== "strangle-options")) {
+        res.status(400).json({ status: "warning", message: "Valid account and strategy are required." });
+        return;
+    }
+    const objResult = await processCoveredLiveActionDecision(vAccountId, vStrategyCode, "confirm", vActionId);
+    res.status(objResult.status === "danger" ? 500 : (objResult.status === "warning" ? 400 : 200)).json(objResult);
+}
+export async function rejectAdminPendingCoveredLikeLiveAction(req: Request, res: Response): Promise<void> {
+    const vAccountId = String(req.body?.accountId || "").trim();
+    const vStrategyCode = String(req.body?.strategyCode || "").trim() as RollingFuturesLtStrategyCode;
+    const vActionId = String(req.body?.actionId || "").trim();
+    if (!vAccountId || (vStrategyCode !== "covered-options" && vStrategyCode !== "strangle-options")) {
+        res.status(400).json({ status: "warning", message: "Valid account and strategy are required." });
+        return;
+    }
+    const objResult = await processCoveredLiveActionDecision(vAccountId, vStrategyCode, "reject", vActionId);
+    res.status(objResult.status === "danger" ? 500 : (objResult.status === "warning" ? 400 : 200)).json(objResult);
+}
 export async function handleTelegramWebhook(req: Request, res: Response): Promise<void> {
     await handleTelegramWebhookInternal(req, res);
 }

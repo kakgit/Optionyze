@@ -127,6 +127,9 @@ import {
     clearCoveredOptionsOpenPositions,
     clearStrangleOptionsOpenPositions,
     clearOptionsScalperOpenPositions,
+    listAdminPendingCoveredLikeLiveActions,
+    confirmAdminPendingCoveredLikeLiveAction,
+    rejectAdminPendingCoveredLikeLiveAction,
     swapCoveredOptionsImportedOpenPosition,
     swapStrangleOptionsImportedOpenPosition,
     handleTelegramWebhook
@@ -166,6 +169,15 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.delete("/admin/accounts/:accountId", requireAdminApi, async (req, res) => {
         await deleteManagedUserController(req, res);
+    });
+    objRouter.get("/admin/live-actions/pending", requireAdminApi, async (req, res) => {
+        await listAdminPendingCoveredLikeLiveActions(req, res);
+    });
+    objRouter.post("/admin/live-actions/confirm", requireAdminApi, async (req, res) => {
+        await confirmAdminPendingCoveredLikeLiveAction(req, res);
+    });
+    objRouter.post("/admin/live-actions/reject", requireAdminApi, async (req, res) => {
+        await rejectAdminPendingCoveredLikeLiveAction(req, res);
     });
 
     objRouter.post("/account/mobile-push-tokens", requireAuthApi, async (req, res) => {
