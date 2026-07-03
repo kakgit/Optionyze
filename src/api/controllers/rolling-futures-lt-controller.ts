@@ -32,6 +32,7 @@ import {
 } from "../../storage/rolling-options-pt-de-event-store";
 import {
     appendOptionsScalperPaperClosedPositions,
+    clearOptionsScalperPaperClosedPositions,
     listOptionsScalperPaperClosedPositions,
     type OptionsScalperPaperClosedPositionRecord
 } from "../../storage/options-scalper-paper-store";
@@ -146,6 +147,7 @@ const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
     "rolling-futures-lt-dual": "Dual Rolling Futures",
     "covered-options": "Covered Options",
     "strangle-options": "Strangle Options",
+    "renko-options": "Renko Options",
     "options-scalper": "Options Demo"
 };
 const gFutureLimitRetryDelayMs = 5000;
@@ -422,6 +424,7 @@ type CoveredLiveConfirmationState = {
 
 interface RollingFuturesLtAccountSummarySnapshot {
     symbol: "BTC" | "ETH";
+    spotPrice: number | null;
     oneLotValue: number | null;
     totalBalance: number | null;
     blockedMargin: number | null;
@@ -443,7 +446,11 @@ function getAccountId(req: Request): string {
     const vTargetAccountId = String(vBodyTarget || vQueryTarget || "").trim();
     const bCoveredVerifierTarget = Boolean(
         req.authAccount?.isVerifier
-        && (req.originalUrl.includes("/covered-options") || req.originalUrl.includes("/strangle-options"))
+        && (
+            req.originalUrl.includes("/covered-options")
+            || req.originalUrl.includes("/strangle-options")
+            || req.originalUrl.includes("/renko-options")
+        )
     );
     if ((req.authAccount?.isAdmin || bCoveredVerifierTarget) && vTargetAccountId) {
         return vTargetAccountId;
@@ -454,12 +461,14 @@ function getAccountId(req: Request): string {
 function isDualRollingFuturesStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
     return pStrategyCode === "rolling-futures-lt-dual"
         || pStrategyCode === "covered-options"
-        || pStrategyCode === "strangle-options";
+        || pStrategyCode === "strangle-options"
+        || pStrategyCode === "renko-options";
 }
 
 function isCoveredLikeStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
     return pStrategyCode === "covered-options"
         || pStrategyCode === "strangle-options"
+        || pStrategyCode === "renko-options"
         || pStrategyCode === "options-scalper";
 }
 
@@ -467,12 +476,16 @@ function isOptionsScalperStrategy(pStrategyCode: RollingFuturesLtStrategyCode): 
     return pStrategyCode === "options-scalper";
 }
 
+function supportsRenkoFeedStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
+    return pStrategyCode === "renko-options" || isOptionsScalperStrategy(pStrategyCode);
+}
+
 function isStrangleOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "strangle-options";
+    return pStrategyCode === "strangle-options" || pStrategyCode === "renko-options";
 }
 
 function isCoveredOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "covered-options" || pStrategyCode === "strangle-options";
+    return pStrategyCode === "covered-options" || pStrategyCode === "strangle-options" || pStrategyCode === "renko-options";
 }
 
 function isDualServerManagedStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
@@ -480,19 +493,31 @@ function isDualServerManagedStrategy(pStrategyCode: RollingFuturesLtStrategyCode
 }
 
 function getCoveredLikeStrategyLabel(pStrategyCode: RollingFuturesLtStrategyCode): string {
-    return isStrangleOptionsStrategy(pStrategyCode) ? "Strangle Options" : "Covered Options";
+    if (pStrategyCode === "renko-options") {
+        return "Renko Options";
+    }
+    return pStrategyCode === "strangle-options" ? "Strangle Options" : "Covered Options";
 }
 
 function getCoveredLikeLowerLabel(pStrategyCode: RollingFuturesLtStrategyCode): string {
-    return isStrangleOptionsStrategy(pStrategyCode) ? "strangle" : "covered";
+    if (pStrategyCode === "renko-options") {
+        return "renko";
+    }
+    return pStrategyCode === "strangle-options" ? "strangle" : "covered";
 }
 
 function getCoveredLikeLegText(pStrategyCode: RollingFuturesLtStrategyCode): string {
-    return isStrangleOptionsStrategy(pStrategyCode) ? "strangle leg" : "covered leg";
+    if (pStrategyCode === "renko-options") {
+        return "renko leg";
+    }
+    return pStrategyCode === "strangle-options" ? "strangle leg" : "covered leg";
 }
 
 function getCoveredLikePositionText(pStrategyCode: RollingFuturesLtStrategyCode): string {
-    return isStrangleOptionsStrategy(pStrategyCode) ? "strangle position" : "covered position";
+    if (pStrategyCode === "renko-options") {
+        return "renko position";
+    }
+    return pStrategyCode === "strangle-options" ? "strangle position" : "covered position";
 }
 
 function normalizeOptionRowIndex(
@@ -547,7 +572,7 @@ function normalizeExecStrategyInput(
 }
 
 function getCoveredMultiplierMin(pStrategyCode: RollingFuturesLtStrategyCode): number {
-    return isStrangleOptionsStrategy(pStrategyCode) ? 1 : 2;
+    return (isOptionsScalperStrategy(pStrategyCode) || isStrangleOptionsStrategy(pStrategyCode)) ? 1 : 2;
 }
 
 function normalizeCoveredMultiplierValue(
@@ -886,7 +911,9 @@ async function executePendingDualStrategyRequestByRecord(
 }> {
     const vStrategyCode: RollingFuturesLtStrategyCode = pRequest.strategyCode === "covered-options"
         ? "covered-options"
-        : (pRequest.strategyCode === "strangle-options" ? "strangle-options" : "rolling-futures-lt-dual");
+        : (pRequest.strategyCode === "strangle-options"
+            ? "strangle-options"
+            : (pRequest.strategyCode === "renko-options" ? "renko-options" : "rolling-futures-lt-dual"));
     if (!isDualExecStrategyAllowed(vStrategyCode, pRequest.execStrategy)) {
         throw new Error(gExecStrategyUnauthorizedMessage);
     }
@@ -1572,6 +1599,74 @@ function normalizeStringValue(pValue: unknown, pFallback: string): string {
     return vValue || pFallback;
 }
 
+function normalizeRenkoBaseValueString(pValue: unknown): string {
+    const vRaw = Number(pValue);
+    if (!Number.isFinite(vRaw) || !(vRaw > 0)) {
+        return "";
+    }
+    return String(Number(vRaw.toFixed(2)));
+}
+
+function normalizeRenkoBaseValues(pValue: unknown): { BTC: string; ETH: string } {
+    const objValue = pValue && typeof pValue === "object" ? pValue as Record<string, unknown> : {};
+    return {
+        BTC: normalizeRenkoBaseValueString(objValue.BTC),
+        ETH: normalizeRenkoBaseValueString(objValue.ETH)
+    };
+}
+
+function normalizeRenkoColorValue(pValue: unknown): "neutral" | "green" | "red" {
+    const vValue = String(pValue || "").trim().toLowerCase();
+    return vValue === "green" || vValue === "red" ? vValue : "neutral";
+}
+
+function normalizeRenkoStateValues(pValue: unknown): {
+    BTC: { referencePrice: string; lastColor: "neutral" | "green" | "red" };
+    ETH: { referencePrice: string; lastColor: "neutral" | "green" | "red" };
+} {
+    const objValue = pValue && typeof pValue === "object" ? pValue as Record<string, unknown> : {};
+    function normalizeEntry(pEntry: unknown): { referencePrice: string; lastColor: "neutral" | "green" | "red" } {
+        const objEntry = pEntry && typeof pEntry === "object" ? pEntry as Record<string, unknown> : {};
+        return {
+            referencePrice: normalizeRenkoBaseValueString(objEntry.referencePrice),
+            lastColor: normalizeRenkoColorValue(objEntry.lastColor)
+        };
+    }
+    return {
+        BTC: normalizeEntry(objValue.BTC),
+        ETH: normalizeEntry(objValue.ETH)
+    };
+}
+
+function normalizeRenkoHistoryValues(pValue: unknown): {
+    BTC: Array<{ color: "green" | "red"; changedAt: string; referencePrice: string }>;
+    ETH: Array<{ color: "green" | "red"; changedAt: string; referencePrice: string }>;
+} {
+    const objValue = pValue && typeof pValue === "object" ? pValue as Record<string, unknown> : {};
+    function normalizeEntries(pEntries: unknown): Array<{ color: "green" | "red"; changedAt: string; referencePrice: string }> {
+        return (Array.isArray(pEntries) ? pEntries : [])
+            .map((pEntry) => {
+                const objEntry = pEntry && typeof pEntry === "object" ? pEntry as Record<string, unknown> : {};
+                const vColor = normalizeRenkoColorValue(objEntry.color);
+                const vChangedAt = String(objEntry.changedAt || "").trim();
+                if (vColor === "neutral" || !vChangedAt) {
+                    return null;
+                }
+                return {
+                    color: vColor,
+                    changedAt: vChangedAt,
+                    referencePrice: normalizeRenkoBaseValueString(objEntry.referencePrice)
+                };
+            })
+            .filter((entry): entry is { color: "green" | "red"; changedAt: string; referencePrice: string } => Boolean(entry))
+            .slice(0, 20);
+    }
+    return {
+        BTC: normalizeEntries(objValue.BTC),
+        ETH: normalizeEntries(objValue.ETH)
+    };
+}
+
 function normalizeRollingFuturesLegSelection(pValue: unknown, pFallback: string): "ce" | "pe" | "both" {
     const vFallback = String(pFallback || "").trim().toLowerCase();
     const vValue = String(pValue || "").trim().toLowerCase();
@@ -1755,7 +1850,7 @@ function getDefaultManualTraderUiState(
     const bIsShort = pStrategyCode === "rolling-futures-lt-short";
     const bIsDual = isDualRollingFuturesStrategy(pStrategyCode);
     const objState: Record<string, unknown> = {
-        startQty: isStrangleOptionsStrategy(pStrategyCode) ? "1" : "2",
+        startQty: getCoveredMultiplierMin(pStrategyCode) === 1 ? "1" : "2",
         symbol: "BTC",
         manualFutOrderType: "market_order",
         bsFutQty: "1",
@@ -1777,6 +1872,15 @@ function getDefaultManualTraderUiState(
         buyHedgeOppositeLegOnGate: false,
         buyQtyPercentEnabled: false,
         buyQtyPercent: "100",
+        renkoEnabled: false,
+        renkoStepPoints: "100",
+        renkoBaseValue: "",
+        renkoBaseValues: { BTC: "", ETH: "" },
+        renkoStateBySymbol: {
+            BTC: { referencePrice: "", lastColor: "neutral" as const },
+            ETH: { referencePrice: "", lastColor: "neutral" as const }
+        },
+        renkoHistoryBySymbol: { BTC: [], ETH: [] },
         strangleReopenAtNewD: false,
         autoConfirmLiveActions: isCoveredLikeStrategy(pStrategyCode),
         telegramAlertTypes: getDefaultTelegramAlertTypesForStrategy(pStrategyCode),
@@ -1823,11 +1927,19 @@ function inferTrackedOptionLegSide(pContractName: unknown): "ce" | "pe" | "" {
     return "";
 }
 
+function isTrackedPositionInactive(pPosition: RollingFuturesLtImportedPositionRecord): boolean {
+    const objMetadata = pPosition.metadata && typeof pPosition.metadata === "object"
+        ? pPosition.metadata as Record<string, unknown>
+        : {};
+    return String(objMetadata.positionState || "").trim().toLowerCase() === "inactive"
+        || Boolean(String(objMetadata.inactiveAt || "").trim());
+}
+
 function listTrackedOpenOptionPositions(
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
 ): RollingFuturesLtImportedPositionRecord[] {
     return Array.isArray(pTrackedPositions)
-        ? pTrackedPositions.filter((objPosition) => isOptionContractSymbol(objPosition.contractName))
+        ? pTrackedPositions.filter((objPosition) => isOptionContractSymbol(objPosition.contractName) && !isTrackedPositionInactive(objPosition))
         : [];
 }
 
@@ -1853,6 +1965,39 @@ function getTrackedOptionMetadata(pPosition: RollingFuturesLtImportedPositionRec
     return pPosition.metadata && typeof pPosition.metadata === "object"
         ? pPosition.metadata as RollingFuturesLtOptionMetadata
         : {};
+}
+
+function buildInactiveTrackedPosition(
+    pPosition: RollingFuturesLtImportedPositionRecord,
+    pClosedPosition: OptionsScalperPaperClosedPositionRecord,
+    pReason: "sl" | "tp"
+): RollingFuturesLtImportedPositionRecord {
+    const objExistingMetadata = pPosition.metadata && typeof pPosition.metadata === "object"
+        ? pPosition.metadata as Record<string, unknown>
+        : {};
+    const objClosedMetadata = pClosedPosition.metadata && typeof pClosedPosition.metadata === "object"
+        ? pClosedPosition.metadata as Record<string, unknown>
+        : {};
+    const vClosePrice = Number(objClosedMetadata.closePrice || pPosition.markPrice || pPosition.entryPrice || 0);
+    const vInactiveAt = String(pClosedPosition.endAt || new Date().toISOString()).trim();
+    return {
+        ...pPosition,
+        markPrice: Number.isFinite(vClosePrice) ? vClosePrice : Number(pPosition.markPrice || pPosition.entryPrice || 0),
+        charges: Number(pClosedPosition.charges || pPosition.charges || 0),
+        pnl: Number(pClosedPosition.pnl || 0),
+        margin: 0,
+        liquidationPrice: 0,
+        updatedAt: vInactiveAt,
+        metadata: {
+            ...objExistingMetadata,
+            ...objClosedMetadata,
+            positionState: "inactive",
+            inactiveAt: vInactiveAt,
+            inactiveReason: pReason,
+            realizedPnl: Number(pClosedPosition.pnl || 0),
+            realizedCharges: Number(pClosedPosition.charges || 0)
+        }
+    };
 }
 
 function inferCoveredOptionRowIndexFromUiState(
@@ -2959,6 +3104,13 @@ async function refreshOptionsScalperPaperOpenPositions(
 ): Promise<RollingFuturesLtImportedPositionRecord[]> {
     const arrNext: RollingFuturesLtImportedPositionRecord[] = [];
     for (const objPosition of Array.isArray(pPositions) ? pPositions : []) {
+        if (isTrackedPositionInactive(objPosition)) {
+            arrNext.push({
+                ...objPosition,
+                updatedAt: String(objPosition.updatedAt || objPosition.openedAt || new Date().toISOString()).trim()
+            });
+            continue;
+        }
         const objTicker = await getLiveOptionTicker(objPosition.contractName);
         const vMarkPrice = Number(objTicker?.markPrice || objPosition.markPrice || objPosition.entryPrice || 0);
         arrNext.push({
@@ -3589,11 +3741,18 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
     const objUiState = (pProfile.uiState && typeof pProfile.uiState === "object") ? pProfile.uiState : {};
     const objDefaults = getDefaultManualTraderUiState(pProfile.strategyCode);
     const arrTelegramPrefs = normalizeTelegramAlertTypesForStrategy(pProfile.strategyCode, objUiState);
+    const vSymbol = normalizeSymbolValue(objUiState.symbol);
+    const objRenkoBaseValues = normalizeRenkoBaseValues(objUiState.renkoBaseValues ?? objDefaults.renkoBaseValues);
+    const objRenkoStateBySymbol = normalizeRenkoStateValues(objUiState.renkoStateBySymbol ?? objDefaults.renkoStateBySymbol);
+    const objRenkoHistoryBySymbol = normalizeRenkoHistoryValues(objUiState.renkoHistoryBySymbol ?? objDefaults.renkoHistoryBySymbol);
+    if (!objRenkoBaseValues[vSymbol]) {
+        objRenkoBaseValues[vSymbol] = normalizeRenkoBaseValueString(objUiState.renkoBaseValue ?? "");
+    }
     const objMergedUiState: Record<string, unknown> = {
         startQty: isCoveredOptionsStrategy(pProfile.strategyCode)
             ? normalizeCoveredMultiplierString(objUiState.startQty ?? objDefaults.startQty, pProfile.strategyCode)
             : normalizeStringValue(objUiState.startQty, String(objDefaults.startQty)),
-        symbol: normalizeSymbolValue(objUiState.symbol),
+        symbol: vSymbol,
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
         minusDelta: normalizeStringValue(objUiState.minusDelta, String(objDefaults.minusDelta)),
@@ -3628,6 +3787,27 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         buyQtyPercent: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? "100"
             : normalizeCoveredBuyQtyPercentString(objUiState.buyQtyPercent ?? objDefaults.buyQtyPercent),
+        renkoEnabled: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? normalizeBooleanValue(objUiState.renkoEnabled, Boolean(objDefaults.renkoEnabled))
+            : false,
+        renkoStepPoints: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? String(Math.min(1000000, Math.max(1, Math.floor(Number((objUiState.renkoStepPoints ?? objDefaults.renkoStepPoints) || 100)) || 100)))
+            : "100",
+        renkoBaseValue: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? objRenkoBaseValues[vSymbol]
+            : "",
+        renkoBaseValues: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? objRenkoBaseValues
+            : { BTC: "", ETH: "" },
+        renkoStateBySymbol: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? objRenkoStateBySymbol
+            : {
+                BTC: { referencePrice: "", lastColor: "neutral" as const },
+                ETH: { referencePrice: "", lastColor: "neutral" as const }
+            },
+        renkoHistoryBySymbol: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? objRenkoHistoryBySymbol
+            : { BTC: [], ETH: [] },
         strangleReopenAtNewD: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? normalizeBooleanValue(objUiState.strangleReopenAtNewD, Boolean(objDefaults.strangleReopenAtNewD))
             : false,
@@ -3922,11 +4102,18 @@ function normalizeProfileSaveInput(
     const objUiState = (pIncoming.uiState && typeof pIncoming.uiState === "object") ? pIncoming.uiState : {};
     const objDefaults = getDefaultManualTraderUiState(pStrategyCode);
     const arrTelegramPrefs = normalizeTelegramAlertTypesForStrategy(pStrategyCode, objUiState);
+    const vSymbol = normalizeSymbolValue(objUiState.symbol);
+    const objRenkoBaseValues = normalizeRenkoBaseValues(objUiState.renkoBaseValues ?? objDefaults.renkoBaseValues);
+    const objRenkoStateBySymbol = normalizeRenkoStateValues(objUiState.renkoStateBySymbol ?? objDefaults.renkoStateBySymbol);
+    const objRenkoHistoryBySymbol = normalizeRenkoHistoryValues(objUiState.renkoHistoryBySymbol ?? objDefaults.renkoHistoryBySymbol);
+    if (!objRenkoBaseValues[vSymbol]) {
+        objRenkoBaseValues[vSymbol] = normalizeRenkoBaseValueString(objUiState.renkoBaseValue ?? "");
+    }
     const objNormalizedUiState: Record<string, unknown> = {
         startQty: isCoveredOptionsStrategy(pStrategyCode)
             ? normalizeCoveredMultiplierString(objUiState.startQty ?? objDefaults.startQty, pStrategyCode)
             : normalizeStringValue(objUiState.startQty, String(objDefaults.startQty)),
-        symbol: normalizeSymbolValue(objUiState.symbol),
+        symbol: vSymbol,
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
         minusDelta: normalizeStringValue(objUiState.minusDelta, String(objDefaults.minusDelta)),
@@ -3961,6 +4148,27 @@ function normalizeProfileSaveInput(
         buyQtyPercent: isStrangleOptionsStrategy(pStrategyCode)
             ? "100"
             : normalizeCoveredBuyQtyPercentString(objUiState.buyQtyPercent ?? objDefaults.buyQtyPercent),
+        renkoEnabled: supportsRenkoFeedStrategy(pStrategyCode)
+            ? normalizeBooleanValue(objUiState.renkoEnabled, Boolean(objDefaults.renkoEnabled))
+            : false,
+        renkoStepPoints: supportsRenkoFeedStrategy(pStrategyCode)
+            ? String(Math.min(1000000, Math.max(1, Math.floor(Number((objUiState.renkoStepPoints ?? objDefaults.renkoStepPoints) || 100)) || 100)))
+            : "100",
+        renkoBaseValue: supportsRenkoFeedStrategy(pStrategyCode)
+            ? objRenkoBaseValues[vSymbol]
+            : "",
+        renkoBaseValues: supportsRenkoFeedStrategy(pStrategyCode)
+            ? objRenkoBaseValues
+            : { BTC: "", ETH: "" },
+        renkoStateBySymbol: supportsRenkoFeedStrategy(pStrategyCode)
+            ? objRenkoStateBySymbol
+            : {
+                BTC: { referencePrice: "", lastColor: "neutral" as const },
+                ETH: { referencePrice: "", lastColor: "neutral" as const }
+            },
+        renkoHistoryBySymbol: supportsRenkoFeedStrategy(pStrategyCode)
+            ? objRenkoHistoryBySymbol
+            : { BTC: [], ETH: [] },
         strangleReopenAtNewD: isStrangleOptionsStrategy(pStrategyCode)
             ? normalizeBooleanValue(objUiState.strangleReopenAtNewD, Boolean(objDefaults.strangleReopenAtNewD))
             : false,
@@ -4285,6 +4493,7 @@ async function fetchAccountSummarySnapshot(
 
     return {
         symbol: pSymbol,
+        spotPrice: Number.isFinite(vLivePrice) && vLivePrice > 0 ? Number(vLivePrice.toFixed(2)) : null,
         oneLotValue: Number.isFinite(vOneLotValue) ? Number(vOneLotValue.toFixed(2)) : null,
         totalBalance: Number.isFinite(vTotalBalance) ? Number(vTotalBalance.toFixed(2)) : null,
         blockedMargin: Number.isFinite(vBlockedMargin) ? Number(vBlockedMargin.toFixed(2)) : null,
@@ -4363,14 +4572,23 @@ async function enrichTrackedOpenPositions(
         const vGammaRaw = bIsFuture ? 0 : Number(objTicker?.gamma || 0);
         const vThetaRaw = bIsFuture ? 0 : Number(objTicker?.theta || 0);
         const vVegaRaw = bIsFuture ? 0 : Number(objTicker?.vega || 0);
-        const vMarkPrice = Number.isFinite(Number(objTicker?.markPrice))
-            ? Number(objTicker?.markPrice || 0)
-            : Number(objPosition.markPrice || 0);
+        const bInactivePosition = isTrackedPositionInactive(objPosition);
+        const vMarkPrice = bInactivePosition
+            ? Number(objPosition.markPrice || objPosition.entryPrice || 0)
+            : (
+                Number.isFinite(Number(objTicker?.markPrice))
+                    ? Number(objTicker?.markPrice || 0)
+                    : Number(objPosition.markPrice || 0)
+            );
         const vPositionSymbol = normalizeSymbolValue(vContractName.includes("ETH") ? "ETH" : "BTC");
         const vLotSize = getLotSizeForSymbol(vPositionSymbol);
         const vUnderlyingPrice = Number(objUnderlyingPriceBySymbol.get(vPositionSymbol) || 0);
-        const vThetaPerContractScaled = Number.isFinite(vThetaRaw) ? (vThetaRaw * (bIsFuture ? 1 : vLotSize)) : 0;
-        const vDisplayDeltaSigned = bIsFuture
+        const vThetaPerContractScaled = bInactivePosition
+            ? 0
+            : (Number.isFinite(vThetaRaw) ? (vThetaRaw * (bIsFuture ? 1 : vLotSize)) : 0);
+        const vDisplayDeltaSigned = bInactivePosition
+            ? 0
+            : (bIsFuture
             ? 1
             : (
                 Number.isFinite(Number(objMetadata.manualTraderDelta))
@@ -4378,43 +4596,51 @@ async function enrichTrackedOpenPositions(
                     : (Number.isFinite(Number(objMetadata.baseDelta))
                         ? Number(objMetadata.baseDelta)
                         : (inferTrackedOptionLegSide(vContractName) === "pe" ? -Math.abs(vDeltaRaw) : Math.abs(vDeltaRaw)))
-            );
-        const vDisplayThetaCurrentTotal = bIsFuture
+            ));
+        const vDisplayThetaCurrentTotal = bInactivePosition
             ? 0
-            : Math.abs(Number.isFinite(vThetaRaw) ? vThetaRaw : 0);
+            : (bIsFuture
+            ? 0
+            : Math.abs(Number.isFinite(vThetaRaw) ? vThetaRaw : 0));
         const vBaseThetaRaw = Math.abs(Number.isFinite(Number(objMetadata.baseTheta))
             ? Number(objMetadata.baseTheta)
             : (Number.isFinite(vThetaRaw) ? vThetaRaw : 0));
-        const vDisplayThetaBaseTotal = bIsFuture
+        const vDisplayThetaBaseTotal = bInactivePosition
             ? 0
-            : Math.abs(vBaseThetaRaw);
-        const vCharges = estimateLivePositionCharges(
-            vContractName,
-            vQty,
-            vLotSize,
-            Number(objPosition.entryPrice || 0),
-            vUnderlyingPrice
-        );
-        const vPnl = calculateLivePositionPnl(
-            objPosition.side,
-            vQty,
-            vLotSize,
-            Number(objPosition.entryPrice || 0),
-            vMarkPrice
-        );
+            : (bIsFuture
+            ? 0
+            : Math.abs(vBaseThetaRaw));
+        const vCharges = bInactivePosition
+            ? Number(objPosition.charges || 0)
+            : estimateLivePositionCharges(
+                vContractName,
+                vQty,
+                vLotSize,
+                Number(objPosition.entryPrice || 0),
+                vUnderlyingPrice
+            );
+        const vPnl = bInactivePosition
+            ? Number(objPosition.pnl || 0)
+            : calculateLivePositionPnl(
+                objPosition.side,
+                vQty,
+                vLotSize,
+                Number(objPosition.entryPrice || 0),
+                vMarkPrice
+            );
         const objGreeks: RollingFuturesLtPositionGreeks = {
-            deltaPerContract: Number((vSideMultiplier * (Number.isFinite(vDeltaRaw) ? vDeltaRaw : 0)).toFixed(6)),
-            deltaTotal: Number((vSideMultiplier * (Number.isFinite(vDeltaRaw) ? vDeltaRaw : 0) * vQty).toFixed(6)),
+            deltaPerContract: Number(((bInactivePosition ? 0 : (vSideMultiplier * (Number.isFinite(vDeltaRaw) ? vDeltaRaw : 0)))).toFixed(6)),
+            deltaTotal: Number(((bInactivePosition ? 0 : (vSideMultiplier * (Number.isFinite(vDeltaRaw) ? vDeltaRaw : 0) * vQty))).toFixed(6)),
             deltaDisplayPerContract: Number((vSideMultiplier * vDisplayDeltaSigned).toFixed(6)),
             deltaDisplayTotal: Number((vSideMultiplier * vDisplayDeltaSigned * vQty).toFixed(6)),
-            gammaPerContract: Number((vSideMultiplier * (Number.isFinite(vGammaRaw) ? vGammaRaw : 0)).toFixed(6)),
-            gammaTotal: Number((vSideMultiplier * (Number.isFinite(vGammaRaw) ? vGammaRaw : 0)).toFixed(6)),
+            gammaPerContract: Number(((bInactivePosition ? 0 : (vSideMultiplier * (Number.isFinite(vGammaRaw) ? vGammaRaw : 0)))).toFixed(6)),
+            gammaTotal: Number(((bInactivePosition ? 0 : (vSideMultiplier * (Number.isFinite(vGammaRaw) ? vGammaRaw : 0)))).toFixed(6)),
             thetaPerContract: Number((vSideMultiplier * vThetaPerContractScaled).toFixed(6)),
             thetaTotal: Number((vSideMultiplier * vThetaPerContractScaled * vQty).toFixed(6)),
             thetaDisplayTotal: Number((vSideMultiplier * vDisplayThetaCurrentTotal).toFixed(6)),
             thetaBaseDisplayTotal: Number((vSideMultiplier * vDisplayThetaBaseTotal).toFixed(6)),
-            vegaPerContract: Number((vSideMultiplier * (Number.isFinite(vVegaRaw) ? vVegaRaw : 0)).toFixed(6)),
-            vegaTotal: Number((vSideMultiplier * (Number.isFinite(vVegaRaw) ? vVegaRaw : 0)).toFixed(6))
+            vegaPerContract: Number(((bInactivePosition ? 0 : (vSideMultiplier * (Number.isFinite(vVegaRaw) ? vVegaRaw : 0)))).toFixed(6)),
+            vegaTotal: Number(((bInactivePosition ? 0 : (vSideMultiplier * (Number.isFinite(vVegaRaw) ? vVegaRaw : 0)))).toFixed(6))
         };
 
         objTotals.totalDeltaPerContract += objGreeks.deltaPerContract;
@@ -4944,22 +5170,27 @@ function getProfitCloseRule(
     thresholdValue: number;
     reEnterEnabled: boolean;
 } {
+    const bBrokerageEnabled = Boolean(pUiState.closeNetProfitBrokerage);
+    const vBrokerageMultiplier = Math.max(0, Number(pUiState.brokerageMultiplier || 0));
+    const vOpenPositionsTotalPnl = Number(pOpenPositions.totals?.totalPnl || 0);
+    const vOpenPositionsTotalBrokerage = Math.max(0, Number(pOpenPositions.totals?.totalCharges || 0));
     const vNetProfit = Number(pOpenPositions.recoveryMetrics?.netPnl || 0);
-    if (!(vNetProfit > 0)) {
+    if (bBrokerageEnabled && !(vOpenPositionsTotalPnl > 0)) {
+        return { triggered: false, reason: "", message: "", thresholdValue: 0, reEnterEnabled: false };
+    }
+    if (!bBrokerageEnabled && !(vNetProfit > 0)) {
         return { triggered: false, reason: "", message: "", thresholdValue: 0, reEnterEnabled: false };
     }
 
-    const bBrokerageEnabled = Boolean(pUiState.closeNetProfitBrokerage);
-    const vBrokerageMultiplier = Math.max(0, Number(pUiState.brokerageMultiplier || 0));
-    const vBrokerageBase = Math.max(0, Number(pOpenPositions.recoveryMetrics?.totalBrokerageToRecover || 0));
+    const vBrokerageBase = vOpenPositionsTotalBrokerage;
     const vBrokerageBaseRounded = Number(vBrokerageBase.toFixed(4));
     if (bBrokerageEnabled && vBrokerageMultiplier > 0 && vBrokerageBaseRounded >= 0.01) {
         const vThreshold = vBrokerageBaseRounded * vBrokerageMultiplier;
-        if (vNetProfit >= vThreshold) {
+        if (vOpenPositionsTotalPnl >= vThreshold) {
             return {
                 triggered: true,
                 reason: "brokerage",
-                message: `Net PnL ${vNetProfit.toFixed(2)} reached the brokerage target ${vThreshold.toFixed(2)} (${vBrokerageBaseRounded.toFixed(2)} x ${vBrokerageMultiplier.toFixed(2)}).`,
+                message: `Open Positions Total PnL ${vOpenPositionsTotalPnl.toFixed(2)} reached the brokerage target ${vThreshold.toFixed(2)} (${vBrokerageBaseRounded.toFixed(2)} x ${vBrokerageMultiplier.toFixed(2)}).`,
                 thresholdValue: Number(vThreshold.toFixed(6)),
                 reEnterEnabled: Boolean(pUiState.reEnterBrok)
             };
@@ -5777,7 +6008,7 @@ function buildDeltaClientOrderId(
 ): string {
     const vPrefix = pStrategyCode === "covered-options"
         ? "COV"
-        : (pStrategyCode === "strangle-options" ? "STG" : "RFD");
+        : (pStrategyCode === "strangle-options" ? "STG" : (pStrategyCode === "renko-options" ? "RNK" : "RFD"));
     const vRunTag = String(pRunTag || "").trim().toUpperCase().slice(0, 10);
     const vSequence = Math.max(1, Math.floor(Number(pSequence || 1))).toString(36).toUpperCase().padStart(2, "0").slice(-2);
     return `${vPrefix}-${vRunTag}-${pOrderKind}${vSequence}`.slice(0, 32);
@@ -5789,6 +6020,9 @@ function getStrategyClientOrderIdPrefix(pStrategyCode: RollingFuturesLtStrategyC
     }
     if (pStrategyCode === "strangle-options") {
         return "STG-";
+    }
+    if (pStrategyCode === "renko-options") {
+        return "RNK-";
     }
     return "RFD-";
 }
@@ -7823,15 +8057,17 @@ async function closeTrackedPositionOnDelta(
     pSelectedApiProfileId: string,
     pPosition: RollingFuturesLtImportedPositionRecord,
     pOrderKind: "SL" | "TP" | "CL" = "CL"
-) : Promise<{ payload: Record<string, unknown>; placedAt: string; realizedPnl: number | null; }> {
+) : Promise<{ payload: Record<string, unknown>; placedAt: string; realizedPnl: number | null; closedRecord?: OptionsScalperPaperClosedPositionRecord; }> {
     if (isOptionsScalperStrategy(pStrategyCode)) {
         const objClosed = await closeOptionsScalperPaperPosition(pUserId, pStrategyCode, pPosition);
         const vClosedAtIso = objClosed.endAt;
-        await appendOptionsScalperPaperClosedPositions(pUserId, pStrategyCode, [objClosed]);
-        await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
-            pUserId,
-            await readLiveProfile(pUserId, pStrategyCode)
-        );
+        if (pOrderKind === "CL") {
+            await appendOptionsScalperPaperClosedPositions(pUserId, pStrategyCode, [objClosed]);
+            await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
+                pUserId,
+                await readLiveProfile(pUserId, pStrategyCode)
+            );
+        }
         return {
             payload: {
                 id: crypto.randomUUID(),
@@ -7841,7 +8077,8 @@ async function closeTrackedPositionOnDelta(
                 isPaperTrade: true
             },
             placedAt: vClosedAtIso,
-            realizedPnl: objClosed.pnl
+            realizedPnl: objClosed.pnl,
+            closedRecord: objClosed
         };
     }
     const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
@@ -8841,6 +9078,12 @@ async function applyTriggeredOptionRule(
                 vProfitClosePauseUntil
             )
         });
+        if ((pReason === "sl" || pReason === "tp") && objCloseResult.closedRecord) {
+            arrNextPositions = [
+                ...arrNextPositions,
+                buildInactiveTrackedPosition(pPosition, objCloseResult.closedRecord, pReason)
+            ];
+        }
         if (Boolean(objMetadata.reEnterEnabled) || pReason === "delta_diff_replace") {
             try {
                 const objPaperRowState = getNormalizedOptionRowUiState(
@@ -9219,6 +9462,9 @@ async function findTriggeredTrackedOptions(
     const objCurrentDeltaTime = getCurrentDeltaUiDateTimeParts();
     for (const objPosition of pTrackedPositions) {
         if (!isOptionContractSymbol(objPosition.contractName)) {
+            continue;
+        }
+        if (isTrackedPositionInactive(objPosition)) {
             continue;
         }
         const vResolvedExpiryDate = getTrackedOptionResolvedExpiryDate(objPosition);
@@ -11506,6 +11752,7 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
             data: {
                 execStrategy: isDualExecStrategyAllowed(pStrategyCode, objTargetAccount?.execStrategy),
                 symbol: vSelectedSymbol,
+                spotPrice: Number.isFinite(vLivePrice) && vLivePrice > 0 ? Number(vLivePrice.toFixed(2)) : null,
                 oneLotValue: Number.isFinite(vOneLotValue) ? Number(vOneLotValue.toFixed(2)) : null,
                 totalBalance: Number.isFinite(vTotalBalance) ? Number(vTotalBalance.toFixed(2)) : null,
                 blockedMargin: Number.isFinite(vBlockedMargin) ? Number(vBlockedMargin.toFixed(2)) : null,
@@ -12408,9 +12655,9 @@ async function executeCoveredOpenPositionSwap(
 }
 
 async function swapCoveredOpenPositionInternal(req: Request, res: Response): Promise<void> {
-    const pStrategyCode: RollingFuturesLtStrategyCode = req.originalUrl.includes("/strangle-options")
-        ? "strangle-options"
-        : "covered-options";
+    const pStrategyCode: RollingFuturesLtStrategyCode = req.originalUrl.includes("/renko-options")
+        ? "renko-options"
+        : (req.originalUrl.includes("/strangle-options") ? "strangle-options" : "covered-options");
     const vStrategyLabel = getCoveredLikeStrategyLabel(pStrategyCode);
     const vLowerLabel = getCoveredLikeLowerLabel(pStrategyCode);
     const vUserId = getAccountId(req);
@@ -12684,6 +12931,17 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
         return;
     }
 
+    if (isOptionsScalperStrategy(pStrategyCode)) {
+        const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
+        if (!objRuntime?.autoTraderEnabled || String(objRuntime.status || "").trim().toLowerCase() !== "running") {
+            res.status(400).json({
+                status: "warning",
+                message: "Turn Auto Trader ON before placing paper option orders."
+            });
+            return;
+        }
+    }
+
     const vAction = String(req.body?.action || "").trim().toLowerCase();
     const vSymbol = normalizeSymbolValue(req.body?.symbol || getMergedUiState(objProfile).symbol);
     let vLegSide = String(req.body?.legSide || "").trim().toLowerCase();
@@ -12719,13 +12977,6 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
     try {
         if (isOptionsScalperStrategy(pStrategyCode)) {
             const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
-            const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
-            if (arrOpenOptions.length > 0 && !hasTrackedOptionRowLeg(arrExisting, vRowIndex, vLegSide === "pe" ? "pe" : "ce")) {
-                throw new Error(`A paper option position is already open (${arrOpenOptions[0].contractName}). Close the existing option before placing another paper option.`);
-            }
-            if (hasTrackedOptionRowLeg(arrExisting, vRowIndex, vLegSide === "pe" ? "pe" : "ce")) {
-                throw new Error(`Row ${vRowIndex} ${vLegSide.toUpperCase()} paper option is already open. Close it before placing another one.`);
-            }
             const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
                 vUserId,
                 pStrategyCode,
@@ -13356,6 +13607,44 @@ async function getClosedPositionsInternal(req: Request, res: Response, pStrategy
         res.status(500).json({
             status: "danger",
             message: getErrorMessage(objError, "Unable to fetch Delta closed futures positions.")
+        });
+    }
+}
+
+async function clearOptionsScalperClosedPositionsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
+    const vUserId = getAccountId(req);
+    if (!vUserId) {
+        res.status(401).json({
+            status: "warning",
+            message: "Sign in to continue."
+        });
+        return;
+    }
+    if (pStrategyCode !== "options-scalper") {
+        res.status(400).json({
+            status: "warning",
+            message: "Closed-position clearing is only supported on Options Demo."
+        });
+        return;
+    }
+    try {
+        await clearOptionsScalperPaperClosedPositions(vUserId, pStrategyCode);
+        const objProfile = await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
+            vUserId,
+            await readLiveProfile(vUserId, pStrategyCode)
+        );
+        res.json({
+            status: "success",
+            message: "Closed demo positions cleared.",
+            data: {
+                profile: objProfile
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to clear closed demo positions.")
         });
     }
 }
@@ -14365,6 +14654,10 @@ export async function listStrangleOptionsVerifierRunningUsers(req: Request, res:
     await listCoveredLikeVerifierRunningUsers(req, res, "strangle-options", "Strangle Options");
 }
 
+export async function listRenkoOptionsVerifierRunningUsers(req: Request, res: Response): Promise<void> {
+    await listCoveredLikeVerifierRunningUsers(req, res, "renko-options", "Renko Options");
+}
+
 export async function enableRollingFuturesLtDualSimulatedPrimaryOutageController(req: Request, res: Response): Promise<void> {
     const vUserId = String(req.params.accountId || "").trim();
     const vEnabledByAccountId = String(getAccountId(req) || "").trim();
@@ -14939,49 +15232,91 @@ export async function rejectCoveredOptionsLiveAction(req: Request, res: Response
 export async function getStrangleOptionsProfile(req: Request, res: Response): Promise<void> {
     await getProfileInternal(req, res, "strangle-options");
 }
+export async function getRenkoOptionsProfile(req: Request, res: Response): Promise<void> {
+    await getProfileInternal(req, res, "renko-options");
+}
 export async function saveStrangleOptionsProfile(req: Request, res: Response): Promise<void> {
     await saveProfileInternal(req, res, "strangle-options");
+}
+export async function saveRenkoOptionsProfile(req: Request, res: Response): Promise<void> {
+    await saveProfileInternal(req, res, "renko-options");
 }
 export async function getStrangleOptionsConnectionStatus(req: Request, res: Response): Promise<void> {
     await getConnectionStatusInternal(req, res, "strangle-options");
 }
+export async function getRenkoOptionsConnectionStatus(req: Request, res: Response): Promise<void> {
+    await getConnectionStatusInternal(req, res, "renko-options");
+}
 export async function getStrangleOptionsRuntimeStatus(req: Request, res: Response): Promise<void> {
     await getRuntimeStatusInternal(req, res, "strangle-options");
+}
+export async function getRenkoOptionsRuntimeStatus(req: Request, res: Response): Promise<void> {
+    await getRuntimeStatusInternal(req, res, "renko-options");
 }
 export async function checkStrangleOptionsConnection(req: Request, res: Response): Promise<void> {
     await checkConnectionInternal(req, res, "strangle-options");
 }
+export async function checkRenkoOptionsConnection(req: Request, res: Response): Promise<void> {
+    await checkConnectionInternal(req, res, "renko-options");
+}
 export async function enableStrangleOptionsAutoTrader(req: Request, res: Response): Promise<void> {
     await enableAutoTraderInternal(req, res, "strangle-options");
+}
+export async function enableRenkoOptionsAutoTrader(req: Request, res: Response): Promise<void> {
+    await enableAutoTraderInternal(req, res, "renko-options");
 }
 export async function disableStrangleOptionsAutoTrader(req: Request, res: Response): Promise<void> {
     await disableAutoTraderInternal(req, res, "strangle-options");
 }
+export async function disableRenkoOptionsAutoTrader(req: Request, res: Response): Promise<void> {
+    await disableAutoTraderInternal(req, res, "renko-options");
+}
 export async function getStrangleOptionsAccountSummary(req: Request, res: Response): Promise<void> {
     await getAccountSummaryInternal(req, res, "strangle-options");
+}
+export async function getRenkoOptionsAccountSummary(req: Request, res: Response): Promise<void> {
+    await getAccountSummaryInternal(req, res, "renko-options");
 }
 export async function calculateStrangleOptionsRecommendedStartQty(req: Request, res: Response): Promise<void> {
     await calculateRecommendedStartQtyInternal(req, res, "strangle-options");
 }
+export async function calculateRenkoOptionsRecommendedStartQty(req: Request, res: Response): Promise<void> {
+    await calculateRecommendedStartQtyInternal(req, res, "renko-options");
+}
 export async function executeStrangleOptionsManualFuture(req: Request, res: Response): Promise<void> {
     await executeManualFutureInternal(req, res, "strangle-options");
+}
+export async function executeRenkoOptionsManualFuture(req: Request, res: Response): Promise<void> {
+    await executeManualFutureInternal(req, res, "renko-options");
 }
 export async function executeStrangleOptionsManualOption(req: Request, res: Response): Promise<void> {
     await executeManualOptionInternal(req, res, "strangle-options");
 }
+export async function executeRenkoOptionsManualOption(req: Request, res: Response): Promise<void> {
+    await executeManualOptionInternal(req, res, "renko-options");
+}
 export async function executeStrangleOptionsStrategy(req: Request, res: Response): Promise<void> {
     await executeStrategyInternal(req, res, "strangle-options");
+}
+export async function executeRenkoOptionsStrategy(req: Request, res: Response): Promise<void> {
+    await executeStrategyInternal(req, res, "renko-options");
 }
 export async function confirmStrangleOptionsLiveAction(req: Request, res: Response): Promise<void> {
     await confirmCoveredLiveActionInternal(req, res, "strangle-options");
 }
+export async function confirmRenkoOptionsLiveAction(req: Request, res: Response): Promise<void> {
+    await confirmCoveredLiveActionInternal(req, res, "renko-options");
+}
 export async function rejectStrangleOptionsLiveAction(req: Request, res: Response): Promise<void> {
     await rejectCoveredLiveActionInternal(req, res, "strangle-options");
+}
+export async function rejectRenkoOptionsLiveAction(req: Request, res: Response): Promise<void> {
+    await rejectCoveredLiveActionInternal(req, res, "renko-options");
 }
 export async function listAdminPendingCoveredLikeLiveActions(req: Request, res: Response): Promise<void> {
     const arrRuntimeRows = await listRollingFuturesLtRuntime();
     const arrPending = await Promise.all(arrRuntimeRows
-        .filter((objRuntime) => objRuntime.strategyCode === "covered-options" || objRuntime.strategyCode === "strangle-options")
+        .filter((objRuntime) => objRuntime.strategyCode === "covered-options" || objRuntime.strategyCode === "strangle-options" || objRuntime.strategyCode === "renko-options")
         .map(async (objRuntime) => {
             const objPending = getCoveredLiveConfirmationState(objRuntime);
             if (!objPending) {
@@ -15059,7 +15394,7 @@ export async function confirmAdminPendingCoveredLikeLiveAction(req: Request, res
     const vAccountId = String(req.body?.accountId || "").trim();
     const vStrategyCode = String(req.body?.strategyCode || "").trim() as RollingFuturesLtStrategyCode;
     const vActionId = String(req.body?.actionId || "").trim();
-    if (!vAccountId || (vStrategyCode !== "covered-options" && vStrategyCode !== "strangle-options")) {
+    if (!vAccountId || (vStrategyCode !== "covered-options" && vStrategyCode !== "strangle-options" && vStrategyCode !== "renko-options")) {
         res.status(400).json({ status: "warning", message: "Valid account and strategy are required." });
         return;
     }
@@ -15070,7 +15405,7 @@ export async function rejectAdminPendingCoveredLikeLiveAction(req: Request, res:
     const vAccountId = String(req.body?.accountId || "").trim();
     const vStrategyCode = String(req.body?.strategyCode || "").trim() as RollingFuturesLtStrategyCode;
     const vActionId = String(req.body?.actionId || "").trim();
-    if (!vAccountId || (vStrategyCode !== "covered-options" && vStrategyCode !== "strangle-options")) {
+    if (!vAccountId || (vStrategyCode !== "covered-options" && vStrategyCode !== "strangle-options" && vStrategyCode !== "renko-options")) {
         res.status(400).json({ status: "warning", message: "Valid account and strategy are required." });
         return;
     }
@@ -15110,29 +15445,56 @@ export async function getCoveredOptionsClosedPositions(req: Request, res: Respon
 export async function getStrangleOptionsImportableOpenPositions(req: Request, res: Response): Promise<void> {
     await getImportableOpenPositionsInternal(req, res, "strangle-options");
 }
+export async function getRenkoOptionsImportableOpenPositions(req: Request, res: Response): Promise<void> {
+    await getImportableOpenPositionsInternal(req, res, "renko-options");
+}
 export async function getStrangleOptionsOpenPositions(req: Request, res: Response): Promise<void> {
     await getOpenPositionsInternal(req, res, "strangle-options");
+}
+export async function getRenkoOptionsOpenPositions(req: Request, res: Response): Promise<void> {
+    await getOpenPositionsInternal(req, res, "renko-options");
 }
 export async function saveStrangleOptionsOpenPositions(req: Request, res: Response): Promise<void> {
     await saveOpenPositionsInternal(req, res, "strangle-options");
 }
+export async function saveRenkoOptionsOpenPositions(req: Request, res: Response): Promise<void> {
+    await saveOpenPositionsInternal(req, res, "renko-options");
+}
 export async function deleteStrangleOptionsOpenPosition(req: Request, res: Response): Promise<void> {
     await deleteOpenPositionInternal(req, res, "strangle-options");
+}
+export async function deleteRenkoOptionsOpenPosition(req: Request, res: Response): Promise<void> {
+    await deleteOpenPositionInternal(req, res, "renko-options");
 }
 export async function clearStrangleOptionsOpenPositions(req: Request, res: Response): Promise<void> {
     await clearOpenPositionsInternal(req, res, "strangle-options");
 }
+export async function clearRenkoOptionsOpenPositions(req: Request, res: Response): Promise<void> {
+    await clearOpenPositionsInternal(req, res, "renko-options");
+}
 export async function reconcileStrangleOptionsOpenPositions(req: Request, res: Response): Promise<void> {
     await reconcileOpenPositionsInternal(req, res, "strangle-options");
+}
+export async function reconcileRenkoOptionsOpenPositions(req: Request, res: Response): Promise<void> {
+    await reconcileOpenPositionsInternal(req, res, "renko-options");
 }
 export async function closeStrangleOptionsImportedOpenPosition(req: Request, res: Response): Promise<void> {
     await closeImportedOpenPositionInternal(req, res, "strangle-options");
 }
+export async function closeRenkoOptionsImportedOpenPosition(req: Request, res: Response): Promise<void> {
+    await closeImportedOpenPositionInternal(req, res, "renko-options");
+}
 export async function swapStrangleOptionsImportedOpenPosition(req: Request, res: Response): Promise<void> {
+    await swapCoveredOpenPositionInternal(req, res);
+}
+export async function swapRenkoOptionsImportedOpenPosition(req: Request, res: Response): Promise<void> {
     await swapCoveredOpenPositionInternal(req, res);
 }
 export async function getStrangleOptionsClosedPositions(req: Request, res: Response): Promise<void> {
     await getClosedPositionsInternal(req, res, "strangle-options");
+}
+export async function getRenkoOptionsClosedPositions(req: Request, res: Response): Promise<void> {
+    await getClosedPositionsInternal(req, res, "renko-options");
 }
 export async function getCoveredOptionsEvents(req: Request, res: Response): Promise<void> {
     await getEventsInternal(req, res, "covered-options");
@@ -15140,11 +15502,17 @@ export async function getCoveredOptionsEvents(req: Request, res: Response): Prom
 export async function getStrangleOptionsEvents(req: Request, res: Response): Promise<void> {
     await getEventsInternal(req, res, "strangle-options");
 }
+export async function getRenkoOptionsEvents(req: Request, res: Response): Promise<void> {
+    await getEventsInternal(req, res, "renko-options");
+}
 export async function clearCoveredOptionsEventsController(req: Request, res: Response): Promise<void> {
     await clearEventsInternal(req, res, "covered-options");
 }
 export async function clearStrangleOptionsEventsController(req: Request, res: Response): Promise<void> {
     await clearEventsInternal(req, res, "strangle-options");
+}
+export async function clearRenkoOptionsEventsController(req: Request, res: Response): Promise<void> {
+    await clearEventsInternal(req, res, "renko-options");
 }
 export async function deleteCoveredOptionsEventController(req: Request, res: Response): Promise<void> {
     await deleteEventInternal(req, res, "covered-options");
@@ -15152,11 +15520,17 @@ export async function deleteCoveredOptionsEventController(req: Request, res: Res
 export async function deleteStrangleOptionsEventController(req: Request, res: Response): Promise<void> {
     await deleteEventInternal(req, res, "strangle-options");
 }
+export async function deleteRenkoOptionsEventController(req: Request, res: Response): Promise<void> {
+    await deleteEventInternal(req, res, "renko-options");
+}
 export async function executeCoveredOptionsKillSwitch(req: Request, res: Response): Promise<void> {
     await executeKillSwitchInternal(req, res, "covered-options");
 }
 export async function executeStrangleOptionsKillSwitch(req: Request, res: Response): Promise<void> {
     await executeKillSwitchInternal(req, res, "strangle-options");
+}
+export async function executeRenkoOptionsKillSwitch(req: Request, res: Response): Promise<void> {
+    await executeKillSwitchInternal(req, res, "renko-options");
 }
 export async function updateCoveredOptionsRecoveryMetrics(req: Request, res: Response): Promise<void> {
     await updateRecoveryMetricsInternal(req, res, "covered-options");
@@ -15164,11 +15538,17 @@ export async function updateCoveredOptionsRecoveryMetrics(req: Request, res: Res
 export async function updateStrangleOptionsRecoveryMetrics(req: Request, res: Response): Promise<void> {
     await updateRecoveryMetricsInternal(req, res, "strangle-options");
 }
+export async function updateRenkoOptionsRecoveryMetrics(req: Request, res: Response): Promise<void> {
+    await updateRecoveryMetricsInternal(req, res, "renko-options");
+}
 export async function recalculateCoveredOptionsRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "covered-options");
 }
 export async function recalculateStrangleOptionsRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "strangle-options");
+}
+export async function recalculateRenkoOptionsRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
+    await recalculateRecoveryTotalPnlInternal(req, res, "renko-options");
 }
 
 export async function getOptionsScalperProfile(req: Request, res: Response): Promise<void> {
@@ -15261,6 +15641,9 @@ export async function closeOptionsScalperImportedOpenPosition(req: Request, res:
 }
 export async function getOptionsScalperClosedPositions(req: Request, res: Response): Promise<void> {
     await getClosedPositionsInternal(req, res, "options-scalper");
+}
+export async function clearOptionsScalperClosedPositions(req: Request, res: Response): Promise<void> {
+    await clearOptionsScalperClosedPositionsInternal(req, res, "options-scalper");
 }
 export async function getOptionsScalperEvents(req: Request, res: Response): Promise<void> {
     await getEventsInternal(req, res, "options-scalper");

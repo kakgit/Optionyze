@@ -11,6 +11,7 @@ import { ensurePostgresSchema, isPostgresConfigured } from "../storage/postgres"
 import { ensureSurvivalPostgresSchema } from "../storage/survival-postgres";
 import {
     renderCoveredOptionsPage,
+    renderRenkoOptionsPage,
     renderStrangleOptionsPage,
     renderOptionsDemoPage
 } from "../api/controllers/strategyfo-paper-controller";
@@ -97,6 +98,7 @@ async function bootstrap(): Promise<void> {
     app.get("/dashboard", requireAuthPage, requireFreshPasswordPage, renderDashboardPage);
     app.get("/covered-options", requireAuthPage, requireFreshPasswordPage, renderCoveredOptionsPage);
     app.get("/strangle-options", requireAuthPage, requireFreshPasswordPage, renderStrangleOptionsPage);
+    app.get("/renko-options", requireAuthPage, requireFreshPasswordPage, renderRenkoOptionsPage);
     app.get("/options-demo", requireAuthPage, requireFreshPasswordPage, renderOptionsDemoPage);
     app.get("/mngusers", requireAuthPage, requireFreshPasswordPage, requireAdminPage, renderMngUsersPage);
     app.get("/account/profile", requireAuthPage, renderMyProfilePage);

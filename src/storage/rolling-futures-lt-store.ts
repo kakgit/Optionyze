@@ -2,7 +2,7 @@ import path from "node:path";
 import { readJsonFile, writeJsonFileAtomic } from "./json-store";
 import { getPostgresPool, isPostgresConfigured } from "./postgres";
 
-export type RollingFuturesLtStrategyCode = "rolling-futures-lt-long" | "rolling-futures-lt-short" | "rolling-futures-lt-dual" | "covered-options" | "strangle-options" | "options-scalper";
+export type RollingFuturesLtStrategyCode = "rolling-futures-lt-long" | "rolling-futures-lt-short" | "rolling-futures-lt-dual" | "covered-options" | "strangle-options" | "renko-options" | "options-scalper";
 
 export interface RollingFuturesLtConnectionStatus {
     state: "not_selected" | "checking" | "connected" | "warning" | "disconnected" | "auth_failed" | "rate_limited";

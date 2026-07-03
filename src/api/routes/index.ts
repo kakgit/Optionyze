@@ -11,44 +11,58 @@ import {
 import { listSurvivalAdminRunningUsers } from "../controllers/survival-admin-controller";
 import {
     calculateCoveredOptionsRecommendedStartQty,
+    calculateRenkoOptionsRecommendedStartQty,
     calculateStrangleOptionsRecommendedStartQty,
     calculateOptionsScalperRecommendedStartQty,
     checkRollingFuturesLtDualConnection,
     checkCoveredOptionsConnection,
+    checkRenkoOptionsConnection,
     checkStrangleOptionsConnection,
     checkOptionsScalperConnection,
     calculateRollingFuturesLtDualRecommendedStartQty,
     clearCoveredOptionsEventsController,
+    clearRenkoOptionsEventsController,
     clearStrangleOptionsEventsController,
     clearOptionsScalperEventsController,
+    clearOptionsScalperClosedPositions,
     clearRollingFuturesLtDualEventsController,
     closeCoveredOptionsImportedOpenPosition,
+    closeRenkoOptionsImportedOpenPosition,
     closeStrangleOptionsImportedOpenPosition,
     closeOptionsScalperImportedOpenPosition,
     deleteRollingFuturesLtDualEventController,
     deleteCoveredOptionsEventController,
+    deleteRenkoOptionsEventController,
     deleteStrangleOptionsEventController,
     deleteOptionsScalperEventController,
     closeRollingFuturesLtDualImportedOpenPosition,
     deleteCoveredOptionsOpenPosition,
+    deleteRenkoOptionsOpenPosition,
     deleteStrangleOptionsOpenPosition,
     deleteOptionsScalperOpenPosition,
     deleteRollingFuturesLtDualOpenPosition,
     disableCoveredOptionsAutoTrader,
+    disableRenkoOptionsAutoTrader,
     disableStrangleOptionsAutoTrader,
     disableOptionsScalperAutoTrader,
     disableRollingFuturesLtDualAutoTrader,
     enableCoveredOptionsAutoTrader,
+    enableRenkoOptionsAutoTrader,
     enableStrangleOptionsAutoTrader,
     enableOptionsScalperAutoTrader,
     enableRollingFuturesLtDualAutoTrader,
     executeCoveredOptionsKillSwitch,
+    executeRenkoOptionsKillSwitch,
     executeStrangleOptionsKillSwitch,
     confirmCoveredOptionsLiveAction,
+    confirmRenkoOptionsLiveAction,
     confirmStrangleOptionsLiveAction,
     executeCoveredOptionsManualFuture,
     executeCoveredOptionsManualOption,
     executeCoveredOptionsStrategy,
+    executeRenkoOptionsManualFuture,
+    executeRenkoOptionsManualOption,
+    executeRenkoOptionsStrategy,
     executeStrangleOptionsManualFuture,
     executeStrangleOptionsManualOption,
     executeStrangleOptionsStrategy,
@@ -71,6 +85,14 @@ import {
     getCoveredOptionsOpenPositions,
     getCoveredOptionsProfile,
     getCoveredOptionsRuntimeStatus,
+    getRenkoOptionsAccountSummary,
+    getRenkoOptionsClosedPositions,
+    getRenkoOptionsConnectionStatus,
+    getRenkoOptionsEvents,
+    getRenkoOptionsImportableOpenPositions,
+    getRenkoOptionsOpenPositions,
+    getRenkoOptionsProfile,
+    getRenkoOptionsRuntimeStatus,
     getStrangleOptionsAccountSummary,
     getStrangleOptionsClosedPositions,
     getStrangleOptionsConnectionStatus,
@@ -89,6 +111,7 @@ import {
     getOptionsScalperProfile,
     getOptionsScalperRuntimeStatus,
     listCoveredOptionsVerifierRunningUsers,
+    listRenkoOptionsVerifierRunningUsers,
     listStrangleOptionsVerifierRunningUsers,
     getRollingFuturesLtDualAccountSummary,
     getRollingFuturesLtDualClosedPositions,
@@ -102,22 +125,28 @@ import {
     disableRollingFuturesLtDualSimulatedPrimaryOutageController,
     switchRollingFuturesLtDualBackToPrimaryController,
     recalculateCoveredOptionsRecoveryTotalPnl,
+    recalculateRenkoOptionsRecoveryTotalPnl,
     recalculateStrangleOptionsRecoveryTotalPnl,
     recalculateOptionsScalperRecoveryTotalPnl,
     recalculateRollingFuturesLtDualRecoveryTotalPnl,
     updateCoveredOptionsRecoveryMetrics,
+    updateRenkoOptionsRecoveryMetrics,
     updateStrangleOptionsRecoveryMetrics,
     updateOptionsScalperRecoveryMetrics,
     updateRollingFuturesLtDualRecoveryMetrics,
     reconcileCoveredOptionsOpenPositions,
     rejectCoveredOptionsLiveAction,
+    rejectRenkoOptionsLiveAction,
     rejectStrangleOptionsLiveAction,
+    reconcileRenkoOptionsOpenPositions,
     reconcileStrangleOptionsOpenPositions,
     rejectOptionsScalperLiveAction,
     reconcileOptionsScalperOpenPositions,
     reconcileRollingFuturesLtDualOpenPositions,
     saveCoveredOptionsOpenPositions,
     saveCoveredOptionsProfile,
+    saveRenkoOptionsOpenPositions,
+    saveRenkoOptionsProfile,
     saveStrangleOptionsOpenPositions,
     saveStrangleOptionsProfile,
     saveOptionsScalperOpenPositions,
@@ -125,12 +154,14 @@ import {
     saveRollingFuturesLtDualOpenPositions,
     saveRollingFuturesLtDualProfile,
     clearCoveredOptionsOpenPositions,
+    clearRenkoOptionsOpenPositions,
     clearStrangleOptionsOpenPositions,
     clearOptionsScalperOpenPositions,
     listAdminPendingCoveredLikeLiveActions,
     confirmAdminPendingCoveredLikeLiveAction,
     rejectAdminPendingCoveredLikeLiveAction,
     swapCoveredOptionsImportedOpenPosition,
+    swapRenkoOptionsImportedOpenPosition,
     swapStrangleOptionsImportedOpenPosition,
     handleTelegramWebhook
 } from "../controllers/rolling-futures-lt-controller";
@@ -210,6 +241,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.get("/strangle-options/admin/running-users", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await listStrangleOptionsVerifierRunningUsers(req, res);
+    });
+    objRouter.get("/renko-options/admin/running-users", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await listRenkoOptionsVerifierRunningUsers(req, res);
     });
     objRouter.get("/survival-admin/running-users", requireSurvivalAdminApi, async (req, res) => {
         await listSurvivalAdminRunningUsers(req, res);
@@ -396,6 +430,94 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
         await clearStrangleOptionsEventsController(req, res);
     });
 
+    objRouter.get("/renko-options/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRenkoOptionsProfile(req, res);
+    });
+    objRouter.post("/renko-options/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveRenkoOptionsProfile(req, res);
+    });
+    objRouter.get("/renko-options/connection/status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRenkoOptionsConnectionStatus(req, res);
+    });
+    objRouter.get("/renko-options/runtime", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRenkoOptionsRuntimeStatus(req, res);
+    });
+    objRouter.post("/renko-options/connection/check", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await checkRenkoOptionsConnection(req, res);
+    });
+    objRouter.post("/renko-options/auto-trader/start", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await enableRenkoOptionsAutoTrader(req, res);
+    });
+    objRouter.post("/renko-options/auto-trader/stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await disableRenkoOptionsAutoTrader(req, res);
+    });
+    objRouter.get("/renko-options/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRenkoOptionsAccountSummary(req, res);
+    });
+    objRouter.post("/renko-options/start-qty/calculate", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await calculateRenkoOptionsRecommendedStartQty(req, res);
+    });
+    objRouter.post("/renko-options/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeRenkoOptionsManualFuture(req, res);
+    });
+    objRouter.post("/renko-options/manual/option", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeRenkoOptionsManualOption(req, res);
+    });
+    objRouter.post("/renko-options/strategy/execute", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeRenkoOptionsStrategy(req, res);
+    });
+    objRouter.post("/renko-options/live-action/confirm", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await confirmRenkoOptionsLiveAction(req, res);
+    });
+    objRouter.post("/renko-options/live-action/reject", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await rejectRenkoOptionsLiveAction(req, res);
+    });
+    objRouter.get("/renko-options/open-positions/importable", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRenkoOptionsImportableOpenPositions(req, res);
+    });
+    objRouter.get("/renko-options/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRenkoOptionsOpenPositions(req, res);
+    });
+    objRouter.post("/renko-options/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveRenkoOptionsOpenPositions(req, res);
+    });
+    objRouter.post("/renko-options/open-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteRenkoOptionsOpenPosition(req, res);
+    });
+    objRouter.post("/renko-options/open-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearRenkoOptionsOpenPositions(req, res);
+    });
+    objRouter.post("/renko-options/open-positions/reconcile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await reconcileRenkoOptionsOpenPositions(req, res);
+    });
+    objRouter.post("/renko-options/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await closeRenkoOptionsImportedOpenPosition(req, res);
+    });
+    objRouter.post("/renko-options/open-positions/swap", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await swapRenkoOptionsImportedOpenPosition(req, res);
+    });
+    objRouter.post("/renko-options/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeRenkoOptionsKillSwitch(req, res);
+    });
+    objRouter.post("/renko-options/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateRenkoOptionsRecoveryMetrics(req, res);
+    });
+    objRouter.post("/renko-options/metrics/recalculate-total-pnl", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await recalculateRenkoOptionsRecoveryTotalPnl(req, res);
+    });
+    objRouter.get("/renko-options/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRenkoOptionsClosedPositions(req, res);
+    });
+    objRouter.get("/renko-options/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getRenkoOptionsEvents(req, res);
+    });
+    objRouter.post("/renko-options/events/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteRenkoOptionsEventController(req, res);
+    });
+    objRouter.post("/renko-options/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearRenkoOptionsEventsController(req, res);
+    });
+
     objRouter.get("/options-demo/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getOptionsScalperProfile(req, res);
     });
@@ -473,6 +595,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.get("/options-demo/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getOptionsScalperClosedPositions(req, res);
+    });
+    objRouter.post("/options-demo/closed-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearOptionsScalperClosedPositions(req, res);
     });
     objRouter.get("/options-demo/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getOptionsScalperEvents(req, res);

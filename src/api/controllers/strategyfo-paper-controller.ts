@@ -35,6 +35,16 @@ export function renderStrangleOptionsPage(req: Request, res: Response): void {
     });
 }
 
+export function renderRenkoOptionsPage(req: Request, res: Response): void {
+    res.render("covered-options", {
+        pageTitle: "Renko Options - Live | Optionyze",
+        pageVariant: "renko",
+        currentAccount: req.authAccount,
+        defaultUserId: req.authAccount?.accountId || "demo-paper",
+        rollingTelegramEventTypes: gRollingFuturesTelegramEventTypes
+    });
+}
+
 export function renderOptionsDemoPage(req: Request, res: Response): void {
     res.render("covered-options", {
         pageTitle: "Options Demo | Optionyze",

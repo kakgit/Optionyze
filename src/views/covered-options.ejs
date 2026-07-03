@@ -15,25 +15,31 @@
     const vPageVariantRaw = String(pageVariant || "live").trim().toLowerCase();
     const vPageVariant = vPageVariantRaw === "demo"
         ? "demo"
-        : (vPageVariantRaw === "strangle" ? "strangle" : "live");
+        : (vPageVariantRaw === "strangle"
+            ? "strangle"
+            : (vPageVariantRaw === "renko" ? "renko" : "live"));
     const bIsDemoPage = vPageVariant === "demo";
     const bIsStranglePage = vPageVariant === "strangle";
-    const vStrategyLabel = bIsDemoPage ? "Options Demo" : (bIsStranglePage ? "Strangle Options" : "Covered Options");
+    const bIsRenkoPage = vPageVariant === "renko";
+    const bShowRenkoSection = bIsDemoPage || bIsRenkoPage;
+    const bIsStrangleLikePage = bIsStranglePage || bIsRenkoPage;
+    const vStrategyLabel = bIsDemoPage ? "Options Demo" : (bIsRenkoPage ? "Renko Options" : (bIsStranglePage ? "Strangle Options" : "Covered Options"));
     const vPageHeading = bIsDemoPage ? "Options Demo" : `${vStrategyLabel} - Live`;
-    const vEndpointBase = bIsDemoPage ? "/api/options-demo" : (bIsStranglePage ? "/api/strangle-options" : "/api/covered-options");
+    const vEndpointBase = bIsDemoPage ? "/api/options-demo" : (bIsRenkoPage ? "/api/renko-options" : (bIsStranglePage ? "/api/strangle-options" : "/api/covered-options"));
     const vOpenPositionsEmpty = bIsDemoPage
         ? "No demo positions are currently shown."
-        : `Select an API profile and load live ${bIsStranglePage ? "strangle-option" : "covered-option"} positions from Delta Exchange.`;
+        : `Select an API profile and load live ${bIsRenkoPage ? "renko-option" : (bIsStranglePage ? "strangle-option" : "covered-option")} positions from Delta Exchange.`;
     const vClosedPositionsEmpty = bIsDemoPage
         ? "No demo trade history found for the selected date range."
         : "No Delta fill history found for the selected date range.";
-    const vConfirmationHeading = bIsDemoPage ? "Demo Confirmation" : `${vStrategyLabel} Confirmation`;
-    const vConfirmationAutoText = bIsDemoPage ? "Auto-confirm all demo actions" : `Auto-confirm all ${bIsStranglePage ? "strangle" : "covered"} live actions`;
-    const vConfirmationEmpty = bIsDemoPage ? "No demo action is waiting for confirmation." : "No live action is waiting for confirmation.";
+    const vConfirmationHeading = `${vStrategyLabel} Confirmation`;
+    const vConfirmationAutoText = `Auto-confirm all ${bIsRenkoPage ? "renko" : (bIsStranglePage ? "strangle" : "covered")} live actions`;
+    const vConfirmationEmpty = "No live action is waiting for confirmation.";
     const vActivityEmpty = bIsDemoPage ? "No demo activity has been logged yet." : "No live activity has been logged yet.";
     const vClearOpenPositionsTitle = bIsDemoPage ? "Clear all demo open positions locally" : "Clear all imported open positions locally";
     const vRefreshOpenPositionsTitle = bIsDemoPage ? "Refresh demo positions" : "Refresh open positions";
     const vKillSwitchTitle = bIsDemoPage ? "Kill switch to close demo option legs" : "Kill switch to close live option legs";
+    const vClearClosedPositionsTitle = bIsDemoPage ? "Clear all demo closed positions locally" : "";
     const vRefreshClosedTitle = bIsDemoPage ? "Refresh closed demo positions" : "Refresh closed positions from Delta Exchange";
   %>
   <body class="app-page"
@@ -78,7 +84,7 @@
                             </button>
                         </div>
                         <div class="rolling-futures-start-qty-row">
-                            <input class="rolling-futures-start-qty" type="number" min="<%= bIsStranglePage ? '1' : '2' %>" max="1000" step="1" id="txtRollingFuturesStartQty" value="<%= bIsStranglePage ? '1' : '2' %>" />
+                            <input class="rolling-futures-start-qty" type="number" min="<%= (bIsDemoPage || bIsStrangleLikePage) ? '1' : '2' %>" max="1000" step="1" id="txtRollingFuturesStartQty" value="<%= (bIsDemoPage || bIsStrangleLikePage) ? '1' : '2' %>" />
                         </div>
                     </div>
                     <div class="rolling-futures-hero-badge action">
@@ -104,12 +110,8 @@
                             </div>
                             <div class="rolling-futures-help-inline-bottom">
                                 <div class="rolling-demo-field rolling-futures-help-input-field">
-                                    <input type="number" id="txtRollingFuturesBrokerageMultiplier" value="<%= bIsStranglePage ? '5' : '10' %>" />
+                                    <input type="number" id="txtRollingFuturesBrokerageMultiplier" value="<%= bIsStrangleLikePage ? '5' : '10' %>" />
                                 </div>
-                                <label class="rolling-futures-neutral-mode rolling-futures-help-mode rolling-futures-help-side-check" for="chkRollingFuturesReEnterBrok">
-                                    <input type="checkbox" id="chkRollingFuturesReEnterBrok" checked />
-                                    <span class="rolling-futures-help-side-label">Re Enter</span>
-                                </label>
                             </div>
                         </div>
                     </div>
@@ -131,12 +133,8 @@
                             </div>
                             <div class="rolling-futures-help-inline-bottom">
                                 <div class="rolling-demo-field rolling-futures-help-input-field">
-                                    <input type="number" id="txtRollingFuturesBlockedMarginPct" value="<%= bIsStranglePage ? '10' : '20' %>" />
+                                    <input type="number" id="txtRollingFuturesBlockedMarginPct" value="<%= bIsStrangleLikePage ? '10' : '20' %>" />
                                 </div>
-                                <label class="rolling-futures-neutral-mode rolling-futures-help-mode rolling-futures-help-side-check" for="chkRollingFuturesReEnterBlock">
-                                    <input type="checkbox" id="chkRollingFuturesReEnterBlock" checked />
-                                    <span class="rolling-futures-help-side-label">Re Enter</span>
-                                </label>
                             </div>
                         </div>
                     </div>
@@ -274,8 +272,8 @@
                     <div class="rolling-demo-field">
                         <label for="ddlRollingFuturesLegs1">Legs</label>
                         <select id="ddlRollingFuturesLegs1">
-                            <option value="both" <%= bIsStranglePage ? '' : 'selected' %>>Both</option>
-                            <option value="ce" <%= bIsStranglePage ? 'selected' : '' %>>CE</option>
+                            <option value="both" <%= bIsStrangleLikePage ? '' : 'selected' %>>Both</option>
+                            <option value="ce" <%= bIsStrangleLikePage ? 'selected' : '' %>>CE</option>
                             <option value="pe">PE</option>
                         </select>
                     </div>
@@ -310,25 +308,13 @@
                         <label for="txtRollingFuturesNewD1">New D</label>
                         <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD1" value="0.33" />
                     </div>
-                    <% if (!bIsStranglePage) { %>
-                        <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-red">
-                            <label for="txtRollingFuturesReD1">Re D</label>
-                            <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesReD1" value="0.33" />
-                        </div>
-                    <% } %>
                     <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-tpd">
                         <label for="txtRollingFuturesTpD1">TP D</label>
                         <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD1" value="0.10" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-sld">
                         <label for="txtRollingFuturesSlD1">SL D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD1" value="<%= bIsStranglePage ? '0.55' : '0.50' %>" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-reenter">
-                        <label for="chkRollingFuturesReEnter1">Re Enter</label>
-                        <div class="rolling-futures-mini-check">
-                            <input type="checkbox" id="chkRollingFuturesReEnter1" checked />
-                        </div>
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD1" value="<%= bIsStrangleLikePage ? '0.55' : '0.50' %>" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row1-break-action rolling-covered-row1-break-action-sellpe">
                         <label>&nbsp;</label>
@@ -345,26 +331,26 @@
                         <label for="ddlRollingFuturesAction2">Action</label>
                         <select id="ddlRollingFuturesAction2">
                             <option value="none">None</option>
-                            <option value="buy" <%= bIsStranglePage ? '' : 'selected' %>>Buy</option>
-                            <option value="sell" <%= bIsStranglePage ? 'selected' : '' %>>Sell</option>
+                            <option value="buy" <%= bIsStrangleLikePage ? '' : 'selected' %>>Buy</option>
+                            <option value="sell" <%= bIsStrangleLikePage ? 'selected' : '' %>>Sell</option>
                         </select>
                     </div>
                     <div class="rolling-demo-field">
                         <label for="ddlRollingFuturesLegs2">Legs</label>
                         <select id="ddlRollingFuturesLegs2">
-                            <option value="both" <%= bIsStranglePage ? '' : 'selected' %>>Both</option>
+                            <option value="both" <%= bIsStrangleLikePage ? '' : 'selected' %>>Both</option>
                             <option value="ce">CE</option>
-                            <option value="pe" <%= bIsStranglePage ? 'selected' : '' %>>PE</option>
+                            <option value="pe" <%= bIsStrangleLikePage ? 'selected' : '' %>>PE</option>
                         </select>
                     </div>
                     <div class="rolling-demo-field">
                         <label for="ddlRollingFuturesExpiryType2">Expiry Type</label>
                         <select id="ddlRollingFuturesExpiryType2">
-                            <option value="1" <%= bIsStranglePage ? '' : 'selected' %>>DAILY T+1</option>
+                            <option value="1" <%= bIsStrangleLikePage ? '' : 'selected' %>>DAILY T+1</option>
                             <option value="2">DAILY T+2</option>
                             <option value="4">WEEKLY</option>
                             <option value="5">BI-WEEKLY</option>
-                            <option value="6" <%= bIsStranglePage ? 'selected' : '' %>>MONTHLY</option>
+                            <option value="6" <%= bIsStrangleLikePage ? 'selected' : '' %>>MONTHLY</option>
                             <option value="7">BI-MONTHLY</option>
                         </select>
                     </div>
@@ -386,27 +372,15 @@
                     </div>
                     <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-newd">
                         <label for="txtRollingFuturesNewD2">New D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD2" value="<%= bIsStranglePage ? '0.33' : '0.13' %>" />
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD2" value="<%= bIsStrangleLikePage ? '0.33' : '0.13' %>" />
                     </div>
-                    <% if (!bIsStranglePage) { %>
-                        <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-red">
-                            <label for="txtRollingFuturesReD2">Re D</label>
-                            <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesReD2" value="0.13" />
-                        </div>
-                    <% } %>
                     <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-tpd">
                         <label for="txtRollingFuturesTpD2">TP D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD2" value="<%= bIsStranglePage ? '0.10' : '1.00' %>" />
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD2" value="<%= bIsStrangleLikePage ? '0.10' : '1.00' %>" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-sld">
                         <label for="txtRollingFuturesSlD2">SL D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD2" value="<%= bIsStranglePage ? '0.55' : '0.05' %>" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-reenter">
-                        <label for="chkRollingFuturesReEnter2">Re Enter</label>
-                        <div class="rolling-futures-mini-check">
-                            <input type="checkbox" id="chkRollingFuturesReEnter2" checked />
-                        </div>
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD2" value="<%= bIsStrangleLikePage ? '0.55' : '0.05' %>" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row2-break-action rolling-covered-row2-break-action-sellpe">
                         <label>&nbsp;</label>
@@ -421,7 +395,7 @@
                 <div class="rolling-futures-demo-grid actions-row rolling-futures-actions-row-with-gate">
                     <div class="rolling-demo-field rolling-futures-buy-gate-field">
                         <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
-                            <% if (bIsStranglePage) { %>
+                            <% if (bIsStrangleLikePage) { %>
                                 <div class="rolling-futures-buy-gate-row">
                                     <div class="rolling-futures-buy-gate-text">Replace weaker leg when delta gap exceeds X% of total live delta</div>
                                     <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesStrangleDeltaDiffReplaceEnabled">
@@ -431,7 +405,7 @@
                                         <input type="number" id="txtRollingFuturesStrangleDeltaDiffReplacePct" min="0" max="100" step="1" value="40" />
                                     </div>
                                     <span class="rolling-futures-help-icon-wrap">
-                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show strangle delta gap replacement help">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show <%= vStrategyLabel %> delta gap replacement help">
                                             ?
                                         </button>
                                         <span class="rolling-futures-help-popout floating">
@@ -457,33 +431,19 @@
                                         </span>
                                     </span>
                                 </div>
-                                <div class="rolling-futures-buy-gate-row">
-                                    <div class="rolling-futures-buy-gate-text">Open Opposite leg if the above condition is Satisfied</div>
-                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesBuyHedgeOppositeLegOnGate">
-                                        <input type="checkbox" id="chkRollingFuturesBuyHedgeOppositeLegOnGate" />
-                                    </label>
-                                    <span class="rolling-futures-help-icon-wrap">
-                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show opposite buy leg help">
-                                            ?
-                                        </button>
-                                        <span class="rolling-futures-help-popout floating">
-                                            When enabled, a premium-gated covered buy-hedge trigger will try to open the opposite leg instead. Example: instead of <code>CE BUY</code>, it will try <code>PE BUY</code>. If that opposite leg is already open, nothing new will be placed.
-                                        </span>
-                                    </span>
-                                </div>
                             <% } %>
                         </div>
                     </div>
                     <div class="rolling-demo-field rolling-futures-buy-gate-field">
                         <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
-                            <% if (bIsStranglePage) { %>
+                            <% if (bIsStrangleLikePage) { %>
                                 <div class="rolling-futures-buy-gate-row">
                                     <div class="rolling-futures-buy-gate-text">Reopen leg at New D value</div>
                                     <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesStrangleReopenAtNewD">
                                         <input type="checkbox" id="chkRollingFuturesStrangleReopenAtNewD" />
                                     </label>
                                     <span class="rolling-futures-help-icon-wrap">
-                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show strangle reopen help">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show <%= vStrategyLabel %> reopen help">
                                             ?
                                         </button>
                                         <span class="rolling-futures-help-popout floating">
@@ -617,6 +577,14 @@
                             </div>
                             <div class="rolling-demo-field">
                                 <div class="rolling-demo-check-wrap">
+                                    <% if (bIsDemoPage) { %>
+                                        <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClearClosedPositions" title="<%= vClearClosedPositionsTitle %>" aria-label="<%= vClearClosedPositionsTitle %>">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                                <path d="M18 6 6 18" />
+                                                <path d="m6 6 12 12" />
+                                            </svg>
+                                        </button>
+                                    <% } %>
                                     <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesRefreshClosedPositions" title="<%= vRefreshClosedTitle %>" aria-label="<%= vRefreshClosedTitle %>">
                                         <svg viewBox="0 0 24 24" aria-hidden="true">
                                             <path d="M21 12a9 9 0 1 1-2.64-6.36" />
@@ -666,99 +634,40 @@
                 </div>
             </div>
 
+            <% if (!bIsDemoPage) { %>
             <div class="app-panel rolling-demo-card rolling-futures-hidden rolling-futures-indicator-card" id="cardRollingFuturesDeltaDirec">
                 <div class="rolling-demo-card-head rolling-futures-indicator-head-row">
-                    <h2><%= bIsDemoPage ? "Indicator" : "Delta Direction" %></h2>
-                    <% if (bIsDemoPage) { %>
-                        <div class="rolling-futures-indicator-controls">
-                            <label class="rolling-futures-indicator-refresh-interval" for="txtRollingFuturesIndicatorRefreshMins">
-                                <span>Refresh Mins</span>
-                                <input id="txtRollingFuturesIndicatorRefreshMins" type="number" min="1" max="60" step="1" value="5" />
-                            </label>
-                            <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingFuturesIndicatorRefresh" title="Refresh indicator now" aria-label="Refresh indicator now">
-                                <svg viewBox="0 0 24 24" aria-hidden="true">
-                                    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-                                    <path d="M21 3v6h-6" />
-                                </svg>
-                            </button>
-                        </div>
-                    <% } %>
+                    <h2>Delta Direction</h2>
                 </div>
-                <% if (bIsDemoPage) { %>
-                    <div class="rolling-futures-indicator-head">
-                        <div class="rolling-futures-badges">
-                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorOverall">Overall: Waiting</span>
-                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorPcr">PCR: -</span>
-                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorSupport">Support: -</span>
-                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorResistance">Resistance: -</span>
-                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorOrderBook">Order Book: -</span>
-                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorFlow">Flow: -</span>
-                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorTrend">Trend: -</span>
-                            <span class="rolling-futures-badge" id="rollingFuturesIndicatorStrength">Strength: -</span>
-                        </div>
-                        <div class="rolling-futures-strength-wrap">
-                            <div class="rolling-futures-strength-label">Signal Strength</div>
-                            <div class="rolling-futures-strength-bar" id="rollingFuturesIndicatorStrengthBar" aria-label="Signal strength meter">
-                                <% for (let i = 1; i <= 5; i += 1) { %>
-                                    <span class="rolling-futures-strength-step" data-step="<%= i %>"></span>
-                                <% } %>
-                            </div>
-                        </div>
-                        <div class="rolling-futures-strength-wrap">
-                            <div class="rolling-futures-strength-label">Strength History</div>
-                            <div class="rolling-futures-history-bar" id="rollingFuturesIndicatorHistoryBar" aria-label="Signal strength history">
-                                <% for (let i = 1; i <= 8; i += 1) { %>
-                                    <span class="rolling-futures-history-step" data-step="<%= i %>"></span>
-                                <% } %>
-                            </div>
-                        </div>
-                        <div class="rolling-futures-indicator-meta" id="rollingFuturesIndicatorMeta">Open interest direction will appear after the latest market snapshot loads.</div>
-                        <div class="rolling-futures-indicator-confidence" id="rollingFuturesIndicatorConfidence">Confidence: -</div>
-                        <div class="rolling-futures-indicator-headline" id="rollingFuturesIndicatorHeadline">Headline: -</div>
-                    </div>
-                <% } %>
                 <div class="rolling-demo-table-wrap">
                     <table class="rolling-demo-table">
                         <thead>
                             <tr>
-                                <% if (bIsDemoPage) { %>
-                                    <th>Term</th>
-                                    <th>Window</th>
-                                    <th>Expiry</th>
-                                    <th>DTE</th>
-                                    <th>Call OI</th>
-                                    <th>Put OI</th>
-                                    <th>PCR</th>
-                                    <th>Support</th>
-                                    <th>Resistance</th>
-                                    <th>Flow</th>
-                                    <th>Trend</th>
-                                    <th>Direction</th>
-                                <% } else { %>
-                                    <th>Dated</th>
-                                    <th>Daily Call</th>
-                                    <th>Daily Put</th>
-                                    <th>Direc</th>
-                                    <th>Weekly Call</th>
-                                    <th>Weekly Put</th>
-                                    <th>Direc</th>
-                                    <th>Monthly Call</th>
-                                    <th>Monthly Put</th>
-                                    <th>Direc</th>
-                                    <th>OA Direc</th>
-                                <% } %>
+                                <th>Dated</th>
+                                <th>Daily Call</th>
+                                <th>Daily Put</th>
+                                <th>Direc</th>
+                                <th>Weekly Call</th>
+                                <th>Weekly Put</th>
+                                <th>Direc</th>
+                                <th>Monthly Call</th>
+                                <th>Monthly Put</th>
+                                <th>Direc</th>
+                                <th>OA Direc</th>
                             </tr>
                         </thead>
                         <tbody id="tBodyRollingFuturesDeltas">
                             <tr class="rolling-futures-empty-body">
-                                <td colspan="<%= bIsDemoPage ? 12 : 11 %>"><%= bIsDemoPage ? "No indicator data yet." : "No delta direction data yet." %></td>
+                                <td colspan="11">No delta direction data yet.</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
             </div>
+            <% } %>
 
             <div class="rolling-demo-log-grid">
+                <% if (!bIsDemoPage) { %>
                 <div class="app-panel rolling-demo-card">
                     <div class="rolling-demo-card-head">
                         <h2><%= vConfirmationHeading %></h2>
@@ -789,6 +698,58 @@
                         </div>
                     </div>
                 </div>
+                <% } %>
+
+                <% if (bShowRenkoSection) { %>
+                    <div class="app-panel rolling-demo-card rolling-renko-feed-card">
+                        <div class="rolling-demo-card-head">
+                            <div class="rolling-futures-indicator-head-row">
+                                <h2>Renko Feed</h2>
+                                <span class="rolling-renko-feed-color-badge neutral" id="rollingRenkoCurrentBoxColor">Waiting</span>
+                            </div>
+                            <div class="rolling-demo-card-tools">
+                                <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingRenkoRefresh" title="Refresh Renko feed" aria-label="Refresh Renko feed">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                        <path d="M21 3v6h-6" />
+                                    </svg>
+                                </button>
+                                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingRenkoClear" title="Clear Renko feed" aria-label="Clear Renko feed">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M18 6 6 18" />
+                                        <path d="m6 6 12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="rolling-renko-feed-grid">
+                            <div class="rolling-demo-field rolling-renko-feed-field switch-only">
+                                <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoEnabled">
+                                    <input type="checkbox" id="chkRollingFuturesRenkoEnabled" />
+                                    <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
+                                </label>
+                            </div>
+                            <div class="rolling-demo-field rolling-renko-feed-field">
+                                <label for="txtRollingFuturesRenkoBoxSize">Renko Box Size</label>
+                                <input type="number" id="txtRollingFuturesRenkoBoxSize" min="1" step="1" value="100" />
+                            </div>
+                            <div class="rolling-demo-field rolling-renko-feed-field">
+                                <label for="txtRollingFuturesRenkoBaseValue">Base Value</label>
+                                <input type="number" id="txtRollingFuturesRenkoBaseValue" min="0" step="0.01" placeholder="Enter base value" />
+                            </div>
+                            <div class="rolling-demo-field rolling-renko-feed-field">
+                                <label>Spot Price</label>
+                                <div class="rolling-renko-feed-value-row">
+                                    <span class="rolling-renko-feed-value-badge" id="rollingRenkoSpotPrice">--</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="rolling-renko-feed-meta" id="rollingRenkoFeedMeta">Turn the Renko feed ON to begin tracking live box color.</div>
+                        <div class="rolling-demo-event-log" id="rollingRenkoHistoryLog">
+                            <div class="rolling-demo-event-empty">No Renko color changes yet.</div>
+                        </div>
+                    </div>
+                <% } %>
 
                 <% if (!bIsDemoPage) { %>
                     <div class="app-panel rolling-demo-card">
