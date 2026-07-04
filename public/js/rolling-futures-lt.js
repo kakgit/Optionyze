@@ -173,6 +173,10 @@
         refreshOpenPositionsButton: document.getElementById(`btn${idPrefix}RefreshOpenPositions`),
         killSwitchButton: document.getElementById(`btn${idPrefix}KillSwitch`),
         openPositionsBody: document.getElementById(`${prefix}OpenPositionsBody`),
+        openPrevPageButton: document.getElementById(`btn${idPrefix}OpenPrevPage`),
+        openNextPageButton: document.getElementById(`btn${idPrefix}OpenNextPage`),
+        openPageInfo: document.getElementById(`${prefix}OpenPositionsPageInfo`),
+        openPageNumbers: document.getElementById(`${prefix}OpenPageNumbers`),
         hedgeGateSummary: document.getElementById("rollingDualFuturesHedgeGateSummary"),
         closedFromDate: document.getElementById(`txt${idPrefix}ClosedFromDate`),
         closedToDate: document.getElementById(`txt${idPrefix}ClosedToDate`),
@@ -211,6 +215,7 @@
     let selectedApiProfileId = "";
     let connectionState = "not_selected";
     let displayedPositions = [];
+    let openPositionsPage = 1;
     let importablePositions = [];
     let closedPositions = [];
     let closedPositionsPage = 1;
@@ -266,6 +271,7 @@
     };
     let renkoHistoryBySymbol = { BTC: [], ETH: [] };
     let currentRenkoBaseSymbol = "BTC";
+    const openPositionsPageSize = 10;
     const closedPositionsPageSize = 10;
     const coveredMultiplierMarginPerUnit = 1.5;
 
@@ -3434,7 +3440,12 @@
 
     function renderOpenPositions(payload) {
         const objPayload = extractOpenPositionsPayload(payload);
-        const arrRows = objPayload.positions;
+        const arrRows = Array.isArray(objPayload.positions)
+            ? objPayload.positions.slice().sort(function (left, right) {
+                return new Date(String(right?.openedAt || right?.updatedAt || "")).getTime()
+                    - new Date(String(left?.openedAt || left?.updatedAt || "")).getTime();
+            })
+            : [];
         const objTotals = objPayload.totals || {};
         displayedPositions = arrRows;
         renderCoveredHedgeGateSummary(arrRows);
@@ -3451,11 +3462,22 @@
             if (ids.openCount) {
                 ids.openCount.textContent = "0";
             }
+            if (ids.openPageInfo) {
+                ids.openPageInfo.textContent = "Page 0 of 0";
+            }
+            if (ids.openPageNumbers) {
+                ids.openPageNumbers.innerHTML = "";
+            }
             setButtonsEnabled();
             return;
         }
+        const totalPages = Math.max(1, Math.ceil(arrRows.length / openPositionsPageSize));
+        openPositionsPage = Math.min(openPositionsPage, totalPages);
+        openPositionsPage = Math.max(openPositionsPage, 1);
+        const startIndex = (openPositionsPage - 1) * openPositionsPageSize;
+        const pageRows = arrRows.slice(startIndex, startIndex + openPositionsPageSize);
         const nextLtps = new Map();
-        const openRowsHtml = arrRows.map(function (row) {
+        const openRowsHtml = pageRows.map(function (row) {
             const side = String(row.side || "-").trim().toUpperCase();
             const contractName = String(row.contractName || "-");
             const lotSize = contractName.includes("ETH") ? 0.01 : 0.001;
@@ -3556,6 +3578,16 @@
         if (ids.openCount) {
             ids.openCount.textContent = String(arrRows.length);
         }
+        if (ids.openPageInfo) {
+            ids.openPageInfo.textContent = `Page ${openPositionsPage} of ${totalPages} | ${arrRows.length} records`;
+        }
+        if (ids.openPageNumbers) {
+            const pageNumbers = [];
+            for (let page = 1; page <= totalPages; page += 1) {
+                pageNumbers.push(`<button class="rolling-demo-icon-btn ${page === openPositionsPage ? "primary" : "warn"} rolling-live-open-page-btn" type="button" data-page="${page}">${page}</button>`);
+            }
+            ids.openPageNumbers.innerHTML = pageNumbers.join("");
+        }
         setButtonsEnabled();
     }
 
@@ -3607,7 +3639,12 @@
     }
 
     function renderClosedPositions(rows) {
-        closedPositions = Array.isArray(rows) ? rows : [];
+        closedPositions = Array.isArray(rows)
+            ? rows.slice().sort(function (left, right) {
+                return new Date(String(right?.startAt || right?.endAt || "")).getTime()
+                    - new Date(String(left?.startAt || left?.endAt || "")).getTime();
+            })
+            : [];
         const totalPages = Math.max(1, Math.ceil(closedPositions.length / closedPositionsPageSize));
         closedPositionsPage = Math.min(closedPositionsPage, totalPages);
         closedPositionsPage = Math.max(closedPositionsPage, 1);
@@ -4617,6 +4654,33 @@
         }).catch(function (error) {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to clear closed-position filters.", "danger");
         });
+    });
+    ids.openPrevPageButton?.addEventListener("click", function () {
+        if (openPositionsPage <= 1) {
+            return;
+        }
+        openPositionsPage -= 1;
+        renderOpenPositions(displayedPositions);
+    });
+    ids.openNextPageButton?.addEventListener("click", function () {
+        const totalPages = Math.max(1, Math.ceil(displayedPositions.length / openPositionsPageSize));
+        if (openPositionsPage >= totalPages) {
+            return;
+        }
+        openPositionsPage += 1;
+        renderOpenPositions(displayedPositions);
+    });
+    ids.openPageNumbers?.addEventListener("click", function (event) {
+        const target = event.target instanceof Element ? event.target.closest(".rolling-live-open-page-btn") : null;
+        if (!(target instanceof HTMLButtonElement)) {
+            return;
+        }
+        const page = Number(target.dataset.page || 0);
+        if (!Number.isFinite(page) || page <= 0) {
+            return;
+        }
+        openPositionsPage = page;
+        renderOpenPositions(displayedPositions);
     });
     ids.closedPrevPageButton?.addEventListener("click", function () {
         if (closedPositionsPage <= 1) {
