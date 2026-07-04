@@ -2835,6 +2835,8 @@
             updateNeutralBadges(lastNeutralStatus);
             refreshCoveredBalanceSummaryDisplay();
             updateRenkoFeedDisplay(lastAccountSummary);
+            syncLocalProfitClosePendingFromOpenPositions();
+            restartProfitCloseCountdown();
         }
         finally {
             isApplyingState = false;
