@@ -3156,9 +3156,10 @@
         const vLegSide = String(rowNodes.legs?.value || "").trim().toLowerCase();
         const vExpiryMode = String(rowNodes.expiryMode?.value || "5").trim();
         const vExpiryDate = String(rowNodes.expiryDate?.value || "").trim();
-        const vQty = Math.max(1, Math.floor(Number(rowNodes.qty?.value || 1)));
+        const vBaseQty = Math.max(1, Math.floor(Number(rowNodes.qty?.value || 1)));
         const vTargetDelta = Math.max(0, Number(rowNodes.newD?.value || 0.53));
         const vSymbol = String(ids.symbol?.value || "BTC").trim().toUpperCase();
+        const vQty = resolveCoveredTradeQty(vAction, vLegSide, vBaseQty, vSymbol);
 
         if (vAction !== "buy" && vAction !== "sell") {
             throw new Error(`Select Buy or Sell in Action for row ${optionRowIndex} before executing the live strategy.`);
@@ -3233,9 +3234,10 @@
 
         const vExpiryMode = String(rowNodes.expiryMode?.value || "5").trim();
         const vExpiryDate = String(rowNodes.expiryDate?.value || "").trim();
-        const vQty = Math.max(1, Math.floor(Number(rowNodes.qty?.value || 1)));
+        const vBaseQty = Math.max(1, Math.floor(Number(rowNodes.qty?.value || 1)));
         const vTargetDelta = Math.max(0, Number(rowNodes.newD?.value || 0.53));
         const vSymbol = String(ids.symbol?.value || "BTC").trim().toUpperCase();
+        const vQty = resolveCoveredTradeQty(vAction, vLegSide, vBaseQty, vSymbol);
 
         if (!vExpiryDate) {
             throw new Error("Select an expiry date before placing a live option order.");
