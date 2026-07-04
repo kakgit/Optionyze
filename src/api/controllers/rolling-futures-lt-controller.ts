@@ -1870,6 +1870,7 @@ function getDefaultManualTraderUiState(
         strangleDeltaDiffReplaceEnabled: isStrangleOptionsStrategy(pStrategyCode),
         strangleDeltaDiffReplacePct: isStrangleOptionsStrategy(pStrategyCode) ? "40" : "50",
         buyHedgeOppositeLegOnGate: false,
+        sameSideLegIncrementEnabled: true,
         buyQtyPercentEnabled: false,
         buyQtyPercent: "100",
         renkoEnabled: false,
@@ -3781,6 +3782,12 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         buyHedgeOppositeLegOnGate: pProfile.strategyCode === "covered-options"
             ? normalizeBooleanValue(objUiState.buyHedgeOppositeLegOnGate, Boolean(objDefaults.buyHedgeOppositeLegOnGate))
             : false,
+        sameSideLegIncrementEnabled: isStrangleOptionsStrategy(pProfile.strategyCode)
+            ? false
+            : normalizeBooleanValue(
+                objUiState.sameSideLegIncrementEnabled,
+                normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.sameSideLegIncrementEnabled))
+            ),
         buyQtyPercentEnabled: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.buyQtyPercentEnabled)),
@@ -4142,6 +4149,12 @@ function normalizeProfileSaveInput(
         buyHedgeOppositeLegOnGate: pStrategyCode === "covered-options"
             ? normalizeBooleanValue(objUiState.buyHedgeOppositeLegOnGate, Boolean(objDefaults.buyHedgeOppositeLegOnGate))
             : false,
+        sameSideLegIncrementEnabled: isStrangleOptionsStrategy(pStrategyCode)
+            ? false
+            : normalizeBooleanValue(
+                objUiState.sameSideLegIncrementEnabled,
+                normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.sameSideLegIncrementEnabled))
+            ),
         buyQtyPercentEnabled: isStrangleOptionsStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.buyQtyPercentEnabled)),

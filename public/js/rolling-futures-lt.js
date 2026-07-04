@@ -138,8 +138,7 @@
         strangleDeltaDiffReplacePct: document.getElementById("txtRollingFuturesStrangleDeltaDiffReplacePct"),
         buyHedgeOppositeLegOnGate: document.getElementById("chkRollingFuturesBuyHedgeOppositeLegOnGate"),
         strangleReopenAtNewD: document.getElementById("chkRollingFuturesStrangleReopenAtNewD"),
-        buyQtyPercentEnabled: document.getElementById("chkRollingFuturesBuyQtyPercentEnabled"),
-        buyQtyPercent: document.getElementById("txtRollingFuturesBuyQtyPercent"),
+        sameSideLegIncrementEnabled: document.getElementById("chkRollingFuturesSameSideLegIncrementEnabled"),
         renkoEnabled: document.getElementById("chkRollingFuturesRenkoEnabled"),
         renkoBoxSize: document.getElementById("txtRollingFuturesRenkoBoxSize"),
         renkoBaseValue: document.getElementById("txtRollingFuturesRenkoBaseValue"),
@@ -312,14 +311,6 @@
 
     function getCoveredRequiredBlockedMargin(multiplierValue) {
         return Number((clampCoveredMultiplierValue(multiplierValue) * coveredMultiplierMarginPerUnit).toFixed(2));
-    }
-
-    function clampCoveredBuyQtyPercentValue(value) {
-        const vRaw = Math.floor(Number(value || 0));
-        if (!Number.isFinite(vRaw) || vRaw < 1) {
-            return 1;
-        }
-        return Math.min(200, vRaw);
     }
 
     function clampRenkoBoxSizeValue(value) {
@@ -531,7 +522,7 @@
     }
 
     function triggerRenkoAutoTrade(symbol, color) {
-        if (!isDemoVariant || !supportsRenkoFeed) {
+        if (!(isDemoVariant || isRenkoPage) || !supportsRenkoFeed) {
             return;
         }
         const tradeConfig = getRenkoAutoTradeConfig(color);
@@ -546,7 +537,9 @@
             return loadRuntimeStatus().catch(function () { return undefined; });
         }).then(function () {
             if (!autoTraderEnabled) {
-                throw new Error("Turn Auto Trader ON before Renko auto trades can place paper positions.");
+                throw new Error(isDemoVariant
+                    ? "Turn Auto Trader ON before Renko auto trades can place paper positions."
+                    : "Turn Auto Trader ON before Renko auto trades can place live option orders.");
             }
             applyExpiryModeDefaults(true, tradeConfig.rowIndex);
             return placeManualOption(tradeConfig.action, tradeConfig.legSide, tradeConfig.rowIndex);
@@ -731,21 +724,10 @@
         }
     }
 
-    function getCoveredBuyQtyPercentValue() {
-        if (!(ids.buyQtyPercent instanceof HTMLInputElement)) {
-            return 100;
-        }
-        return clampCoveredBuyQtyPercentValue(ids.buyQtyPercent.value);
-    }
-
-    function resolveCoveredBuyRowQty(multiplierValue) {
-        const vMultiplier = clampCoveredMultiplierValue(multiplierValue);
-        const bEnabled = ids.buyQtyPercentEnabled instanceof HTMLInputElement && ids.buyQtyPercentEnabled.checked;
-        if (!bEnabled) {
-            return vMultiplier;
-        }
-        const vPercent = getCoveredBuyQtyPercentValue();
-        return Math.max(1, Math.floor((vMultiplier * vPercent) / 100));
+    function isCoveredSameSideLegIncrementEnabled() {
+        return ids.sameSideLegIncrementEnabled instanceof HTMLInputElement
+            ? ids.sameSideLegIncrementEnabled.checked
+            : true;
     }
 
     function refreshCoveredBalanceSummaryDisplay() {
@@ -868,12 +850,12 @@
                 </div>
             </div>
             <div class="rolling-futures-saved-profile-card">
-                <div class="rolling-futures-saved-profile-title">${isStrangleLikePage ? "Reopen Rule" : "Buy Qty Rule"}</div>
+                <div class="rolling-futures-saved-profile-title">${isStrangleLikePage ? "Reopen Rule" : "Increment Mode"}</div>
                 <div class="rolling-futures-saved-profile-grid">
                     ${isStrangleLikePage
                         ? `<span>Reopen At New D: <strong>${escapeHtml(String(Boolean(state.strangleReopenAtNewD)) === "true" ? "ON" : "OFF")}</strong></span>`
-                        : `<span>Enabled: <strong>${escapeHtml(String(Boolean(state.buyQtyPercentEnabled)) === "true" ? "ON" : "OFF")}</strong></span>
-                    <span>Buy Qty %: <strong>${escapeHtml(formatSavedProfileValue(state.buyQtyPercent, "100"))}</strong></span>`}
+                        : `<span>Same-side Legs: <strong>${escapeHtml(String(Boolean(state.sameSideLegIncrementEnabled ?? state.buyQtyPercentEnabled ?? true)) === "true" ? "ON" : "OFF")}</strong></span>
+                    <span>Unchecked Mode: <strong>Increment on every Renko side change</strong></span>`}
                 </div>
             </div>
         ` : "";
@@ -1162,8 +1144,7 @@
             strangleDeltaDiffReplacePct: isStrangleLikePage ? "40" : "50",
             buyHedgeOppositeLegOnGate: false,
             strangleReopenAtNewD: false,
-            buyQtyPercentEnabled: false,
-            buyQtyPercent: "100",
+            sameSideLegIncrementEnabled: true,
             renkoEnabled: false,
             renkoStepPoints: "100",
             renkoBaseValue: "",
@@ -2794,8 +2775,7 @@
             strangleDeltaDiffReplacePct: isStrangleLikePage ? getInputValue(ids.strangleDeltaDiffReplacePct, "50") : "50",
             buyHedgeOppositeLegOnGate: getCheckboxValue(ids.buyHedgeOppositeLegOnGate, false),
             strangleReopenAtNewD: isStrangleLikePage ? getCheckboxValue(ids.strangleReopenAtNewD, false) : false,
-            buyQtyPercentEnabled: isStrangleLikePage ? false : getCheckboxValue(ids.buyQtyPercentEnabled, false),
-            buyQtyPercent: isStrangleLikePage ? "100" : getInputValue(ids.buyQtyPercent, "100"),
+            sameSideLegIncrementEnabled: isStrangleLikePage ? false : getCheckboxValue(ids.sameSideLegIncrementEnabled, true),
             renkoEnabled: supportsRenkoFeed ? getCheckboxValue(ids.renkoEnabled, false) : false,
             renkoStepPoints: supportsRenkoFeed ? String(getRenkoBoxSizeValue()) : "100",
             renkoBaseValue: supportsRenkoFeed ? normalizeRenkoBaseValue(ids.renkoBaseValue?.value || "") : "",
@@ -2867,8 +2847,10 @@
             setInputValue(ids.strangleDeltaDiffReplacePct, objUiState.strangleDeltaDiffReplacePct);
             setCheckboxValue(ids.buyHedgeOppositeLegOnGate, objUiState.buyHedgeOppositeLegOnGate);
             setCheckboxValue(ids.strangleReopenAtNewD, objUiState.strangleReopenAtNewD);
-            setCheckboxValue(ids.buyQtyPercentEnabled, isStrangleLikePage ? false : objUiState.buyQtyPercentEnabled);
-            setInputValue(ids.buyQtyPercent, isStrangleLikePage ? "100" : objUiState.buyQtyPercent);
+            setCheckboxValue(
+                ids.sameSideLegIncrementEnabled,
+                isStrangleLikePage ? false : (objUiState.sameSideLegIncrementEnabled ?? objUiState.buyQtyPercentEnabled ?? true)
+            );
             setCheckboxValue(ids.renkoEnabled, supportsRenkoFeed ? objUiState.renkoEnabled : false);
             setInputValue(ids.renkoBoxSize, supportsRenkoFeed ? objUiState.renkoStepPoints : "100");
             setInputValue(ids.renkoBaseValue, supportsRenkoFeed ? String(renkoBaseValuesBySymbol[getCurrentSelectedSymbol()] || "") : "");
@@ -2910,18 +2892,13 @@
         if (!(ids.startQty instanceof HTMLInputElement)) {
             return;
         }
-        if (isCoveredMode && ids.buyQtyPercent instanceof HTMLInputElement) {
-            ids.buyQtyPercent.value = String(clampCoveredBuyQtyPercentValue(ids.buyQtyPercent.value));
-        }
         const vStartQty = String(ids.startQty.value || "").trim() || String(getCoveredMultiplierMin());
         const vCoveredMultiplierQty = isCoveredMode ? getCoveredMultiplierDraftValue() : Math.max(1, Math.floor(Number(vStartQty || 1)));
-        const vCoveredBuyQty = isCoveredMode ? resolveCoveredBuyRowQty(vCoveredMultiplierQty) : vCoveredMultiplierQty;
         getSupportedOptionRowIndexes().forEach(function (rowIndex) {
             const nodes = getOptionRowNodes(rowIndex);
             if (nodes.qty instanceof HTMLInputElement) {
                 if (isCoveredMode) {
-                    const vAction = String(nodes.action?.value || "").trim().toLowerCase();
-                    nodes.qty.value = String(vAction === "buy" ? vCoveredBuyQty : vCoveredMultiplierQty);
+                    nodes.qty.value = String(vCoveredMultiplierQty);
                 }
                 else {
                     nodes.qty.value = vStartQty;
@@ -3559,6 +3536,15 @@
         }).length;
     }
 
+    function countActiveCoveredTradesForSymbol(symbol, action) {
+        const normalizedAction = String(action || "").trim().toUpperCase() === "BUY" ? "BUY" : "SELL";
+        return (Array.isArray(displayedPositions) ? displayedPositions : []).filter(function (row) {
+            return !isDisplayedPositionInactive(row)
+                && isTrackedCoveredTradeForSymbol(row, symbol)
+                && String(row?.side || "").trim().toUpperCase() === normalizedAction;
+        }).length;
+    }
+
     function resolveCoveredTradeQty(action, legSide, rowQty, symbol) {
         const vBaseQty = Math.max(1, Math.floor(Number(rowQty || 1)));
         if (!isCoveredMode || isStrangleLikePage) {
@@ -3568,7 +3554,9 @@
         if (!objIncrementConfig.enabled || !(objIncrementConfig.incrementLots > 0)) {
             return vBaseQty;
         }
-        const vExistingTrades = countActiveCoveredTradesByLeg(symbol, legSide, action);
+        const vExistingTrades = isCoveredSameSideLegIncrementEnabled()
+            ? countActiveCoveredTradesByLeg(symbol, legSide, action)
+            : countActiveCoveredTradesForSymbol(symbol, action);
         return vBaseQty + (vExistingTrades * objIncrementConfig.incrementLots);
     }
 
@@ -4332,8 +4320,7 @@
         ids.strangleDeltaDiffReplacePct,
         ids.buyHedgeOppositeLegOnGate,
         ids.strangleReopenAtNewD,
-        ids.buyQtyPercentEnabled,
-        ids.buyQtyPercent,
+        ids.sameSideLegIncrementEnabled,
         ids.renkoEnabled,
         ids.renkoBoxSize,
         ids.autoConfirmLiveActions
@@ -4361,17 +4348,11 @@
             });
         }
     });
-    [ids.buyQtyPercentEnabled, ids.buyQtyPercent].forEach(function (node) {
+    [ids.sameSideLegIncrementEnabled].forEach(function (node) {
         node?.addEventListener("change", function () {
             syncQtyFromStartQty();
             queueProfileSave();
         });
-        if (node instanceof HTMLInputElement && node.type !== "checkbox") {
-            node.addEventListener("input", function () {
-                syncQtyFromStartQty();
-                queueProfileSave();
-            });
-        }
     });
     [ids.renkoEnabled, ids.renkoBoxSize, ids.renkoBaseValue].forEach(function (node) {
         node?.addEventListener("change", function () {
