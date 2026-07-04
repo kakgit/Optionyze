@@ -235,6 +235,7 @@
     let closedFiltersRefreshTimer = null;
     let indicatorRefreshTimer = null;
     let profitCloseCountdownTimer = null;
+    let profitCloseAutoExitInFlight = false;
     let lastClosedPositionsRefreshAt = "";
     let adminRunningUsers = [];
     let targetUserId = requiresExplicitTargetSelection ? "" : currentAccountId;
@@ -1731,6 +1732,7 @@
         ids.profitCloseTimer.title = remainingMs > 0
             ? "Close All will trigger if the profit target stays satisfied for the full 5-minute confirmation window."
             : "Profit target confirmation window completed. Close All should trigger on the next runtime pass.";
+        maybeAutoCloseOptionsDemoFromProfitTimer(objPending, remainingMs);
     }
 
     function restartProfitCloseCountdown() {
@@ -1750,6 +1752,61 @@
         profitCloseCountdownTimer = window.setInterval(function () {
             renderProfitCloseCountdown();
         }, 1000);
+    }
+
+    function isBrokerageProfitCloseRuleSatisfied() {
+        const objPayload = lastOpenPositionsPayload && typeof lastOpenPositionsPayload === "object"
+            ? lastOpenPositionsPayload
+            : null;
+        const arrPositions = Array.isArray(objPayload?.positions) ? objPayload.positions : [];
+        const objTotals = objPayload?.totals || null;
+        const bBrokerageEnabled = ids.closeNetProfitBrokerage instanceof HTMLInputElement && ids.closeNetProfitBrokerage.checked;
+        const vBrokerageMultiplier = Math.max(0, Number(ids.brokerageMultiplier instanceof HTMLInputElement ? ids.brokerageMultiplier.value : 0));
+        const vTotalCharges = Math.max(0, Number(objTotals?.totalCharges || 0));
+        const vTotalPnl = Number(objTotals?.totalPnl || 0);
+        return autoTraderEnabled
+            && arrPositions.length > 0
+            && bBrokerageEnabled
+            && vBrokerageMultiplier > 0
+            && vTotalCharges > 0
+            && vTotalPnl >= (vTotalCharges * vBrokerageMultiplier);
+    }
+
+    function maybeAutoCloseOptionsDemoFromProfitTimer(objPending, remainingMs) {
+        if (!isDemoVariant || !isCoveredMode || profitCloseAutoExitInFlight || remainingMs > 0) {
+            return;
+        }
+        const reason = String(objPending?.reason || "").trim().toLowerCase();
+        if (reason !== "brokerage" && reason !== "blockmargin") {
+            return;
+        }
+        if (reason === "brokerage" && !isBrokerageProfitCloseRuleSatisfied()) {
+            return;
+        }
+        profitCloseAutoExitInFlight = true;
+        void runKillSwitch().then(function (objResult) {
+            const trackedPayload = objResult?.data?.trackedOpenPositions || null;
+            if (trackedPayload) {
+                renderOpenPositions(trackedPayload);
+            }
+            else {
+                renderOpenPositions([]);
+            }
+            localProfitClosePending = null;
+            profitClosePending = null;
+            restartProfitCloseCountdown();
+            setStatus(ids.pageStatus, objResult?.message || "Profit target reached. Demo positions closed.", "success");
+            return Promise.all([
+                loadRuntimeStatus().catch(function () { return undefined; }),
+                loadAccountSummary().catch(function () { return undefined; }),
+                loadEvents().catch(function () { return undefined; }),
+                loadClosedPositions().catch(function () { return undefined; })
+            ]);
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to auto-close demo positions after profit timer.", "danger");
+        }).finally(function () {
+            profitCloseAutoExitInFlight = false;
+        });
     }
 
     function syncLocalProfitClosePendingFromOpenPositions() {
