@@ -5184,7 +5184,7 @@ function getProfitCloseRule(
 
     const vBrokerageBase = vOpenPositionsTotalBrokerage;
     const vBrokerageBaseRounded = Number(vBrokerageBase.toFixed(4));
-    if (bBrokerageEnabled && vBrokerageMultiplier > 0 && vBrokerageBaseRounded >= 0.01) {
+    if (bBrokerageEnabled && vBrokerageMultiplier > 0 && vBrokerageBaseRounded > 0) {
         const vThreshold = vBrokerageBaseRounded * vBrokerageMultiplier;
         if (vOpenPositionsTotalPnl >= vThreshold) {
             return {

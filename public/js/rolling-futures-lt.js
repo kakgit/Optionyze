@@ -1774,7 +1774,7 @@
             && arrPositions.length > 0
             && bBrokerageEnabled
             && vBrokerageMultiplier > 0
-            && vTotalCharges >= 0.01
+            && vTotalCharges > 0
             && vTotalPnl >= (vTotalCharges * vBrokerageMultiplier);
         if (!bRuleSatisfied) {
             localProfitClosePending = null;
