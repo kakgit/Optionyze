@@ -483,7 +483,7 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-action-sel
 
 .rolling-live-open-head {
     display: grid;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto 1fr auto auto;
     align-items: center;
     gap: 16px;
 }
@@ -548,6 +548,16 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-action-sel
     color: var(--app-muted);
     font-size: 0.92rem;
     font-weight: 700;
+}
+
+.rolling-live-profit-close-timer {
+    padding: 7px 12px;
+    border: 1px solid rgba(255, 184, 77, .28);
+    border-radius: 999px;
+    color: #ffca7a;
+    background: rgba(255, 184, 77, .08);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
 }
 
 .rolling-live-pagination {

@@ -177,6 +177,7 @@
         openNextPageButton: document.getElementById(`btn${idPrefix}OpenNextPage`),
         openPageInfo: document.getElementById(`${prefix}OpenPositionsPageInfo`),
         openPageNumbers: document.getElementById(`${prefix}OpenPageNumbers`),
+        profitCloseTimer: document.getElementById(`${prefix}ProfitCloseTimer`),
         hedgeGateSummary: document.getElementById("rollingDualFuturesHedgeGateSummary"),
         closedFromDate: document.getElementById(`txt${idPrefix}ClosedFromDate`),
         closedToDate: document.getElementById(`txt${idPrefix}ClosedToDate`),
@@ -233,6 +234,7 @@
     let execStrategyEnabled = isDualLikeMode ? initialExecStrategyEnabled : true;
     let closedFiltersRefreshTimer = null;
     let indicatorRefreshTimer = null;
+    let profitCloseCountdownTimer = null;
     let lastClosedPositionsRefreshAt = "";
     let adminRunningUsers = [];
     let targetUserId = requiresExplicitTargetSelection ? "" : currentAccountId;
@@ -254,6 +256,7 @@
     let lastNeutralStatus = null;
     let lastRecoveryMetrics = null;
     let pendingLiveConfirmation = null;
+    let profitClosePending = null;
     let confirmationAudioContext = null;
     let queuedConfirmationSoundActionId = "";
     let lastConfirmationSoundActionId = "";
@@ -269,6 +272,7 @@
         BTC: { referencePrice: "", lastColor: "neutral" },
         ETH: { referencePrice: "", lastColor: "neutral" }
     };
+    const profitCloseConfirmationMs = 5 * 60 * 1000;
     let renkoHistoryBySymbol = { BTC: [], ETH: [] };
     let currentRenkoBaseSymbol = "BTC";
     const openPositionsPageSize = 10;
@@ -909,6 +913,13 @@
         const hour = String(objDeltaDate.getUTCHours()).padStart(2, "0");
         const minute = String(objDeltaDate.getUTCMinutes()).padStart(2, "0");
         return `${year}-${month}-${day}T${hour}:${minute}`;
+    }
+
+    function formatCountdownDuration(msRemaining) {
+        const totalSeconds = Math.max(0, Math.ceil(msRemaining / 1000));
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
     }
 
     function applyBadgeTone(node, tone) {
@@ -1690,6 +1701,51 @@
         }
     }
 
+    function renderProfitCloseCountdown() {
+        if (!ids.profitCloseTimer) {
+            return;
+        }
+        const objPending = profitClosePending && typeof profitClosePending === "object"
+            ? profitClosePending
+            : null;
+        const startedAtText = String(objPending?.startedAt || "").trim();
+        const startedAtMs = startedAtText ? new Date(startedAtText).getTime() : Number.NaN;
+        const reason = String(objPending?.reason || "").trim().toLowerCase();
+        if (!objPending || !startedAtText || !Number.isFinite(startedAtMs)) {
+            ids.profitCloseTimer.hidden = true;
+            ids.profitCloseTimer.textContent = "";
+            ids.profitCloseTimer.removeAttribute("title");
+            return;
+        }
+        const elapsedMs = Date.now() - startedAtMs;
+        const remainingMs = Math.max(0, profitCloseConfirmationMs - elapsedMs);
+        const reasonLabel = reason === "brokerage"
+            ? "Brokerage"
+            : (reason === "blockmargin" ? "Blocked Margin" : "Profit");
+        ids.profitCloseTimer.hidden = false;
+        ids.profitCloseTimer.textContent = `${reasonLabel} close in ${formatCountdownDuration(remainingMs)}`;
+        ids.profitCloseTimer.title = remainingMs > 0
+            ? "Close All will trigger if the profit target stays satisfied for the full 5-minute confirmation window."
+            : "Profit target confirmation window completed. Close All should trigger on the next runtime pass.";
+    }
+
+    function restartProfitCloseCountdown() {
+        renderProfitCloseCountdown();
+        if (profitCloseCountdownTimer) {
+            clearInterval(profitCloseCountdownTimer);
+            profitCloseCountdownTimer = null;
+        }
+        const objPending = profitClosePending && typeof profitClosePending === "object"
+            ? profitClosePending
+            : null;
+        if (!objPending || !String(objPending.startedAt || "").trim()) {
+            return;
+        }
+        profitCloseCountdownTimer = window.setInterval(function () {
+            renderProfitCloseCountdown();
+        }, 1000);
+    }
+
     function applyConnectionStatus(connectionStatus) {
         const objStatus = connectionStatus || {};
         connectionState = String(objStatus.state || "not_selected").trim();
@@ -1714,6 +1770,7 @@
         runtimeStatus = String(objRuntime.status || "idle").trim() || "idle";
         autoTraderEnabled = Boolean(objRuntime.autoTraderEnabled);
         pendingLiveConfirmation = objRuntime?.state?.pendingCoveredLiveConfirmation || null;
+        profitClosePending = objRuntime?.state?.profitClosePending || null;
         const strategyStartedAt = String(objRuntime?.state?.strategyStartedAt || "").trim();
         const closedPositionsRefreshAt = String(objRuntime?.state?.closedPositionsRefreshAt || "").trim();
         if (ids.engineStatus) {
@@ -1749,6 +1806,7 @@
             queueClosedPositionsRefresh();
         }
         updateNeutralBadges(lastNeutralStatus);
+        restartProfitCloseCountdown();
         renderPendingLiveConfirmation();
         setButtonsEnabled();
     }
