@@ -23,17 +23,17 @@
     const bIsRenkoPage = vPageVariant === "renko";
     const bShowRenkoSection = bIsDemoPage || bIsRenkoPage;
     const bIsStrangleLikePage = bIsStranglePage || bIsRenkoPage;
-    const vStrategyLabel = bIsDemoPage ? "Options Demo" : (bIsRenkoPage ? "Renko Options" : (bIsStranglePage ? "Strangle Options" : "Covered Options"));
+    const vStrategyLabel = bIsDemoPage ? "Options Demo" : (bIsRenkoPage ? "Options-Scalper" : (bIsStranglePage ? "Strangle Options" : "Covered Options"));
     const vPageHeading = bIsDemoPage ? "Options Demo" : `${vStrategyLabel} - Live`;
     const vEndpointBase = bIsDemoPage ? "/api/options-demo" : (bIsRenkoPage ? "/api/renko-options" : (bIsStranglePage ? "/api/strangle-options" : "/api/covered-options"));
     const vOpenPositionsEmpty = bIsDemoPage
         ? "No demo positions are currently shown."
-        : `Select an API profile and load live ${bIsRenkoPage ? "renko-option" : (bIsStranglePage ? "strangle-option" : "covered-option")} positions from Delta Exchange.`;
+        : `Select an API profile and load live ${bIsRenkoPage ? "options-scalper" : (bIsStranglePage ? "strangle-option" : "covered-option")} positions from Delta Exchange.`;
     const vClosedPositionsEmpty = bIsDemoPage
         ? "No demo trade history found for the selected date range."
         : "No Delta fill history found for the selected date range.";
     const vConfirmationHeading = `${vStrategyLabel} Confirmation`;
-    const vConfirmationAutoText = `Auto-confirm all ${bIsRenkoPage ? "renko" : (bIsStranglePage ? "strangle" : "covered")} live actions`;
+    const vConfirmationAutoText = `Auto-confirm all ${bIsRenkoPage ? "options-scalper" : (bIsStranglePage ? "strangle" : "covered")} live actions`;
     const vConfirmationEmpty = "No live action is waiting for confirmation.";
     const vActivityEmpty = bIsDemoPage ? "No demo activity has been logged yet." : "No live activity has been logged yet.";
     const vClearOpenPositionsTitle = bIsDemoPage ? "Clear all demo open positions locally" : "Clear all imported open positions locally";
