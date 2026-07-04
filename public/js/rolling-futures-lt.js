@@ -275,7 +275,7 @@
         BTC: { referencePrice: "", lastColor: "neutral" },
         ETH: { referencePrice: "", lastColor: "neutral" }
     };
-    const profitCloseConfirmationMs = 5 * 60 * 1000;
+    const profitCloseConfirmationMs = 2 * 60 * 1000;
     let renkoHistoryBySymbol = { BTC: [], ETH: [] };
     let currentRenkoBaseSymbol = "BTC";
     const openPositionsPageSize = 10;
@@ -508,21 +508,24 @@
 
     function getRenkoAutoTradeConfig(color) {
         const normalizedColor = normalizeRenkoColorValue(color);
-        if (normalizedColor === "green") {
+        function buildRowTradeConfig(rowIndex, sellLegSide, buyLegSide) {
+            const rowNodes = getOptionRowNodes(rowIndex);
+            const rowAction = String(rowNodes.action?.value || "sell").trim().toLowerCase() === "buy"
+                ? "buy"
+                : "sell";
+            const resolvedLegSide = rowAction === "buy" ? buyLegSide : sellLegSide;
             return {
-                action: "sell",
-                legSide: "pe",
-                rowIndex: 1,
-                label: "SELL PE"
+                action: rowAction,
+                legSide: resolvedLegSide,
+                rowIndex: rowIndex,
+                label: `${rowAction.toUpperCase()} ${resolvedLegSide.toUpperCase()}`
             };
         }
+        if (normalizedColor === "green") {
+            return buildRowTradeConfig(1, "pe", "ce");
+        }
         if (normalizedColor === "red") {
-            return {
-                action: "sell",
-                legSide: "ce",
-                rowIndex: 2,
-                label: "SELL CE"
-            };
+            return buildRowTradeConfig(2, "ce", "pe");
         }
         return null;
     }
@@ -1730,7 +1733,7 @@
         ids.profitCloseTimer.hidden = false;
         ids.profitCloseTimer.textContent = `${reasonLabel} close in ${formatCountdownDuration(remainingMs)}`;
         ids.profitCloseTimer.title = remainingMs > 0
-            ? "Close All will trigger if the profit target stays satisfied for the full 5-minute confirmation window."
+            ? "Close All will trigger if the profit target stays satisfied for the full 2-minute confirmation window."
             : "Profit target confirmation window completed. Close All should trigger on the next runtime pass.";
         maybeAutoCloseOptionsDemoFromProfitTimer(objPending, remainingMs);
     }

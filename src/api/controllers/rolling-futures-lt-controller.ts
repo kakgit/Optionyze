@@ -156,7 +156,7 @@ const gOptionReentryPendingMs = 5000;
 const gCoveredOptionReEntryRetryMs = 60 * 1000;
 const gProfitClosePauseAfterOptionRuleMs = 15000;
 const gProfitCloseReEntryCooldownMs = 5 * 60 * 1000;
-const gProfitCloseConfirmationMs = 5 * 60 * 1000;
+const gProfitCloseConfirmationMs = 2 * 60 * 1000;
 const gRestartCloseProtectionMs = 5 * 60 * 1000;
 const gOptionRecoveryRefreshDelayMs = 5 * 60 * 1000;
 const gNeutralityHedgeCooldownMs = 2 * 60 * 1000;
@@ -11180,7 +11180,7 @@ async function runAutoTraderCycle(
                         objProfitRule.reason === "brokerage"
                             ? "Brokerage Profit Close Timer Started"
                             : "Blocked Margin Profit Close Timer Started",
-                        `${objProfitRule.message} Closing all positions will only happen if this Net PnL stays above the target for 5 minutes continuously.`,
+                        `${objProfitRule.message} Closing all positions will only happen if this Net PnL stays above the target for 2 minutes continuously.`,
                         {
                             thresholdValue: objProfitRule.thresholdValue,
                             reason: objProfitRule.reason === "brokerage"
