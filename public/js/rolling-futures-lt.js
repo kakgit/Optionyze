@@ -257,6 +257,8 @@
     let lastRecoveryMetrics = null;
     let pendingLiveConfirmation = null;
     let profitClosePending = null;
+    let localProfitClosePending = null;
+    let lastOpenPositionsPayload = null;
     let confirmationAudioContext = null;
     let queuedConfirmationSoundActionId = "";
     let lastConfirmationSoundActionId = "";
@@ -1707,7 +1709,9 @@
         }
         const objPending = profitClosePending && typeof profitClosePending === "object"
             ? profitClosePending
-            : null;
+            : (localProfitClosePending && typeof localProfitClosePending === "object"
+                ? localProfitClosePending
+                : null);
         const startedAtText = String(objPending?.startedAt || "").trim();
         const startedAtMs = startedAtText ? new Date(startedAtText).getTime() : Number.NaN;
         const reason = String(objPending?.reason || "").trim().toLowerCase();
@@ -1737,13 +1741,53 @@
         }
         const objPending = profitClosePending && typeof profitClosePending === "object"
             ? profitClosePending
-            : null;
+            : (localProfitClosePending && typeof localProfitClosePending === "object"
+                ? localProfitClosePending
+                : null);
         if (!objPending || !String(objPending.startedAt || "").trim()) {
             return;
         }
         profitCloseCountdownTimer = window.setInterval(function () {
             renderProfitCloseCountdown();
         }, 1000);
+    }
+
+    function syncLocalProfitClosePendingFromOpenPositions() {
+        if (!isCoveredMode || !isDemoVariant) {
+            localProfitClosePending = null;
+            return;
+        }
+        if (profitClosePending && typeof profitClosePending === "object" && String(profitClosePending.startedAt || "").trim()) {
+            localProfitClosePending = null;
+            return;
+        }
+        const objPayload = lastOpenPositionsPayload && typeof lastOpenPositionsPayload === "object"
+            ? lastOpenPositionsPayload
+            : null;
+        const arrPositions = Array.isArray(objPayload?.positions) ? objPayload.positions : [];
+        const objTotals = objPayload?.totals || null;
+        const bBrokerageEnabled = ids.closeNetProfitBrokerage instanceof HTMLInputElement && ids.closeNetProfitBrokerage.checked;
+        const vBrokerageMultiplier = Math.max(0, Number(ids.brokerageMultiplier instanceof HTMLInputElement ? ids.brokerageMultiplier.value : 0));
+        const vTotalCharges = Math.max(0, Number(objTotals?.totalCharges || 0));
+        const vTotalPnl = Number(objTotals?.totalPnl || 0);
+        const bRuleSatisfied = autoTraderEnabled
+            && arrPositions.length > 0
+            && bBrokerageEnabled
+            && vBrokerageMultiplier > 0
+            && vTotalCharges >= 0.01
+            && vTotalPnl >= (vTotalCharges * vBrokerageMultiplier);
+        if (!bRuleSatisfied) {
+            localProfitClosePending = null;
+            return;
+        }
+        if (localProfitClosePending && String(localProfitClosePending.reason || "").trim() === "brokerage") {
+            return;
+        }
+        localProfitClosePending = {
+            reason: "brokerage",
+            thresholdValue: Number((vTotalCharges * vBrokerageMultiplier).toFixed(6)),
+            startedAt: new Date().toISOString()
+        };
     }
 
     function applyConnectionStatus(connectionStatus) {
@@ -3578,6 +3622,7 @@
 
     function renderOpenPositions(payload) {
         const objPayload = extractOpenPositionsPayload(payload);
+        lastOpenPositionsPayload = objPayload;
         const arrRows = Array.isArray(objPayload.positions)
             ? objPayload.positions.slice().sort(function (left, right) {
                 return new Date(String(right?.openedAt || right?.updatedAt || "")).getTime()
@@ -3590,6 +3635,8 @@
         lastNeutralStatus = objPayload.neutralStatus || null;
         applyRecoveryMetrics(objPayload.recoveryMetrics || null);
         updateNeutralBadges(lastNeutralStatus);
+        syncLocalProfitClosePendingFromOpenPositions();
+        restartProfitCloseCountdown();
         if (!ids.openPositionsBody) {
             return;
         }
@@ -4230,8 +4277,16 @@
         ids.autoConfirmLiveActions
     ].forEach(function (node) {
         node?.addEventListener("change", queueProfileSave);
+        node?.addEventListener("change", function () {
+            syncLocalProfitClosePendingFromOpenPositions();
+            restartProfitCloseCountdown();
+        });
         if (node instanceof HTMLInputElement && node.type !== "checkbox") {
             node.addEventListener("input", queueProfileSave);
+            node.addEventListener("input", function () {
+                syncLocalProfitClosePendingFromOpenPositions();
+                restartProfitCloseCountdown();
+            });
         }
     });
     [ids.buyHedgeSellPremiumGate, ids.buyHedgeSellPremiumPct, ids.strangleDeltaDiffReplaceEnabled, ids.strangleDeltaDiffReplacePct].forEach(function (node) {
