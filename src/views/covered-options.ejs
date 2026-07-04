@@ -415,19 +415,19 @@
                                 </div>
                             <% } else { %>
                                 <div class="rolling-futures-buy-gate-row">
-                                    <div class="rolling-futures-buy-gate-text">Open Buy Hedge Only If Same CE/PE Sell Premium Drop Stays Within Threshold %</div>
                                     <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesBuyHedgeSellPremiumGate">
                                         <input type="checkbox" id="chkRollingFuturesBuyHedgeSellPremiumGate" checked />
                                     </label>
+                                    <div class="rolling-futures-buy-gate-text">Increment by X no of lots on every new Trade</div>
                                     <div class="rolling-demo-field rolling-futures-help-input-field">
-                                        <input type="number" id="txtRollingFuturesBuyHedgeSellPremiumPct" min="0" step="0.1" value="2" />
+                                        <input type="number" id="txtRollingFuturesBuyHedgeSellPremiumPct" min="0" step="1" value="1" />
                                     </div>
                                     <span class="rolling-futures-help-icon-wrap">
-                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show buy hedge premium help">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show trade lot increment help">
                                             ?
                                         </button>
                                         <span class="rolling-futures-help-popout floating">
-                                            For covered buy-leg opens and re-entries, the same CE or PE sell premium can drop only up to the configured percentage from its sold premium. Example: at <code>2%</code>, a leg sold at <code>100</code> must stay at <code>98</code> or higher.
+                                            When enabled, each new CE or PE trade uses the Manual Trader row quantity plus <code>X</code> extra lots for every already-active open position on the same side. CE and PE are tracked separately.
                                         </span>
                                     </span>
                                 </div>

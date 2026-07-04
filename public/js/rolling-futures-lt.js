@@ -848,13 +848,13 @@
         }).join("");
         const gateBlock = isCoveredMode ? `
             <div class="rolling-futures-saved-profile-card">
-                <div class="rolling-futures-saved-profile-title">${isStrangleLikePage ? "Delta Gap Replace Rule" : "Buy Hedge Threshold"}</div>
+                <div class="rolling-futures-saved-profile-title">${isStrangleLikePage ? "Delta Gap Replace Rule" : "Trade Lot Increment"}</div>
                 <div class="rolling-futures-saved-profile-grid">
                     ${isStrangleLikePage
                         ? `<span>Enabled: <strong>${escapeHtml(String(Boolean(state.strangleDeltaDiffReplaceEnabled)) === "true" ? "ON" : "OFF")}</strong></span>
                     <span>Threshold %: <strong>${escapeHtml(formatSavedProfileValue(state.strangleDeltaDiffReplacePct, "50"))}</strong></span>`
                         : `<span>Enabled: <strong>${escapeHtml(String(Boolean(state.buyHedgeSellPremiumGate)) === "true" ? "ON" : "OFF")}</strong></span>
-                    <span>Threshold %: <strong>${escapeHtml(formatSavedProfileValue(state.buyHedgeSellPremiumPct, "2"))}</strong></span>`}
+                    <span>Increment Lots: <strong>${escapeHtml(formatSavedProfileValue(state.buyHedgeSellPremiumPct, "1"))}</strong></span>`}
                 </div>
             </div>
             <div class="rolling-futures-saved-profile-card">
@@ -1140,7 +1140,7 @@
             blockedMarginPct: isStrangleLikePage ? "10" : "20",
             reEnterBlock: false,
             buyHedgeSellPremiumGate: true,
-            buyHedgeSellPremiumPct: "2",
+            buyHedgeSellPremiumPct: "1",
             strangleDeltaDiffReplaceEnabled: isStrangleLikePage,
             strangleDeltaDiffReplacePct: isStrangleLikePage ? "40" : "50",
             buyHedgeOppositeLegOnGate: false,
@@ -2627,7 +2627,7 @@
             blockedMarginPct: getInputValue(ids.blockedMarginPct, "20"),
             reEnterBlock: false,
             buyHedgeSellPremiumGate: isStrangleLikePage ? false : getCheckboxValue(ids.buyHedgeSellPremiumGate, false),
-            buyHedgeSellPremiumPct: isStrangleLikePage ? "2" : getInputValue(ids.buyHedgeSellPremiumPct, "2"),
+            buyHedgeSellPremiumPct: isStrangleLikePage ? "2" : getInputValue(ids.buyHedgeSellPremiumPct, "1"),
             strangleDeltaDiffReplaceEnabled: isStrangleLikePage ? getCheckboxValue(ids.strangleDeltaDiffReplaceEnabled, false) : false,
             strangleDeltaDiffReplacePct: isStrangleLikePage ? getInputValue(ids.strangleDeltaDiffReplacePct, "50") : "50",
             buyHedgeOppositeLegOnGate: getCheckboxValue(ids.buyHedgeOppositeLegOnGate, false),
@@ -3115,9 +3115,10 @@
         const vLegSide = String(rowNodes.legs?.value || "").trim().toLowerCase();
         const vExpiryMode = String(rowNodes.expiryMode?.value || "5").trim();
         const vExpiryDate = String(rowNodes.expiryDate?.value || "").trim();
-        const vQty = Math.max(1, Math.floor(Number(rowNodes.qty?.value || 1)));
+        const vBaseQty = Math.max(1, Math.floor(Number(rowNodes.qty?.value || 1)));
         const vTargetDelta = Math.max(0, Number(rowNodes.newD?.value || 0.53));
         const vSymbol = String(ids.symbol?.value || "BTC").trim().toUpperCase();
+        const vQty = resolveCoveredTradeQty(vAction, vLegSide, vBaseQty, vSymbol);
 
         if (vAction !== "buy" && vAction !== "sell") {
             throw new Error("Select Buy or Sell in Action before executing the live strategy.");
@@ -3355,6 +3356,56 @@
             })[0] || null;
     }
 
+    function getCoveredTradeIncrementLots() {
+        const bEnabled = ids.buyHedgeSellPremiumGate instanceof HTMLInputElement
+            && ids.buyHedgeSellPremiumGate.checked;
+        const vRawIncrement = Number(ids.buyHedgeSellPremiumPct instanceof HTMLInputElement
+            ? ids.buyHedgeSellPremiumPct.value
+            : 1);
+        const vIncrementLots = Number.isFinite(vRawIncrement)
+            ? Math.max(0, Math.floor(vRawIncrement))
+            : 1;
+        return {
+            enabled: bEnabled,
+            incrementLots: vIncrementLots
+        };
+    }
+
+    function isTrackedCoveredTradeForSymbol(row, symbol) {
+        const normalizedSymbol = String(symbol || "").trim().toUpperCase();
+        const contractName = String(row?.contractName || "").trim().toUpperCase();
+        if (!normalizedSymbol || !contractName) {
+            return false;
+        }
+        return contractName.includes(`-${normalizedSymbol}-`)
+            || contractName.startsWith(`${normalizedSymbol}-`)
+            || contractName.includes(normalizedSymbol);
+    }
+
+    function countActiveCoveredTradesByLeg(symbol, legSide, action) {
+        const normalizedLegSide = String(legSide || "").trim().toUpperCase() === "PE" ? "PE" : "CE";
+        const normalizedAction = String(action || "").trim().toUpperCase() === "BUY" ? "BUY" : "SELL";
+        return (Array.isArray(displayedPositions) ? displayedPositions : []).filter(function (row) {
+            return !isDisplayedPositionInactive(row)
+                && isTrackedCoveredTradeForSymbol(row, symbol)
+                && String(row?.side || "").trim().toUpperCase() === normalizedAction
+                && getCoveredContractLegSide(row?.contractName) === normalizedLegSide;
+        }).length;
+    }
+
+    function resolveCoveredTradeQty(action, legSide, rowQty, symbol) {
+        const vBaseQty = Math.max(1, Math.floor(Number(rowQty || 1)));
+        if (!isCoveredMode || isStrangleLikePage) {
+            return vBaseQty;
+        }
+        const objIncrementConfig = getCoveredTradeIncrementLots();
+        if (!objIncrementConfig.enabled || !(objIncrementConfig.incrementLots > 0)) {
+            return vBaseQty;
+        }
+        const vExistingTrades = countActiveCoveredTradesByLeg(symbol, legSide, action);
+        return vBaseQty + (vExistingTrades * objIncrementConfig.incrementLots);
+    }
+
     function renderCoveredHedgeGateSummary(rows) {
         if (!isCoveredMode || !ids.hedgeGateSummary) {
             return;
@@ -3398,6 +3449,33 @@
             ids.hedgeGateSummary.innerHTML = `<span class="rolling-covered-hedge-chip gate">Replace at ${escapeHtml(fmt(vThresholdPct, 0))}% Current at ${escapeHtml(currentPctText)}%</span>`;
             return;
         }
+        const objIncrementConfig = getCoveredTradeIncrementLots();
+        if (!objIncrementConfig.enabled) {
+            ids.hedgeGateSummary.innerHTML = '<span class="rolling-covered-hedge-chip off">Increment Off</span>';
+            return;
+        }
+        const vSymbol = String(ids.symbol?.value || "BTC").trim().toUpperCase();
+        const row1Qty = Math.max(1, Math.floor(Number(getOptionRowNodes(1).qty?.value || 1)));
+        const row2Qty = Math.max(1, Math.floor(Number(getOptionRowNodes(2).qty?.value || 1)));
+        const nextLegChips = [
+            {
+                label: "PE",
+                qty: resolveCoveredTradeQty("sell", "pe", row1Qty, vSymbol),
+                activeCount: countActiveCoveredTradesByLeg(vSymbol, "pe", "sell")
+            },
+            {
+                label: "CE",
+                qty: resolveCoveredTradeQty("sell", "ce", row2Qty, vSymbol),
+                activeCount: countActiveCoveredTradesByLeg(vSymbol, "ce", "sell")
+            }
+        ].map(function (entry) {
+            return `<span class="rolling-covered-hedge-chip neutral">${entry.label} Next ${escapeHtml(fmt(entry.qty, 0))} (${escapeHtml(fmt(entry.activeCount, 0))} open)</span>`;
+        }).join("");
+        ids.hedgeGateSummary.innerHTML = `
+            <span class="rolling-covered-hedge-chip gate">Increment +${escapeHtml(fmt(objIncrementConfig.incrementLots, 0))}</span>
+            ${nextLegChips}
+        `;
+        return;
         const gateEnabled = ids.buyHedgeSellPremiumGate instanceof HTMLInputElement
             && ids.buyHedgeSellPremiumGate.checked;
         const rawThresholdPct = Number(ids.buyHedgeSellPremiumPct instanceof HTMLInputElement
@@ -4089,7 +4167,6 @@
         ids.buyQtyPercent,
         ids.renkoEnabled,
         ids.renkoBoxSize,
-        ids.renkoBaseValue,
         ids.autoConfirmLiveActions
     ].forEach(function (node) {
         node?.addEventListener("change", queueProfileSave);
@@ -4132,18 +4209,22 @@
             queueProfileSave();
         });
         if (node instanceof HTMLInputElement && node.type !== "checkbox") {
-            node.addEventListener("input", function () {
-                if (node === ids.renkoBoxSize) {
+            if (node === ids.renkoBoxSize) {
+                node.addEventListener("input", function () {
                     ids.renkoBoxSize.value = String(clampRenkoBoxSizeValue(ids.renkoBoxSize.value));
                     resetRenkoFeedState("Renko box size changed. Waiting for fresh box color.");
-                }
-                else {
+                    updateRenkoFeedDisplay(lastAccountSummary);
+                    queueProfileSave();
+                });
+            }
+            else if (node === ids.renkoBaseValue) {
+                node.addEventListener("blur", function () {
                     captureRenkoBaseValueForCurrentSymbol();
                     resetRenkoFeedState("Renko base value changed. Waiting for fresh box color.");
-                }
-                updateRenkoFeedDisplay(lastAccountSummary);
-                queueProfileSave();
-            });
+                    updateRenkoFeedDisplay(lastAccountSummary);
+                    queueProfileSave();
+                });
+            }
         }
     });
     getSupportedOptionRowIndexes().forEach(function (rowIndex) {
@@ -4164,6 +4245,7 @@
         });
         nodes.action?.addEventListener("change", function () {
             syncQtyFromStartQty();
+            renderCoveredHedgeGateSummary(displayedPositions);
             queueProfileSave();
         });
         nodes.qty?.addEventListener("change", function () {
@@ -4171,6 +4253,7 @@
                 return;
             }
             syncQtyFromStartQty();
+            renderCoveredHedgeGateSummary(displayedPositions);
             queueProfileSave();
         });
         if (nodes.qty instanceof HTMLInputElement) {
@@ -4179,6 +4262,7 @@
                     return;
                 }
                 syncQtyFromStartQty();
+                renderCoveredHedgeGateSummary(displayedPositions);
                 queueProfileSave();
             });
         }
