@@ -3113,11 +3113,11 @@ async function refreshOptionsScalperPaperOpenPositions(
             continue;
         }
         const objTicker = await getLiveOptionTicker(objPosition.contractName);
-        const vMarkPrice = Number(objTicker?.markPrice || objPosition.markPrice || objPosition.entryPrice || 0);
+        const vTrackedPrice = resolveTrackedOptionLivePrice(objPosition.side, objTicker, Number(objPosition.markPrice || objPosition.entryPrice || 0));
         arrNext.push({
             ...objPosition,
-            markPrice: vMarkPrice,
-            pnl: Number(estimateTrackedPositionPnl(objPosition, vMarkPrice).toFixed(4)),
+            markPrice: vTrackedPrice,
+            pnl: Number(estimateTrackedPositionPnl(objPosition, vTrackedPrice).toFixed(4)),
             updatedAt: new Date().toISOString(),
             metadata: objPosition.metadata && typeof objPosition.metadata === "object"
                 ? {
@@ -3141,7 +3141,11 @@ async function closeOptionsScalperPaperPosition(
     const vClosedAtIso = String(pClosedAtIso || "").trim() || new Date().toISOString();
     const vExitPrice = Number.isFinite(Number(pExitPrice))
         ? Number(pExitPrice)
-        : Number((await getLiveOptionTicker(pPosition.contractName))?.markPrice || pPosition.markPrice || pPosition.entryPrice || 0);
+        : resolveTrackedOptionLivePrice(
+            pPosition.side,
+            await getLiveOptionTicker(pPosition.contractName),
+            Number(pPosition.markPrice || pPosition.entryPrice || 0)
+        );
     const vCloseCharge = await estimateTrackedPositionCharge(pPosition, vExitPrice);
     const vPnl = Number(estimateTrackedPositionPnl(pPosition, vExitPrice).toFixed(4));
     const vTotalCharges = Number((Number(pPosition.charges || 0) + vCloseCharge).toFixed(4));
@@ -6784,6 +6788,48 @@ function getTrackedPositionIdentityKey(
     ].join("::");
 }
 
+function resolveTrackedOptionLivePrice(
+    pSide: unknown,
+    pTicker: Awaited<ReturnType<typeof getLiveOptionTicker>> | null,
+    pFallbackPrice: number
+): number {
+    const vSide = String(pSide || "").trim().toUpperCase();
+    const vBestBid = Number(pTicker?.bestBid);
+    const vBestAsk = Number(pTicker?.bestAsk);
+    const vMarkPrice = Number(pTicker?.markPrice);
+    if (vSide === "BUY" && Number.isFinite(vBestBid) && vBestBid > 0) {
+        return vBestBid;
+    }
+    if (vSide === "SELL" && Number.isFinite(vBestAsk) && vBestAsk > 0) {
+        return vBestAsk;
+    }
+    if (Number.isFinite(vMarkPrice) && vMarkPrice > 0) {
+        return vMarkPrice;
+    }
+    return Number.isFinite(Number(pFallbackPrice)) ? Number(pFallbackPrice) : 0;
+}
+
+function resolveTrackedOptionEntryPrice(
+    pSide: unknown,
+    pTicker: Pick<NonNullable<Awaited<ReturnType<typeof getLiveOptionTicker>>>, "bestBid" | "bestAsk" | "markPrice">,
+    pFallbackPrice?: number
+): number {
+    const vSide = String(pSide || "").trim().toUpperCase();
+    const vBestBid = Number(pTicker?.bestBid);
+    const vBestAsk = Number(pTicker?.bestAsk);
+    const vMarkPrice = Number(pTicker?.markPrice);
+    if (vSide === "BUY" && Number.isFinite(vBestAsk) && vBestAsk > 0) {
+        return vBestAsk;
+    }
+    if (vSide === "SELL" && Number.isFinite(vBestBid) && vBestBid > 0) {
+        return vBestBid;
+    }
+    if (Number.isFinite(vMarkPrice) && vMarkPrice > 0) {
+        return vMarkPrice;
+    }
+    return Number.isFinite(Number(pFallbackPrice)) ? Number(pFallbackPrice) : 0;
+}
+
 async function reconcileRemovedTrackedPositionsPnl(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -7951,11 +7997,12 @@ async function buildOptionsScalperPaperOptionOpen(
     }
 
     const vOpenedAtIso = new Date().toISOString();
+    const vEntryPrice = resolveTrackedOptionEntryPrice(pInput.action, objContract, Number(objContract.markPrice || 0));
     const vEntryCharge = await estimateTrackedPositionCharge({
         contractName: String(objContract.contractSymbol || "").trim(),
         qty: pInput.qty,
-        entryPrice: Number(objContract.markPrice || 0),
-        markPrice: Number(objContract.markPrice || 0)
+        entryPrice: vEntryPrice,
+        markPrice: vEntryPrice
     });
     return {
         position: {
@@ -7965,8 +8012,8 @@ async function buildOptionsScalperPaperOptionOpen(
             contractName: String(objContract.contractSymbol || "").trim(),
             side: pInput.action.toUpperCase(),
             qty: pInput.qty,
-            entryPrice: Number(objContract.markPrice || 0),
-            markPrice: Number(objContract.markPrice || 0),
+            entryPrice: vEntryPrice,
+            markPrice: resolveTrackedOptionLivePrice(pInput.action, objContract, vEntryPrice),
             charges: Number(vEntryCharge.toFixed(4)),
             pnl: 0,
             margin: 0,
