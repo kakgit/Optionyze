@@ -6830,6 +6830,21 @@ function resolveTrackedOptionEntryPrice(
     return Number.isFinite(Number(pFallbackPrice)) ? Number(pFallbackPrice) : 0;
 }
 
+function hasActiveTrackedOptionContract(
+    pPositions: RollingFuturesLtImportedPositionRecord[],
+    pContractName: string
+): boolean {
+    const vContractName = String(pContractName || "").trim().toUpperCase();
+    if (!vContractName) {
+        return false;
+    }
+    return (Array.isArray(pPositions) ? pPositions : []).some((objPosition) =>
+        !isTrackedPositionInactive(objPosition)
+        && isOptionContractSymbol(objPosition.contractName)
+        && String(objPosition.contractName || "").trim().toUpperCase() === vContractName
+    );
+}
+
 async function reconcileRemovedTrackedPositionsPnl(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -7981,6 +7996,13 @@ async function buildOptionsScalperPaperOptionOpen(
     );
     if (!objContract) {
         throw new Error(`No live ${pInput.legSide.toUpperCase()} contract was found for ${pInput.symbol} near target delta ${pInput.targetDelta.toFixed(2)}.`);
+    }
+    if (isOptionsScalperStrategy(pStrategyCode) && String(pInput.openedReason || "").trim() !== "manual_option_open") {
+        const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+        const vContractName = String(objContract.contractSymbol || "").trim();
+        if (hasActiveTrackedOptionContract(arrExisting, vContractName)) {
+            throw new Error(`Skipped auto trade because ${vContractName} is already active in Open Positions.`);
+        }
     }
 
     const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
