@@ -13055,6 +13055,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
     const vExpiryDate = normalizeRollingFuturesExpiryDate(vExpiryMode, req.body?.expiryDate);
     const vQty = Math.max(1, Math.floor(Number(req.body?.qty || 1)));
     const vTargetDelta = Math.max(0, Number(req.body?.targetDelta || 0.53));
+    const vOpenedReason = String(req.body?.openedReason || "").trim() || "manual_option_open";
 
     if (vAction !== "buy" && vAction !== "sell") {
         res.status(400).json({ status: "warning", message: "Select a valid option action before placing a live option order." });
@@ -13095,7 +13096,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
                     qty: vQty,
                     targetDelta: vTargetDelta,
                     rowIndex: vRowIndex,
-                    openedReason: "manual_option_open"
+                    openedReason: vOpenedReason
                 }
             );
             const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, [

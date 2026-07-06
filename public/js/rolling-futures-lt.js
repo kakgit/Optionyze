@@ -546,7 +546,7 @@
                     : "Turn Auto Trader ON before Renko auto trades can place live option orders.");
             }
             applyExpiryModeDefaults(true, tradeConfig.rowIndex);
-            return placeManualOption(tradeConfig.action, tradeConfig.legSide, tradeConfig.rowIndex);
+            return placeManualOption(tradeConfig.action, tradeConfig.legSide, tradeConfig.rowIndex, "strategy_option_open");
         }).then(function (objResult) {
             const trackedPayload = objResult?.data?.trackedOpenPositions || null;
             const objOrder = objResult?.data?.order || {};
@@ -3372,7 +3372,7 @@
         }
     }
 
-    async function placeManualOption(action, legSide, rowIndex) {
+    async function placeManualOption(action, legSide, rowIndex, openedReason) {
         const optionRowIndex = normalizeOptionRowIndex(rowIndex);
         const rowNodes = getOptionRowNodes(optionRowIndex);
         const vAction = String(action || "").trim().toLowerCase();
@@ -3419,7 +3419,8 @@
                 expiryMode: vExpiryMode,
                 expiryDate: vExpiryDate,
                 qty: vQty,
-                targetDelta: vTargetDelta
+                targetDelta: vTargetDelta,
+                openedReason: String(openedReason || "").trim() || "manual_option_open"
             });
         }
         finally {
