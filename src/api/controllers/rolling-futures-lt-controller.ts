@@ -8017,7 +8017,7 @@ async function buildOptionsScalperPaperOptionOpen(
     if (!objContract) {
         throw new Error(`No live ${pInput.legSide.toUpperCase()} contract was found for ${pInput.symbol} near target delta ${pInput.targetDelta.toFixed(2)}.`);
     }
-    if (isOptionsScalperStrategy(pStrategyCode) && String(pInput.openedReason || "").trim() !== "manual_option_open") {
+    if (isOptionsScalperStrategy(pStrategyCode) && String(pInput.openedReason || "").trim().toLowerCase() === "strategy_option_open") {
         const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
         const vContractName = String(objContract.contractSymbol || "").trim();
         if (hasActiveTrackedOptionContract(arrExisting, vContractName)) {
