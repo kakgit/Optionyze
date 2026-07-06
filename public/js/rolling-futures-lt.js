@@ -143,7 +143,10 @@
         renkoEnabled: document.getElementById("chkRollingFuturesRenkoEnabled"),
         renkoBoxSize: document.getElementById("txtRollingFuturesRenkoBoxSize"),
         renkoBaseValue: document.getElementById("txtRollingFuturesRenkoBaseValue"),
+        renkoEmaEnabled: document.getElementById("chkRollingFuturesRenkoEmaEnabled"),
+        renkoEmaLength: document.getElementById("txtRollingFuturesRenkoEmaLength"),
         renkoSpotPrice: document.getElementById("rollingRenkoSpotPrice"),
+        renkoEmaValue: document.getElementById("rollingRenkoEmaValue"),
         renkoCurrentBoxColor: document.getElementById("rollingRenkoCurrentBoxColor"),
         renkoFeedMeta: document.getElementById("rollingRenkoFeedMeta"),
         renkoHistoryLog: document.getElementById("rollingRenkoHistoryLog"),
@@ -271,6 +274,7 @@
     let renkoLastLivePrice = Number.NaN;
     let renkoAutoTradeInFlight = false;
     let renkoBaseValuesBySymbol = { BTC: "", ETH: "" };
+    let renkoEmaValuesBySymbol = { BTC: "", ETH: "" };
     let renkoStateBySymbol = {
         BTC: { referencePrice: "", lastColor: "neutral" },
         ETH: { referencePrice: "", lastColor: "neutral" }
@@ -329,6 +333,21 @@
         return clampRenkoBoxSizeValue(ids.renkoBoxSize.value);
     }
 
+    function clampRenkoEmaLengthValue(value) {
+        const vRaw = Math.floor(Number(value || 0));
+        if (!Number.isFinite(vRaw) || vRaw < 1) {
+            return 20;
+        }
+        return Math.min(1000, vRaw);
+    }
+
+    function getRenkoEmaLengthValue() {
+        if (!(ids.renkoEmaLength instanceof HTMLInputElement)) {
+            return 20;
+        }
+        return clampRenkoEmaLengthValue(ids.renkoEmaLength.value);
+    }
+
     function normalizeRenkoBaseValue(value) {
         const vRaw = Number(value);
         if (!Number.isFinite(vRaw) || !(vRaw > 0)) {
@@ -338,6 +357,14 @@
     }
 
     function normalizeRenkoBaseValues(value) {
+        const source = value && typeof value === "object" ? value : {};
+        return {
+            BTC: normalizeRenkoBaseValue(source.BTC),
+            ETH: normalizeRenkoBaseValue(source.ETH)
+        };
+    }
+
+    function normalizeRenkoEmaValues(value) {
         const source = value && typeof value === "object" ? value : {};
         return {
             BTC: normalizeRenkoBaseValue(source.BTC),
@@ -399,6 +426,7 @@
         const normalizedSymbol = String(symbol || "").trim().toUpperCase() === "ETH" ? "ETH" : "BTC";
         ids.renkoBaseValue.value = String(renkoBaseValuesBySymbol[normalizedSymbol] || "");
         currentRenkoBaseSymbol = normalizedSymbol;
+        setRenkoEmaDisplay(getRenkoEmaValueForSymbol(normalizedSymbol), getRenkoEmaEnabled());
         renderRenkoHistory();
     }
 
@@ -424,6 +452,16 @@
             renkoStateBySymbol[normalizedSymbol] = { referencePrice: "", lastColor: "neutral" };
         }
         return renkoStateBySymbol[normalizedSymbol];
+    }
+
+    function getRenkoEmaValueForSymbol(symbol) {
+        const normalizedSymbol = String(symbol || "").trim().toUpperCase() === "ETH" ? "ETH" : "BTC";
+        return Number(renkoEmaValuesBySymbol[normalizedSymbol] || 0);
+    }
+
+    function setRenkoEmaValueForSymbol(symbol, value) {
+        const normalizedSymbol = String(symbol || "").trim().toUpperCase() === "ETH" ? "ETH" : "BTC";
+        renkoEmaValuesBySymbol[normalizedSymbol] = normalizeRenkoBaseValue(value);
     }
 
     function setRenkoStateForSymbol(symbol, referencePrice, lastColor) {
@@ -595,6 +633,10 @@
         return supportsRenkoFeed && ids.renkoEnabled instanceof HTMLInputElement && ids.renkoEnabled.checked;
     }
 
+    function getRenkoEmaEnabled() {
+        return supportsRenkoFeed && ids.renkoEmaEnabled instanceof HTMLInputElement && ids.renkoEmaEnabled.checked;
+    }
+
     function setRenkoColorDisplay(color, label, metaText) {
         if (ids.renkoCurrentBoxColor) {
             ids.renkoCurrentBoxColor.classList.remove("green", "red", "neutral");
@@ -611,6 +653,47 @@
             return;
         }
         ids.renkoSpotPrice.textContent = Number.isFinite(value) ? fmt(value, 2) : "--";
+    }
+
+    function setRenkoEmaDisplay(value, enabled) {
+        if (!ids.renkoEmaValue) {
+            return;
+        }
+        if (enabled === false) {
+            ids.renkoEmaValue.textContent = "OFF";
+            return;
+        }
+        ids.renkoEmaValue.textContent = Number.isFinite(value) ? fmt(value, 2) : "--";
+    }
+
+    function getRenkoEmaMetaText(symbol) {
+        if (!getRenkoEmaEnabled()) {
+            return "EMA OFF";
+        }
+        const emaLength = getRenkoEmaLengthValue();
+        const emaValue = getRenkoEmaValueForSymbol(symbol);
+        return `EMA ${emaLength} ${Number.isFinite(emaValue) && emaValue > 0 ? fmt(emaValue, 2) : "--"}`;
+    }
+
+    function updateRenkoEmaValue(symbol, livePrice) {
+        const normalizedSymbol = String(symbol || "").trim().toUpperCase() === "ETH" ? "ETH" : "BTC";
+        if (!getRenkoEmaEnabled()) {
+            setRenkoEmaDisplay(Number.NaN, false);
+            return false;
+        }
+        if (!Number.isFinite(livePrice) || !(livePrice > 0)) {
+            setRenkoEmaDisplay(getRenkoEmaValueForSymbol(normalizedSymbol), true);
+            return false;
+        }
+        const previousEma = getRenkoEmaValueForSymbol(normalizedSymbol);
+        const emaLength = getRenkoEmaLengthValue();
+        const smoothing = 2 / (emaLength + 1);
+        const nextEma = Number.isFinite(previousEma) && previousEma > 0
+            ? Number((previousEma + ((livePrice - previousEma) * smoothing)).toFixed(2))
+            : Number(livePrice.toFixed(2));
+        setRenkoEmaValueForSymbol(normalizedSymbol, nextEma);
+        setRenkoEmaDisplay(nextEma, true);
+        return normalizeRenkoBaseValue(previousEma) !== normalizeRenkoBaseValue(nextEma);
     }
 
     function getRenkoLivePrice(summary) {
@@ -655,17 +738,26 @@
         const previousReferencePrice = currentState.referencePrice;
         const previousLastColor = currentState.lastColor;
         if (!getRenkoFeedEnabled()) {
+            updateRenkoEmaValue(currentSymbol, livePrice);
             resetRenkoFeedState("Renko feed is OFF.");
             return;
         }
+        const emaChanged = updateRenkoEmaValue(currentSymbol, livePrice);
+        const emaMeta = getRenkoEmaMetaText(currentSymbol);
         if (!Number.isFinite(baseValue) || !(baseValue > 0)) {
             setRenkoStateForSymbol(currentSymbol, "", "neutral");
-            setRenkoColorDisplay("neutral", "Waiting", `Feed ON | Box ${boxSize} | Enter a base value to start tracking.`);
+            setRenkoColorDisplay("neutral", "Waiting", `Feed ON | Box ${boxSize} | ${emaMeta} | Enter a base value to start tracking.`);
+            if (emaChanged) {
+                queueProfileSave();
+            }
             return;
         }
         if (!Number.isFinite(livePrice) || !(livePrice > 0)) {
             setRenkoStateForSymbol(currentSymbol, currentState.referencePrice || baseValue, currentState.lastColor);
-            setRenkoColorDisplay("neutral", "Waiting", `Feed ON | Base ${fmt(baseValue, 2)} | Box ${boxSize} | Waiting for live price...`);
+            setRenkoColorDisplay("neutral", "Waiting", `Feed ON | Base ${fmt(baseValue, 2)} | Box ${boxSize} | ${emaMeta} | Waiting for live price...`);
+            if (emaChanged) {
+                queueProfileSave();
+            }
             return;
         }
         renkoLastLivePrice = livePrice;
@@ -712,18 +804,19 @@
             triggerRenkoAutoTrade(currentSymbol, nextLastColor);
         }
         if (nextLastColor === "neutral") {
-            setRenkoColorDisplay("neutral", "Waiting", `Feed ON | Base ${fmt(baseValue, 2)} | Price ${fmt(livePrice, 2)} | Waiting for first box.`);
+            setRenkoColorDisplay("neutral", "Waiting", `Feed ON | Base ${fmt(baseValue, 2)} | Price ${fmt(livePrice, 2)} | ${emaMeta} | Waiting for first box.`);
         }
         else {
             const colorLabel = nextLastColor === "green" ? "Green" : "Red";
             setRenkoColorDisplay(
                 nextLastColor,
                 colorLabel,
-                `Feed ON | Anchor ${fmt(baseValue, 2)} | Box ${boxSize} | Price ${fmt(livePrice, 2)} | Current ${fmt(nextReferencePrice, 2)}`
+                `Feed ON | Anchor ${fmt(baseValue, 2)} | Box ${boxSize} | Price ${fmt(livePrice, 2)} | Current ${fmt(nextReferencePrice, 2)} | ${emaMeta}`
             );
         }
         if (previousReferencePrice !== renkoStateBySymbol[currentSymbol].referencePrice
-            || previousLastColor !== renkoStateBySymbol[currentSymbol].lastColor) {
+            || previousLastColor !== renkoStateBySymbol[currentSymbol].lastColor
+            || emaChanged) {
             queueProfileSave();
         }
     }
@@ -883,6 +976,8 @@
                 <div class="rolling-futures-saved-profile-grid">
                     <span>Enabled: <strong>${escapeHtml(String(Boolean(state.renkoEnabled)) === "true" ? "ON" : "OFF")}</strong></span>
                     <span>Box Size: <strong>${escapeHtml(formatSavedProfileValue(state.renkoStepPoints, "100"))}</strong></span>
+                    <span>EMA: <strong>${escapeHtml(String(Boolean(state.renkoEmaEnabled)) === "true" ? "ON" : "OFF")}</strong></span>
+                    <span>EMA Length: <strong>${escapeHtml(formatSavedProfileValue(state.renkoEmaLength, "20"))}</strong></span>
                     <span>BTC Base: <strong>${escapeHtml(formatSavedProfileValue(state.renkoBaseValues?.BTC || "", "-"))}</strong></span>
                     <span>ETH Base: <strong>${escapeHtml(formatSavedProfileValue(state.renkoBaseValues?.ETH || "", "-"))}</strong></span>
                 </div>
@@ -1168,6 +1263,9 @@
             renkoStepPoints: "100",
             renkoBaseValue: "",
             renkoBaseValues: { BTC: "", ETH: "" },
+            renkoEmaEnabled: false,
+            renkoEmaLength: "20",
+            renkoEmaValuesBySymbol: { BTC: "", ETH: "" },
             renkoStateBySymbol: {
                 BTC: { referencePrice: "", lastColor: "neutral" },
                 ETH: { referencePrice: "", lastColor: "neutral" }
@@ -2805,6 +2903,11 @@
                     [getCurrentSelectedSymbol()]: normalizeRenkoBaseValue(ids.renkoBaseValue?.value || "")
                 }
                 : { BTC: "", ETH: "" },
+            renkoEmaEnabled: supportsRenkoFeed ? getCheckboxValue(ids.renkoEmaEnabled, false) : false,
+            renkoEmaLength: supportsRenkoFeed ? String(getRenkoEmaLengthValue()) : "20",
+            renkoEmaValuesBySymbol: supportsRenkoFeed
+                ? renkoEmaValuesBySymbol
+                : { BTC: "", ETH: "" },
             renkoStateBySymbol: supportsRenkoFeed
                 ? renkoStateBySymbol
                 : {
@@ -2839,6 +2942,7 @@
         try {
             const objUiState = { ...getDefaultUiState(), ...(uiState || {}) };
             renkoBaseValuesBySymbol = normalizeRenkoBaseValues(objUiState.renkoBaseValues);
+            renkoEmaValuesBySymbol = normalizeRenkoEmaValues(objUiState.renkoEmaValuesBySymbol);
             renkoStateBySymbol = normalizeRenkoStateValues(objUiState.renkoStateBySymbol);
             renkoHistoryBySymbol = normalizeRenkoHistoryValues(objUiState.renkoHistoryBySymbol);
             setInputValue(ids.startQty, objUiState.startQty);
@@ -2875,9 +2979,15 @@
             setCheckboxValue(ids.renkoEnabled, supportsRenkoFeed ? objUiState.renkoEnabled : false);
             setInputValue(ids.renkoBoxSize, supportsRenkoFeed ? objUiState.renkoStepPoints : "100");
             setInputValue(ids.renkoBaseValue, supportsRenkoFeed ? String(renkoBaseValuesBySymbol[getCurrentSelectedSymbol()] || "") : "");
+            setCheckboxValue(ids.renkoEmaEnabled, supportsRenkoFeed ? objUiState.renkoEmaEnabled : false);
+            setInputValue(ids.renkoEmaLength, supportsRenkoFeed ? objUiState.renkoEmaLength : "20");
             if (ids.renkoBoxSize instanceof HTMLInputElement) {
                 ids.renkoBoxSize.value = String(clampRenkoBoxSizeValue(ids.renkoBoxSize.value));
             }
+            if (ids.renkoEmaLength instanceof HTMLInputElement) {
+                ids.renkoEmaLength.value = String(clampRenkoEmaLengthValue(ids.renkoEmaLength.value));
+            }
+            setRenkoEmaDisplay(getRenkoEmaValueForSymbol(getCurrentSelectedSymbol()), getRenkoEmaEnabled());
             setCheckboxValue(ids.autoConfirmLiveActions, isDemoVariant ? true : objUiState.autoConfirmLiveActions);
             setInputValue(ids.closedFromDate, String(objUiState.closedFromDate || "").trim());
             setInputValue(ids.closedToDate, String(objUiState.closedToDate || "").trim());
@@ -4346,6 +4456,8 @@
         ids.placeOppositeTrades,
         ids.renkoEnabled,
         ids.renkoBoxSize,
+        ids.renkoEmaEnabled,
+        ids.renkoEmaLength,
         ids.autoConfirmLiveActions
     ].forEach(function (node) {
         node?.addEventListener("change", queueProfileSave);
@@ -4377,12 +4489,18 @@
             queueProfileSave();
         });
     });
-    [ids.renkoEnabled, ids.renkoBoxSize, ids.renkoBaseValue].forEach(function (node) {
+    [ids.renkoEnabled, ids.renkoBoxSize, ids.renkoBaseValue, ids.renkoEmaEnabled, ids.renkoEmaLength].forEach(function (node) {
         node?.addEventListener("change", function () {
             if (ids.renkoBoxSize instanceof HTMLInputElement) {
                 ids.renkoBoxSize.value = String(clampRenkoBoxSizeValue(ids.renkoBoxSize.value));
             }
+            if (ids.renkoEmaLength instanceof HTMLInputElement) {
+                ids.renkoEmaLength.value = String(clampRenkoEmaLengthValue(ids.renkoEmaLength.value));
+            }
             captureRenkoBaseValueForCurrentSymbol();
+            if (!getRenkoEmaEnabled()) {
+                setRenkoEmaDisplay(Number.NaN, false);
+            }
             resetRenkoFeedState(getRenkoFeedEnabled()
                 ? "Renko feed updated. Waiting for fresh box color."
                 : "Renko feed is OFF.");
@@ -4394,6 +4512,13 @@
                 node.addEventListener("input", function () {
                     ids.renkoBoxSize.value = String(clampRenkoBoxSizeValue(ids.renkoBoxSize.value));
                     resetRenkoFeedState("Renko box size changed. Waiting for fresh box color.");
+                    updateRenkoFeedDisplay(lastAccountSummary);
+                    queueProfileSave();
+                });
+            }
+            else if (node === ids.renkoEmaLength) {
+                node.addEventListener("input", function () {
+                    ids.renkoEmaLength.value = String(clampRenkoEmaLengthValue(ids.renkoEmaLength.value));
                     updateRenkoFeedDisplay(lastAccountSummary);
                     queueProfileSave();
                 });

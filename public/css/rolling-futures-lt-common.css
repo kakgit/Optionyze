@@ -152,7 +152,7 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-action-sel
 
 .rolling-renko-feed-grid {
     display: grid;
-    grid-template-columns: auto minmax(180px, 1fr) auto auto;
+    grid-template-columns: auto minmax(160px, 1fr) minmax(160px, 1fr) auto minmax(160px, 1fr) auto auto;
     gap: 14px;
     align-items: end;
 }
@@ -165,6 +165,7 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-action-sel
 
 .rolling-renko-feed-field.switch-only {
     justify-self: start;
+    min-width: 88px;
 }
 
 .rolling-renko-feed-switch {

@@ -1615,6 +1615,22 @@ function normalizeRenkoBaseValues(pValue: unknown): { BTC: string; ETH: string }
     };
 }
 
+function normalizeRenkoEmaLengthString(pValue: unknown): string {
+    const vRaw = Math.floor(Number(pValue || 0));
+    if (!Number.isFinite(vRaw) || vRaw < 1) {
+        return "20";
+    }
+    return String(Math.min(1000, vRaw));
+}
+
+function normalizeRenkoEmaValues(pValue: unknown): { BTC: string; ETH: string } {
+    const objValue = pValue && typeof pValue === "object" ? pValue as Record<string, unknown> : {};
+    return {
+        BTC: normalizeRenkoBaseValueString(objValue.BTC),
+        ETH: normalizeRenkoBaseValueString(objValue.ETH)
+    };
+}
+
 function normalizeRenkoColorValue(pValue: unknown): "neutral" | "green" | "red" {
     const vValue = String(pValue || "").trim().toLowerCase();
     return vValue === "green" || vValue === "red" ? vValue : "neutral";
@@ -1878,6 +1894,9 @@ function getDefaultManualTraderUiState(
         renkoStepPoints: "100",
         renkoBaseValue: "",
         renkoBaseValues: { BTC: "", ETH: "" },
+        renkoEmaEnabled: false,
+        renkoEmaLength: "20",
+        renkoEmaValuesBySymbol: { BTC: "", ETH: "" },
         renkoStateBySymbol: {
             BTC: { referencePrice: "", lastColor: "neutral" as const },
             ETH: { referencePrice: "", lastColor: "neutral" as const }
@@ -3749,6 +3768,7 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
     const arrTelegramPrefs = normalizeTelegramAlertTypesForStrategy(pProfile.strategyCode, objUiState);
     const vSymbol = normalizeSymbolValue(objUiState.symbol);
     const objRenkoBaseValues = normalizeRenkoBaseValues(objUiState.renkoBaseValues ?? objDefaults.renkoBaseValues);
+    const objRenkoEmaValuesBySymbol = normalizeRenkoEmaValues(objUiState.renkoEmaValuesBySymbol ?? objDefaults.renkoEmaValuesBySymbol);
     const objRenkoStateBySymbol = normalizeRenkoStateValues(objUiState.renkoStateBySymbol ?? objDefaults.renkoStateBySymbol);
     const objRenkoHistoryBySymbol = normalizeRenkoHistoryValues(objUiState.renkoHistoryBySymbol ?? objDefaults.renkoHistoryBySymbol);
     if (!objRenkoBaseValues[vSymbol]) {
@@ -3813,6 +3833,15 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
             : "",
         renkoBaseValues: supportsRenkoFeedStrategy(pProfile.strategyCode)
             ? objRenkoBaseValues
+            : { BTC: "", ETH: "" },
+        renkoEmaEnabled: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? normalizeBooleanValue(objUiState.renkoEmaEnabled, Boolean(objDefaults.renkoEmaEnabled))
+            : false,
+        renkoEmaLength: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? normalizeRenkoEmaLengthString(objUiState.renkoEmaLength ?? objDefaults.renkoEmaLength)
+            : "20",
+        renkoEmaValuesBySymbol: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? objRenkoEmaValuesBySymbol
             : { BTC: "", ETH: "" },
         renkoStateBySymbol: supportsRenkoFeedStrategy(pProfile.strategyCode)
             ? objRenkoStateBySymbol
@@ -4119,6 +4148,7 @@ function normalizeProfileSaveInput(
     const arrTelegramPrefs = normalizeTelegramAlertTypesForStrategy(pStrategyCode, objUiState);
     const vSymbol = normalizeSymbolValue(objUiState.symbol);
     const objRenkoBaseValues = normalizeRenkoBaseValues(objUiState.renkoBaseValues ?? objDefaults.renkoBaseValues);
+    const objRenkoEmaValuesBySymbol = normalizeRenkoEmaValues(objUiState.renkoEmaValuesBySymbol ?? objDefaults.renkoEmaValuesBySymbol);
     const objRenkoStateBySymbol = normalizeRenkoStateValues(objUiState.renkoStateBySymbol ?? objDefaults.renkoStateBySymbol);
     const objRenkoHistoryBySymbol = normalizeRenkoHistoryValues(objUiState.renkoHistoryBySymbol ?? objDefaults.renkoHistoryBySymbol);
     if (!objRenkoBaseValues[vSymbol]) {
@@ -4183,6 +4213,15 @@ function normalizeProfileSaveInput(
             : "",
         renkoBaseValues: supportsRenkoFeedStrategy(pStrategyCode)
             ? objRenkoBaseValues
+            : { BTC: "", ETH: "" },
+        renkoEmaEnabled: supportsRenkoFeedStrategy(pStrategyCode)
+            ? normalizeBooleanValue(objUiState.renkoEmaEnabled, Boolean(objDefaults.renkoEmaEnabled))
+            : false,
+        renkoEmaLength: supportsRenkoFeedStrategy(pStrategyCode)
+            ? normalizeRenkoEmaLengthString(objUiState.renkoEmaLength ?? objDefaults.renkoEmaLength)
+            : "20",
+        renkoEmaValuesBySymbol: supportsRenkoFeedStrategy(pStrategyCode)
+            ? objRenkoEmaValuesBySymbol
             : { BTC: "", ETH: "" },
         renkoStateBySymbol: supportsRenkoFeedStrategy(pStrategyCode)
             ? objRenkoStateBySymbol
