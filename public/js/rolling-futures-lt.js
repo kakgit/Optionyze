@@ -139,6 +139,7 @@
         buyHedgeOppositeLegOnGate: document.getElementById("chkRollingFuturesBuyHedgeOppositeLegOnGate"),
         strangleReopenAtNewD: document.getElementById("chkRollingFuturesStrangleReopenAtNewD"),
         sameSideLegIncrementEnabled: document.getElementById("chkRollingFuturesSameSideLegIncrementEnabled"),
+        placeOppositeTrades: document.getElementById("chkRollingFuturesPlaceOppositeTrades"),
         renkoEnabled: document.getElementById("chkRollingFuturesRenkoEnabled"),
         renkoBoxSize: document.getElementById("txtRollingFuturesRenkoBoxSize"),
         renkoBaseValue: document.getElementById("txtRollingFuturesRenkoBaseValue"),
@@ -504,7 +505,10 @@
             const rowAction = String(rowNodes.action?.value || "sell").trim().toLowerCase() === "buy"
                 ? "buy"
                 : "sell";
-            const resolvedLegSide = rowAction === "buy" ? buyLegSide : sellLegSide;
+            let resolvedLegSide = rowAction === "buy" ? buyLegSide : sellLegSide;
+            if (isCoveredPlaceOppositeTradesEnabled()) {
+                resolvedLegSide = resolvedLegSide === "pe" ? "ce" : "pe";
+            }
             return {
                 action: rowAction,
                 legSide: resolvedLegSide,
@@ -730,6 +734,12 @@
             : true;
     }
 
+    function isCoveredPlaceOppositeTradesEnabled() {
+        return ids.placeOppositeTrades instanceof HTMLInputElement
+            ? ids.placeOppositeTrades.checked
+            : false;
+    }
+
     function refreshCoveredBalanceSummaryDisplay() {
         if (!isCoveredMode) {
             return;
@@ -858,6 +868,14 @@
                     <span>Unchecked Mode: <strong>Increment on every Renko side change</strong></span>`}
                 </div>
             </div>
+            ${isStrangleLikePage ? "" : `
+            <div class="rolling-futures-saved-profile-card">
+                <div class="rolling-futures-saved-profile-title">Opposite Trade Mode</div>
+                <div class="rolling-futures-saved-profile-grid">
+                    <span>Enabled: <strong>${escapeHtml(String(Boolean(state.placeOppositeTrades)) === "true" ? "ON" : "OFF")}</strong></span>
+                    <span>Behavior: <strong>Flip CE/PE only</strong></span>
+                </div>
+            </div>`}
         ` : "";
         const renkoBlock = supportsRenkoFeed ? `
             <div class="rolling-futures-saved-profile-card">
@@ -1145,6 +1163,7 @@
             buyHedgeOppositeLegOnGate: false,
             strangleReopenAtNewD: false,
             sameSideLegIncrementEnabled: true,
+            placeOppositeTrades: false,
             renkoEnabled: false,
             renkoStepPoints: "100",
             renkoBaseValue: "",
@@ -2776,6 +2795,7 @@
             buyHedgeOppositeLegOnGate: getCheckboxValue(ids.buyHedgeOppositeLegOnGate, false),
             strangleReopenAtNewD: isStrangleLikePage ? getCheckboxValue(ids.strangleReopenAtNewD, false) : false,
             sameSideLegIncrementEnabled: isStrangleLikePage ? false : getCheckboxValue(ids.sameSideLegIncrementEnabled, true),
+            placeOppositeTrades: isStrangleLikePage ? false : getCheckboxValue(ids.placeOppositeTrades, false),
             renkoEnabled: supportsRenkoFeed ? getCheckboxValue(ids.renkoEnabled, false) : false,
             renkoStepPoints: supportsRenkoFeed ? String(getRenkoBoxSizeValue()) : "100",
             renkoBaseValue: supportsRenkoFeed ? normalizeRenkoBaseValue(ids.renkoBaseValue?.value || "") : "",
@@ -2851,6 +2871,7 @@
                 ids.sameSideLegIncrementEnabled,
                 isStrangleLikePage ? false : (objUiState.sameSideLegIncrementEnabled ?? objUiState.buyQtyPercentEnabled ?? true)
             );
+            setCheckboxValue(ids.placeOppositeTrades, isStrangleLikePage ? false : objUiState.placeOppositeTrades);
             setCheckboxValue(ids.renkoEnabled, supportsRenkoFeed ? objUiState.renkoEnabled : false);
             setInputValue(ids.renkoBoxSize, supportsRenkoFeed ? objUiState.renkoStepPoints : "100");
             setInputValue(ids.renkoBaseValue, supportsRenkoFeed ? String(renkoBaseValuesBySymbol[getCurrentSelectedSymbol()] || "") : "");
@@ -4321,6 +4342,7 @@
         ids.buyHedgeOppositeLegOnGate,
         ids.strangleReopenAtNewD,
         ids.sameSideLegIncrementEnabled,
+        ids.placeOppositeTrades,
         ids.renkoEnabled,
         ids.renkoBoxSize,
         ids.autoConfirmLiveActions
@@ -4348,7 +4370,7 @@
             });
         }
     });
-    [ids.sameSideLegIncrementEnabled].forEach(function (node) {
+    [ids.sameSideLegIncrementEnabled, ids.placeOppositeTrades].forEach(function (node) {
         node?.addEventListener("change", function () {
             syncQtyFromStartQty();
             queueProfileSave();

@@ -721,7 +721,7 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-action-sel
 }
 
 .rolling-futures-demo-grid.actions-row.rolling-futures-actions-row-with-gate {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: stretch;
 }
 

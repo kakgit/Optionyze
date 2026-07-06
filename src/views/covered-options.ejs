@@ -469,6 +469,26 @@
                             <% } %>
                         </div>
                     </div>
+                    <% if (!bIsStrangleLikePage) { %>
+                        <div class="rolling-demo-field rolling-futures-buy-gate-field">
+                            <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
+                                <div class="rolling-futures-buy-gate-row">
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesPlaceOppositeTrades">
+                                        <input type="checkbox" id="chkRollingFuturesPlaceOppositeTrades" />
+                                    </label>
+                                    <div class="rolling-futures-buy-gate-text">Place Opposite Trades</div>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show opposite-trade help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, Renko opens only the opposite CE/PE leg while keeping the same Buy or Sell action. Example: if Renko selects <code>CE BUY</code>, it will place only <code>PE BUY</code>.
+                                        </span>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    <% } %>
                 </div>
 
                 <div class="rolling-futures-saved-profile-panel" id="rollingFuturesSavedProfilePanel" style="display:none;">

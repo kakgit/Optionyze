@@ -1871,6 +1871,7 @@ function getDefaultManualTraderUiState(
         strangleDeltaDiffReplacePct: isStrangleOptionsStrategy(pStrategyCode) ? "40" : "50",
         buyHedgeOppositeLegOnGate: false,
         sameSideLegIncrementEnabled: true,
+        placeOppositeTrades: false,
         buyQtyPercentEnabled: false,
         buyQtyPercent: "100",
         renkoEnabled: false,
@@ -3792,6 +3793,9 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
                 objUiState.sameSideLegIncrementEnabled,
                 normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.sameSideLegIncrementEnabled))
             ),
+        placeOppositeTrades: isStrangleOptionsStrategy(pProfile.strategyCode)
+            ? false
+            : normalizeBooleanValue(objUiState.placeOppositeTrades, Boolean(objDefaults.placeOppositeTrades)),
         buyQtyPercentEnabled: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.buyQtyPercentEnabled)),
@@ -4159,6 +4163,9 @@ function normalizeProfileSaveInput(
                 objUiState.sameSideLegIncrementEnabled,
                 normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.sameSideLegIncrementEnabled))
             ),
+        placeOppositeTrades: isStrangleOptionsStrategy(pStrategyCode)
+            ? false
+            : normalizeBooleanValue(objUiState.placeOppositeTrades, Boolean(objDefaults.placeOppositeTrades)),
         buyQtyPercentEnabled: isStrangleOptionsStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.buyQtyPercentEnabled)),
