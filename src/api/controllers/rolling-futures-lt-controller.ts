@@ -1750,7 +1750,7 @@ function getDefaultOptionRowUiState(
         reD: bIsDual ? "0.25" : "0.53",
         tpD: bIsDual ? "0.12" : "0.25",
         slD: bIsDual ? "0.50" : "0.65",
-        reEnter: true
+        reEnter: !supportsRenkoFeedStrategy(pStrategyCode)
     };
     if (isCoveredLikeStrategy(pStrategyCode) && vRowIndex === 1) {
         objDefaults.action = "sell";
@@ -1814,7 +1814,9 @@ function getNormalizedOptionRowUiState(
             : normalizeStringValue(pUiState[objKeys.reD], String(objDefaults.reD)),
         tpD: normalizeStringValue(pUiState[objKeys.tpD], String(objDefaults.tpD)),
         slD: normalizeStringValue(pUiState[objKeys.slD], String(objDefaults.slD)),
-        reEnter: normalizeBooleanValue(pUiState[objKeys.reEnter], Boolean(objDefaults.reEnter))
+        reEnter: supportsRenkoFeedStrategy(pStrategyCode)
+            ? false
+            : normalizeBooleanValue(pUiState[objKeys.reEnter], Boolean(objDefaults.reEnter))
     };
 }
 
@@ -9232,7 +9234,8 @@ async function applyTriggeredOptionRule(
                 buildInactiveTrackedPosition(pPosition, objCloseResult.closedRecord, pReason)
             ];
         }
-        if (Boolean(objMetadata.reEnterEnabled) || pReason === "delta_diff_replace") {
+        const bAllowPaperReEntry = !supportsRenkoFeedStrategy(pStrategyCode) && Boolean(objMetadata.reEnterEnabled);
+        if (bAllowPaperReEntry || pReason === "delta_diff_replace") {
             try {
                 const objPaperRowState = getNormalizedOptionRowUiState(
                     getMergedUiState(objProfile),
@@ -9325,7 +9328,8 @@ async function applyTriggeredOptionRule(
         )
     });
 
-    if (Boolean(objMetadata.reEnterEnabled)) {
+    const bAllowTrackedReEntry = !supportsRenkoFeedStrategy(pStrategyCode) && Boolean(objMetadata.reEnterEnabled);
+    if (bAllowTrackedReEntry) {
         const vOptionReentryPendingUntil = new Date(Date.now() + gOptionReentryPendingMs).toISOString();
         const objRuntimeBeforeReEntry = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
             || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);

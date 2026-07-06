@@ -1176,7 +1176,7 @@
             reD: isDualLikeMode ? "0.65" : (isLong ? "0.65" : "0.65"),
             tpD: isDualLikeMode ? "0.30" : (isLong ? "0.30" : "0.30"),
             slD: isDualLikeMode ? "0.80" : (isLong ? "0.80" : "0.80"),
-            reEnter: true
+            reEnter: !supportsRenkoFeed
         };
         if (isCoveredMode && vRowIndex === 2) {
             const coveredBuyDefaults = {
@@ -1242,7 +1242,7 @@
             : getInputValue(nodes.reD, defaults.reD);
         rowState[keys.tpD] = getInputValue(nodes.tpD, defaults.tpD);
         rowState[keys.slD] = getInputValue(nodes.slD, defaults.slD);
-        rowState[keys.reEnter] = getCheckboxValue(nodes.reEnter, defaults.reEnter);
+        rowState[keys.reEnter] = supportsRenkoFeed ? false : getCheckboxValue(nodes.reEnter, defaults.reEnter);
         return rowState;
     }
 
@@ -1265,7 +1265,7 @@
         setInputValue(nodes.reD, isStrangleLikePage ? (uiState[keys.newD] ?? defaults.newD) : (uiState[keys.reD] ?? defaults.reD));
         setInputValue(nodes.tpD, uiState[keys.tpD] ?? defaults.tpD);
         setInputValue(nodes.slD, uiState[keys.slD] ?? defaults.slD);
-        setCheckboxValue(nodes.reEnter, uiState[keys.reEnter] ?? defaults.reEnter);
+        setCheckboxValue(nodes.reEnter, supportsRenkoFeed ? false : (uiState[keys.reEnter] ?? defaults.reEnter));
     }
 
     function formatCurrentDateTimeLocalValue() {
