@@ -8062,9 +8062,6 @@ async function buildOptionsScalperPaperOptionOpen(
         if (hasActiveTrackedOptionContract(arrExisting, vContractName)) {
             throw new Error(`Skipped auto trade because ${vContractName} is already active in Open Positions.`);
         }
-        if (hasActiveTrackedOptionLegAction(arrExisting, pInput.legSide, pInput.action)) {
-            throw new Error(`Skipped auto trade because an active ${pInput.legSide.toUpperCase()} ${pInput.action.toUpperCase()} position is already open.`);
-        }
     }
 
     const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
