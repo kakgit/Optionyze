@@ -754,43 +754,47 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="rolling-renko-feed-grid">
-                            <div class="rolling-demo-field rolling-renko-feed-field switch-only">
-                                <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoEnabled">
-                                    <input type="checkbox" id="chkRollingFuturesRenkoEnabled" />
-                                    <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
-                                    <span class="rolling-renko-feed-switch-text">Feed</span>
-                                </label>
-                            </div>
-                            <div class="rolling-demo-field rolling-renko-feed-field">
-                                <label for="txtRollingFuturesRenkoBoxSize">Renko Box Size</label>
-                                <input type="number" id="txtRollingFuturesRenkoBoxSize" min="1" step="1" value="100" />
-                            </div>
-                            <div class="rolling-demo-field rolling-renko-feed-field">
-                                <label for="txtRollingFuturesRenkoBaseValue">Base Value</label>
-                                <input type="number" id="txtRollingFuturesRenkoBaseValue" min="0" step="0.01" placeholder="Enter base value" />
-                            </div>
-                            <div class="rolling-demo-field rolling-renko-feed-field switch-only">
-                                <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoEmaEnabled">
-                                    <input type="checkbox" id="chkRollingFuturesRenkoEmaEnabled" />
-                                    <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
-                                    <span class="rolling-renko-feed-switch-text">EMA</span>
-                                </label>
-                            </div>
-                            <div class="rolling-demo-field rolling-renko-feed-field">
-                                <label for="txtRollingFuturesRenkoEmaLength">EMA Length</label>
-                                <input type="number" id="txtRollingFuturesRenkoEmaLength" min="1" step="1" value="20" />
-                            </div>
-                            <div class="rolling-demo-field rolling-renko-feed-field">
-                                <label>Spot Price</label>
-                                <div class="rolling-renko-feed-value-row">
-                                    <span class="rolling-renko-feed-value-badge" id="rollingRenkoSpotPrice">--</span>
+                        <div class="rolling-renko-feed-stack">
+                            <div class="rolling-renko-feed-grid">
+                                <div class="rolling-demo-field rolling-renko-feed-field switch-only">
+                                    <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoEnabled">
+                                        <input type="checkbox" id="chkRollingFuturesRenkoEnabled" />
+                                        <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
+                                        <span class="rolling-renko-feed-switch-text">Feed</span>
+                                    </label>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="txtRollingFuturesRenkoBoxSize">Renko Box Size</label>
+                                    <input type="number" id="txtRollingFuturesRenkoBoxSize" min="1" step="1" value="100" />
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="txtRollingFuturesRenkoBaseValue">Base Value</label>
+                                    <input type="number" id="txtRollingFuturesRenkoBaseValue" min="0" step="0.01" placeholder="Enter base value" />
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>Spot Price</label>
+                                    <div class="rolling-renko-feed-value-row">
+                                        <span class="rolling-renko-feed-value-badge" id="rollingRenkoSpotPrice">--</span>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="rolling-demo-field rolling-renko-feed-field">
-                                <label>Current EMA</label>
-                                <div class="rolling-renko-feed-value-row">
-                                    <span class="rolling-renko-feed-value-badge" id="rollingRenkoEmaValue">--</span>
+                            <div class="rolling-renko-feed-grid rolling-renko-feed-grid-ema">
+                                <div class="rolling-demo-field rolling-renko-feed-field switch-only">
+                                    <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoEmaEnabled">
+                                        <input type="checkbox" id="chkRollingFuturesRenkoEmaEnabled" />
+                                        <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
+                                        <span class="rolling-renko-feed-switch-text">EMA</span>
+                                    </label>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="txtRollingFuturesRenkoEmaLength">EMA Length</label>
+                                    <input type="number" id="txtRollingFuturesRenkoEmaLength" min="1" step="1" value="20" />
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>Current EMA</label>
+                                    <div class="rolling-renko-feed-value-row">
+                                        <span class="rolling-renko-feed-value-badge" id="rollingRenkoEmaValue">--</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>

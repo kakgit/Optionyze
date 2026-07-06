@@ -150,17 +150,30 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-action-sel
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.rolling-renko-feed-stack {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    width: 100%;
+}
+
 .rolling-renko-feed-grid {
     display: grid;
-    grid-template-columns: auto minmax(160px, 1fr) minmax(160px, 1fr) auto minmax(160px, 1fr) auto auto;
+    grid-template-columns: minmax(88px, auto) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 136px);
     gap: 14px;
     align-items: end;
+    width: 100%;
+}
+
+.rolling-renko-feed-grid-ema {
+    grid-template-columns: minmax(88px, auto) minmax(0, 1fr) minmax(0, 136px);
 }
 
 .rolling-renko-feed-field {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    min-width: 0;
 }
 
 .rolling-renko-feed-field.switch-only {
@@ -253,7 +266,8 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-action-sel
 .rolling-renko-feed-value-badge {
     display: inline-flex;
     align-items: center;
-    min-width: 122px;
+    min-width: 0;
+    width: 100%;
     min-height: 40px;
     padding: 8px 14px;
     border-radius: 14px;
