@@ -1896,6 +1896,7 @@ function getDefaultManualTraderUiState(
         renkoBaseValues: { BTC: "", ETH: "" },
         renkoEmaEnabled: false,
         renkoEmaLength: "20",
+        renkoEmaFilterEnabled: false,
         renkoEmaValuesBySymbol: { BTC: "", ETH: "" },
         renkoStateBySymbol: {
             BTC: { referencePrice: "", lastColor: "neutral" as const },
@@ -3840,6 +3841,9 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         renkoEmaLength: supportsRenkoFeedStrategy(pProfile.strategyCode)
             ? normalizeRenkoEmaLengthString(objUiState.renkoEmaLength ?? objDefaults.renkoEmaLength)
             : "20",
+        renkoEmaFilterEnabled: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? normalizeBooleanValue(objUiState.renkoEmaFilterEnabled, Boolean(objDefaults.renkoEmaFilterEnabled))
+            : false,
         renkoEmaValuesBySymbol: supportsRenkoFeedStrategy(pProfile.strategyCode)
             ? objRenkoEmaValuesBySymbol
             : { BTC: "", ETH: "" },
@@ -4220,6 +4224,9 @@ function normalizeProfileSaveInput(
         renkoEmaLength: supportsRenkoFeedStrategy(pStrategyCode)
             ? normalizeRenkoEmaLengthString(objUiState.renkoEmaLength ?? objDefaults.renkoEmaLength)
             : "20",
+        renkoEmaFilterEnabled: supportsRenkoFeedStrategy(pStrategyCode)
+            ? normalizeBooleanValue(objUiState.renkoEmaFilterEnabled, Boolean(objDefaults.renkoEmaFilterEnabled))
+            : false,
         renkoEmaValuesBySymbol: supportsRenkoFeedStrategy(pStrategyCode)
             ? objRenkoEmaValuesBySymbol
             : { BTC: "", ETH: "" },

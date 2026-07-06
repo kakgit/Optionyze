@@ -166,7 +166,7 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-action-sel
 }
 
 .rolling-renko-feed-grid-ema {
-    grid-template-columns: minmax(88px, auto) minmax(0, 1fr) minmax(0, 136px);
+    grid-template-columns: minmax(88px, auto) minmax(0, 1fr) minmax(110px, auto) minmax(0, 136px);
 }
 
 .rolling-renko-feed-field {
