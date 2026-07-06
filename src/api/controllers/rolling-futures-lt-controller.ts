@@ -6845,6 +6845,19 @@ function hasActiveTrackedOptionContract(
     );
 }
 
+function hasActiveTrackedOptionLegAction(
+    pPositions: RollingFuturesLtImportedPositionRecord[],
+    pLegSide: "ce" | "pe",
+    pAction: "buy" | "sell"
+): boolean {
+    const vLegSide = pLegSide === "pe" ? "pe" : "ce";
+    const vSide = pAction === "buy" ? "BUY" : "SELL";
+    return listTrackedOpenOptionPositions(pPositions).some((objPosition) =>
+        getTrackedOptionLegSide(objPosition.contractName) === vLegSide
+        && String(objPosition.side || "").trim().toUpperCase() === vSide
+    );
+}
+
 async function reconcileRemovedTrackedPositionsPnl(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -8002,6 +8015,9 @@ async function buildOptionsScalperPaperOptionOpen(
         const vContractName = String(objContract.contractSymbol || "").trim();
         if (hasActiveTrackedOptionContract(arrExisting, vContractName)) {
             throw new Error(`Skipped auto trade because ${vContractName} is already active in Open Positions.`);
+        }
+        if (hasActiveTrackedOptionLegAction(arrExisting, pInput.legSide, pInput.action)) {
+            throw new Error(`Skipped auto trade because an active ${pInput.legSide.toUpperCase()} ${pInput.action.toUpperCase()} position is already open.`);
         }
     }
 
