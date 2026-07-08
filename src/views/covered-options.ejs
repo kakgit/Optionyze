@@ -262,7 +262,7 @@
                 </div>
                 <div class="rolling-futures-demo-grid row">
                     <div class="rolling-demo-field">
-                        <label for="ddlRollingFuturesAction1">Action</label>
+                        <label for="ddlRollingFuturesAction1"><%= bIsDemoPage ? 'Green Action' : 'Action' %></label>
                         <select id="ddlRollingFuturesAction1">
                             <option value="none">None</option>
                             <option value="buy">Buy</option>
@@ -328,7 +328,7 @@
 
                 <div class="rolling-futures-demo-grid row">
                     <div class="rolling-demo-field">
-                        <label for="ddlRollingFuturesAction2">Action</label>
+                        <label for="ddlRollingFuturesAction2"><%= bIsDemoPage ? 'Red Action' : 'Action' %></label>
                         <select id="ddlRollingFuturesAction2">
                             <option value="none">None</option>
                             <option value="buy" <%= bIsStrangleLikePage ? '' : 'selected' %>>Buy</option>

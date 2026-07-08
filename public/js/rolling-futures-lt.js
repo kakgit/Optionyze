@@ -539,12 +539,14 @@
 
     function getRenkoAutoTradeConfig(color) {
         const normalizedColor = normalizeRenkoColorValue(color);
-        function buildRowTradeConfig(rowIndex, sellLegSide, buyLegSide) {
+        function buildRowTradeConfig(rowIndex) {
             const rowNodes = getOptionRowNodes(rowIndex);
             const rowAction = String(rowNodes.action?.value || "sell").trim().toLowerCase() === "buy"
                 ? "buy"
                 : "sell";
-            let resolvedLegSide = rowAction === "buy" ? buyLegSide : sellLegSide;
+            let resolvedLegSide = String(rowNodes.legs?.value || "ce").trim().toLowerCase() === "pe"
+                ? "pe"
+                : "ce";
             if (isCoveredPlaceOppositeTradesEnabled()) {
                 resolvedLegSide = resolvedLegSide === "pe" ? "ce" : "pe";
             }
@@ -556,10 +558,10 @@
             };
         }
         if (normalizedColor === "green") {
-            return buildRowTradeConfig(1, "pe", "ce");
+            return buildRowTradeConfig(1);
         }
         if (normalizedColor === "red") {
-            return buildRowTradeConfig(2, "ce", "pe");
+            return buildRowTradeConfig(2);
         }
         return null;
     }
