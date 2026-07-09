@@ -182,6 +182,7 @@
         openPageInfo: document.getElementById(`${prefix}OpenPositionsPageInfo`),
         openPageNumbers: document.getElementById(`${prefix}OpenPageNumbers`),
         profitCloseTimer: document.getElementById(`${prefix}ProfitCloseTimer`),
+        profitCloseTimerInput: document.getElementById("txtRollingDualFuturesProfitCloseTimerSecs"),
         hedgeGateSummary: document.getElementById("rollingDualFuturesHedgeGateSummary"),
         closedFromDate: document.getElementById(`txt${idPrefix}ClosedFromDate`),
         closedToDate: document.getElementById(`txt${idPrefix}ClosedToDate`),
@@ -280,12 +281,31 @@
         BTC: { referencePrice: "", lastColor: "neutral" },
         ETH: { referencePrice: "", lastColor: "neutral" }
     };
-    const profitCloseConfirmationMs = 2 * 60 * 1000;
+    const defaultProfitCloseConfirmationSeconds = 120;
     let renkoHistoryBySymbol = { BTC: [], ETH: [] };
     let currentRenkoBaseSymbol = "BTC";
     const openPositionsPageSize = 10;
     const closedPositionsPageSize = 10;
     const coveredMultiplierMarginPerUnit = 1.5;
+
+    function clampProfitCloseConfirmationSecondsValue(value) {
+        const vRaw = Math.floor(Number(value || 0));
+        if (!Number.isFinite(vRaw) || vRaw < 1) {
+            return defaultProfitCloseConfirmationSeconds;
+        }
+        return Math.min(7200, vRaw);
+    }
+
+    function getProfitCloseConfirmationSeconds() {
+        if (!(ids.profitCloseTimerInput instanceof HTMLInputElement)) {
+            return defaultProfitCloseConfirmationSeconds;
+        }
+        return clampProfitCloseConfirmationSecondsValue(ids.profitCloseTimerInput.value);
+    }
+
+    function getProfitCloseConfirmationMs() {
+        return getProfitCloseConfirmationSeconds() * 1000;
+    }
 
     function getCoveredMultiplierMin() {
         return (isDemoVariant || isStrangleLikePage) ? 1 : 2;
@@ -1293,6 +1313,7 @@
             gammaAwareNeutral: false,
             closeNetProfitBrokerage: false,
             brokerageMultiplier: isStrangleLikePage ? "5" : "10",
+            profitCloseTimerSecs: isCoveredMode ? String(defaultProfitCloseConfirmationSeconds) : "",
             reEnterBrok: false,
             closeBlockedMargin: false,
             blockedMarginPct: isStrangleLikePage ? "10" : "20",
@@ -1871,14 +1892,15 @@
             return;
         }
         const elapsedMs = Date.now() - startedAtMs;
-        const remainingMs = Math.max(0, profitCloseConfirmationMs - elapsedMs);
+        const confirmationWindowMs = getProfitCloseConfirmationMs();
+        const remainingMs = Math.max(0, confirmationWindowMs - elapsedMs);
         const reasonLabel = reason === "brokerage"
             ? "Brokerage"
             : (reason === "blockmargin" ? "Blocked Margin" : "Profit");
         ids.profitCloseTimer.hidden = false;
         ids.profitCloseTimer.textContent = `${reasonLabel} close in ${formatCountdownDuration(remainingMs)}`;
         ids.profitCloseTimer.title = remainingMs > 0
-            ? "Close All will trigger if the profit target stays satisfied for the full 2-minute confirmation window."
+            ? `Close All will trigger if the profit target stays satisfied for the full ${getProfitCloseConfirmationSeconds()}-second confirmation window.`
             : "Profit target confirmation window completed. Close All should trigger on the next runtime pass.";
         maybeAutoCloseOptionsDemoFromProfitTimer(objPending, remainingMs);
     }
@@ -2929,6 +2951,7 @@
             gammaAwareNeutral: getCheckboxValue(ids.gammaAwareNeutral, false),
             closeNetProfitBrokerage: getCheckboxValue(ids.closeNetProfitBrokerage, false),
             brokerageMultiplier: getInputValue(ids.brokerageMultiplier, "3"),
+            profitCloseTimerSecs: isCoveredMode ? String(getProfitCloseConfirmationSeconds()) : "",
             reEnterBrok: false,
             closeBlockedMargin: getCheckboxValue(ids.closeBlockedMargin, false),
             blockedMarginPct: getInputValue(ids.blockedMarginPct, "20"),
@@ -3011,6 +3034,7 @@
             });
             setCheckboxValue(ids.closeNetProfitBrokerage, objUiState.closeNetProfitBrokerage);
             setInputValue(ids.brokerageMultiplier, objUiState.brokerageMultiplier);
+            setInputValue(ids.profitCloseTimerInput, isCoveredMode ? String(objUiState.profitCloseTimerSecs || defaultProfitCloseConfirmationSeconds) : "");
             setCheckboxValue(ids.closeBlockedMargin, objUiState.closeBlockedMargin);
             setInputValue(ids.blockedMarginPct, objUiState.blockedMarginPct);
             setCheckboxValue(ids.buyHedgeSellPremiumGate, isStrangleLikePage ? false : objUiState.buyHedgeSellPremiumGate);
@@ -3030,6 +3054,9 @@
             setCheckboxValue(ids.renkoEmaEnabled, supportsRenkoFeed ? objUiState.renkoEmaEnabled : false);
             setInputValue(ids.renkoEmaLength, supportsRenkoFeed ? objUiState.renkoEmaLength : "20");
             setCheckboxValue(ids.renkoEmaFilterEnabled, supportsRenkoFeed ? objUiState.renkoEmaFilterEnabled : false);
+            if (ids.profitCloseTimerInput instanceof HTMLInputElement) {
+                ids.profitCloseTimerInput.value = String(clampProfitCloseConfirmationSecondsValue(ids.profitCloseTimerInput.value));
+            }
             if (ids.renkoBoxSize instanceof HTMLInputElement) {
                 ids.renkoBoxSize.value = String(clampRenkoBoxSizeValue(ids.renkoBoxSize.value));
             }
@@ -4491,6 +4518,7 @@
         ids.plusDelta,
         ids.closeNetProfitBrokerage,
         ids.brokerageMultiplier,
+        ids.profitCloseTimerInput,
         ids.reEnterBrok,
         ids.closeBlockedMargin,
         ids.blockedMarginPct,
@@ -4518,6 +4546,9 @@
         if (node instanceof HTMLInputElement && node.type !== "checkbox") {
             node.addEventListener("input", queueProfileSave);
             node.addEventListener("input", function () {
+                if (node === ids.profitCloseTimerInput) {
+                    ids.profitCloseTimerInput.value = String(clampProfitCloseConfirmationSecondsValue(ids.profitCloseTimerInput.value));
+                }
                 syncLocalProfitClosePendingFromOpenPositions();
                 restartProfitCloseCountdown();
             });

@@ -1879,6 +1879,7 @@ function getDefaultManualTraderUiState(
         gammaAwareNeutral: false,
         closeNetProfitBrokerage: false,
         brokerageMultiplier: isStrangleOptionsStrategy(pStrategyCode) ? "5" : "10",
+        profitCloseTimerSecs: isCoveredLikeStrategy(pStrategyCode) ? "120" : "",
         reEnterBrok: bIsDual,
         closeBlockedMargin: false,
         blockedMarginPct: isStrangleOptionsStrategy(pStrategyCode) ? "10" : "20",
@@ -3791,6 +3792,9 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         gammaAwareNeutral: normalizeBooleanValue(objUiState.gammaAwareNeutral, Boolean(objDefaults.gammaAwareNeutral)),
         closeNetProfitBrokerage: normalizeBooleanValue(objUiState.closeNetProfitBrokerage, Boolean(objDefaults.closeNetProfitBrokerage)),
         brokerageMultiplier: normalizeStringValue(objUiState.brokerageMultiplier, String(objDefaults.brokerageMultiplier)),
+        profitCloseTimerSecs: isCoveredLikeStrategy(pProfile.strategyCode)
+            ? String(Math.min(7200, Math.max(1, Math.floor(Number((objUiState.profitCloseTimerSecs ?? objDefaults.profitCloseTimerSecs) || 120)) || 120)))
+            : "",
         reEnterBrok: normalizeBooleanValue(objUiState.reEnterBrok, Boolean(objDefaults.reEnterBrok)),
         closeBlockedMargin: normalizeBooleanValue(objUiState.closeBlockedMargin, Boolean(objDefaults.closeBlockedMargin)),
         blockedMarginPct: normalizeStringValue(objUiState.blockedMarginPct, String(objDefaults.blockedMarginPct)),
@@ -4174,6 +4178,9 @@ function normalizeProfileSaveInput(
         gammaAwareNeutral: normalizeBooleanValue(objUiState.gammaAwareNeutral, Boolean(objDefaults.gammaAwareNeutral)),
         closeNetProfitBrokerage: normalizeBooleanValue(objUiState.closeNetProfitBrokerage, Boolean(objDefaults.closeNetProfitBrokerage)),
         brokerageMultiplier: normalizeStringValue(objUiState.brokerageMultiplier, String(objDefaults.brokerageMultiplier)),
+        profitCloseTimerSecs: isCoveredLikeStrategy(pStrategyCode)
+            ? String(Math.min(7200, Math.max(1, Math.floor(Number((objUiState.profitCloseTimerSecs ?? objDefaults.profitCloseTimerSecs) || 120)) || 120)))
+            : "",
         reEnterBrok: normalizeBooleanValue(objUiState.reEnterBrok, Boolean(objDefaults.reEnterBrok)),
         closeBlockedMargin: normalizeBooleanValue(objUiState.closeBlockedMargin, Boolean(objDefaults.closeBlockedMargin)),
         blockedMarginPct: normalizeStringValue(objUiState.blockedMarginPct, String(objDefaults.blockedMarginPct)),
@@ -11332,7 +11339,7 @@ async function runAutoTraderCycle(
                         objProfitRule.reason === "brokerage"
                             ? "Brokerage Profit Close Timer Started"
                             : "Blocked Margin Profit Close Timer Started",
-                        `${objProfitRule.message} Closing all positions will only happen if this Net PnL stays above the target for 2 minutes continuously.`,
+                        `${objProfitRule.message} Closing all positions will only happen if this Net PnL stays above the target for the configured confirmation timer continuously.`,
                         {
                             thresholdValue: objProfitRule.thresholdValue,
                             reason: objProfitRule.reason === "brokerage"

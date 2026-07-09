@@ -503,6 +503,25 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-action-sel
     gap: 16px;
 }
 
+.rolling-live-open-title-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.rolling-live-open-timer-input {
+    width: 64px;
+    min-height: 36px;
+    padding: 0 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,.1);
+    background: rgba(255,255,255,.04);
+    color: var(--app-text);
+    font: inherit;
+    font-weight: 700;
+}
+
 .rolling-live-open-head .rolling-futures-signal-row {
     min-width: 0;
     justify-self: center;

@@ -501,7 +501,12 @@
 
             <div class="app-panel rolling-demo-card">
                 <div class="rolling-demo-card-head rolling-live-open-head">
-                    <h2>Open Positions</h2>
+                    <div class="rolling-live-open-title-group">
+                        <h2>Open Positions</h2>
+                        <% if (bIsDemoPage) { %>
+                            <input type="number" min="1" step="1" value="120" id="txtRollingDualFuturesProfitCloseTimerSecs" class="rolling-live-open-timer-input" title="Close timer in seconds" aria-label="Close timer in seconds" />
+                        <% } %>
+                    </div>
                     <div class="rolling-covered-hedge-summary" id="rollingDualFuturesHedgeGateSummary" aria-live="polite">
                         <span class="rolling-covered-hedge-chip off">Gate Off</span>
                     </div>
