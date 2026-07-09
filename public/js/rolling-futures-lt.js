@@ -436,6 +436,10 @@
         };
     }
 
+    function isDemoEmaCrossoverMode() {
+        return isDemoVariant && supportsRenkoFeed;
+    }
+
     function getCurrentSelectedSymbol() {
         return String(ids.symbol?.value || "BTC").trim().toUpperCase() === "ETH" ? "ETH" : "BTC";
     }
@@ -509,23 +513,27 @@
         const currentSymbol = getCurrentSelectedSymbol();
         const history = Array.isArray(renkoHistoryBySymbol[currentSymbol]) ? renkoHistoryBySymbol[currentSymbol] : [];
         if (!history.length) {
-            ids.renkoHistoryLog.innerHTML = "<div class=\"rolling-demo-event-empty\">No Renko color changes yet.</div>";
+            ids.renkoHistoryLog.innerHTML = `<div class="rolling-demo-event-empty">${isDemoEmaCrossoverMode() ? "No EMA crossovers yet." : "No Renko color changes yet."}</div>`;
             return;
         }
         ids.renkoHistoryLog.innerHTML = history.map(function (entry, index) {
             const color = normalizeRenkoColorValue(entry.color);
-            const label = color === "green" ? "Green" : "Red";
+            const label = isDemoEmaCrossoverMode()
+                ? (color === "green" ? "Spot crossed above EMA" : "Spot crossed below EMA")
+                : (color === "green" ? "Green" : "Red");
             const toneClass = color === "green" ? "success" : "danger";
-            const referenceText = entry.referencePrice ? ` | Level ${escapeHtml(entry.referencePrice)}` : "";
+            const referenceText = isDemoEmaCrossoverMode()
+                ? ""
+                : (entry.referencePrice ? ` | Level ${escapeHtml(entry.referencePrice)}` : "");
             return `
                 <article class="rolling-demo-event-item ${toneClass}">
                     <div class="rolling-demo-event-head">
                         <div class="rolling-demo-event-title-stack">
-                            <strong class="rolling-demo-event-title">${escapeHtml(label)} box confirmed</strong>
+                            <strong class="rolling-demo-event-title">${escapeHtml(isDemoEmaCrossoverMode() ? label : `${label} box confirmed`)}</strong>
                         </div>
                         <div class="rolling-demo-event-actions">
                             <span class="rolling-demo-event-time">${escapeHtml(formatDateTimeDisplay(entry.changedAt))}</span>
-                            <button class="rolling-demo-icon-btn warn rolling-renko-delete-entry" type="button" data-entry-index="${escapeHtml(index)}" title="Delete this Renko feed entry" aria-label="Delete this Renko feed entry">
+                            <button class="rolling-demo-icon-btn warn rolling-renko-delete-entry" type="button" data-entry-index="${escapeHtml(index)}" title="${escapeHtml(isDemoEmaCrossoverMode() ? "Delete this EMA crossover entry" : "Delete this Renko feed entry")}" aria-label="${escapeHtml(isDemoEmaCrossoverMode() ? "Delete this EMA crossover entry" : "Delete this Renko feed entry")}">
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="M18 6 6 18" />
                                     <path d="m6 6 12 12" />
@@ -594,6 +602,7 @@
         if (!tradeConfig || renkoAutoTradeInFlight) {
             return;
         }
+        const signalName = isDemoEmaCrossoverMode() ? "EMA crossover" : "Renko";
         renkoAutoTradeInFlight = true;
         void Promise.resolve().then(function () {
             if (autoTraderEnabled) {
@@ -603,13 +612,15 @@
         }).then(function () {
             if (!autoTraderEnabled) {
                 throw new Error(isDemoVariant
-                    ? "Turn Auto Trader ON before Renko auto trades can place paper positions."
-                    : "Turn Auto Trader ON before Renko auto trades can place live option orders.");
+                    ? `Turn Auto Trader ON before ${signalName} auto trades can place paper positions.`
+                    : `Turn Auto Trader ON before ${signalName} auto trades can place live option orders.`);
             }
-            const livePrice = getRenkoLivePrice(lastAccountSummary);
-            const emaFilterDecision = getRenkoEmaFilterDecision(symbol, color, livePrice);
-            if (!emaFilterDecision.allowed) {
-                throw new Error(emaFilterDecision.message);
+            if (!isDemoEmaCrossoverMode()) {
+                const livePrice = getRenkoLivePrice(lastAccountSummary);
+                const emaFilterDecision = getRenkoEmaFilterDecision(symbol, color, livePrice);
+                if (!emaFilterDecision.allowed) {
+                    throw new Error(emaFilterDecision.message);
+                }
             }
             applyExpiryModeDefaults(true, tradeConfig.rowIndex);
             return placeManualOption(tradeConfig.action, tradeConfig.legSide, tradeConfig.rowIndex, "strategy_option_open");
@@ -624,8 +635,8 @@
             setStatus(
                 ids.pageStatus,
                 vOrderId
-                    ? `Renko ${String(color || "").trim().toUpperCase()} detected for ${symbol}. ${vMessage} Order ID: ${vOrderId}`
-                    : `Renko ${String(color || "").trim().toUpperCase()} detected for ${symbol}. ${vMessage}`,
+                    ? `${signalName} ${String(color || "").trim().toUpperCase()} detected for ${symbol}. ${vMessage} Order ID: ${vOrderId}`
+                    : `${signalName} ${String(color || "").trim().toUpperCase()} detected for ${symbol}. ${vMessage}`,
                 "success"
             );
             return Promise.all([
@@ -637,7 +648,7 @@
         }).catch(function (error) {
             setStatus(
                 ids.pageStatus,
-                error instanceof Error ? error.message : `Unable to place Renko ${tradeConfig.label} paper option.`,
+                error instanceof Error ? error.message : `Unable to place ${signalName} ${tradeConfig.label} paper option.`,
                 "danger"
             );
         }).finally(function () {
@@ -653,7 +664,9 @@
             renkoLastLivePrice = Number.NaN;
             renderRenkoHistory();
             setRenkoSpotPriceDisplay(Number.NaN);
-            setRenkoColorDisplay("neutral", "Waiting", "Renko feed cleared. Refresh to start tracking again.");
+            setRenkoColorDisplay("neutral", "Waiting", isDemoEmaCrossoverMode()
+                ? "EMA feed cleared. Refresh to start tracking again."
+                : "Renko feed cleared. Refresh to start tracking again.");
         }
     }
 
@@ -662,10 +675,16 @@
     }
 
     function getRenkoEmaEnabled() {
+        if (isDemoEmaCrossoverMode()) {
+            return true;
+        }
         return supportsRenkoFeed && ids.renkoEmaEnabled instanceof HTMLInputElement && ids.renkoEmaEnabled.checked;
     }
 
     function getRenkoEmaFilterEnabled() {
+        if (isDemoEmaCrossoverMode()) {
+            return false;
+        }
         return supportsRenkoFeed && ids.renkoEmaFilterEnabled instanceof HTMLInputElement && ids.renkoEmaFilterEnabled.checked;
     }
 
@@ -787,7 +806,13 @@
             return;
         }
         renderRenkoHistory();
-        setRenkoColorDisplay("neutral", "Waiting", String(reasonText || "").trim() || "Turn the Renko feed ON to begin tracking live box color.");
+        setRenkoColorDisplay(
+            "neutral",
+            "Waiting",
+            String(reasonText || "").trim() || (isDemoEmaCrossoverMode()
+                ? "EMA mode is ON. Waiting for spot price and EMA crossover."
+                : "Turn the Renko feed ON to begin tracking live box color.")
+        );
     }
 
     function updateRenkoFeedDisplay(summary) {
@@ -798,6 +823,53 @@
         const currentState = getRenkoStateForSymbol(currentSymbol);
         const livePrice = getRenkoLivePrice(summary);
         setRenkoSpotPriceDisplay(livePrice);
+        if (isDemoEmaCrossoverMode()) {
+            const previousLastColor = currentState.lastColor;
+            const emaChanged = updateRenkoEmaValue(currentSymbol, livePrice);
+            const emaMeta = getRenkoEmaMetaText(currentSymbol);
+            const emaValue = getRenkoEmaValueForSymbol(currentSymbol);
+            if (!Number.isFinite(livePrice) || !(livePrice > 0)) {
+                setRenkoColorDisplay("neutral", "Waiting", `EMA mode ON | ${emaMeta} | Waiting for live price...`);
+                if (emaChanged) {
+                    queueProfileSave();
+                }
+                return;
+            }
+            if (!Number.isFinite(emaValue) || !(emaValue > 0)) {
+                setRenkoColorDisplay("neutral", "Waiting", `EMA mode ON | Price ${fmt(livePrice, 2)} | Waiting for EMA...`);
+                if (emaChanged) {
+                    queueProfileSave();
+                }
+                return;
+            }
+            renkoLastLivePrice = livePrice;
+            let nextLastColor = "neutral";
+            if (livePrice > emaValue) {
+                nextLastColor = "green";
+            }
+            else if (livePrice < emaValue) {
+                nextLastColor = "red";
+            }
+            setRenkoStateForSymbol(currentSymbol, emaValue, nextLastColor);
+            if ((previousLastColor === "red" && nextLastColor === "green")
+                || (previousLastColor === "green" && nextLastColor === "red")) {
+                appendRenkoHistoryEntry(currentSymbol, nextLastColor, "");
+                triggerRenkoAutoTrade(currentSymbol, nextLastColor);
+            }
+            if (nextLastColor === "green") {
+                setRenkoColorDisplay("green", "Above EMA", `EMA mode ON | Price ${fmt(livePrice, 2)} | ${emaMeta} | Spot is above EMA.`);
+            }
+            else if (nextLastColor === "red") {
+                setRenkoColorDisplay("red", "Below EMA", `EMA mode ON | Price ${fmt(livePrice, 2)} | ${emaMeta} | Spot is below EMA.`);
+            }
+            else {
+                setRenkoColorDisplay("neutral", "Waiting", `EMA mode ON | Price ${fmt(livePrice, 2)} | ${emaMeta} | Spot is at EMA.`);
+            }
+            if (previousLastColor !== renkoStateBySymbol[currentSymbol].lastColor || emaChanged) {
+                queueProfileSave();
+            }
+            return;
+        }
         const boxSize = getRenkoBoxSizeValue();
         const baseValue = getRenkoBaseValue();
         const previousReferencePrice = currentState.referencePrice;
@@ -2973,9 +3045,9 @@
                     [getCurrentSelectedSymbol()]: normalizeRenkoBaseValue(ids.renkoBaseValue?.value || "")
                 }
                 : { BTC: "", ETH: "" },
-            renkoEmaEnabled: supportsRenkoFeed ? getCheckboxValue(ids.renkoEmaEnabled, false) : false,
+            renkoEmaEnabled: supportsRenkoFeed ? (isDemoEmaCrossoverMode() ? true : getCheckboxValue(ids.renkoEmaEnabled, false)) : false,
             renkoEmaLength: supportsRenkoFeed ? String(getRenkoEmaLengthValue()) : "20",
-            renkoEmaFilterEnabled: supportsRenkoFeed ? getCheckboxValue(ids.renkoEmaFilterEnabled, false) : false,
+            renkoEmaFilterEnabled: supportsRenkoFeed ? (isDemoEmaCrossoverMode() ? false : getCheckboxValue(ids.renkoEmaFilterEnabled, false)) : false,
             renkoEmaValuesBySymbol: supportsRenkoFeed
                 ? renkoEmaValuesBySymbol
                 : { BTC: "", ETH: "" },
@@ -3051,9 +3123,9 @@
             setCheckboxValue(ids.renkoEnabled, supportsRenkoFeed ? objUiState.renkoEnabled : false);
             setInputValue(ids.renkoBoxSize, supportsRenkoFeed ? objUiState.renkoStepPoints : "100");
             setInputValue(ids.renkoBaseValue, supportsRenkoFeed ? String(renkoBaseValuesBySymbol[getCurrentSelectedSymbol()] || "") : "");
-            setCheckboxValue(ids.renkoEmaEnabled, supportsRenkoFeed ? objUiState.renkoEmaEnabled : false);
+            setCheckboxValue(ids.renkoEmaEnabled, supportsRenkoFeed ? (isDemoEmaCrossoverMode() ? true : objUiState.renkoEmaEnabled) : false);
             setInputValue(ids.renkoEmaLength, supportsRenkoFeed ? objUiState.renkoEmaLength : "20");
-            setCheckboxValue(ids.renkoEmaFilterEnabled, supportsRenkoFeed ? objUiState.renkoEmaFilterEnabled : false);
+            setCheckboxValue(ids.renkoEmaFilterEnabled, supportsRenkoFeed ? (isDemoEmaCrossoverMode() ? false : objUiState.renkoEmaFilterEnabled) : false);
             if (ids.profitCloseTimerInput instanceof HTMLInputElement) {
                 ids.profitCloseTimerInput.value = String(clampProfitCloseConfirmationSecondsValue(ids.profitCloseTimerInput.value));
             }

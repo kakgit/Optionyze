@@ -741,17 +741,17 @@
                     <div class="app-panel rolling-demo-card rolling-renko-feed-card">
                         <div class="rolling-demo-card-head">
                             <div class="rolling-futures-indicator-head-row">
-                                <h2>Renko Feed</h2>
+                                <h2><%= bIsDemoPage ? "EMA Feed" : "Renko Feed" %></h2>
                                 <span class="rolling-renko-feed-color-badge neutral" id="rollingRenkoCurrentBoxColor">Waiting</span>
                             </div>
                             <div class="rolling-demo-card-tools">
-                                <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingRenkoRefresh" title="Refresh Renko feed" aria-label="Refresh Renko feed">
+                                <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingRenkoRefresh" title="<%= bIsDemoPage ? "Refresh EMA feed" : "Refresh Renko feed" %>" aria-label="<%= bIsDemoPage ? "Refresh EMA feed" : "Refresh Renko feed" %>">
                                     <svg viewBox="0 0 24 24" aria-hidden="true">
                                         <path d="M21 12a9 9 0 1 1-2.64-6.36" />
                                         <path d="M21 3v6h-6" />
                                     </svg>
                                 </button>
-                                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingRenkoClear" title="Clear Renko feed" aria-label="Clear Renko feed">
+                                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingRenkoClear" title="<%= bIsDemoPage ? "Clear EMA feed" : "Clear Renko feed" %>" aria-label="<%= bIsDemoPage ? "Clear EMA feed" : "Clear Renko feed" %>">
                                     <svg viewBox="0 0 24 24" aria-hidden="true">
                                         <path d="M18 6 6 18" />
                                         <path d="m6 6 12 12" />
@@ -760,6 +760,39 @@
                             </div>
                         </div>
                         <div class="rolling-renko-feed-stack">
+                            <% if (bIsDemoPage) { %>
+                            <div class="rolling-renko-feed-grid">
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>Spot Price</label>
+                                    <div class="rolling-renko-feed-value-row">
+                                        <span class="rolling-renko-feed-value-badge" id="rollingRenkoSpotPrice">--</span>
+                                    </div>
+                                </div>
+                                <input type="checkbox" id="chkRollingFuturesRenkoEnabled" checked hidden />
+                                <input type="number" id="txtRollingFuturesRenkoBoxSize" min="1" step="1" value="100" hidden />
+                                <input type="number" id="txtRollingFuturesRenkoBaseValue" min="0" step="0.01" placeholder="Enter base value" hidden />
+                            </div>
+                            <div class="rolling-renko-feed-grid rolling-renko-feed-grid-ema">
+                                <div class="rolling-demo-field rolling-renko-feed-field switch-only">
+                                    <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoEmaEnabled">
+                                        <input type="checkbox" id="chkRollingFuturesRenkoEmaEnabled" checked disabled />
+                                        <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
+                                        <span class="rolling-renko-feed-switch-text">EMA</span>
+                                    </label>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="txtRollingFuturesRenkoEmaLength">EMA Length</label>
+                                    <input type="number" id="txtRollingFuturesRenkoEmaLength" min="1" step="1" value="20" />
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>Current EMA</label>
+                                    <div class="rolling-renko-feed-value-row">
+                                        <span class="rolling-renko-feed-value-badge" id="rollingRenkoEmaValue">--</span>
+                                    </div>
+                                </div>
+                                <input type="checkbox" id="chkRollingFuturesRenkoEmaFilterEnabled" hidden />
+                            </div>
+                            <% } else { %>
                             <div class="rolling-renko-feed-grid">
                                 <div class="rolling-demo-field rolling-renko-feed-field switch-only">
                                     <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoEnabled">
@@ -809,10 +842,11 @@
                                     </div>
                                 </div>
                             </div>
+                            <% } %>
                         </div>
-                        <div class="rolling-renko-feed-meta" id="rollingRenkoFeedMeta">Turn the Renko feed ON to begin tracking live box color.</div>
+                        <div class="rolling-renko-feed-meta" id="rollingRenkoFeedMeta"><%= bIsDemoPage ? "EMA mode is ON. Waiting for spot price and EMA crossover." : "Turn the Renko feed ON to begin tracking live box color." %></div>
                         <div class="rolling-demo-event-log" id="rollingRenkoHistoryLog">
-                            <div class="rolling-demo-event-empty">No Renko color changes yet.</div>
+                            <div class="rolling-demo-event-empty"><%= bIsDemoPage ? "No EMA crossovers yet." : "No Renko color changes yet." %></div>
                         </div>
                     </div>
                 <% } %>
