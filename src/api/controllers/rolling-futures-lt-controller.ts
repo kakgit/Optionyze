@@ -2529,6 +2529,18 @@ function parseOptionExpiryDateFromContractName(pContractName: unknown): string {
     return formatIsoDateFromParts(objDate.getUTCFullYear(), objDate.getUTCMonth(), objDate.getUTCDate());
 }
 
+function getTrackedOptionBaseContractKey(pContractName: unknown): string {
+    const vContractName = String(pContractName || "").trim().toUpperCase();
+    if (!vContractName) {
+        return "";
+    }
+    const objMatch = vContractName.match(/^([CP]-[A-Z]+-\d+)-\d{6}$/);
+    if (objMatch) {
+        return String(objMatch[1] || "").trim().toUpperCase();
+    }
+    return vContractName;
+}
+
 function getTrackedOptionResolvedExpiryDate(pPosition: RollingFuturesLtImportedPositionRecord): string {
     const objMetadata = getTrackedOptionMetadata(pPosition);
     const vResolvedExpiryDate = normalizeIsoDateOnly(objMetadata.resolvedExpiryDate || objMetadata.requestedExpiryDate);
@@ -6896,14 +6908,14 @@ function hasActiveTrackedOptionContract(
     pPositions: RollingFuturesLtImportedPositionRecord[],
     pContractName: string
 ): boolean {
-    const vContractName = String(pContractName || "").trim().toUpperCase();
-    if (!vContractName) {
+    const vContractKey = getTrackedOptionBaseContractKey(pContractName);
+    if (!vContractKey) {
         return false;
     }
     return (Array.isArray(pPositions) ? pPositions : []).some((objPosition) =>
         !isTrackedPositionInactive(objPosition)
         && isOptionContractSymbol(objPosition.contractName)
-        && String(objPosition.contractName || "").trim().toUpperCase() === vContractName
+        && getTrackedOptionBaseContractKey(objPosition.contractName) === vContractKey
     );
 }
 
