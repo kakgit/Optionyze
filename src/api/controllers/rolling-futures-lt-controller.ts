@@ -2401,6 +2401,71 @@ function getCoveredBuyHedgeSellPremiumGateConfig(
     };
 }
 
+function getOptionsScalperTradeIncrementConfig(
+    pUiState: Record<string, unknown>
+): {
+    enabled: boolean;
+    incrementLots: number;
+} {
+    const vRawIncrement = Number(pUiState.buyHedgeSellPremiumPct ?? 1);
+    return {
+        enabled: normalizeBooleanValue(pUiState.buyHedgeSellPremiumGate, false),
+        incrementLots: Number.isFinite(vRawIncrement)
+            ? Math.max(0, Math.floor(vRawIncrement))
+            : 1
+    };
+}
+
+function countActiveOptionsScalperTradesByLeg(
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pSymbol: string,
+    pLegSide: "ce" | "pe",
+    pAction: "buy" | "sell"
+): number {
+    const vAction = String(pAction || "").trim().toUpperCase() === "BUY" ? "BUY" : "SELL";
+    return (Array.isArray(pTrackedPositions) ? pTrackedPositions : []).filter((objPosition) => {
+        return !isTrackedPositionInactive(objPosition)
+            && isTrackedContractForSymbol(objPosition.contractName, pSymbol)
+            && String(objPosition.side || "").trim().toUpperCase() === vAction
+            && getTrackedOptionLegSide(objPosition.contractName) === pLegSide;
+    }).length;
+}
+
+function countActiveOptionsScalperTradesForSymbol(
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pSymbol: string,
+    pAction: "buy" | "sell"
+): number {
+    const vAction = String(pAction || "").trim().toUpperCase() === "BUY" ? "BUY" : "SELL";
+    return (Array.isArray(pTrackedPositions) ? pTrackedPositions : []).filter((objPosition) => {
+        return !isTrackedPositionInactive(objPosition)
+            && isTrackedContractForSymbol(objPosition.contractName, pSymbol)
+            && String(objPosition.side || "").trim().toUpperCase() === vAction;
+    }).length;
+}
+
+function resolveOptionsScalperIncrementedQty(
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pUiState: Record<string, unknown>,
+    pInput: {
+        symbol: string;
+        legSide: "ce" | "pe";
+        action: "buy" | "sell";
+        qty: number;
+    }
+): number {
+    const vBaseQty = Math.max(1, Math.floor(Number(pInput.qty || 1)));
+    const objIncrementConfig = getOptionsScalperTradeIncrementConfig(pUiState);
+    if (!objIncrementConfig.enabled || !(objIncrementConfig.incrementLots > 0)) {
+        return vBaseQty;
+    }
+    const bSameSideOnly = normalizeBooleanValue(pUiState.sameSideLegIncrementEnabled, true);
+    const vExistingTrades = bSameSideOnly
+        ? countActiveOptionsScalperTradesByLeg(pTrackedPositions, pInput.symbol, pInput.legSide, pInput.action)
+        : countActiveOptionsScalperTradesForSymbol(pTrackedPositions, pInput.symbol, pInput.action);
+    return vBaseQty + (vExistingTrades * objIncrementConfig.incrementLots);
+}
+
 function isCoveredBuyHedgeOppositeLegEnabled(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pUiState: Record<string, unknown>
@@ -10710,11 +10775,13 @@ function getOptionsScalperRenkoAutoTradeLockKey(pUserId: string): string {
 
 function resolveOptionsScalperRenkoAutoTradeInput(
     pProfile: RollingFuturesLtProfileRecord,
-    pSignal: OptionsDemoRenkoSignal
+    pSignal: OptionsDemoRenkoSignal,
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
 ): {
     rowIndex: 1 | 2;
     action: "buy" | "sell";
     legSide: "ce" | "pe";
+    symbol: "BTC" | "ETH";
     expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
     expiryDate: string;
     qty: number;
@@ -10723,6 +10790,7 @@ function resolveOptionsScalperRenkoAutoTradeInput(
     stopLossDelta: number;
 } | null {
     const objUiState = getMergedUiState(pProfile);
+    const vSymbol = normalizeSymbolValue(objUiState.symbol);
     const vRowIndex = pSignal === "G" ? 1 : 2;
     const objRowState = getNormalizedOptionRowUiState(objUiState, "options-scalper", vRowIndex);
     if (objRowState.legs === "both") {
@@ -10743,9 +10811,19 @@ function resolveOptionsScalperRenkoAutoTradeInput(
         rowIndex: vRowIndex,
         action: objRowState.action === "buy" ? "buy" : "sell",
         legSide: vLegSide,
+        symbol: vSymbol,
         expiryMode: vExpiryMode,
         expiryDate: String(objRowState.expiryDate || "").trim(),
-        qty: Math.max(1, Math.floor(Number(objRowState.qty || 1))),
+        qty: resolveOptionsScalperIncrementedQty(
+            pTrackedPositions,
+            objUiState,
+            {
+                symbol: vSymbol,
+                legSide: vLegSide,
+                action: objRowState.action === "buy" ? "buy" : "sell",
+                qty: Math.max(1, Math.floor(Number(objRowState.qty || 1)))
+            }
+        ),
         targetDelta: vTargetDelta,
         takeProfitDelta: Math.max(0, Number(objRowState.tpD || 0)),
         stopLossDelta: Math.max(0, Number(objRowState.slD || 0))
@@ -10815,7 +10893,8 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
         };
     }
 
-    const objTradeInput = resolveOptionsScalperRenkoAutoTradeInput(objSync.profile, vSignal);
+    const arrTrackedPositions = await listRollingFuturesLtImportedPositions(pUserId, "options-scalper");
+    const objTradeInput = resolveOptionsScalperRenkoAutoTradeInput(objSync.profile, vSignal, arrTrackedPositions);
     if (!objTradeInput) {
         return {
             ...objSync,
@@ -10839,15 +10918,13 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
 
     gOptionsScalperRenkoAutoTradeLocks.add(vLockKey);
     try {
-        const objUiState = getMergedUiState(objSync.profile);
-        const vSymbol = normalizeSymbolValue(objUiState.symbol);
         const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
             pUserId,
             "options-scalper",
             objSync.profile,
             {
                 action: objTradeInput.action,
-                symbol: vSymbol,
+                symbol: objTradeInput.symbol,
                 legSide: objTradeInput.legSide,
                 expiryMode: objTradeInput.expiryMode,
                 expiryDate: objTradeInput.expiryDate,
@@ -10873,7 +10950,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
             "Paper Option Auto Opened",
             `${objTradeInput.action.toUpperCase()} ${objTradeInput.legSide.toUpperCase()} paper option opened from row ${objTradeInput.rowIndex}.`,
             {
-                symbol: vSymbol,
+                symbol: objTradeInput.symbol,
                 contractName: objPaperOpen.position.contractName,
                 qty: objTradeInput.qty,
                 targetDelta: objTradeInput.targetDelta,
