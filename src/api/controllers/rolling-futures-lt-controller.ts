@@ -1875,6 +1875,9 @@ function updateOptionsDemoRenkoState(
         manualPriceResetToken: vManualPriceResetToken
     };
     const arrSignals: OptionsDemoRenkoSignal[] = [];
+    const vPreviousColor = String(objExistingState.lastColor || "").trim().toUpperCase() === "G"
+        ? "G"
+        : (String(objExistingState.lastColor || "").trim().toUpperCase() === "R" ? "R" : "");
     if (!bEnabled) {
         return {
             renko: {
@@ -1946,9 +1949,14 @@ function updateOptionsDemoRenkoState(
     objNextRenko.fromPrice = vSourcePrice;
     objNextRenko.lastPrice = vSourcePrice;
     objNextRenko.historyKey = vHistoryKey;
+    const vNextColor = String(objNextRenko.lastColor || "").trim().toUpperCase() === "G"
+        ? "G"
+        : (String(objNextRenko.lastColor || "").trim().toUpperCase() === "R" ? "R" : "");
+    const bColorFlip = (vPreviousColor === "G" && vNextColor === "R")
+        || (vPreviousColor === "R" && vNextColor === "G");
     return {
         renko: objNextRenko,
-        signals: arrSignals,
+        signals: bColorFlip ? [vNextColor] : [],
         sourcePrice: vSourcePrice,
         isEnabled: true
     };
