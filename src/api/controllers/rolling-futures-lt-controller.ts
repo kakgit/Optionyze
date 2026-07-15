@@ -242,6 +242,7 @@ const gDualScaledBaselineFloorRatio = 0.25;
 const gDeltaUiTimezoneOffsetMinutes = 5.5 * 60;
 const gManualFutureOrderLocks = new Set<string>();
 const gManualOptionOrderLocks = new Set<string>();
+const gOptionsScalperRenkoAutoTradeLocks = new Set<string>();
 const gExecStrategyLocks = new Set<string>();
 const gNeutralityHedgeLocks = new Set<string>();
 const gAutoTraderIntervals = new Map<string, NodeJS.Timeout>();
@@ -1607,6 +1608,42 @@ function normalizeRenkoBaseValueString(pValue: unknown): string {
     return String(Number(vRaw.toFixed(2)));
 }
 
+function normalizeRenkoFeedPointSizeString(pValue: unknown): string {
+    const vRaw = Math.floor(Number(pValue || 0));
+    if (!Number.isFinite(vRaw) || vRaw < 1) {
+        return "10";
+    }
+    return String(Math.min(1000000, vRaw));
+}
+
+function normalizeRenkoFeedManualPriceString(pValue: unknown): string {
+    const vRaw = Number(pValue);
+    if (!Number.isFinite(vRaw) || !(vRaw > 0)) {
+        return "";
+    }
+    return String(Number(vRaw.toFixed(2)));
+}
+
+function normalizeRenkoFeedManualPriceResetTokenString(pValue: unknown): string {
+    const vRaw = Math.floor(Number(pValue || 0));
+    if (!Number.isFinite(vRaw) || vRaw < 0) {
+        return "0";
+    }
+    return String(vRaw);
+}
+
+function normalizeRenkoFeedTimeframeValue(pValue: unknown): string {
+    const vValue = String(pValue || "").trim().toLowerCase();
+    return ["5s", "1m", "3m", "5m", "15m", "30m", "1h"].includes(vValue) ? vValue : "5m";
+}
+
+function normalizeRenkoFeedPriceSourceValue(pValue: unknown): "spot_price" | "mark_price" | "best_bid" | "best_ask" {
+    const vValue = String(pValue || "").trim().toLowerCase();
+    return vValue === "mark_price" || vValue === "best_bid" || vValue === "best_ask"
+        ? vValue
+        : "spot_price";
+}
+
 function normalizeRenkoBaseValues(pValue: unknown): { BTC: string; ETH: string } {
     const objValue = pValue && typeof pValue === "object" ? pValue as Record<string, unknown> : {};
     return {
@@ -1655,11 +1692,11 @@ function normalizeRenkoStateValues(pValue: unknown): {
 }
 
 function normalizeRenkoHistoryValues(pValue: unknown): {
-    BTC: Array<{ color: "green" | "red"; changedAt: string; referencePrice: string }>;
-    ETH: Array<{ color: "green" | "red"; changedAt: string; referencePrice: string }>;
+    BTC: Array<{ color: "green" | "red"; changedAt: string; referencePrice: string; sourcePrice: string; anchorPrice: string; pointSize: string }>;
+    ETH: Array<{ color: "green" | "red"; changedAt: string; referencePrice: string; sourcePrice: string; anchorPrice: string; pointSize: string }>;
 } {
     const objValue = pValue && typeof pValue === "object" ? pValue as Record<string, unknown> : {};
-    function normalizeEntries(pEntries: unknown): Array<{ color: "green" | "red"; changedAt: string; referencePrice: string }> {
+    function normalizeEntries(pEntries: unknown): Array<{ color: "green" | "red"; changedAt: string; referencePrice: string; sourcePrice: string; anchorPrice: string; pointSize: string }> {
         return (Array.isArray(pEntries) ? pEntries : [])
             .map((pEntry) => {
                 const objEntry = pEntry && typeof pEntry === "object" ? pEntry as Record<string, unknown> : {};
@@ -1671,10 +1708,13 @@ function normalizeRenkoHistoryValues(pValue: unknown): {
                 return {
                     color: vColor,
                     changedAt: vChangedAt,
-                    referencePrice: normalizeRenkoBaseValueString(objEntry.referencePrice)
+                    referencePrice: normalizeRenkoBaseValueString(objEntry.referencePrice || objEntry.anchorPrice),
+                    sourcePrice: normalizeRenkoBaseValueString(objEntry.sourcePrice),
+                    anchorPrice: normalizeRenkoBaseValueString(objEntry.anchorPrice),
+                    pointSize: normalizeRenkoFeedPointSizeString(objEntry.pointSize)
                 };
             })
-            .filter((entry): entry is { color: "green" | "red"; changedAt: string; referencePrice: string } => Boolean(entry))
+            .filter((entry): entry is { color: "green" | "red"; changedAt: string; referencePrice: string; sourcePrice: string; anchorPrice: string; pointSize: string } => Boolean(entry))
             .slice(0, 20);
     }
     return {
@@ -1682,6 +1722,238 @@ function normalizeRenkoHistoryValues(pValue: unknown): {
         ETH: normalizeEntries(objValue.ETH)
     };
 }
+
+type OptionsDemoRenkoSignal = "R" | "G";
+type OptionsDemoRenkoRuntimeState = {
+    anchor: number | null;
+    lastDir: -1 | 0 | 1;
+    lastColor: "" | "R" | "G";
+    lastPrice: number | null;
+    fromPrice: number | null;
+    pointSize: number;
+    priceSource: string;
+    timeframe: string;
+    historyKey?: string;
+    historySyncedAt?: string;
+    historyCandleCount?: number;
+    manualPriceResetToken?: string;
+};
+
+function getDefaultOptionsDemoRenkoRuntimeState(): OptionsDemoRenkoRuntimeState {
+    return {
+        anchor: null,
+        lastDir: 0,
+        lastColor: "",
+        lastPrice: null,
+        fromPrice: null,
+        pointSize: 10,
+        priceSource: "spot_price",
+        timeframe: "5m",
+        historyKey: "",
+        historySyncedAt: "",
+        historyCandleCount: 0,
+        manualPriceResetToken: "0"
+    };
+}
+
+function normalizeOptionsDemoRenkoRuntimeState(pValue: unknown): OptionsDemoRenkoRuntimeState {
+    const objValue = pValue && typeof pValue === "object" ? pValue as Record<string, unknown> : {};
+    const objDefaults = getDefaultOptionsDemoRenkoRuntimeState();
+    const vAnchor = Number(objValue.anchor);
+    const vLastPrice = Number(objValue.lastPrice);
+    const vFromPrice = Number(objValue.fromPrice);
+    const vPointSize = Math.max(1, Math.floor(Number(objValue.pointSize || objDefaults.pointSize) || objDefaults.pointSize));
+    const vHistoryCandleCount = Math.max(0, Math.floor(Number(objValue.historyCandleCount || 0)));
+    return {
+        anchor: Number.isFinite(vAnchor) && vAnchor > 0 ? Number(vAnchor.toFixed(2)) : null,
+        lastDir: Number(objValue.lastDir) === 1 ? 1 : (Number(objValue.lastDir) === -1 ? -1 : 0),
+        lastColor: String(objValue.lastColor || "").trim().toUpperCase() === "G"
+            ? "G"
+            : (String(objValue.lastColor || "").trim().toUpperCase() === "R" ? "R" : ""),
+        lastPrice: Number.isFinite(vLastPrice) && vLastPrice > 0 ? Number(vLastPrice.toFixed(2)) : null,
+        fromPrice: Number.isFinite(vFromPrice) && vFromPrice > 0 ? Number(vFromPrice.toFixed(2)) : null,
+        pointSize: Math.min(1000000, vPointSize),
+        priceSource: normalizeRenkoFeedPriceSourceValue(objValue.priceSource || objDefaults.priceSource),
+        timeframe: normalizeRenkoFeedTimeframeValue(objValue.timeframe || objDefaults.timeframe),
+        historyKey: String(objValue.historyKey || "").trim(),
+        historySyncedAt: String(objValue.historySyncedAt || "").trim(),
+        historyCandleCount: vHistoryCandleCount,
+        manualPriceResetToken: normalizeRenkoFeedManualPriceResetTokenString(objValue.manualPriceResetToken || objDefaults.manualPriceResetToken)
+    };
+}
+
+function resolveOptionsDemoRenkoSourcePrice(
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null | undefined,
+    pPriceSource: string
+): number {
+    const vPriceSource = normalizeRenkoFeedPriceSourceValue(pPriceSource);
+    const vSpotPrice = Number(pSnapshot?.spotPrice);
+    const vMarkPrice = Number(pSnapshot?.futuresPrice);
+    const vBestBid = Number(pSnapshot?.bestBidPrice);
+    const vBestAsk = Number(pSnapshot?.bestAskPrice);
+    const vFallback = Number.isFinite(vSpotPrice) && vSpotPrice > 0
+        ? vSpotPrice
+        : (Number.isFinite(vMarkPrice) && vMarkPrice > 0 ? vMarkPrice : Number.NaN);
+    if (vPriceSource === "mark_price") {
+        return Number.isFinite(vMarkPrice) && vMarkPrice > 0 ? vMarkPrice : vFallback;
+    }
+    if (vPriceSource === "best_bid") {
+        return Number.isFinite(vBestBid) && vBestBid > 0 ? vBestBid : vFallback;
+    }
+    if (vPriceSource === "best_ask") {
+        return Number.isFinite(vBestAsk) && vBestAsk > 0 ? vBestAsk : vFallback;
+    }
+    return vFallback;
+}
+
+function buildOptionsDemoRenkoHistoryKey(
+    pSymbol: "BTC" | "ETH",
+    pUiState: Record<string, unknown>,
+    pManualPriceResetToken: string
+): string {
+    return [
+        pSymbol,
+        normalizeRenkoFeedTimeframeValue(pUiState.renkoFeedTimeframe || "5m"),
+        normalizeRenkoFeedPriceSourceValue(pUiState.renkoFeedPriceSrc || "spot_price"),
+        normalizeRenkoFeedPointSizeString(pUiState.renkoFeedPts || 10),
+        normalizeRenkoFeedManualPriceString(pUiState.renkoFeedManualPrice || ""),
+        normalizeRenkoFeedManualPriceResetTokenString(pManualPriceResetToken)
+    ].join("|");
+}
+
+function updateOptionsDemoRenkoState(
+    pExistingState: unknown,
+    pUiState: Record<string, unknown>,
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null | undefined,
+    pSymbol: "BTC" | "ETH"
+): {
+    renko: OptionsDemoRenkoRuntimeState;
+    signals: OptionsDemoRenkoSignal[];
+    sourcePrice: number | null;
+    isEnabled: boolean;
+} {
+    const objExistingState = normalizeOptionsDemoRenkoRuntimeState((pExistingState && typeof pExistingState === "object")
+        ? (pExistingState as Record<string, unknown>).renko
+        : null);
+    const bEnabled = normalizeBooleanValue(
+        pUiState.renkoFeedEnabled ?? pUiState.renkoEnabled,
+        Boolean(pUiState.renkoFeedEnabled ?? pUiState.renkoEnabled)
+    );
+    const vPointSizeInput = pUiState.renkoFeedPts ?? pUiState.renkoStepPoints ?? objExistingState.pointSize ?? 10;
+    const vPointSize = Math.max(1, Math.floor(Number(vPointSizeInput) || 10));
+    const vManualPrice = normalizeRenkoBaseValueString(pUiState.renkoFeedManualPrice ?? pUiState.renkoBaseValue ?? "");
+    const vManualPriceResetToken = normalizeRenkoFeedManualPriceResetTokenString(
+        pUiState.renkoManualPriceResetToken ?? objExistingState.manualPriceResetToken ?? "0"
+    );
+    const vTimeframe = normalizeRenkoFeedTimeframeValue(pUiState.renkoFeedTimeframe ?? objExistingState.timeframe);
+    const vPriceSource = normalizeRenkoFeedPriceSourceValue(pUiState.renkoFeedPriceSrc ?? objExistingState.priceSource);
+    const vSourcePriceRaw = resolveOptionsDemoRenkoSourcePrice(pSnapshot, vPriceSource);
+    const vSourcePrice = Number.isFinite(vSourcePriceRaw) && vSourcePriceRaw > 0 ? Number(vSourcePriceRaw.toFixed(2)) : null;
+    const vHistoryKey = buildOptionsDemoRenkoHistoryKey(pSymbol, {
+        renkoFeedTimeframe: vTimeframe,
+        renkoFeedPriceSrc: vPriceSource,
+        renkoFeedPts: vPointSize,
+        renkoFeedManualPrice: vManualPrice
+    }, vManualPriceResetToken);
+    const objNextRenko: OptionsDemoRenkoRuntimeState = {
+        ...objExistingState,
+        pointSize: vPointSize,
+        priceSource: vPriceSource,
+        timeframe: vTimeframe,
+        fromPrice: vSourcePrice,
+        lastPrice: vSourcePrice,
+        manualPriceResetToken: vManualPriceResetToken
+    };
+    const arrSignals: OptionsDemoRenkoSignal[] = [];
+    if (!bEnabled) {
+        return {
+            renko: {
+                ...objNextRenko,
+                historyKey: vHistoryKey
+            },
+            signals: arrSignals,
+            sourcePrice: vSourcePrice,
+            isEnabled: false
+        };
+    }
+
+    if (objNextRenko.historyKey !== vHistoryKey) {
+        const vManualAnchor = Number(vManualPrice);
+        objNextRenko.anchor = Number.isFinite(vManualAnchor) && vManualAnchor > 0
+            ? Number(vManualAnchor.toFixed(2))
+            : (vSourcePrice && vSourcePrice > 0 ? vSourcePrice : null);
+        objNextRenko.lastDir = 0;
+        objNextRenko.lastColor = "";
+        objNextRenko.historyKey = vHistoryKey;
+        objNextRenko.historySyncedAt = new Date().toISOString();
+        objNextRenko.historyCandleCount = 0;
+        if (!objNextRenko.anchor || !(objNextRenko.anchor > 0)) {
+            return {
+                renko: objNextRenko,
+                signals: arrSignals,
+                sourcePrice: vSourcePrice,
+                isEnabled: true
+            };
+        }
+    }
+
+    if (!Number.isFinite(vSourcePrice) || !(vSourcePrice && vSourcePrice > 0)) {
+        return {
+            renko: objNextRenko,
+            signals: arrSignals,
+            sourcePrice: null,
+            isEnabled: true
+        };
+    }
+
+    if (!Number.isFinite(Number(objNextRenko.anchor)) || !(Number(objNextRenko.anchor) > 0)) {
+        objNextRenko.anchor = vSourcePrice;
+        objNextRenko.lastDir = 0;
+        objNextRenko.lastColor = "";
+        return {
+            renko: objNextRenko,
+            signals: arrSignals,
+            sourcePrice: vSourcePrice,
+            isEnabled: true
+        };
+    }
+
+    let vAnchor = Number(objNextRenko.anchor);
+    while (vSourcePrice >= (vAnchor + vPointSize)) {
+        vAnchor = Number((vAnchor + vPointSize).toFixed(2));
+        objNextRenko.lastDir = 1;
+        objNextRenko.lastColor = "G";
+        arrSignals.push("G");
+    }
+    while (vSourcePrice <= (vAnchor - vPointSize)) {
+        vAnchor = Number((vAnchor - vPointSize).toFixed(2));
+        objNextRenko.lastDir = -1;
+        objNextRenko.lastColor = "R";
+        arrSignals.push("R");
+    }
+
+    objNextRenko.anchor = Number(vAnchor.toFixed(2));
+    objNextRenko.fromPrice = vSourcePrice;
+    objNextRenko.lastPrice = vSourcePrice;
+    objNextRenko.historyKey = vHistoryKey;
+    return {
+        renko: objNextRenko,
+        signals: arrSignals,
+        sourcePrice: vSourcePrice,
+        isEnabled: true
+    };
+}
+
 
 function normalizeRollingFuturesLegSelection(pValue: unknown, pFallback: string): "ce" | "pe" | "both" {
     const vFallback = String(pFallback || "").trim().toLowerCase();
@@ -1890,6 +2162,7 @@ function getDefaultManualTraderUiState(
         strangleDeltaDiffReplacePct: isStrangleOptionsStrategy(pStrategyCode) ? "40" : "50",
         buyHedgeOppositeLegOnGate: false,
         sameSideLegIncrementEnabled: true,
+        allowDuplicateContracts: false,
         placeOppositeTrades: false,
         buyQtyPercentEnabled: false,
         buyQtyPercent: "100",
@@ -1897,6 +2170,12 @@ function getDefaultManualTraderUiState(
         renkoStepPoints: "100",
         renkoBaseValue: "",
         renkoBaseValues: { BTC: "", ETH: "" },
+        renkoFeedEnabled: false,
+        renkoFeedPts: "10",
+        renkoFeedManualPrice: "",
+        renkoManualPriceResetToken: "0",
+        renkoFeedTimeframe: "5m",
+        renkoFeedPriceSrc: "spot_price",
         renkoEmaEnabled: false,
         renkoEmaLength: "20",
         renkoEmaFilterEnabled: false,
@@ -3832,6 +4111,9 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
                 objUiState.sameSideLegIncrementEnabled,
                 normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.sameSideLegIncrementEnabled))
             ),
+        allowDuplicateContracts: isStrangleOptionsStrategy(pProfile.strategyCode)
+            ? false
+            : normalizeBooleanValue(objUiState.allowDuplicateContracts, Boolean(objDefaults.allowDuplicateContracts)),
         placeOppositeTrades: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(objUiState.placeOppositeTrades, Boolean(objDefaults.placeOppositeTrades)),
@@ -3853,6 +4135,24 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         renkoBaseValues: supportsRenkoFeedStrategy(pProfile.strategyCode)
             ? objRenkoBaseValues
             : { BTC: "", ETH: "" },
+        renkoFeedEnabled: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? normalizeBooleanValue(objUiState.renkoFeedEnabled ?? objUiState.renkoEnabled, Boolean(objUiState.renkoFeedEnabled ?? objDefaults.renkoFeedEnabled))
+            : false,
+        renkoFeedPts: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? normalizeRenkoFeedPointSizeString(objUiState.renkoFeedPts ?? objUiState.renkoStepPoints ?? objDefaults.renkoFeedPts)
+            : "10",
+        renkoFeedManualPrice: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? normalizeRenkoFeedManualPriceString(objUiState.renkoFeedManualPrice ?? objUiState.renkoBaseValue ?? "")
+            : "",
+        renkoManualPriceResetToken: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? normalizeRenkoFeedManualPriceResetTokenString(objUiState.renkoManualPriceResetToken ?? objDefaults.renkoManualPriceResetToken)
+            : "0",
+        renkoFeedTimeframe: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? normalizeRenkoFeedTimeframeValue(objUiState.renkoFeedTimeframe ?? objDefaults.renkoFeedTimeframe)
+            : "5m",
+        renkoFeedPriceSrc: supportsRenkoFeedStrategy(pProfile.strategyCode)
+            ? normalizeRenkoFeedPriceSourceValue(objUiState.renkoFeedPriceSrc ?? objDefaults.renkoFeedPriceSrc)
+            : "spot_price",
         renkoEmaEnabled: supportsRenkoFeedStrategy(pProfile.strategyCode)
             ? normalizeBooleanValue(objUiState.renkoEmaEnabled, Boolean(objDefaults.renkoEmaEnabled))
             : false,
@@ -4218,6 +4518,9 @@ function normalizeProfileSaveInput(
                 objUiState.sameSideLegIncrementEnabled,
                 normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.sameSideLegIncrementEnabled))
             ),
+        allowDuplicateContracts: isStrangleOptionsStrategy(pStrategyCode)
+            ? false
+            : normalizeBooleanValue(objUiState.allowDuplicateContracts, Boolean(objDefaults.allowDuplicateContracts)),
         placeOppositeTrades: isStrangleOptionsStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(objUiState.placeOppositeTrades, Boolean(objDefaults.placeOppositeTrades)),
@@ -4239,6 +4542,24 @@ function normalizeProfileSaveInput(
         renkoBaseValues: supportsRenkoFeedStrategy(pStrategyCode)
             ? objRenkoBaseValues
             : { BTC: "", ETH: "" },
+        renkoFeedEnabled: supportsRenkoFeedStrategy(pStrategyCode)
+            ? normalizeBooleanValue(objUiState.renkoFeedEnabled ?? objUiState.renkoEnabled, Boolean(objUiState.renkoFeedEnabled ?? objDefaults.renkoFeedEnabled))
+            : false,
+        renkoFeedPts: supportsRenkoFeedStrategy(pStrategyCode)
+            ? normalizeRenkoFeedPointSizeString(objUiState.renkoFeedPts ?? objUiState.renkoStepPoints ?? objDefaults.renkoFeedPts)
+            : "10",
+        renkoFeedManualPrice: supportsRenkoFeedStrategy(pStrategyCode)
+            ? normalizeRenkoFeedManualPriceString(objUiState.renkoFeedManualPrice ?? objUiState.renkoBaseValue ?? "")
+            : "",
+        renkoManualPriceResetToken: supportsRenkoFeedStrategy(pStrategyCode)
+            ? normalizeRenkoFeedManualPriceResetTokenString(objUiState.renkoManualPriceResetToken ?? objDefaults.renkoManualPriceResetToken)
+            : "0",
+        renkoFeedTimeframe: supportsRenkoFeedStrategy(pStrategyCode)
+            ? normalizeRenkoFeedTimeframeValue(objUiState.renkoFeedTimeframe ?? objDefaults.renkoFeedTimeframe)
+            : "5m",
+        renkoFeedPriceSrc: supportsRenkoFeedStrategy(pStrategyCode)
+            ? normalizeRenkoFeedPriceSourceValue(objUiState.renkoFeedPriceSrc ?? objDefaults.renkoFeedPriceSrc)
+            : "spot_price",
         renkoEmaEnabled: supportsRenkoFeedStrategy(pStrategyCode)
             ? normalizeBooleanValue(objUiState.renkoEmaEnabled, Boolean(objDefaults.renkoEmaEnabled))
             : false,
@@ -8087,7 +8408,8 @@ async function buildOptionsScalperPaperOptionOpen(
     if (isOptionsScalperStrategy(pStrategyCode) && String(pInput.openedReason || "").trim().toLowerCase() === "strategy_option_open") {
         const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
         const vContractName = String(objContract.contractSymbol || "").trim();
-        if (hasActiveTrackedOptionContract(arrExisting, vContractName)) {
+        const bAllowDuplicateContracts = normalizeBooleanValue(objUiState.allowDuplicateContracts, false);
+        if (!bAllowDuplicateContracts && hasActiveTrackedOptionContract(arrExisting, vContractName)) {
             throw new Error(`Skipped auto trade because ${vContractName} is already active in Open Positions.`);
         }
     }
@@ -10248,6 +10570,341 @@ async function getRuntimeStatusInternal(req: Request, res: Response, pStrategyCo
     });
 }
 
+function appendOptionsDemoRenkoHistoryEntry(
+    pHistory: Record<string, unknown>[],
+    pEntry: {
+        color: "green" | "red";
+        changedAt: string;
+        referencePrice: string;
+        sourcePrice: string;
+        anchorPrice: string;
+        pointSize: string;
+    }
+): Record<string, unknown>[] {
+    return [{
+        color: pEntry.color,
+        changedAt: pEntry.changedAt,
+        referencePrice: pEntry.referencePrice,
+        sourcePrice: pEntry.sourcePrice,
+        anchorPrice: pEntry.anchorPrice,
+        pointSize: pEntry.pointSize
+    }, ...pHistory].slice(0, 20);
+}
+
+async function syncOptionsDemoRenkoRuntimeState(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pProfile: RollingFuturesLtProfileRecord,
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null,
+    pManualSignal: OptionsDemoRenkoSignal | "" = ""
+): Promise<{
+    runtime: RollingFuturesLtRuntimeRecord | null;
+    profile: RollingFuturesLtProfileRecord;
+    renko: OptionsDemoRenkoRuntimeState;
+    signals: OptionsDemoRenkoSignal[];
+}> {
+    if (!isOptionsScalperStrategy(pStrategyCode)) {
+        return {
+            runtime: pRuntime,
+            profile: pProfile,
+            renko: getDefaultOptionsDemoRenkoRuntimeState(),
+            signals: []
+        };
+    }
+
+    const objUiState = getMergedUiState(pProfile);
+    const objRuntime = pRuntime || await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
+    const objRenkoResult = updateOptionsDemoRenkoState(objRuntime?.state || {}, objUiState, pSnapshot, vSelectedSymbol);
+    if (pManualSignal === "R" || pManualSignal === "G") {
+        objRenkoResult.renko.lastColor = pManualSignal;
+        objRenkoResult.renko.lastDir = pManualSignal === "G" ? 1 : -1;
+    }
+    const objRuntimeState = {
+        ...((objRuntime?.state || {}) as Record<string, unknown>),
+        renko: {
+            ...objRenkoResult.renko,
+            manualSignal: pManualSignal || undefined
+        }
+    };
+    let objNextProfile = pProfile;
+    const objExistingHistory = normalizeRenkoHistoryValues(objUiState.renkoHistoryBySymbol);
+    const objCurrentHistory = Array.isArray(objExistingHistory[vSelectedSymbol]) ? [...objExistingHistory[vSelectedSymbol]] : [];
+    const arrHistorySignals = [...objRenkoResult.signals];
+    if (pManualSignal === "R" || pManualSignal === "G") {
+        arrHistorySignals.push(pManualSignal);
+    }
+    if (arrHistorySignals.length) {
+        const vColor = arrHistorySignals[arrHistorySignals.length - 1] === "G" ? "green" : "red";
+        const vSourcePrice = normalizeRenkoBaseValueString(objRenkoResult.sourcePrice);
+        const vAnchorPrice = normalizeRenkoBaseValueString(objRenkoResult.renko.anchor);
+        const vPointSize = normalizeRenkoFeedPointSizeString(objRenkoResult.renko.pointSize);
+        const objNextHistory = appendOptionsDemoRenkoHistoryEntry(objCurrentHistory as Record<string, unknown>[], {
+            color: vColor,
+            changedAt: new Date().toISOString(),
+            referencePrice: vAnchorPrice,
+            sourcePrice: vSourcePrice,
+            anchorPrice: vAnchorPrice,
+            pointSize: vPointSize
+        });
+        const objNextUiState = {
+            ...objUiState,
+            renkoHistoryBySymbol: {
+                ...objExistingHistory,
+                [vSelectedSymbol]: objNextHistory
+            }
+        };
+        objNextProfile = await saveRollingFuturesLtProfile(normalizeProfileSaveInput(pUserId, pStrategyCode, {
+            ...pProfile,
+            uiState: objNextUiState,
+            connectionStatus: pProfile.connectionStatus
+        }));
+    }
+
+    const objSavedRuntime = await saveRollingFuturesLtRuntime({
+        ...(objRuntime || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        currentSymbol: vSelectedSymbol,
+        state: objRuntimeState,
+        lastCycleAt: new Date().toISOString()
+    });
+
+    return {
+        runtime: objSavedRuntime,
+        profile: objNextProfile,
+        renko: objRenkoResult.renko,
+        signals: arrHistorySignals
+    };
+}
+
+export async function syncOptionsScalperRenkoRuntimeState(
+    pUserId: string,
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null,
+    pManualSignal: OptionsDemoRenkoSignal | "" = ""
+): Promise<{
+    runtime: RollingFuturesLtRuntimeRecord | null;
+    profile: RollingFuturesLtProfileRecord;
+    renko: OptionsDemoRenkoRuntimeState;
+    signals: OptionsDemoRenkoSignal[];
+}> {
+    const objProfile = await readLiveProfile(pUserId, "options-scalper");
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
+    return syncOptionsDemoRenkoRuntimeState(pUserId, "options-scalper", objProfile, objRuntime, pSnapshot, pManualSignal);
+}
+
+function getOptionsScalperRenkoAutoTradeLockKey(pUserId: string): string {
+    return `${getManualFutureOrderLockKey(pUserId, "options-scalper")}::delta-renko-auto-trade`;
+}
+
+function resolveOptionsScalperRenkoAutoTradeInput(
+    pProfile: RollingFuturesLtProfileRecord,
+    pSignal: OptionsDemoRenkoSignal
+): {
+    rowIndex: 1 | 2;
+    action: "buy" | "sell";
+    legSide: "ce" | "pe";
+    expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
+    expiryDate: string;
+    qty: number;
+    targetDelta: number;
+    takeProfitDelta: number;
+    stopLossDelta: number;
+} | null {
+    const objUiState = getMergedUiState(pProfile);
+    const vRowIndex = pSignal === "G" ? 1 : 2;
+    const objRowState = getNormalizedOptionRowUiState(objUiState, "options-scalper", vRowIndex);
+    if (objRowState.legs === "both") {
+        return null;
+    }
+    let vLegSide: "ce" | "pe" = objRowState.legs === "pe" ? "pe" : "ce";
+    if (normalizeBooleanValue(objUiState.placeOppositeTrades, false)) {
+        vLegSide = vLegSide === "pe" ? "ce" : "pe";
+    }
+    const vExpiryMode = (["1", "2", "4", "5", "6", "7"].includes(String(objRowState.expiryMode || "5").trim())
+        ? String(objRowState.expiryMode || "5").trim()
+        : "5") as "1" | "2" | "4" | "5" | "6" | "7";
+    const vTargetDelta = Math.max(0, Number(objRowState.newD || 0));
+    if (!(vTargetDelta > 0)) {
+        return null;
+    }
+    return {
+        rowIndex: vRowIndex,
+        action: objRowState.action === "buy" ? "buy" : "sell",
+        legSide: vLegSide,
+        expiryMode: vExpiryMode,
+        expiryDate: String(objRowState.expiryDate || "").trim(),
+        qty: Math.max(1, Math.floor(Number(objRowState.qty || 1))),
+        targetDelta: vTargetDelta,
+        takeProfitDelta: Math.max(0, Number(objRowState.tpD || 0)),
+        stopLossDelta: Math.max(0, Number(objRowState.slD || 0))
+    };
+}
+
+export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
+    pUserId: string,
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null,
+    pManualSignal: OptionsDemoRenkoSignal | "" = ""
+): Promise<{
+    runtime: RollingFuturesLtRuntimeRecord | null;
+    profile: RollingFuturesLtProfileRecord;
+    renko: OptionsDemoRenkoRuntimeState;
+    signals: OptionsDemoRenkoSignal[];
+    autoTrade: null | {
+        status: "success" | "warning" | "danger";
+        message: string;
+        trackedOpenPositions?: Awaited<ReturnType<typeof buildOpenPositionsPayload>>;
+    };
+}> {
+    const objProfile = await readLiveProfile(pUserId, "options-scalper");
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
+    const vPreviousColor = normalizeOptionsDemoRenkoRuntimeState((objRuntime?.state || {}) as Record<string, unknown>).lastColor;
+    const objSync = await syncOptionsDemoRenkoRuntimeState(
+        pUserId,
+        "options-scalper",
+        objProfile,
+        objRuntime,
+        pSnapshot,
+        pManualSignal
+    );
+    const vNextColor = String(objSync.renko.lastColor || "").trim().toUpperCase();
+    const bShouldAttemptAutoTrade = (pManualSignal === "R" || pManualSignal === "G")
+        ? true
+        : (Boolean(objSync.signals.length) && Boolean(vNextColor) && vNextColor !== vPreviousColor);
+    if (!bShouldAttemptAutoTrade) {
+        return {
+            ...objSync,
+            autoTrade: null
+        };
+    }
+
+    const objLatestRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
+    if (!objLatestRuntime?.autoTraderEnabled || String(objLatestRuntime.status || "").trim().toLowerCase() !== "running") {
+        return {
+            ...objSync,
+            autoTrade: {
+                status: "warning",
+                message: "Turn Auto Trader ON before Delta Renko signals can place paper option orders."
+            }
+        };
+    }
+
+    const vSignal = pManualSignal === "R" || pManualSignal === "G"
+        ? pManualSignal
+        : (vNextColor === "R" || vNextColor === "G" ? vNextColor as OptionsDemoRenkoSignal : "");
+    if (!vSignal) {
+        return {
+            ...objSync,
+            autoTrade: null
+        };
+    }
+
+    const objTradeInput = resolveOptionsScalperRenkoAutoTradeInput(objSync.profile, vSignal);
+    if (!objTradeInput) {
+        return {
+            ...objSync,
+            autoTrade: {
+                status: "warning",
+                message: `Row ${vSignal === "G" ? 1 : 2} Manual Trader settings are incomplete for Delta Renko paper auto trades.`
+            }
+        };
+    }
+
+    const vLockKey = getOptionsScalperRenkoAutoTradeLockKey(pUserId);
+    if (gOptionsScalperRenkoAutoTradeLocks.has(vLockKey)) {
+        return {
+            ...objSync,
+            autoTrade: {
+                status: "warning",
+                message: "A Delta Renko paper auto trade is already being processed. Please wait for the current signal to finish."
+            }
+        };
+    }
+
+    gOptionsScalperRenkoAutoTradeLocks.add(vLockKey);
+    try {
+        const objUiState = getMergedUiState(objSync.profile);
+        const vSymbol = normalizeSymbolValue(objUiState.symbol);
+        const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
+            pUserId,
+            "options-scalper",
+            objSync.profile,
+            {
+                action: objTradeInput.action,
+                symbol: vSymbol,
+                legSide: objTradeInput.legSide,
+                expiryMode: objTradeInput.expiryMode,
+                expiryDate: objTradeInput.expiryDate,
+                qty: objTradeInput.qty,
+                targetDelta: objTradeInput.targetDelta,
+                rowIndex: objTradeInput.rowIndex,
+                openedReason: "strategy_option_open",
+                takeProfitDelta: objTradeInput.takeProfitDelta,
+                stopLossDelta: objTradeInput.stopLossDelta,
+                reEnterEnabled: false
+            }
+        );
+        const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, "options-scalper");
+        const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, "options-scalper", [
+            ...arrExisting,
+            objPaperOpen.position
+        ]);
+        await logFuturesEvent(
+            pUserId,
+            "options-scalper",
+            "option_opened",
+            "success",
+            "Paper Option Auto Opened",
+            `${objTradeInput.action.toUpperCase()} ${objTradeInput.legSide.toUpperCase()} paper option opened from row ${objTradeInput.rowIndex}.`,
+            {
+                symbol: vSymbol,
+                contractName: objPaperOpen.position.contractName,
+                qty: objTradeInput.qty,
+                targetDelta: objTradeInput.targetDelta,
+                rowIndex: objTradeInput.rowIndex,
+                signal: vSignal,
+                reason: "delta_renko_paper_auto_trade"
+            }
+        );
+        return {
+            ...objSync,
+            autoTrade: {
+                status: "success",
+                message: `${vSignal === "G" ? "Green" : "Red"} signal opened ${objTradeInput.action.toUpperCase()} ${objTradeInput.legSide.toUpperCase()} paper option from row ${objTradeInput.rowIndex}.`,
+                trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrSaved)
+            }
+        };
+    }
+    catch (objError) {
+        return {
+            ...objSync,
+            autoTrade: {
+                status: getErrorMessage(objError, "").includes("already active") ? "warning" : "danger",
+                message: getErrorMessage(objError, "Unable to place Delta Renko paper auto trade.")
+            }
+        };
+    }
+    finally {
+        gOptionsScalperRenkoAutoTradeLocks.delete(vLockKey);
+    }
+}
+
 async function checkConnectionInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
     const objResult = await performRollingFuturesLtConnectionCheck(vUserId, pStrategyCode, String(req.body?.profileId || "").trim());
@@ -11918,6 +12575,16 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
         const vHealthPct = vAvailableBalance > 0 && vSelectedFuturePositionValue > 0
             ? Number(((vSelectedFuturePositionValue / vAvailableBalance) * 100).toFixed(2))
             : Number.NaN;
+        let objRenkoRuntimeState: OptionsDemoRenkoRuntimeState | null = null;
+        let objRenkoHistoryBySymbol = objUiState.renkoHistoryBySymbol && typeof objUiState.renkoHistoryBySymbol === "object"
+            ? objUiState.renkoHistoryBySymbol as Record<string, unknown>
+            : { BTC: [], ETH: [] };
+        if (pStrategyCode === "options-scalper") {
+            const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
+            const objRenkoSync = await syncOptionsDemoRenkoRuntimeState(vUserId, pStrategyCode, objProfile, objRuntime, objMarketSnapshot);
+            objRenkoRuntimeState = objRenkoSync.renko;
+            objRenkoHistoryBySymbol = getMergedUiState(objRenkoSync.profile).renkoHistoryBySymbol as Record<string, unknown>;
+        }
         res.json({
             status: "success",
             data: {
@@ -11937,6 +12604,8 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
                     const vQty = Math.abs(toFiniteNumber(objRow.net_size ?? objRow.size, 0));
                     return isTrackedContractForSymbol(vContract, vSelectedSymbol) && vQty > 0;
                 }).length,
+                renko: objRenkoRuntimeState,
+                renkoHistoryBySymbol: objRenkoHistoryBySymbol,
                 indicator: pStrategyCode === "options-scalper" && objIndicatorResult.status === "fulfilled"
                     ? objIndicatorResult.value
                     : null
@@ -15763,6 +16432,64 @@ export async function getOptionsScalperIndicator(req: Request, res: Response): P
         res.status(500).json({
             status: "danger",
             message: getErrorMessage(objError, "Unable to fetch options demo indicator.")
+        });
+    }
+}
+export async function setOptionsScalperRenkoManualSignal(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const objProfile = await readLiveProfile(vUserId, "options-scalper");
+        const objRuntime = await loadRollingFuturesLtRuntime(vUserId, "options-scalper");
+        const objUiState = getMergedUiState(objProfile);
+        const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
+        const vSignal = String(req.body?.signal || req.body?.color || "").trim().toUpperCase() === "G" ? "G"
+            : (String(req.body?.signal || req.body?.color || "").trim().toUpperCase() === "R" ? "R" : "");
+        if (!vSignal) {
+            res.status(400).json({
+                status: "warning",
+                message: "Select R or G for the manual Renko signal."
+            });
+            return;
+        }
+        const objSnapshot = await getLiveMarketSnapshot({
+            symbol: vSelectedSymbol,
+            contractName: getContractNameForSymbol(vSelectedSymbol),
+            lotSize: getLotSizeForSymbol(vSelectedSymbol),
+            futureQty: 1,
+            futureOrderType: "market_order",
+            action: "buy",
+            legSide: "ce",
+            expiryMode: "1",
+            expiryDate: "",
+            optionQty: 1,
+            redOptionQtyPct: 100,
+            greenOptionQtyPct: 100,
+            newDelta: 0.53,
+            reDelta: 0.53,
+            deltaTakeProfit: 0.15,
+            deltaStopLoss: 0.85,
+            reEnter: false,
+            addOneLotFuture: false,
+            renkoEnabled: Boolean(objUiState.renkoFeedEnabled ?? objUiState.renkoEnabled),
+            renkoStepPoints: Math.max(1, Math.floor(Number(objUiState.renkoFeedPts || objUiState.renkoStepPoints || 10) || 10)),
+            renkoPriceSource: normalizeRenkoFeedPriceSourceValue(objUiState.renkoFeedPriceSrc || "spot_price"),
+            loopSeconds: 8
+        });
+        const objSync = await syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(vUserId, objSnapshot, vSignal);
+        res.json({
+            status: "success",
+            message: `Manual Renko signal set to ${vSignal}.`,
+            data: {
+                renko: objSync.renko,
+                renkoHistoryBySymbol: getMergedUiState(objSync.profile).renkoHistoryBySymbol,
+                autoTrade: objSync.autoTrade || null
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to set the manual Renko signal.")
         });
     }
 }

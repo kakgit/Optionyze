@@ -3,19 +3,26 @@ loadLocalEnv();
 
 import express from "express";
 import dns from "node:dns";
+import { createServer } from "node:http";
+import type { IncomingMessage } from "node:http";
 import path from "node:path";
+import WebSocket, { WebSocketServer } from "ws";
 import { createApiRouter } from "../api/routes";
 import { RunnerManager } from "../runners/runner-manager";
 import { getServerId } from "../runtime/server-runtime";
 import { ensurePostgresSchema, isPostgresConfigured } from "../storage/postgres";
 import { ensureSurvivalPostgresSchema } from "../storage/survival-postgres";
+import { getAccountById } from "../storage/accounts-store";
+import { getSessionById, getSessionCookieName } from "../storage/sessions-store";
 import {
     renderCoveredOptionsPage,
     renderRenkoOptionsPage,
     renderStrangleOptionsPage,
     renderOptionsDemoPage
 } from "../api/controllers/strategyfo-paper-controller";
-import { recoverRollingFuturesLtAutoTraderCycles } from "../api/controllers/rolling-futures-lt-controller";
+import { recoverRollingFuturesLtAutoTraderCycles, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
+import { ensureLiveTickerSymbols, getLiveMarketSnapshot } from "../strategies/rolling-options-pt-de/market-data";
+import type { RollingOptionsPtDeConfig } from "../strategies/rolling-options-pt-de/types";
 import {
     changePassword,
     renderChangePasswordPage,
@@ -52,6 +59,33 @@ import {
 } from "../api/controllers/survival-admin-controller";
 
 dns.setDefaultResultOrder("ipv4first");
+
+function normalizeDemoRenkoSymbol(value: unknown): "BTC" | "ETH" {
+    return String(value || "").trim().toUpperCase() === "ETH" ? "ETH" : "BTC";
+}
+
+function getDemoRenkoContractName(symbol: "BTC" | "ETH"): string {
+    return symbol === "ETH" ? "ETHUSD" : "BTCUSD";
+}
+
+function getDemoRenkoLotSize(symbol: "BTC" | "ETH"): number {
+    return symbol === "ETH" ? 0.01 : 0.001;
+}
+
+function readCookieValue(headerValue: string | undefined, cookieName: string): string {
+    const source = String(headerValue || "");
+    if (!source) {
+        return "";
+    }
+    for (const cookiePart of source.split(";")) {
+        const [rawName, ...rawValueParts] = cookiePart.split("=");
+        if (String(rawName || "").trim() !== cookieName) {
+            continue;
+        }
+        return decodeURIComponent(rawValueParts.join("=").trim());
+    }
+    return "";
+}
 
 async function bootstrap(): Promise<void> {
     const app = express();
@@ -115,7 +149,134 @@ async function bootstrap(): Promise<void> {
     });
     app.use("/api", createApiRouter(runnerManager));
 
-    app.listen(port, () => {
+    const server = createServer(app);
+    const websocketServer = new WebSocketServer({ noServer: true });
+
+    server.on("upgrade", async (req, socket, head) => {
+        try {
+            const objUrl = new URL(String(req.url || ""), "http://localhost");
+            if (objUrl.pathname !== "/ws/options-demo/renko") {
+                socket.destroy();
+                return;
+            }
+            const vSessionId = readCookieValue(req.headers.cookie, getSessionCookieName());
+            if (!vSessionId) {
+                socket.destroy();
+                return;
+            }
+            const objSession = await getSessionById(vSessionId);
+            if (!objSession) {
+                socket.destroy();
+                return;
+            }
+            const objAccount = await getAccountById(objSession.accountId);
+            if (!objAccount || !objAccount.isActive) {
+                socket.destroy();
+                return;
+            }
+            websocketServer.handleUpgrade(req, socket, head, (ws) => {
+                websocketServer.emit("connection", ws, req, objAccount.accountId);
+            });
+        }
+        catch (objError) {
+            console.error("[renko-ws] upgrade failed:", objError);
+            socket.destroy();
+        }
+    });
+
+    websocketServer.on("connection", (ws: WebSocket, req: IncomingMessage, userId: string) => {
+        const objUrl = new URL(String(req.url || ""), "http://localhost");
+        const symbol = normalizeDemoRenkoSymbol(objUrl.searchParams.get("symbol"));
+        const contractName = getDemoRenkoContractName(symbol);
+        const lotSize = getDemoRenkoLotSize(symbol);
+        let closed = false;
+        let timerRef: NodeJS.Timeout | null = null;
+
+        ensureLiveTickerSymbols([contractName]);
+
+        const sendTick = async (): Promise<void> => {
+            if (closed || ws.readyState !== WebSocket.OPEN) {
+                return;
+            }
+            try {
+                const objSnapshot = await getLiveMarketSnapshot({
+                    symbol,
+                    contractName,
+                    lotSize,
+                    futureQty: 1,
+                    futureOrderType: "market_order",
+                    action: "buy",
+                    legSide: "ce",
+                    expiryMode: "1",
+                    expiryDate: "",
+                    optionQty: 1,
+                    redOptionQtyPct: 100,
+                    greenOptionQtyPct: 100,
+                    newDelta: 0.53,
+                    reDelta: 0.53,
+                    deltaTakeProfit: 0.15,
+                    deltaStopLoss: 0.85,
+                    reEnter: false,
+                    addOneLotFuture: false,
+                    renkoEnabled: true,
+                    renkoStepPoints: 10,
+                    renkoPriceSource: "spot_price",
+                    loopSeconds: 1
+                });
+                const objSync = await syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(userId, {
+                    spotPrice: objSnapshot.spotPrice,
+                    futuresPrice: objSnapshot.futuresPrice,
+                    bestBidPrice: objSnapshot.bestBidPrice,
+                    bestAskPrice: objSnapshot.bestAskPrice
+                });
+                if (closed || ws.readyState !== WebSocket.OPEN) {
+                    return;
+                }
+                ws.send(JSON.stringify({
+                    type: "renko_state",
+                    userId,
+                    symbol,
+                    contractName,
+                    spotPrice: objSnapshot.spotPrice,
+                    futuresPrice: objSnapshot.futuresPrice,
+                    bestBidPrice: objSnapshot.bestBidPrice,
+                    bestAskPrice: objSnapshot.bestAskPrice,
+                    ts: objSnapshot.ts,
+                    renko: objSync.renko,
+                    renkoHistoryBySymbol: objSync.profile?.uiState?.renkoHistoryBySymbol || null,
+                    autoTrade: objSync.autoTrade || null
+                }));
+            }
+            catch (objError) {
+                if (!closed && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: "renko_error",
+                        message: objError instanceof Error ? objError.message : "Unable to load live Renko price."
+                    }));
+                }
+            }
+        };
+
+        void sendTick();
+        timerRef = setInterval(() => {
+            void sendTick();
+        }, 1000);
+
+        ws.on("close", () => {
+            closed = true;
+            if (timerRef) {
+                clearInterval(timerRef);
+            }
+        });
+        ws.on("error", () => {
+            closed = true;
+            if (timerRef) {
+                clearInterval(timerRef);
+            }
+        });
+    });
+
+    server.listen(port, () => {
         console.log(`Optionyze server listening on port ${port} as ${getServerId()}`);
     });
 }

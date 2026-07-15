@@ -473,6 +473,24 @@
                         <div class="rolling-demo-field rolling-futures-buy-gate-field">
                             <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
                                 <div class="rolling-futures-buy-gate-row">
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesAllowDuplicateContracts">
+                                        <input type="checkbox" id="chkRollingFuturesAllowDuplicateContracts" />
+                                    </label>
+                                    <div class="rolling-futures-buy-gate-text">Allow Duplicate Contracts</div>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show duplicate-contract help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, Delta Renko paper auto trades may stack the exact same option contract again in Open Positions. When disabled, the same active contract is skipped to avoid overtrading.
+                                        </span>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="rolling-demo-field rolling-futures-buy-gate-field">
+                            <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
+                                <div class="rolling-futures-buy-gate-row">
                                     <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesPlaceOppositeTrades">
                                         <input type="checkbox" id="chkRollingFuturesPlaceOppositeTrades" />
                                     </label>
@@ -741,17 +759,20 @@
                     <div class="app-panel rolling-demo-card rolling-renko-feed-card">
                         <div class="rolling-demo-card-head">
                             <div class="rolling-futures-indicator-head-row">
-                                <h2><%= bIsDemoPage ? "EMA Feed" : "Renko Feed" %></h2>
-                                <span class="rolling-renko-feed-color-badge neutral" id="rollingRenkoCurrentBoxColor">Waiting</span>
+                                <h2><%= bIsDemoPage ? "Delta Renko-Style Feed" : "Renko Feed" %></h2>
+                                <div class="rolling-renko-feed-header-badges">
+                                    <span class="rolling-renko-feed-status-badge off" id="rollingRenkoFeedStatus">OFF</span>
+                                    <span class="rolling-renko-feed-color-badge neutral" id="rollingRenkoCurrentBoxColor">-</span>
+                                </div>
                             </div>
                             <div class="rolling-demo-card-tools">
-                                <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingRenkoRefresh" title="<%= bIsDemoPage ? "Refresh EMA feed" : "Refresh Renko feed" %>" aria-label="<%= bIsDemoPage ? "Refresh EMA feed" : "Refresh Renko feed" %>">
+                                <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingRenkoRefresh" title="<%= bIsDemoPage ? "Refresh Delta Renko feed" : "Refresh Renko feed" %>" aria-label="<%= bIsDemoPage ? "Refresh Delta Renko feed" : "Refresh Renko feed" %>">
                                     <svg viewBox="0 0 24 24" aria-hidden="true">
                                         <path d="M21 12a9 9 0 1 1-2.64-6.36" />
                                         <path d="M21 3v6h-6" />
                                     </svg>
                                 </button>
-                                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingRenkoClear" title="<%= bIsDemoPage ? "Clear EMA feed" : "Clear Renko feed" %>" aria-label="<%= bIsDemoPage ? "Clear EMA feed" : "Clear Renko feed" %>">
+                                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingRenkoClear" title="<%= bIsDemoPage ? "Clear Delta Renko feed" : "Clear Renko feed" %>" aria-label="<%= bIsDemoPage ? "Clear Delta Renko feed" : "Clear Renko feed" %>">
                                     <svg viewBox="0 0 24 24" aria-hidden="true">
                                         <path d="M18 6 6 18" />
                                         <path d="m6 6 12 12" />
@@ -761,36 +782,71 @@
                         </div>
                         <div class="rolling-renko-feed-stack">
                             <% if (bIsDemoPage) { %>
-                            <div class="rolling-renko-feed-grid">
+                            <div class="rolling-renko-feed-grid rolling-renko-feed-grid-demo">
                                 <div class="rolling-demo-field rolling-renko-feed-field">
-                                    <label>Spot Price</label>
+                                    <label for="chkRollingFuturesRenkoFeedEnabled">Delta Renko Feed</label>
                                     <div class="rolling-renko-feed-value-row">
-                                        <span class="rolling-renko-feed-value-badge" id="rollingRenkoSpotPrice">--</span>
+                                        <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoFeedEnabled">
+                                            <input type="checkbox" id="chkRollingFuturesRenkoFeedEnabled" />
+                                            <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
+                                            <span class="rolling-renko-feed-switch-text">Feed</span>
+                                        </label>
                                     </div>
                                 </div>
-                                <input type="checkbox" id="chkRollingFuturesRenkoEnabled" checked hidden />
-                                <input type="number" id="txtRollingFuturesRenkoBoxSize" min="1" step="1" value="100" hidden />
-                                <input type="number" id="txtRollingFuturesRenkoBaseValue" min="0" step="0.01" placeholder="Enter base value" hidden />
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="txtRollingFuturesRenkoFeedPts">Point Size</label>
+                                    <input type="number" id="txtRollingFuturesRenkoFeedPts" min="1" step="1" value="10" />
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>From</label>
+                                    <div class="rolling-renko-feed-value-row">
+                                        <span class="rolling-renko-feed-value-badge" id="rollingRenkoFromPrice">--</span>
+                                    </div>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>Anchor</label>
+                                    <div class="rolling-renko-feed-value-row">
+                                        <span class="rolling-renko-feed-value-badge" id="rollingRenkoAnchorPrice">--</span>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="rolling-renko-feed-grid rolling-renko-feed-grid-ema">
-                                <div class="rolling-demo-field rolling-renko-feed-field switch-only">
-                                    <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoEmaEnabled">
-                                        <input type="checkbox" id="chkRollingFuturesRenkoEmaEnabled" checked disabled />
-                                        <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
-                                        <span class="rolling-renko-feed-switch-text">EMA</span>
-                                    </label>
+                            <div class="rolling-renko-feed-grid rolling-renko-feed-grid-demo-bottom">
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="ddlRollingFuturesRenkoFeedTimeframe">Timeframe</label>
+                                    <select id="ddlRollingFuturesRenkoFeedTimeframe">
+                                        <option value="5s">5s</option>
+                                        <option value="1m">1m</option>
+                                        <option value="3m">3m</option>
+                                        <option value="5m" selected>5m</option>
+                                        <option value="15m">15m</option>
+                                        <option value="30m">30m</option>
+                                        <option value="1h">1h</option>
+                                    </select>
                                 </div>
                                 <div class="rolling-demo-field rolling-renko-feed-field">
-                                    <label for="txtRollingFuturesRenkoEmaLength">EMA Length</label>
-                                    <input type="number" id="txtRollingFuturesRenkoEmaLength" min="1" step="1" value="20" />
+                                    <label for="ddlRollingFuturesRenkoFeedPriceSrc">Price Source</label>
+                                    <select id="ddlRollingFuturesRenkoFeedPriceSrc">
+                                        <option value="spot_price">Spot Price</option>
+                                        <option value="mark_price">Mark Price</option>
+                                        <option value="best_bid">Best Bid</option>
+                                        <option value="best_ask">Best Ask</option>
+                                    </select>
                                 </div>
                                 <div class="rolling-demo-field rolling-renko-feed-field">
-                                    <label>Current EMA</label>
-                                    <div class="rolling-renko-feed-value-row">
-                                        <span class="rolling-renko-feed-value-badge" id="rollingRenkoEmaValue">--</span>
+                                    <label for="txtRollingFuturesRenkoFeedManualPrice">Manual Anchor</label>
+                                    <input type="number" id="txtRollingFuturesRenkoFeedManualPrice" min="0" step="0.01" placeholder="Optional" />
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>&nbsp;</label>
+                                    <div class="rolling-renko-feed-action-row">
+                                        <button class="rolling-demo-btn warn" type="button" id="btnRollingRenkoManualRed">R</button>
+                                        <button class="rolling-demo-btn primary" type="button" id="btnRollingRenkoManualGreen">G</button>
                                     </div>
                                 </div>
-                                <input type="checkbox" id="chkRollingFuturesRenkoEmaFilterEnabled" hidden />
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>&nbsp;</label>
+                                    <button class="rolling-demo-btn success" type="button" id="btnRollingRenkoUpdate">Update</button>
+                                </div>
                             </div>
                             <% } else { %>
                             <div class="rolling-renko-feed-grid">
@@ -844,9 +900,9 @@
                             </div>
                             <% } %>
                         </div>
-                        <div class="rolling-renko-feed-meta" id="rollingRenkoFeedMeta"><%= bIsDemoPage ? "EMA mode is ON. Waiting for spot price and EMA crossover." : "Turn the Renko feed ON to begin tracking live box color." %></div>
+                        <div class="rolling-renko-feed-meta" id="rollingRenkoFeedMeta"><%= bIsDemoPage ? "Delta Renko feed is OFF. Save settings to begin tracking current signal changes." : "Turn the Renko feed ON to begin tracking live box color." %></div>
                         <div class="rolling-demo-event-log" id="rollingRenkoHistoryLog">
-                            <div class="rolling-demo-event-empty"><%= bIsDemoPage ? "No EMA crossovers yet." : "No Renko color changes yet." %></div>
+                            <div class="rolling-demo-event-empty"><%= bIsDemoPage ? "No Renko signals yet." : "No Renko color changes yet." %></div>
                         </div>
                     </div>
                 <% } %>

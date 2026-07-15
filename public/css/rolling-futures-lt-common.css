@@ -169,6 +169,14 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-action-sel
     grid-template-columns: minmax(88px, auto) minmax(0, 1fr) minmax(110px, auto) minmax(0, 136px);
 }
 
+.rolling-renko-feed-grid-demo {
+    grid-template-columns: minmax(120px, auto) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.rolling-renko-feed-grid-demo-bottom {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .rolling-renko-feed-field {
     display: flex;
     flex-direction: column;
@@ -179,6 +187,13 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-action-sel
 .rolling-renko-feed-field.switch-only {
     justify-self: start;
     min-width: 88px;
+}
+
+.rolling-renko-feed-header-badges {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
 .rolling-renko-feed-switch {
@@ -310,14 +325,49 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-action-sel
     color: #cbd5e1;
 }
 
+.rolling-renko-feed-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 72px;
+    min-height: 40px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.26);
+    background: rgba(15, 23, 42, 0.28);
+    color: #cbd5e1;
+    font-weight: 800;
+    letter-spacing: .08em;
+}
+
+.rolling-renko-feed-status-badge.on {
+    border-color: rgba(101, 212, 232, 0.34);
+    background: rgba(18, 52, 71, 0.22);
+    color: #9de8f4;
+}
+
+.rolling-renko-feed-status-badge.off {
+    border-color: rgba(148, 163, 184, 0.26);
+    background: rgba(15, 23, 42, 0.28);
+    color: #cbd5e1;
+}
+
 .rolling-renko-feed-meta {
     margin-top: 12px;
     color: var(--app-muted);
     font-size: 13px;
 }
 
+.rolling-renko-feed-action-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
 @media (max-width: 900px) {
-    .rolling-renko-feed-grid {
+    .rolling-renko-feed-grid,
+    .rolling-renko-feed-grid-demo-bottom {
         grid-template-columns: 1fr;
     }
 }

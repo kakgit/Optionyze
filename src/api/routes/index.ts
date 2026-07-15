@@ -110,6 +110,7 @@ import {
     getOptionsScalperOpenPositions,
     getOptionsScalperProfile,
     getOptionsScalperRuntimeStatus,
+    setOptionsScalperRenkoManualSignal,
     listCoveredOptionsVerifierRunningUsers,
     listRenkoOptionsVerifierRunningUsers,
     listStrangleOptionsVerifierRunningUsers,
@@ -544,6 +545,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.get("/options-demo/indicator", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getOptionsScalperIndicator(req, res);
+    });
+    objRouter.post("/options-demo/renko/manual-signal", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await setOptionsScalperRenkoManualSignal(req, res);
     });
     objRouter.post("/options-demo/start-qty/calculate", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await calculateOptionsScalperRecommendedStartQty(req, res);
