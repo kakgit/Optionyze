@@ -7326,6 +7326,19 @@ function hasActiveTrackedOptionLegAction(
     );
 }
 
+function getLatestActiveTrackedOptionPosition(
+    pPositions: RollingFuturesLtImportedPositionRecord[]
+): RollingFuturesLtImportedPositionRecord | null {
+    const arrOpenPositions = listTrackedOpenOptionPositions(pPositions);
+    if (!arrOpenPositions.length) {
+        return null;
+    }
+    return [...arrOpenPositions].sort((pLeft, pRight) => {
+        return new Date(String(pRight.openedAt || pRight.updatedAt || "")).getTime()
+            - new Date(String(pLeft.openedAt || pLeft.updatedAt || "")).getTime();
+    })[0] || null;
+}
+
 async function reconcileRemovedTrackedPositionsPnl(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -8478,12 +8491,21 @@ async function buildOptionsScalperPaperOptionOpen(
     if (!objContract) {
         throw new Error(`No live ${pInput.legSide.toUpperCase()} contract was found for ${pInput.symbol} near target delta ${pInput.targetDelta.toFixed(2)}.`);
     }
-    if (isOptionsScalperStrategy(pStrategyCode) && String(pInput.openedReason || "").trim().toLowerCase() === "strategy_option_open") {
+    if (isOptionsScalperStrategy(pStrategyCode)) {
         const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+        const objLatestActiveOption = getLatestActiveTrackedOptionPosition(arrExisting);
+        const vLatestLegSide = objLatestActiveOption
+            ? getTrackedOptionLegSide(objLatestActiveOption.contractName)
+            : "";
+        if (vLatestLegSide && vLatestLegSide === pInput.legSide) {
+            throw new Error(`Skipped auto trade because the latest active option is already ${vLatestLegSide.toUpperCase()}. Next option must alternate to ${vLatestLegSide === "ce" ? "PE" : "CE"}.`);
+        }
+        if (String(pInput.openedReason || "").trim().toLowerCase() === "strategy_option_open") {
         const vContractName = String(objContract.contractSymbol || "").trim();
         const bAllowDuplicateContracts = normalizeBooleanValue(objUiState.allowDuplicateContracts, false);
         if (!bAllowDuplicateContracts && hasActiveTrackedOptionContract(arrExisting, vContractName)) {
             throw new Error(`Skipped auto trade because ${vContractName} is already active in Open Positions.`);
+        }
         }
     }
 
