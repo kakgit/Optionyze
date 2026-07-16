@@ -4502,6 +4502,7 @@ async function queueCoveredReEntryAction(
             targetDelta: pPending.targetDelta,
             expiryMode: pPending.expiryMode,
             expiryDate: pPending.expiryDate,
+            closedImportId: pPending.closedImportId,
             closedContractName: pPending.closedContractName
         }
     });
@@ -5518,6 +5519,7 @@ type CoveredPendingOptionReEntryState = {
     runAt: string;
     scheduledAt: string;
     attemptCount: number;
+    closedImportId: string;
     closedContractName: string;
     lastError: string;
 };
@@ -5549,6 +5551,7 @@ function getCoveredPendingOptionReEntriesState(
             runAt: String(objEntry.runAt || "").trim(),
             scheduledAt: String(objEntry.scheduledAt || "").trim(),
             attemptCount: Math.max(0, Math.floor(Number(objEntry.attemptCount || 0))),
+            closedImportId: String(objEntry.closedImportId || "").trim(),
             closedContractName: String(objEntry.closedContractName || "").trim(),
             lastError: String(objEntry.lastError || "").trim()
         } satisfies CoveredPendingOptionReEntryState;
@@ -5577,6 +5580,7 @@ function buildRuntimeStateWithCoveredPendingOptionReEntries(
         runAt: String(objEntry.runAt || "").trim(),
         scheduledAt: String(objEntry.scheduledAt || "").trim(),
         attemptCount: Math.max(0, Math.floor(Number(objEntry.attemptCount || 0))),
+        closedImportId: String(objEntry.closedImportId || "").trim(),
         closedContractName: String(objEntry.closedContractName || "").trim(),
         lastError: String(objEntry.lastError || "").trim()
     }));
@@ -8718,6 +8722,7 @@ async function openTrackedOptionReEntry(
         useRowReEntryDelta?: boolean;
         forceLegSide?: "ce" | "pe";
         forceTargetDelta?: number;
+        forceQty?: number;
     }
 ): Promise<{
     position: RollingFuturesLtImportedPositionRecord;
@@ -8750,7 +8755,10 @@ async function openTrackedOptionReEntry(
     const vOrderAction = (pOptions?.useRowAction || bCoveredRowDriven)
         ? (String(objRowState.action || "sell").trim().toLowerCase() === "buy" ? "buy" as const : "sell" as const)
         : (String(pClosedPosition.side || "").trim().toUpperCase() === "BUY" ? "buy" as const : "sell" as const);
-    const vOptionQty = (pOptions?.useRowQty || bCoveredRowDriven)
+    const vForcedQty = Math.max(0, Math.floor(Number(pOptions?.forceQty || 0)));
+    const vOptionQty = vForcedQty > 0
+        ? vForcedQty
+        : (pOptions?.useRowQty || bCoveredRowDriven)
         ? Math.max(1, Math.floor(Number(objRowState.qty || pClosedPosition.qty || 1)))
         : Math.max(1, Math.floor(Number(pClosedPosition.qty || 1)));
     const vTakeProfitDelta = Math.max(
@@ -8965,7 +8973,7 @@ async function executeCoveredPendingReEntryNow(
     const pStrategyCode = isCoveredOptionsStrategy(pProfile.strategyCode) ? pProfile.strategyCode : "covered-options";
     const objProfile = await refreshModeDrivenExpiryDatesInProfile(pUserId, pStrategyCode, pProfile);
     let arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
-    if (hasTrackedOptionRowLeg(arrSavedPositions, pPending.rowIndex, pPending.legSide, getMergedUiState(objProfile))) {
+    if (pPending.reason === "missing_leg" && hasTrackedOptionRowLeg(arrSavedPositions, pPending.rowIndex, pPending.legSide, getMergedUiState(objProfile))) {
         return false;
     }
     const objPlaceholderPosition = buildCoveredReEntryPlaceholderPosition(
@@ -9002,6 +9010,7 @@ async function executeCoveredPendingReEntryNow(
             useRowReEntryDelta: true,
             forceLegSide: pPending.legSide,
             forceTargetDelta: pPending.targetDelta,
+            forceQty: pPending.qty,
             forceExpiryDate: vResolvedPendingExpiryDate,
         }
     );
@@ -9095,6 +9104,7 @@ async function scheduleCoveredPendingOptionReEntry(
         targetDelta?: number;
         expiryMode?: string;
         expiryDate?: string;
+        closedImportId?: string;
         closedContractName?: string;
         lastError?: string;
         attemptCount?: number;
@@ -9102,8 +9112,13 @@ async function scheduleCoveredPendingOptionReEntry(
 ): Promise<void> {
     const objUiState = getMergedUiState(pProfile);
     const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, pRowIndex);
+    const vClosedImportId = String(pOptions?.closedImportId || "").trim();
+    const vClosedContractName = String(pOptions?.closedContractName || "").trim();
+    const vDedupeKey = vClosedImportId || vClosedContractName
+        ? `${pRowIndex}:${pLegSide}:${pReason}:${vClosedImportId || vClosedContractName}`
+        : `${pRowIndex}:${pLegSide}`;
     const objEntry: CoveredPendingOptionReEntryState = {
-        dedupeKey: `${pRowIndex}:${pLegSide}`,
+        dedupeKey: vDedupeKey,
         rowIndex: pRowIndex,
         legSide: pLegSide,
         action: pOptions?.action || objRowState.action,
@@ -9115,7 +9130,8 @@ async function scheduleCoveredPendingOptionReEntry(
         runAt: new Date(Date.now() + gCoveredOptionReEntryRetryMs).toISOString(),
         scheduledAt: new Date().toISOString(),
         attemptCount: Math.max(0, Math.floor(Number(pOptions?.attemptCount || 0))),
-        closedContractName: String(pOptions?.closedContractName || "").trim(),
+        closedImportId: vClosedImportId,
+        closedContractName: vClosedContractName,
         lastError: String(pOptions?.lastError || "").trim()
     };
     await upsertCoveredPendingOptionReEntry(pUserId, pStrategyCode, objEntry);
@@ -9174,7 +9190,7 @@ async function processCoveredPendingOptionReEntries(
         const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, objPending.rowIndex);
         const vConfiguredQty = Math.max(1, Math.floor(Number(objRowState.qty || 1)));
         const vCurrentOpenQty = getTrackedOptionRowLegTotalQty(arrSavedPositions, objPending.rowIndex, objPending.legSide, objUiState);
-        if (vCurrentOpenQty > vConfiguredQty) {
+        if (objPending.reason === "missing_leg" && vCurrentOpenQty > vConfiguredQty) {
             arrNextPending = arrNextPending.filter((objEntry) => objEntry.dedupeKey !== objPending.dedupeKey);
             await logFuturesEvent(
                 pUserId,
@@ -9193,7 +9209,7 @@ async function processCoveredPendingOptionReEntries(
             );
             continue;
         }
-        if (hasTrackedOptionRowLeg(arrSavedPositions, objPending.rowIndex, objPending.legSide, objUiState)) {
+        if (objPending.reason === "missing_leg" && hasTrackedOptionRowLeg(arrSavedPositions, objPending.rowIndex, objPending.legSide, objUiState)) {
             arrNextPending = arrNextPending.filter((objEntry) => objEntry.dedupeKey !== objPending.dedupeKey);
             continue;
         }
@@ -9850,6 +9866,9 @@ async function applyTriggeredOptionRule(
                     useRowAction: true,
                     useRowQty: true,
                     useRowReEntryDelta: !isStrangleOptionsStrategy(pStrategyCode),
+                    ...(isCoveredOptionsStrategy(pStrategyCode)
+                        ? { forceQty: Math.max(1, Math.floor(Number(pPosition.qty || 1))) }
+                        : {}),
                     ...(Number(vForcedReEntryTargetDelta) > 0
                         ? { forceTargetDelta: Number(vForcedReEntryTargetDelta) }
                         : {})
@@ -9942,6 +9961,7 @@ async function applyTriggeredOptionRule(
                                     getTrackedOptionResolvedExpiryDate(pPosition)
                                 )
                                 : String(objRowState.expiryDate || "").trim(),
+                            closedImportId: String(pPosition.importId || "").trim(),
                             closedContractName: pPosition.contractName,
                             lastError: objFailure.message
                         }
@@ -14071,6 +14091,18 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
             }
             vLegSide = vResolvedLegSide;
         }
+        const vEffectiveQty = isCoveredOptionsStrategy(pStrategyCode)
+            ? resolveOptionsScalperIncrementedQty(
+                arrExisting,
+                objUiState,
+                {
+                    symbol: vSymbol,
+                    legSide: vLegSide === "pe" ? "pe" : "ce",
+                    action: vAction === "buy" ? "buy" : "sell",
+                    qty: Math.max(1, Math.floor(Number(getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex).qty || vQty || 1)))
+                }
+            )
+            : vQty;
         const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(objUiState, "manual_option_open", pStrategyCode, vRowIndex);
         const objConfig = {
             symbol: vSymbol,
@@ -14082,7 +14114,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
             legSide: vLegSide === "pe" ? "pe" as const : "ce" as const,
             expiryMode: ["1", "2", "4", "5", "6", "7"].includes(vExpiryMode) ? vExpiryMode : "5",
             expiryDate: vExpiryDate,
-            optionQty: vQty,
+            optionQty: vEffectiveQty,
             redOptionQtyPct: 100,
             greenOptionQtyPct: 100,
             newDelta: vTargetDelta,
@@ -14105,7 +14137,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
         const vClientOrderId = await allocateStrategyClientOrderId(vUserId, pStrategyCode, "EN");
         const objOrderPayload: Record<string, unknown> = {
             product_symbol: objContract.contractSymbol,
-            size: vQty,
+            size: vEffectiveQty,
             side: vAction,
             order_type: "market_order",
             time_in_force: "gtc",
@@ -14126,7 +14158,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
                 importId: crypto.randomUUID(),
                 contractName: String(objContract.contractSymbol || "").trim(),
                 side: vAction.toUpperCase(),
-                qty: vQty,
+                qty: vEffectiveQty,
                 entryPrice: Number(objContract.markPrice || 0),
                 markPrice: Number(objContract.markPrice || 0),
                 charges: 0,
@@ -14156,14 +14188,14 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
             String(objContract.contractSymbol || "").trim(),
             objPayload.result && typeof objPayload.result === "object" ? objPayload.result as Record<string, unknown> : objPayload,
             vAction.toUpperCase(),
-            vQty,
+            vEffectiveQty,
             new Date().toISOString()
         );
         const vEntryCharge = vResolvedEntryCharge !== null
             ? vResolvedEntryCharge
             : await estimateTrackedPositionCharge({
                 contractName: String(objContract.contractSymbol || "").trim(),
-                qty: vQty,
+                qty: vEffectiveQty,
                 entryPrice: Number(objContract.markPrice || 0),
                 markPrice: Number(objContract.markPrice || 0)
             });
@@ -14188,7 +14220,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
             {
                 symbol: vSymbol,
                 contractName: objContract.contractSymbol,
-                qty: vQty,
+                qty: vEffectiveQty,
                 targetDelta: vTargetDelta,
                 rowIndex: vRowIndex,
                 reason: "manual_option"
@@ -14221,7 +14253,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
                 action: vAction,
                 legSide: vLegSide,
                 rowIndex: vRowIndex,
-                qty: vQty,
+                qty: vEffectiveQty,
                 targetDelta: vTargetDelta,
                 order: objPayload.result || objPayload,
                 contract: {
