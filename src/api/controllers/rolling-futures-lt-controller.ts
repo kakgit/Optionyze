@@ -5329,7 +5329,7 @@ function buildNeutralStatus(
     };
 }
 
-async function buildOpenPositionsPayload(
+export async function buildOpenPositionsPayload(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
     pPositions?: RollingFuturesLtImportedPositionRecord[]

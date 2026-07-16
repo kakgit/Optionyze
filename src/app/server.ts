@@ -20,7 +20,7 @@ import {
     renderStrangleOptionsPage,
     renderOptionsDemoPage
 } from "../api/controllers/strategyfo-paper-controller";
-import { recoverRollingFuturesLtAutoTraderCycles, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
+import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
 import { ensureLiveTickerSymbols, getLiveMarketSnapshot } from "../strategies/rolling-options-pt-de/market-data";
 import type { RollingOptionsPtDeConfig } from "../strategies/rolling-options-pt-de/types";
 import {
@@ -191,6 +191,8 @@ async function bootstrap(): Promise<void> {
         const lotSize = getDemoRenkoLotSize(symbol);
         let closed = false;
         let timerRef: NodeJS.Timeout | null = null;
+        let tickInFlight = false;
+        let tickPending = false;
 
         ensureLiveTickerSymbols([contractName]);
 
@@ -229,6 +231,8 @@ async function bootstrap(): Promise<void> {
                     bestBidPrice: objSnapshot.bestBidPrice,
                     bestAskPrice: objSnapshot.bestAskPrice
                 });
+                const objTrackedOpenPositions = objSync.autoTrade?.trackedOpenPositions
+                    || await buildOpenPositionsPayload(userId, "options-scalper");
                 if (closed || ws.readyState !== WebSocket.OPEN) {
                     return;
                 }
@@ -244,7 +248,8 @@ async function bootstrap(): Promise<void> {
                     ts: objSnapshot.ts,
                     renko: objSync.renko,
                     renkoHistoryBySymbol: objSync.profile?.uiState?.renkoHistoryBySymbol || null,
-                    autoTrade: objSync.autoTrade || null
+                    autoTrade: objSync.autoTrade || null,
+                    trackedOpenPositions: objTrackedOpenPositions
                 }));
             }
             catch (objError) {
@@ -257,9 +262,34 @@ async function bootstrap(): Promise<void> {
             }
         };
 
-        void sendTick();
+        const queueSendTick = (): void => {
+            if (closed || ws.readyState !== WebSocket.OPEN) {
+                return;
+            }
+            if (tickInFlight) {
+                tickPending = true;
+                return;
+            }
+            tickInFlight = true;
+            void (async () => {
+                try {
+                    do {
+                        tickPending = false;
+                        await sendTick();
+                    } while (!closed && ws.readyState === WebSocket.OPEN && tickPending);
+                }
+                finally {
+                    tickInFlight = false;
+                    if (!closed && ws.readyState === WebSocket.OPEN && tickPending) {
+                        queueSendTick();
+                    }
+                }
+            })();
+        };
+
+        queueSendTick();
         timerRef = setInterval(() => {
-            void sendTick();
+            queueSendTick();
         }, 1000);
 
         ws.on("close", () => {

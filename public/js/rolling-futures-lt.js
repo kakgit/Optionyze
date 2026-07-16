@@ -277,6 +277,10 @@
     let profitClosePending = null;
     let localProfitClosePending = null;
     let lastOpenPositionsPayload = null;
+    let openPositionsRenderLocked = false;
+    let openPositionsRenderQueued = false;
+    let pendingOpenPositionsPayload = null;
+    let lastOpenPositionsRenderSignature = "";
     let confirmationAudioContext = null;
     let queuedConfirmationSoundActionId = "";
     let lastConfirmationSoundActionId = "";
@@ -955,9 +959,12 @@
                     renkoLastLivePrice = Number(payload.spotPrice || payload.futuresPrice || payload.bestBidPrice || payload.bestAskPrice || NaN);
                     setRenkoSpotPriceDisplay(renkoLastLivePrice);
                     renderDemoRenkoFeedState(getDemoRenkoRuntimeForSymbol(normalizedSymbol), renkoHistoryBySymbol, getUiState());
+                    if (payload.trackedOpenPositions) {
+                        scheduleOpenPositionsRender(payload.trackedOpenPositions);
+                    }
                     if (payload.autoTrade && typeof payload.autoTrade === "object") {
                         if (payload.autoTrade.trackedOpenPositions) {
-                            renderOpenPositions(payload.autoTrade.trackedOpenPositions);
+                            scheduleOpenPositionsRender(payload.autoTrade.trackedOpenPositions);
                         }
                         if (payload.autoTrade.message) {
                             setStatus(ids.pageStatus, String(payload.autoTrade.message), String(payload.autoTrade.status || "success"));
@@ -4442,10 +4449,61 @@
         setButtonsEnabled();
     }
 
+    function getOpenPositionsRenderSignature(payload) {
+        try {
+            return JSON.stringify(payload || {});
+        }
+        catch (_error) {
+            return "";
+        }
+    }
+
+    function scheduleOpenPositionsRender(payload) {
+        pendingOpenPositionsPayload = payload;
+        if (openPositionsRenderLocked || openPositionsRenderQueued) {
+            return;
+        }
+        openPositionsRenderQueued = true;
+        window.setTimeout(function () {
+            openPositionsRenderQueued = false;
+            drainOpenPositionsRenderQueue();
+        }, 0);
+    }
+
+    function drainOpenPositionsRenderQueue() {
+        if (openPositionsRenderLocked || !pendingOpenPositionsPayload) {
+            return;
+        }
+        openPositionsRenderLocked = true;
+        try {
+            while (pendingOpenPositionsPayload) {
+                const nextPayload = pendingOpenPositionsPayload;
+                pendingOpenPositionsPayload = null;
+                const objPayload = extractOpenPositionsPayload(nextPayload);
+                const signature = getOpenPositionsRenderSignature(objPayload);
+                if (signature && signature === lastOpenPositionsRenderSignature) {
+                    continue;
+                }
+                renderOpenPositions(objPayload);
+                lastOpenPositionsRenderSignature = signature;
+            }
+        }
+        finally {
+            openPositionsRenderLocked = false;
+            if (pendingOpenPositionsPayload && !openPositionsRenderQueued) {
+                openPositionsRenderQueued = true;
+                window.setTimeout(function () {
+                    openPositionsRenderQueued = false;
+                    drainOpenPositionsRenderQueue();
+                }, 0);
+            }
+        }
+    }
+
     async function loadSavedOpenPositions() {
         const objResult = await getJson(`${endpointBase}/open-positions`);
         const objOpenPositions = extractOpenPositionsPayload(objResult?.data);
-        renderOpenPositions(objOpenPositions);
+        scheduleOpenPositionsRender(objOpenPositions);
         return objOpenPositions.positions;
     }
 
