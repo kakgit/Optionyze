@@ -1543,6 +1543,7 @@
         const vRowIndex = normalizeOptionRowIndex(rowIndex);
         const isLong = mode === "long";
         const defaultLegs = isDualLikeMode ? "both" : (mode === "short" ? "pe" : "ce");
+        const bAllowCoveredDemoReEntry = isCoveredMode && isDemoVariant;
         const optionDefaults = {
             action: "sell",
             legs: defaultLegs,
@@ -1553,7 +1554,7 @@
             reD: isDualLikeMode ? "0.65" : (isLong ? "0.65" : "0.65"),
             tpD: isDualLikeMode ? "0.30" : (isLong ? "0.30" : "0.30"),
             slD: isDualLikeMode ? "0.80" : (isLong ? "0.80" : "0.80"),
-            reEnter: !supportsRenkoFeed
+            reEnter: bAllowCoveredDemoReEntry || !supportsRenkoFeed
         };
         if (isCoveredMode && vRowIndex === 2) {
             const coveredBuyDefaults = {
@@ -1604,6 +1605,7 @@
         const keys = getOptionRowStateKeys(vRowIndex);
         const nodes = getOptionRowNodes(vRowIndex);
         const defaults = getOptionRowDefaultState(vRowIndex);
+        const bUseNewDForReEntry = isCoveredMode && isDemoVariant;
         const vLegs = getInputValue(nodes.legs, defaults.legs).toLowerCase();
         const rowState = {};
         rowState[keys.action] = getInputValue(nodes.action, defaults.action).toLowerCase() === "buy" ? "buy" : "sell";
@@ -1614,12 +1616,14 @@
         rowState[keys.expiryDate] = String(nodes.expiryDate?.value || defaults.expiryDate).trim();
         rowState[keys.qty] = getInputValue(nodes.qty, defaults.qty);
         rowState[keys.newD] = getInputValue(nodes.newD, defaults.newD);
-        rowState[keys.reD] = isStrangleLikePage
+        rowState[keys.reD] = isStrangleLikePage || bUseNewDForReEntry
             ? rowState[keys.newD]
             : getInputValue(nodes.reD, defaults.reD);
         rowState[keys.tpD] = getInputValue(nodes.tpD, defaults.tpD);
         rowState[keys.slD] = getInputValue(nodes.slD, defaults.slD);
-        rowState[keys.reEnter] = supportsRenkoFeed ? false : getCheckboxValue(nodes.reEnter, defaults.reEnter);
+        rowState[keys.reEnter] = (supportsRenkoFeed && !bUseNewDForReEntry)
+            ? false
+            : getCheckboxValue(nodes.reEnter, defaults.reEnter);
         return rowState;
     }
 
@@ -1628,6 +1632,7 @@
         const keys = getOptionRowStateKeys(vRowIndex);
         const nodes = getOptionRowNodes(vRowIndex);
         const defaults = getOptionRowDefaultState(vRowIndex);
+        const bUseNewDForReEntry = isCoveredMode && isDemoVariant;
         const defaultLegs = defaults.legs;
         const savedLegs = uiState[keys.legs];
         const finalLegs = isDualLikeMode
@@ -1639,10 +1644,10 @@
         setInputValue(nodes.expiryDate, String(uiState[keys.expiryDate] || defaults.expiryDate).trim());
         setInputValue(nodes.qty, uiState[keys.qty] ?? defaults.qty);
         setInputValue(nodes.newD, uiState[keys.newD] ?? defaults.newD);
-        setInputValue(nodes.reD, isStrangleLikePage ? (uiState[keys.newD] ?? defaults.newD) : (uiState[keys.reD] ?? defaults.reD));
+        setInputValue(nodes.reD, (isStrangleLikePage || bUseNewDForReEntry) ? (uiState[keys.newD] ?? defaults.newD) : (uiState[keys.reD] ?? defaults.reD));
         setInputValue(nodes.tpD, uiState[keys.tpD] ?? defaults.tpD);
         setInputValue(nodes.slD, uiState[keys.slD] ?? defaults.slD);
-        setCheckboxValue(nodes.reEnter, supportsRenkoFeed ? false : (uiState[keys.reEnter] ?? defaults.reEnter));
+        setCheckboxValue(nodes.reEnter, (supportsRenkoFeed && !bUseNewDForReEntry) ? false : (uiState[keys.reEnter] ?? defaults.reEnter));
     }
 
     function formatCurrentDateTimeLocalValue() {
@@ -4128,11 +4133,18 @@
             || contractName.includes(normalizedSymbol);
     }
 
+    function isIncrementEligibleCoveredTrade(row) {
+        const metadata = row && typeof row.metadata === "object" ? row.metadata : {};
+        const openedReason = String(metadata.openedReason || "").trim().toLowerCase();
+        return !openedReason.includes("reentry");
+    }
+
     function countActiveCoveredTradesByLeg(symbol, legSide, action) {
         const normalizedLegSide = String(legSide || "").trim().toUpperCase() === "PE" ? "PE" : "CE";
         const normalizedAction = String(action || "").trim().toUpperCase() === "BUY" ? "BUY" : "SELL";
         return (Array.isArray(displayedPositions) ? displayedPositions : []).filter(function (row) {
             return !isDisplayedPositionInactive(row)
+                && isIncrementEligibleCoveredTrade(row)
                 && isTrackedCoveredTradeForSymbol(row, symbol)
                 && String(row?.side || "").trim().toUpperCase() === normalizedAction
                 && getCoveredContractLegSide(row?.contractName) === normalizedLegSide;
@@ -4143,6 +4155,7 @@
         const normalizedAction = String(action || "").trim().toUpperCase() === "BUY" ? "BUY" : "SELL";
         return (Array.isArray(displayedPositions) ? displayedPositions : []).filter(function (row) {
             return !isDisplayedPositionInactive(row)
+                && isIncrementEligibleCoveredTrade(row)
                 && isTrackedCoveredTradeForSymbol(row, symbol)
                 && String(row?.side || "").trim().toUpperCase() === normalizedAction;
         }).length;

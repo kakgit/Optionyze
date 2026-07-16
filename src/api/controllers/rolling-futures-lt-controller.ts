@@ -2030,7 +2030,7 @@ function getDefaultOptionRowUiState(
         reD: bIsDual ? "0.25" : "0.53",
         tpD: bIsDual ? "0.12" : "0.25",
         slD: bIsDual ? "0.50" : "0.65",
-        reEnter: !supportsRenkoFeedStrategy(pStrategyCode)
+        reEnter: isOptionsScalperStrategy(pStrategyCode) || !supportsRenkoFeedStrategy(pStrategyCode)
     };
     if (isCoveredLikeStrategy(pStrategyCode) && vRowIndex === 1) {
         objDefaults.action = "sell";
@@ -2089,12 +2089,12 @@ function getNormalizedOptionRowUiState(
         expiryDate: normalizeRollingFuturesExpiryDate(vExpiryMode, pUiState[objKeys.expiryDate]),
         qty: normalizeStringValue(pUiState[objKeys.qty], String(objDefaults.qty)),
         newD: normalizeStringValue(pUiState[objKeys.newD], String(objDefaults.newD)),
-        reD: isStrangleOptionsStrategy(pStrategyCode)
+        reD: (isStrangleOptionsStrategy(pStrategyCode) || isOptionsScalperStrategy(pStrategyCode))
             ? normalizeStringValue(pUiState[objKeys.newD], String(objDefaults.newD))
             : normalizeStringValue(pUiState[objKeys.reD], String(objDefaults.reD)),
         tpD: normalizeStringValue(pUiState[objKeys.tpD], String(objDefaults.tpD)),
         slD: normalizeStringValue(pUiState[objKeys.slD], String(objDefaults.slD)),
-        reEnter: supportsRenkoFeedStrategy(pStrategyCode)
+        reEnter: (supportsRenkoFeedStrategy(pStrategyCode) && !isOptionsScalperStrategy(pStrategyCode))
             ? false
             : normalizeBooleanValue(pUiState[objKeys.reEnter], Boolean(objDefaults.reEnter))
     };
@@ -2433,6 +2433,7 @@ function countActiveOptionsScalperTradesByLeg(
     const vAction = String(pAction || "").trim().toUpperCase() === "BUY" ? "BUY" : "SELL";
     return (Array.isArray(pTrackedPositions) ? pTrackedPositions : []).filter((objPosition) => {
         return !isTrackedPositionInactive(objPosition)
+            && isIncrementEligibleTrackedOptionPosition(objPosition)
             && isTrackedContractForSymbol(objPosition.contractName, pSymbol)
             && String(objPosition.side || "").trim().toUpperCase() === vAction
             && getTrackedOptionLegSide(objPosition.contractName) === pLegSide;
@@ -2447,6 +2448,7 @@ function countActiveOptionsScalperTradesForSymbol(
     const vAction = String(pAction || "").trim().toUpperCase() === "BUY" ? "BUY" : "SELL";
     return (Array.isArray(pTrackedPositions) ? pTrackedPositions : []).filter((objPosition) => {
         return !isTrackedPositionInactive(objPosition)
+            && isIncrementEligibleTrackedOptionPosition(objPosition)
             && isTrackedContractForSymbol(objPosition.contractName, pSymbol)
             && String(objPosition.side || "").trim().toUpperCase() === vAction;
     }).length;
@@ -7339,6 +7341,14 @@ function getLatestActiveTrackedOptionPosition(
     })[0] || null;
 }
 
+function isIncrementEligibleTrackedOptionPosition(
+    pPosition: RollingFuturesLtImportedPositionRecord
+): boolean {
+    const objMetadata = getTrackedOptionMetadata(pPosition);
+    const vOpenedReason = String(objMetadata.openedReason || "").trim().toLowerCase();
+    return !vOpenedReason.includes("reentry");
+}
+
 async function reconcileRemovedTrackedPositionsPnl(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -8497,10 +8507,13 @@ async function buildOptionsScalperPaperOptionOpen(
         const vLatestLegSide = objLatestActiveOption
             ? getTrackedOptionLegSide(objLatestActiveOption.contractName)
             : "";
-        if (vLatestLegSide && vLatestLegSide === pInput.legSide) {
+        const vOpenedReason = String(pInput.openedReason || "").trim().toLowerCase();
+        const bApplyAlternatingLegGuard = vOpenedReason === "strategy_option_open"
+            || vOpenedReason === "manual_option_open";
+        if (bApplyAlternatingLegGuard && vLatestLegSide && vLatestLegSide === pInput.legSide) {
             throw new Error(`Skipped auto trade because the latest active option is already ${vLatestLegSide.toUpperCase()}. Next option must alternate to ${vLatestLegSide === "ce" ? "PE" : "CE"}.`);
         }
-        if (String(pInput.openedReason || "").trim().toLowerCase() === "strategy_option_open") {
+        if (vOpenedReason === "strategy_option_open") {
         const vContractName = String(objContract.contractSymbol || "").trim();
         const bAllowDuplicateContracts = normalizeBooleanValue(objUiState.allowDuplicateContracts, false);
         if (!bAllowDuplicateContracts && hasActiveTrackedOptionContract(arrExisting, vContractName)) {
@@ -9670,7 +9683,7 @@ async function applyTriggeredOptionRule(
                 buildInactiveTrackedPosition(pPosition, objCloseResult.closedRecord, pReason)
             ];
         }
-        const bAllowPaperReEntry = !supportsRenkoFeedStrategy(pStrategyCode) && Boolean(objMetadata.reEnterEnabled);
+        const bAllowPaperReEntry = Boolean(objMetadata.reEnterEnabled);
         if (bAllowPaperReEntry || pReason === "delta_diff_replace") {
             try {
                 const objPaperRowState = getNormalizedOptionRowUiState(
@@ -9764,7 +9777,8 @@ async function applyTriggeredOptionRule(
         )
     });
 
-    const bAllowTrackedReEntry = !supportsRenkoFeedStrategy(pStrategyCode) && Boolean(objMetadata.reEnterEnabled);
+    const bAllowTrackedReEntry = (isOptionsScalperStrategy(pStrategyCode) || !supportsRenkoFeedStrategy(pStrategyCode))
+        && Boolean(objMetadata.reEnterEnabled);
     if (bAllowTrackedReEntry) {
         const vOptionReentryPendingUntil = new Date(Date.now() + gOptionReentryPendingMs).toISOString();
         const objRuntimeBeforeReEntry = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
@@ -11782,6 +11796,37 @@ async function runAutoTraderCycle(
 
         let arrSavedPositions: RollingFuturesLtImportedPositionRecord[] = [];
         if (isOptionsScalperStrategy(pStrategyCode)) {
+            const vLotSize = getLotSizeForSymbol(vSymbol);
+            const objMarketSnapshot = await getLiveMarketSnapshot({
+                symbol: vSymbol,
+                contractName: getContractNameForSymbol(vSymbol),
+                lotSize: vLotSize,
+                futureQty: 1,
+                futureOrderType: "market_order",
+                action: "buy",
+                legSide: "ce",
+                expiryMode: "1",
+                expiryDate: "",
+                optionQty: 1,
+                redOptionQtyPct: 100,
+                greenOptionQtyPct: 100,
+                newDelta: 0.53,
+                reDelta: 0.53,
+                deltaTakeProfit: 0.15,
+                deltaStopLoss: 0.85,
+                reEnter: false,
+                addOneLotFuture: false,
+                renkoEnabled: false,
+                renkoStepPoints: 10,
+                renkoPriceSource: "spot_price",
+                loopSeconds: 8
+            });
+            await syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(pUserId, {
+                spotPrice: objMarketSnapshot.spotPrice,
+                futuresPrice: objMarketSnapshot.futuresPrice,
+                bestBidPrice: objMarketSnapshot.bestBidPrice,
+                bestAskPrice: objMarketSnapshot.bestAskPrice
+            });
             arrSavedPositions = await replaceRollingFuturesLtImportedPositions(
                 pUserId,
                 pStrategyCode,
@@ -12471,7 +12516,12 @@ export async function recoverRollingFuturesLtAutoTraderCycles(): Promise<void> {
             && vStatus === "running"
             && !!vUserId
             && !!vSelectedApiProfileId
-            && (vStrategyCode === "rolling-futures-lt-long" || vStrategyCode === "rolling-futures-lt-short" || isDualRollingFuturesStrategy(vStrategyCode));
+            && (
+                vStrategyCode === "rolling-futures-lt-long"
+                || vStrategyCode === "rolling-futures-lt-short"
+                || isDualRollingFuturesStrategy(vStrategyCode)
+                || isOptionsScalperStrategy(vStrategyCode)
+            );
 
         if (!bShouldResume) {
             continue;

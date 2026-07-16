@@ -316,6 +316,24 @@
                         <label for="txtRollingFuturesSlD1">SL D</label>
                         <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD1" value="<%= bIsStrangleLikePage ? '0.55' : '0.50' %>" />
                     </div>
+                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-reenter">
+                        <label for="chkRollingFuturesReEnter1">
+                            Re-Enter
+                            <span class="rolling-futures-help-icon-wrap">
+                                <button type="button" class="rolling-futures-help-trigger" aria-label="Show row 1 re-enter help">
+                                    ?
+                                </button>
+                                <span class="rolling-futures-help-popout floating">
+                                    When enabled, if this row closes because of <code>SL</code> or <code>TP</code>, it reopens from the same row using the same action, leg, quantity, and <code>New D</code>. This re-entry does not use or increase the fresh-trade lot increment.
+                                </span>
+                            </span>
+                        </label>
+                        <div class="rolling-futures-help-inline-top">
+                            <label class="rolling-futures-help-check compact" for="chkRollingFuturesReEnter1">
+                                <input type="checkbox" id="chkRollingFuturesReEnter1" checked />
+                            </label>
+                        </div>
+                    </div>
                     <div class="rolling-demo-field rolling-covered-row1-break-action rolling-covered-row1-break-action-sellpe">
                         <label>&nbsp;</label>
                         <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesSellPe">SELL PE</button>
@@ -381,6 +399,24 @@
                     <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-sld">
                         <label for="txtRollingFuturesSlD2">SL D</label>
                         <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD2" value="<%= bIsStrangleLikePage ? '0.55' : '0.05' %>" />
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-reenter">
+                        <label for="chkRollingFuturesReEnter2">
+                            Re-Enter
+                            <span class="rolling-futures-help-icon-wrap">
+                                <button type="button" class="rolling-futures-help-trigger" aria-label="Show row 2 re-enter help">
+                                    ?
+                                </button>
+                                <span class="rolling-futures-help-popout floating">
+                                    When enabled, if this row closes because of <code>SL</code> or <code>TP</code>, it reopens from the same row using the same action, leg, quantity, and <code>New D</code>. This re-entry does not use or increase the fresh-trade lot increment.
+                                </span>
+                            </span>
+                        </label>
+                        <div class="rolling-futures-help-inline-top">
+                            <label class="rolling-futures-help-check compact" for="chkRollingFuturesReEnter2">
+                                <input type="checkbox" id="chkRollingFuturesReEnter2" checked />
+                            </label>
+                        </div>
                     </div>
                     <div class="rolling-demo-field rolling-covered-row2-break-action rolling-covered-row2-break-action-sellpe">
                         <label>&nbsp;</label>
