@@ -8196,6 +8196,13 @@ async function executeStrategyPlacement(
             if (!objContract) {
                 throw new Error(`No live ${vOptionSide} contract was found for ${pInput.symbol} near target delta ${pInput.targetDelta.toFixed(2)}.`);
             }
+            const vContractName = String(objContract.contractSymbol || "").trim();
+            const bAllowDuplicateContracts = normalizeBooleanValue(objUiState.allowDuplicateContracts, false);
+            if (isCoveredOptionsStrategy(pStrategyCode)
+                && !bAllowDuplicateContracts
+                && hasActiveTrackedOptionContract(arrExisting, vContractName)) {
+                throw new Error(`Skipped order because ${vContractName} is already active in Open Positions.`);
+            }
 
             const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
             const objImmediateRuleDecision = shouldTriggerTrackedOption(
@@ -14131,6 +14138,13 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
         const objContract = await findBestLiveOptionContractWithNearestFallback(objConfig, vLegSide === "pe" ? "PE" : "CE", vTargetDelta);
         if (!objContract) {
             throw new Error(`No live ${vLegSide.toUpperCase()} contract was found for ${vSymbol} near target delta ${vTargetDelta.toFixed(2)}.`);
+        }
+        const vContractName = String(objContract.contractSymbol || "").trim();
+        const bAllowDuplicateContracts = normalizeBooleanValue(objUiState.allowDuplicateContracts, false);
+        if (isCoveredOptionsStrategy(pStrategyCode)
+            && !bAllowDuplicateContracts
+            && hasActiveTrackedOptionContract(arrExisting, vContractName)) {
+            throw new Error(`Skipped order because ${vContractName} is already active in Open Positions.`);
         }
 
         const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
