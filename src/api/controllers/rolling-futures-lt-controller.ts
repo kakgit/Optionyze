@@ -249,7 +249,7 @@ const gAutoTraderIntervals = new Map<string, NodeJS.Timeout>();
 const gAutoTraderCycleLocks = new Set<string>();
 const gLocalStrategyLeaseTokens = new Map<string, string>();
 const gNeutralityHedgePendingMs = 45 * 1000;
-const gDuplicateLiveEventCooldownMs = 60 * 1000;
+const gDuplicateLiveEventCooldownMs = 0;
 const gServerId = getServerId();
 const gServerInstanceId = `${gServerId}:${process.pid}:${crypto.randomUUID()}`;
 const gRollingFuturesTelegramEventTypes = new Set([
@@ -333,7 +333,10 @@ interface RollingFuturesLtOpenPositionTotals {
     totalCharges: number;
     totalPnl: number;
     totalMargin: number;
+    totalQty: number;
     positionCount: number;
+    ceQty: number;
+    peQty: number;
 }
 
 interface RollingFuturesLtNeutralStatus {
@@ -5044,7 +5047,10 @@ async function enrichTrackedOpenPositions(
         totalCharges: 0,
         totalPnl: 0,
         totalMargin: 0,
-        positionCount: 0
+        totalQty: 0,
+        positionCount: 0,
+        ceQty: 0,
+        peQty: 0
     };
 
     const arrEnriched = arrPositions.map((objPosition) => {
@@ -5146,7 +5152,17 @@ async function enrichTrackedOpenPositions(
         objTotals.totalCharges += vCharges;
         objTotals.totalPnl += vPnl;
         objTotals.totalMargin += Number(objPosition.margin || 0);
+        objTotals.totalQty += vQty;
         objTotals.positionCount += 1;
+        if (!bInactivePosition && !bIsFuture) {
+            const vLegSide = inferTrackedOptionLegSide(vContractName);
+            if (vLegSide === "pe") {
+                objTotals.peQty += vQty;
+            }
+            else {
+                objTotals.ceQty += vQty;
+            }
+        }
 
         return {
             ...objPosition,
@@ -5174,6 +5190,9 @@ async function enrichTrackedOpenPositions(
     objTotals.totalCharges = Number(objTotals.totalCharges.toFixed(6));
     objTotals.totalPnl = Number(objTotals.totalPnl.toFixed(6));
     objTotals.totalMargin = Number(objTotals.totalMargin.toFixed(6));
+    objTotals.totalQty = Number(objTotals.totalQty.toFixed(0));
+    objTotals.ceQty = Number(objTotals.ceQty.toFixed(0));
+    objTotals.peQty = Number(objTotals.peQty.toFixed(0));
 
     return {
         positions: arrEnriched,
@@ -6030,16 +6049,18 @@ async function logFuturesEvent(
         payload: pPayload
     };
 
-    const bDuplicateWithinCooldown = await hasRecentRollingOptionsEventMatch(
-        pUserId,
-        pStrategyCode,
-        pEventType,
-        pTitle,
-        pMessage,
-        gDuplicateLiveEventCooldownMs
-    );
-    if (bDuplicateWithinCooldown) {
-        return;
+    if (gDuplicateLiveEventCooldownMs > 0) {
+        const bDuplicateWithinCooldown = await hasRecentRollingOptionsEventMatch(
+            pUserId,
+            pStrategyCode,
+            pEventType,
+            pTitle,
+            pMessage,
+            gDuplicateLiveEventCooldownMs
+        );
+        if (bDuplicateWithinCooldown) {
+            return;
+        }
     }
 
     await saveRollingOptionsEvent(objEvent);
@@ -8519,17 +8540,18 @@ async function buildOptionsScalperPaperOptionOpen(
             ? getTrackedOptionLegSide(objLatestActiveOption.contractName)
             : "";
         const vOpenedReason = String(pInput.openedReason || "").trim().toLowerCase();
+        const bIsReEntryOpen = vOpenedReason.includes("reentry");
         const bApplyAlternatingLegGuard = vOpenedReason === "strategy_option_open"
             || vOpenedReason === "manual_option_open";
-        if (bApplyAlternatingLegGuard && vLatestLegSide && vLatestLegSide === pInput.legSide) {
+        if (!bIsReEntryOpen && bApplyAlternatingLegGuard && vLatestLegSide && vLatestLegSide === pInput.legSide) {
             throw new Error(`Skipped auto trade because the latest active option is already ${vLatestLegSide.toUpperCase()}. Next option must alternate to ${vLatestLegSide === "ce" ? "PE" : "CE"}.`);
         }
-        if (vOpenedReason === "strategy_option_open") {
-        const vContractName = String(objContract.contractSymbol || "").trim();
-        const bAllowDuplicateContracts = normalizeBooleanValue(objUiState.allowDuplicateContracts, false);
-        if (!bAllowDuplicateContracts && hasActiveTrackedOptionContract(arrExisting, vContractName)) {
-            throw new Error(`Skipped auto trade because ${vContractName} is already active in Open Positions.`);
-        }
+        if (!bIsReEntryOpen && vOpenedReason === "strategy_option_open") {
+            const vContractName = String(objContract.contractSymbol || "").trim();
+            const bAllowDuplicateContracts = normalizeBooleanValue(objUiState.allowDuplicateContracts, false);
+            if (!bAllowDuplicateContracts && hasActiveTrackedOptionContract(arrExisting, vContractName)) {
+                throw new Error(`Skipped auto trade because ${vContractName} is already active in Open Positions.`);
+            }
         }
     }
 
@@ -9733,6 +9755,7 @@ async function applyTriggeredOptionRule(
                             : {}),
                         useRowAction: true,
                         useRowQty: true,
+                        forceQty: Math.max(1, Math.floor(Number(pPosition.qty || 1))),
                         useRowReEntryDelta: true
                     }
                 );
@@ -9872,6 +9895,7 @@ async function applyTriggeredOptionRule(
                         : {}),
                     useRowAction: true,
                     useRowQty: true,
+                    forceQty: Math.max(1, Math.floor(Number(pPosition.qty || 1))),
                     useRowReEntryDelta: !isStrangleOptionsStrategy(pStrategyCode),
                     ...(isCoveredOptionsStrategy(pStrategyCode)
                         ? { forceQty: Math.max(1, Math.floor(Number(pPosition.qty || 1))) }
@@ -10957,6 +10981,50 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
     const vSignal = pManualSignal === "R" || pManualSignal === "G"
         ? pManualSignal
         : (vNextColor === "R" || vNextColor === "G" ? vNextColor as OptionsDemoRenkoSignal : "");
+    const objUiState = getMergedUiState(objSync.profile);
+    const bRenkoEmaEnabled = normalizeBooleanValue(objUiState.renkoEmaEnabled, false);
+    const bRenkoEmaFilterEnabled = normalizeBooleanValue(objUiState.renkoEmaFilterEnabled, false);
+    if (bRenkoEmaFilterEnabled) {
+        const vLivePrice = Number(pSnapshot?.spotPrice || pSnapshot?.futuresPrice || pSnapshot?.bestBidPrice || pSnapshot?.bestAskPrice || 0);
+        if (!bRenkoEmaEnabled) {
+            return {
+                ...objSync,
+                autoTrade: {
+                    status: "warning",
+                    message: "Skipped Renko auto trade because EMA Filter is ON but EMA is disabled."
+                }
+            };
+        }
+        const objRenkoEmaValuesBySymbol = normalizeRenkoEmaValues(objUiState.renkoEmaValuesBySymbol || {});
+        const vEmaValue = Number(objRenkoEmaValuesBySymbol[normalizeSymbolValue(objUiState.symbol)] || 0);
+        if (!(vLivePrice > 0) || !(vEmaValue > 0)) {
+            return {
+                ...objSync,
+                autoTrade: {
+                    status: "warning",
+                    message: "Skipped Renko auto trade because EMA Filter is ON but EMA is not ready yet."
+                }
+            };
+        }
+        if (vSignal === "G" && !(vLivePrice > vEmaValue)) {
+            return {
+                ...objSync,
+                autoTrade: {
+                    status: "warning",
+                    message: `Skipped Renko GREEN auto trade because price ${vLivePrice.toFixed(2)} is not above EMA ${vEmaValue.toFixed(2)}.`
+                }
+            };
+        }
+        if (vSignal === "R" && !(vLivePrice < vEmaValue)) {
+            return {
+                ...objSync,
+                autoTrade: {
+                    status: "warning",
+                    message: `Skipped Renko RED auto trade because price ${vLivePrice.toFixed(2)} is not below EMA ${vEmaValue.toFixed(2)}.`
+                }
+            };
+        }
+    }
     if (!vSignal) {
         return {
             ...objSync,

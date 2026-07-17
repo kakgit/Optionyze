@@ -1137,7 +1137,6 @@
             if ((previousLastColor === "red" && nextLastColor === "green")
                 || (previousLastColor === "green" && nextLastColor === "red")) {
                 appendRenkoHistoryEntry(currentSymbol, nextLastColor, "");
-                triggerRenkoAutoTrade(currentSymbol, nextLastColor);
             }
             if (nextLastColor === "green") {
                 setRenkoColorDisplay("green", "Above EMA", `EMA mode ON | Price ${fmt(livePrice, 2)} | ${emaMeta} | Spot is above EMA.`);
@@ -1221,7 +1220,6 @@
         setRenkoStateForSymbol(currentSymbol, nextReferencePrice, nextLastColor);
         if (previousLastColor !== nextLastColor && nextLastColor !== "neutral") {
             appendRenkoHistoryEntry(currentSymbol, nextLastColor, nextReferencePrice);
-            triggerRenkoAutoTrade(currentSymbol, nextLastColor);
         }
         if (nextLastColor === "neutral") {
             setRenkoColorDisplay("neutral", "Waiting", `Feed ON | Base ${fmt(baseValue, 2)} | Price ${fmt(livePrice, 2)} | ${emaMeta} | Waiting for first box.`);
@@ -4421,7 +4419,12 @@
                 <td><strong>TOTAL</strong></td>
                 <td>-</td>
                 <td>-</td>
-                <td>${escapeHtml(fmt(objTotals.positionCount, 0))}</td>
+                <td>
+                    <div>${escapeHtml(fmt(Number(objTotals.totalQty || 0), 0))}</div>
+                    <div class="rolling-demo-total-breakdown">
+                        CE ${escapeHtml(fmt(Number(objTotals.ceQty || 0), 0))} | PE ${escapeHtml(fmt(Number(objTotals.peQty || 0), 0))}
+                    </div>
+                </td>
                 <td>-</td>
                 <td>-</td>
                 <td>-</td>

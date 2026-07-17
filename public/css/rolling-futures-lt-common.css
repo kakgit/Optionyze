@@ -2022,7 +2022,16 @@ body[data-rolling-futures-live="covered"] .rolling-covered-pnl-value.total {
         justify-content: stretch;
     }
 
-    .rolling-live-import-metrics {
+.rolling-live-import-metrics {
         grid-template-columns: 1fr;
     }
+}
+
+.rolling-demo-total-breakdown {
+    margin-top: 3px;
+    color: rgba(203, 214, 243, .72);
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .01em;
+    white-space: nowrap;
 }
