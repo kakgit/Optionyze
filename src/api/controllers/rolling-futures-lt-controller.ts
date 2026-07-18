@@ -8501,6 +8501,8 @@ async function buildOptionsScalperPaperOptionOpen(
     const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pInput.rowIndex);
     const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
     const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(objUiState, String(pInput.openedReason || "strategy_option_open"), pStrategyCode, vRowIndex);
+    const vOpenedReason = String(pInput.openedReason || "").trim().toLowerCase();
+    const bIsReEntryOpen = vOpenedReason.includes("reentry");
     const objConfig = {
         symbol: pInput.symbol,
         contractName: getContractNameForSymbol(pInput.symbol),
@@ -8539,8 +8541,6 @@ async function buildOptionsScalperPaperOptionOpen(
         const vLatestLegSide = objLatestActiveOption
             ? getTrackedOptionLegSide(objLatestActiveOption.contractName)
             : "";
-        const vOpenedReason = String(pInput.openedReason || "").trim().toLowerCase();
-        const bIsReEntryOpen = vOpenedReason.includes("reentry");
         const bApplyAlternatingLegGuard = vOpenedReason === "strategy_option_open"
             || vOpenedReason === "manual_option_open";
         if (!bIsReEntryOpen && bApplyAlternatingLegGuard && vLatestLegSide && vLatestLegSide === pInput.legSide) {
@@ -8558,14 +8558,16 @@ async function buildOptionsScalperPaperOptionOpen(
     const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
     const vTakeProfitDelta = Math.max(0, Number(pInput.takeProfitDelta ?? objOptionMetadata.takeProfitDelta ?? objRowState.tpD ?? 0.25));
     const vStopLossDelta = Math.max(0, Number(pInput.stopLossDelta ?? objOptionMetadata.stopLossDelta ?? objRowState.slD ?? 0.65));
-    const objImmediateRuleDecision = shouldTriggerTrackedOption(
-        pInput.action.toUpperCase(),
-        vAbsoluteDelta,
-        vTakeProfitDelta,
-        vStopLossDelta
-    );
-    if (objImmediateRuleDecision.shouldAct) {
-        throw new Error(`The selected ${pInput.legSide.toUpperCase()} contract delta ${vAbsoluteDelta.toFixed(2)} already violates the configured ${objImmediateRuleDecision.reason.toUpperCase()} rule for row ${vRowIndex}. Adjust New D / SL / TP before executing.`);
+    if (!bIsReEntryOpen) {
+        const objImmediateRuleDecision = shouldTriggerTrackedOption(
+            pInput.action.toUpperCase(),
+            vAbsoluteDelta,
+            vTakeProfitDelta,
+            vStopLossDelta
+        );
+        if (objImmediateRuleDecision.shouldAct) {
+            throw new Error(`The selected ${pInput.legSide.toUpperCase()} contract delta ${vAbsoluteDelta.toFixed(2)} already violates the configured ${objImmediateRuleDecision.reason.toUpperCase()} rule for row ${vRowIndex}. Adjust New D / SL / TP before executing.`);
+        }
     }
 
     const vOpenedAtIso = new Date().toISOString();
@@ -8930,13 +8932,16 @@ async function openTrackedOptionReEntry(
     }
 
     const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
-    if (shouldTriggerTrackedOption(
-        vOrderAction.toUpperCase(),
-        vAbsoluteDelta,
-        Number(pMetadata.takeProfitDelta || objRowState.tpD || 0.25),
-        Number(pMetadata.stopLossDelta || objRowState.slD || 0.65)
-    ).shouldAct) {
-        return null;
+    const bBypassImmediateRuleCheck = pReason === "sl" || pReason === "tp" || pReason === "expiry_cutoff" || pReason === "delta_diff_replace";
+    if (!bBypassImmediateRuleCheck) {
+        if (shouldTriggerTrackedOption(
+            vOrderAction.toUpperCase(),
+            vAbsoluteDelta,
+            Number(pMetadata.takeProfitDelta || objRowState.tpD || 0.25),
+            Number(pMetadata.stopLossDelta || objRowState.slD || 0.65)
+        ).shouldAct) {
+            return null;
+        }
     }
 
     const vPlacedAtIso = new Date().toISOString();
@@ -9713,6 +9718,12 @@ async function applyTriggeredOptionRule(
         const vProfitClosePauseUntil = new Date(Date.now() + gProfitClosePauseAfterOptionRuleMs).toISOString();
         const objRuntimeBeforeProfitPause = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
             || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+        const objPaperRowState = getNormalizedOptionRowUiState(
+            getMergedUiState(objProfile),
+            pStrategyCode,
+            objMetadata.rowIndex
+        );
+        const bAllowPaperReEntry = Boolean(objPaperRowState.reEnter || objMetadata.reEnterEnabled);
         await saveRollingFuturesLtRuntime({
             ...objRuntimeBeforeProfitPause,
             userId: pUserId,
@@ -9728,14 +9739,8 @@ async function applyTriggeredOptionRule(
                 buildInactiveTrackedPosition(pPosition, objCloseResult.closedRecord, pReason)
             ];
         }
-        const bAllowPaperReEntry = Boolean(objMetadata.reEnterEnabled);
         if (bAllowPaperReEntry || pReason === "delta_diff_replace") {
             try {
-                const objPaperRowState = getNormalizedOptionRowUiState(
-                    getMergedUiState(objProfile),
-                    pStrategyCode,
-                    objMetadata.rowIndex
-                );
                 const objReEntry = await openTrackedOptionReEntry(
                     pUserId,
                     pStrategyCode,
@@ -9823,8 +9828,13 @@ async function applyTriggeredOptionRule(
         )
     });
 
+    const objCurrentRowState = getNormalizedOptionRowUiState(
+        getMergedUiState(objProfile),
+        pStrategyCode,
+        objMetadata.rowIndex
+    );
     const bAllowTrackedReEntry = (isOptionsScalperStrategy(pStrategyCode) || !supportsRenkoFeedStrategy(pStrategyCode))
-        && Boolean(objMetadata.reEnterEnabled);
+        && Boolean(objCurrentRowState.reEnter || objMetadata.reEnterEnabled);
     if (bAllowTrackedReEntry) {
         const vOptionReentryPendingUntil = new Date(Date.now() + gOptionReentryPendingMs).toISOString();
         const objRuntimeBeforeReEntry = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
