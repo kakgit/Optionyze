@@ -4605,6 +4605,9 @@ function normalizeProfileSaveInput(
         placeOppositeTrades: isStrangleOptionsStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(objUiState.placeOppositeTrades, Boolean(objDefaults.placeOppositeTrades)),
+        renkoFirstSignalOnlyEnabled: isStrangleOptionsStrategy(pStrategyCode)
+            ? false
+            : normalizeBooleanValue(objUiState.renkoFirstSignalOnlyEnabled, Boolean(objDefaults.renkoFirstSignalOnlyEnabled)),
         buyQtyPercentEnabled: isStrangleOptionsStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.buyQtyPercentEnabled)),
