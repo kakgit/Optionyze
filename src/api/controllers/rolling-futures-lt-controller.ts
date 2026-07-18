@@ -1959,7 +1959,7 @@ function updateOptionsDemoRenkoState(
         || (vPreviousColor === "R" && vNextColor === "G");
     return {
         renko: objNextRenko,
-        signals: bColorFlip ? [vNextColor] : [],
+        signals: arrSignals.length ? [...arrSignals] : (bColorFlip ? [vNextColor] : []),
         sourcePrice: vSourcePrice,
         isEnabled: true
     };
@@ -2175,6 +2175,7 @@ function getDefaultManualTraderUiState(
         sameSideLegIncrementEnabled: true,
         allowDuplicateContracts: false,
         placeOppositeTrades: false,
+        renkoFirstSignalOnlyEnabled: true,
         buyQtyPercentEnabled: false,
         buyQtyPercent: "100",
         renkoEnabled: false,
@@ -2435,8 +2436,7 @@ function countActiveOptionsScalperTradesByLeg(
 ): number {
     const vAction = String(pAction || "").trim().toUpperCase() === "BUY" ? "BUY" : "SELL";
     return (Array.isArray(pTrackedPositions) ? pTrackedPositions : []).filter((objPosition) => {
-        return !isTrackedPositionInactive(objPosition)
-            && isIncrementEligibleTrackedOptionPosition(objPosition)
+        return isIncrementEligibleTrackedOptionPosition(objPosition)
             && isTrackedContractForSymbol(objPosition.contractName, pSymbol)
             && String(objPosition.side || "").trim().toUpperCase() === vAction
             && getTrackedOptionLegSide(objPosition.contractName) === pLegSide;
@@ -2450,8 +2450,7 @@ function countActiveOptionsScalperTradesForSymbol(
 ): number {
     const vAction = String(pAction || "").trim().toUpperCase() === "BUY" ? "BUY" : "SELL";
     return (Array.isArray(pTrackedPositions) ? pTrackedPositions : []).filter((objPosition) => {
-        return !isTrackedPositionInactive(objPosition)
-            && isIncrementEligibleTrackedOptionPosition(objPosition)
+        return isIncrementEligibleTrackedOptionPosition(objPosition)
             && isTrackedContractForSymbol(objPosition.contractName, pSymbol)
             && String(objPosition.side || "").trim().toUpperCase() === vAction;
     }).length;
@@ -4195,6 +4194,9 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         placeOppositeTrades: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(objUiState.placeOppositeTrades, Boolean(objDefaults.placeOppositeTrades)),
+        renkoFirstSignalOnlyEnabled: isStrangleOptionsStrategy(pProfile.strategyCode)
+            ? false
+            : normalizeBooleanValue(objUiState.renkoFirstSignalOnlyEnabled, Boolean(objDefaults.renkoFirstSignalOnlyEnabled)),
         buyQtyPercentEnabled: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.buyQtyPercentEnabled)),
@@ -8533,7 +8535,23 @@ async function buildOptionsScalperPaperOptionOpen(
         pInput.targetDelta
     );
     if (!objContract) {
-        throw new Error(`No live ${pInput.legSide.toUpperCase()} contract was found for ${pInput.symbol} near target delta ${pInput.targetDelta.toFixed(2)}.`);
+        const vMessage = `No live ${pInput.legSide.toUpperCase()} contract was found for ${pInput.symbol} near target delta ${pInput.targetDelta.toFixed(2)}.`;
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "engine_error",
+            "warning",
+            "Paper Option Order Skipped",
+            vMessage,
+            {
+                symbol: pInput.symbol,
+                legSide: pInput.legSide,
+                rowIndex: vRowIndex,
+                targetDelta: pInput.targetDelta,
+                reason: "paper_option_no_contract"
+            }
+        );
+        throw new Error(vMessage);
     }
     if (isOptionsScalperStrategy(pStrategyCode)) {
         const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
@@ -8544,13 +8562,43 @@ async function buildOptionsScalperPaperOptionOpen(
         const bApplyAlternatingLegGuard = vOpenedReason === "strategy_option_open"
             || vOpenedReason === "manual_option_open";
         if (!bIsReEntryOpen && bApplyAlternatingLegGuard && vLatestLegSide && vLatestLegSide === pInput.legSide) {
-            throw new Error(`Skipped auto trade because the latest active option is already ${vLatestLegSide.toUpperCase()}. Next option must alternate to ${vLatestLegSide === "ce" ? "PE" : "CE"}.`);
+            const vMessage = `Skipped auto trade because the latest active option is already ${vLatestLegSide.toUpperCase()}. Next option must alternate to ${vLatestLegSide === "ce" ? "PE" : "CE"}.`;
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "engine_error",
+                "warning",
+                "Paper Option Order Skipped",
+                vMessage,
+                {
+                    contractName: vLatestLegSide,
+                    legSide: pInput.legSide,
+                    rowIndex: vRowIndex,
+                    reason: "paper_option_alternating_leg_guard"
+                }
+            );
+            throw new Error(vMessage);
         }
         if (!bIsReEntryOpen && vOpenedReason === "strategy_option_open") {
             const vContractName = String(objContract.contractSymbol || "").trim();
             const bAllowDuplicateContracts = normalizeBooleanValue(objUiState.allowDuplicateContracts, false);
             if (!bAllowDuplicateContracts && hasActiveTrackedOptionContract(arrExisting, vContractName)) {
-                throw new Error(`Skipped auto trade because ${vContractName} is already active in Open Positions.`);
+                const vMessage = `Skipped auto trade because ${vContractName} is already active in Open Positions.`;
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "engine_error",
+                    "warning",
+                    "Paper Option Order Skipped",
+                    vMessage,
+                    {
+                        contractName: vContractName,
+                        legSide: pInput.legSide,
+                        rowIndex: vRowIndex,
+                        reason: "paper_option_duplicate_contract"
+                    }
+                );
+                throw new Error(vMessage);
             }
         }
     }
@@ -8566,7 +8614,22 @@ async function buildOptionsScalperPaperOptionOpen(
             vStopLossDelta
         );
         if (objImmediateRuleDecision.shouldAct) {
-            throw new Error(`The selected ${pInput.legSide.toUpperCase()} contract delta ${vAbsoluteDelta.toFixed(2)} already violates the configured ${objImmediateRuleDecision.reason.toUpperCase()} rule for row ${vRowIndex}. Adjust New D / SL / TP before executing.`);
+            const vMessage = `The selected ${pInput.legSide.toUpperCase()} contract delta ${vAbsoluteDelta.toFixed(2)} already violates the configured ${objImmediateRuleDecision.reason.toUpperCase()} rule for row ${vRowIndex}. Adjust New D / SL / TP before executing.`;
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "engine_error",
+                "warning",
+                "Paper Option Order Skipped",
+                vMessage,
+                {
+                    contractName: String(objContract.contractSymbol || "").trim(),
+                    legSide: pInput.legSide,
+                    rowIndex: vRowIndex,
+                    reason: `paper_option_${objImmediateRuleDecision.reason}_guard`
+                }
+            );
+            throw new Error(vMessage);
         }
     }
 
@@ -8809,6 +8872,20 @@ async function openTrackedOptionReEntry(
         )
     );
     if (!(vTargetDelta > 0)) {
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "manual_action",
+            "warning",
+            "Paper Option Re-Entry Skipped",
+            `Skipped re-entry for ${pClosedPosition.contractName} because no valid target delta was available from row ${vRowIndex}.`,
+            {
+                contractName: pClosedPosition.contractName,
+                legSide: vLegSide,
+                rowIndex: vRowIndex,
+                reason: "paper_option_reentry_missing_target_delta"
+            }
+        );
         return null;
     }
     if (isCoveredOptionsStrategy(pStrategyCode) && vOrderAction === "buy") {
@@ -8833,6 +8910,20 @@ async function openTrackedOptionReEntry(
         }
         const vResolvedTargetLegSide = resolveCoveredBuyHedgeTargetLegSide(pStrategyCode, arrTrackedPositions, objUiState, vRowIndex, vRequestedLegSide);
         if (!vResolvedTargetLegSide) {
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "manual_action",
+                "warning",
+                "Covered Buy Hedge Re-Entry Skipped",
+                `Skipped ${vLegSide.toUpperCase()} buy hedge re-entry because the row could not resolve a valid target leg side.`,
+                {
+                    contractName: pClosedPosition.contractName,
+                    legSide: vLegSide,
+                    rowIndex: vRowIndex,
+                    reason: "covered_buy_hedge_target_leg_missing"
+                }
+            );
             return null;
         }
         vLegSide = vResolvedTargetLegSide;
@@ -8906,6 +8997,21 @@ async function openTrackedOptionReEntry(
         vTargetDelta
     );
     if (!objContract) {
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "manual_action",
+            "warning",
+            "Paper Option Re-Entry Skipped",
+            `Skipped re-entry for ${pClosedPosition.contractName} because no live ${vLegSide.toUpperCase()} contract was found near target delta ${vTargetDelta.toFixed(2)}.`,
+            {
+                contractName: pClosedPosition.contractName,
+                legSide: vLegSide,
+                rowIndex: vRowIndex,
+                targetDelta: vTargetDelta,
+                reason: "paper_option_reentry_no_contract"
+            }
+        );
         return null;
     }
     if (isCoveredOptionsStrategy(pStrategyCode) && vOrderAction === "buy") {
@@ -8940,6 +9046,32 @@ async function openTrackedOptionReEntry(
             Number(pMetadata.takeProfitDelta || objRowState.tpD || 0.25),
             Number(pMetadata.stopLossDelta || objRowState.slD || 0.65)
         ).shouldAct) {
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "manual_action",
+                "warning",
+                "Paper Option Re-Entry Skipped",
+                `Skipped re-entry for ${pClosedPosition.contractName} because the selected contract delta ${vAbsoluteDelta.toFixed(2)} already violates the configured ${shouldTriggerTrackedOption(
+                    vOrderAction.toUpperCase(),
+                    vAbsoluteDelta,
+                    Number(pMetadata.takeProfitDelta || objRowState.tpD || 0.25),
+                    Number(pMetadata.stopLossDelta || objRowState.slD || 0.65)
+                ).reason.toUpperCase()} rule for row ${vRowIndex}.`,
+                {
+                    contractName: pClosedPosition.contractName,
+                    legSide: vLegSide,
+                    rowIndex: vRowIndex,
+                    targetDelta: vTargetDelta,
+                    contractDelta: vAbsoluteDelta,
+                    reason: `paper_option_reentry_${shouldTriggerTrackedOption(
+                        vOrderAction.toUpperCase(),
+                        vAbsoluteDelta,
+                        Number(pMetadata.takeProfitDelta || objRowState.tpD || 0.25),
+                        Number(pMetadata.stopLossDelta || objRowState.slD || 0.65)
+                    ).reason}_guard`
+                }
+            );
             return null;
         }
     }
@@ -10967,9 +11099,13 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
         pManualSignal
     );
     const vNextColor = String(objSync.renko.lastColor || "").trim().toUpperCase();
+    const objUiState = getMergedUiState(objSync.profile);
+    const bFirstSignalOnly = normalizeBooleanValue(objUiState.renkoFirstSignalOnlyEnabled, true);
     const bShouldAttemptAutoTrade = (pManualSignal === "R" || pManualSignal === "G")
         ? true
-        : (Boolean(objSync.signals.length) && Boolean(vNextColor) && vNextColor !== vPreviousColor);
+        : (bFirstSignalOnly
+            ? (Boolean(objSync.signals.length) && Boolean(vNextColor) && vNextColor !== vPreviousColor)
+            : Boolean(objSync.signals.length));
     if (!bShouldAttemptAutoTrade) {
         return {
             ...objSync,
@@ -10991,7 +11127,6 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
     const vSignal = pManualSignal === "R" || pManualSignal === "G"
         ? pManualSignal
         : (vNextColor === "R" || vNextColor === "G" ? vNextColor as OptionsDemoRenkoSignal : "");
-    const objUiState = getMergedUiState(objSync.profile);
     const bRenkoEmaEnabled = normalizeBooleanValue(objUiState.renkoEmaEnabled, false);
     const bRenkoEmaFilterEnabled = normalizeBooleanValue(objUiState.renkoEmaFilterEnabled, false);
     if (bRenkoEmaFilterEnabled) {
@@ -11042,14 +11177,17 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
         };
     }
 
-    const arrTrackedPositions = await listRollingFuturesLtImportedPositions(pUserId, "options-scalper");
-    const objTradeInput = resolveOptionsScalperRenkoAutoTradeInput(objSync.profile, vSignal, arrTrackedPositions);
-    if (!objTradeInput) {
+    const arrSignalsToProcess = (pManualSignal === "R" || pManualSignal === "G")
+        ? [pManualSignal]
+        : (bFirstSignalOnly
+            ? [vSignal as OptionsDemoRenkoSignal]
+            : [...objSync.signals]);
+    if (!arrSignalsToProcess.length) {
         return {
             ...objSync,
             autoTrade: {
                 status: "warning",
-                message: `Row ${vSignal === "G" ? 1 : 2} Manual Trader settings are incomplete for Delta Renko paper auto trades.`
+                message: "No Delta Renko trade signal was available to process."
             }
         };
     }
@@ -11067,53 +11205,72 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
 
     gOptionsScalperRenkoAutoTradeLocks.add(vLockKey);
     try {
-        const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
-            pUserId,
-            "options-scalper",
-            objSync.profile,
-            {
-                action: objTradeInput.action,
-                symbol: objTradeInput.symbol,
-                legSide: objTradeInput.legSide,
-                expiryMode: objTradeInput.expiryMode,
-                expiryDate: objTradeInput.expiryDate,
-                qty: objTradeInput.qty,
-                targetDelta: objTradeInput.targetDelta,
-                rowIndex: objTradeInput.rowIndex,
-                openedReason: "strategy_option_open",
-                takeProfitDelta: objTradeInput.takeProfitDelta,
-                stopLossDelta: objTradeInput.stopLossDelta,
-                reEnterEnabled: false
+        let arrCurrentTrackedPositions = await listRollingFuturesLtImportedPositions(pUserId, "options-scalper");
+        let vOpenedCount = 0;
+        for (const vCurrentSignal of arrSignalsToProcess) {
+            const objTradeInput = resolveOptionsScalperRenkoAutoTradeInput(objSync.profile, vCurrentSignal, arrCurrentTrackedPositions);
+            if (!objTradeInput) {
+                continue;
             }
-        );
-        const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, "options-scalper");
-        const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, "options-scalper", [
-            ...arrExisting,
-            objPaperOpen.position
-        ]);
-        await logFuturesEvent(
-            pUserId,
-            "options-scalper",
-            "option_opened",
-            "success",
-            "Paper Option Auto Opened",
-            `${objTradeInput.action.toUpperCase()} ${objTradeInput.legSide.toUpperCase()} paper option opened from row ${objTradeInput.rowIndex}.`,
-            {
-                symbol: objTradeInput.symbol,
-                contractName: objPaperOpen.position.contractName,
-                qty: objTradeInput.qty,
-                targetDelta: objTradeInput.targetDelta,
-                rowIndex: objTradeInput.rowIndex,
-                signal: vSignal,
-                reason: "delta_renko_paper_auto_trade"
-            }
-        );
+            const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
+                pUserId,
+                "options-scalper",
+                objSync.profile,
+                {
+                    action: objTradeInput.action,
+                    symbol: objTradeInput.symbol,
+                    legSide: objTradeInput.legSide,
+                    expiryMode: objTradeInput.expiryMode,
+                    expiryDate: objTradeInput.expiryDate,
+                    qty: objTradeInput.qty,
+                    targetDelta: objTradeInput.targetDelta,
+                    rowIndex: objTradeInput.rowIndex,
+                    openedReason: "strategy_option_open",
+                    takeProfitDelta: objTradeInput.takeProfitDelta,
+                    stopLossDelta: objTradeInput.stopLossDelta,
+                    reEnterEnabled: false
+                }
+            );
+            arrCurrentTrackedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, "options-scalper", [
+                ...arrCurrentTrackedPositions,
+                objPaperOpen.position
+            ]);
+            vOpenedCount += 1;
+            await logFuturesEvent(
+                pUserId,
+                "options-scalper",
+                "option_opened",
+                "success",
+                "Paper Option Auto Opened",
+                `${objTradeInput.action.toUpperCase()} ${objTradeInput.legSide.toUpperCase()} paper option opened from row ${objTradeInput.rowIndex}.`,
+                {
+                    symbol: objTradeInput.symbol,
+                    contractName: objPaperOpen.position.contractName,
+                    qty: objTradeInput.qty,
+                    targetDelta: objTradeInput.targetDelta,
+                    rowIndex: objTradeInput.rowIndex,
+                    signal: vCurrentSignal,
+                    reason: "delta_renko_paper_auto_trade"
+                }
+            );
+        }
+        if (!(vOpenedCount > 0)) {
+            return {
+                ...objSync,
+                autoTrade: {
+                    status: "warning",
+                    message: `Delta Renko signal${arrSignalsToProcess.length === 1 ? "" : "s"} were received, but no paper option order could be placed from the current Manual Trader settings.`
+                }
+            };
+        }
         return {
             ...objSync,
             autoTrade: {
                 status: "success",
-                message: `${vSignal === "G" ? "Green" : "Red"} signal opened ${objTradeInput.action.toUpperCase()} ${objTradeInput.legSide.toUpperCase()} paper option from row ${objTradeInput.rowIndex}.`,
-                trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrSaved)
+                message: bFirstSignalOnly
+                    ? `${vSignal === "G" ? "Green" : "Red"} signal opened a ${vSignal === "G" ? "GREEN" : "RED"} paper option from row ${vSignal === "G" ? 1 : 2}.`
+                    : `Delta Renko placed ${vOpenedCount} paper option order${vOpenedCount === 1 ? "" : "s"} from the latest box signals.`,
+                trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrCurrentTrackedPositions)
             }
         };
     }

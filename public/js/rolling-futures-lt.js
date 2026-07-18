@@ -141,6 +141,7 @@
         sameSideLegIncrementEnabled: document.getElementById("chkRollingFuturesSameSideLegIncrementEnabled"),
         allowDuplicateContracts: document.getElementById("chkRollingFuturesAllowDuplicateContracts"),
         placeOppositeTrades: document.getElementById("chkRollingFuturesPlaceOppositeTrades"),
+        renkoFirstSignalOnlyEnabled: document.getElementById("chkRollingFuturesRenkoFirstSignalOnlyEnabled"),
         renkoFeedEnabled: document.getElementById("chkRollingFuturesRenkoFeedEnabled"),
         renkoFeedPts: document.getElementById("txtRollingFuturesRenkoFeedPts"),
         renkoFeedManualPrice: document.getElementById("txtRollingFuturesRenkoFeedManualPrice"),
@@ -1692,6 +1693,7 @@
             sameSideLegIncrementEnabled: true,
             allowDuplicateContracts: false,
             placeOppositeTrades: false,
+            renkoFirstSignalOnlyEnabled: true,
             renkoEnabled: false,
             renkoStepPoints: "100",
             renkoBaseValue: "",
@@ -3340,6 +3342,7 @@
             sameSideLegIncrementEnabled: isStrangleLikePage ? false : getCheckboxValue(ids.sameSideLegIncrementEnabled, true),
             allowDuplicateContracts: isStrangleLikePage ? false : getCheckboxValue(ids.allowDuplicateContracts, false),
             placeOppositeTrades: isStrangleLikePage ? false : getCheckboxValue(ids.placeOppositeTrades, false),
+            renkoFirstSignalOnlyEnabled: isStrangleLikePage ? false : getCheckboxValue(ids.renkoFirstSignalOnlyEnabled, true),
             renkoEnabled: supportsRenkoFeed ? getCheckboxValue(ids.renkoEnabled, false) : false,
             renkoStepPoints: supportsRenkoFeed ? String(getRenkoBoxSizeValue()) : "100",
             renkoBaseValue: supportsRenkoFeed ? normalizeRenkoBaseValue(ids.renkoBaseValue?.value || "") : "",
@@ -3443,6 +3446,7 @@
             );
             setCheckboxValue(ids.allowDuplicateContracts, isStrangleLikePage ? false : objUiState.allowDuplicateContracts);
             setCheckboxValue(ids.placeOppositeTrades, isStrangleLikePage ? false : objUiState.placeOppositeTrades);
+            setCheckboxValue(ids.renkoFirstSignalOnlyEnabled, isStrangleLikePage ? false : (objUiState.renkoFirstSignalOnlyEnabled ?? true));
             if (isDemoRenkoFeedMode()) {
                 setCheckboxValue(ids.renkoFeedEnabled, Boolean(objUiState.renkoFeedEnabled));
                 setInputValue(ids.renkoFeedPts, objUiState.renkoFeedPts || "10");
@@ -4148,8 +4152,7 @@
         const normalizedLegSide = String(legSide || "").trim().toUpperCase() === "PE" ? "PE" : "CE";
         const normalizedAction = String(action || "").trim().toUpperCase() === "BUY" ? "BUY" : "SELL";
         return (Array.isArray(displayedPositions) ? displayedPositions : []).filter(function (row) {
-            return !isDisplayedPositionInactive(row)
-                && isIncrementEligibleCoveredTrade(row)
+            return isIncrementEligibleCoveredTrade(row)
                 && isTrackedCoveredTradeForSymbol(row, symbol)
                 && String(row?.side || "").trim().toUpperCase() === normalizedAction
                 && getCoveredContractLegSide(row?.contractName) === normalizedLegSide;
@@ -4159,8 +4162,7 @@
     function countActiveCoveredTradesForSymbol(symbol, action) {
         const normalizedAction = String(action || "").trim().toUpperCase() === "BUY" ? "BUY" : "SELL";
         return (Array.isArray(displayedPositions) ? displayedPositions : []).filter(function (row) {
-            return !isDisplayedPositionInactive(row)
-                && isIncrementEligibleCoveredTrade(row)
+            return isIncrementEligibleCoveredTrade(row)
                 && isTrackedCoveredTradeForSymbol(row, symbol)
                 && String(row?.side || "").trim().toUpperCase() === normalizedAction;
         }).length;
@@ -5034,7 +5036,7 @@
             });
         }
     });
-    [ids.sameSideLegIncrementEnabled, ids.allowDuplicateContracts, ids.placeOppositeTrades].forEach(function (node) {
+    [ids.sameSideLegIncrementEnabled, ids.allowDuplicateContracts, ids.placeOppositeTrades, ids.renkoFirstSignalOnlyEnabled].forEach(function (node) {
         node?.addEventListener("change", function () {
             syncQtyFromStartQty();
             queueProfileSave();

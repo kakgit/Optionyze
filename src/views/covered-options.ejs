@@ -542,6 +542,24 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="rolling-demo-field rolling-futures-buy-gate-field">
+                            <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
+                                <div class="rolling-futures-buy-gate-row">
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesRenkoFirstSignalOnlyEnabled">
+                                        <input type="checkbox" id="chkRollingFuturesRenkoFirstSignalOnlyEnabled" checked />
+                                    </label>
+                                    <div class="rolling-futures-buy-gate-text">Exec Positions only on 1st Renko Green or Red</div>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show first-signal execution help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, Renko places trades only on the first confirmed Green or Red box in a move. When disabled, every newly formed Green or Red Renko box can attempt a trade, while still honoring the rest of the Manual Trader filters.
+                                        </span>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
                     <% } %>
                 </div>
 
