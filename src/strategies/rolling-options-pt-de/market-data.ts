@@ -98,6 +98,102 @@ async function fetchJson<T>(pPath: string, pSearchParams?: URLSearchParams): Pro
     return objResponse.json() as Promise<T>;
 }
 
+interface CachedLiveOptionTicker {
+    ticker: RollingOptionsPtDeLiveOptionContract | null;
+    expiresAtMs: number;
+}
+
+const gLiveOptionTickerCacheBySymbol = new Map<string, CachedLiveOptionTicker>();
+let gLiveOptionTickerFetchQueue: Promise<void> = Promise.resolve();
+let gLiveOptionTickerCooldownUntilMs = 0;
+let gDeltaMarketDataAlertHandler: ((pPayload: { reason: string; symbol?: string; path?: string; status?: number }) => Promise<void> | void) | null = null;
+let gDeltaMarketDataAlertCooldownUntilMs = 0;
+let gDeltaMarketDataRateLimitSignal: { reason: string; symbol?: string; path?: string; status?: number } | null = null;
+
+const gLiveOptionTickerCacheTtlMs = 5000;
+const gLiveOptionTickerCooldownMs = 15000;
+const gDeltaMarketDataAlertCooldownMs = 60 * 1000;
+
+function isDeltaRateLimitError(pError: unknown): boolean {
+    const vMessage = String((pError as { message?: unknown } | null)?.message || pError || "");
+    return vMessage.includes("429");
+}
+
+function cacheLiveOptionTicker(pSymbol: string, pTicker: RollingOptionsPtDeLiveOptionContract | null): void {
+    gLiveOptionTickerCacheBySymbol.set(pSymbol, {
+        ticker: pTicker,
+        expiresAtMs: Date.now() + gLiveOptionTickerCacheTtlMs
+    });
+}
+
+export function setDeltaMarketDataAlertHandler(
+    pHandler: ((pPayload: { reason: string; symbol?: string; path?: string; status?: number }) => Promise<void> | void) | null
+): void {
+    gDeltaMarketDataAlertHandler = pHandler;
+}
+
+export function consumeDeltaMarketDataRateLimitSignal(): { reason: string; symbol?: string; path?: string; status?: number } | null {
+    const objSignal = gDeltaMarketDataRateLimitSignal;
+    gDeltaMarketDataRateLimitSignal = null;
+    return objSignal;
+}
+
+async function notifyDeltaMarketDataAlert(
+    pPayload: { reason: string; symbol?: string; path?: string; status?: number }
+): Promise<void> {
+    gDeltaMarketDataRateLimitSignal = pPayload;
+    if (!gDeltaMarketDataAlertHandler) {
+        return;
+    }
+    if (Date.now() < gDeltaMarketDataAlertCooldownUntilMs) {
+        return;
+    }
+    gDeltaMarketDataAlertCooldownUntilMs = Date.now() + gDeltaMarketDataAlertCooldownMs;
+    try {
+        await gDeltaMarketDataAlertHandler(pPayload);
+    }
+    catch (_objError) {
+        // Logging must never break market data access.
+    }
+}
+
+async function runLiveOptionTickerLookupSerial<T>(pTask: () => Promise<T>): Promise<T> {
+    const vNext = gLiveOptionTickerFetchQueue.then(pTask, pTask);
+    gLiveOptionTickerFetchQueue = vNext.then(() => void 0, () => void 0);
+    return vNext;
+}
+
+function buildLiveOptionTickerFromRow(pRow: DeltaTickerRow, pFallbackSymbol: string): RollingOptionsPtDeLiveOptionContract | null {
+    if (!pRow || !pRow.symbol) {
+        return null;
+    }
+
+    const vSymbol = String(pRow.symbol || pFallbackSymbol || "").trim();
+    if (!vSymbol) {
+        return null;
+    }
+
+    const vOptionSide = vSymbol.startsWith("P-") || vSymbol.includes("-P-") || vSymbol.endsWith("-P") || vSymbol.includes("PUT")
+        ? "PE"
+        : "CE";
+
+    return {
+        contractSymbol: vSymbol,
+        optionSide: vOptionSide,
+        strike: parseNumber(pRow.strike_price, 0),
+        markPrice: parseNumber(pRow.mark_price, 0),
+        bestBid: Number.isFinite(parseNumber(pRow.quotes?.best_bid, NaN)) ? parseNumber(pRow.quotes?.best_bid, NaN) : null,
+        bestAsk: Number.isFinite(parseNumber(pRow.quotes?.best_ask, NaN)) ? parseNumber(pRow.quotes?.best_ask, NaN) : null,
+        delta: parseFiniteOrNaN(pRow.greeks?.delta),
+        gamma: parseFiniteOrNaN(pRow.greeks?.gamma),
+        theta: parseFiniteOrNaN(pRow.greeks?.theta),
+        vega: parseFiniteOrNaN(pRow.greeks?.vega),
+        expiryDate: "",
+        requestedExpiryDate: "",
+        usedNextDayFallback: false
+    };
+}
+
 class DeltaPublicTickerFeed {
     private static readonly SYMBOL_TTL_MS = 15 * 60 * 1000;
     private ws: WebSocket | null = null;
@@ -396,7 +492,21 @@ export async function findBestLiveOptionContract(
             underlying_asset_symbols: pConfig.symbol,
             expiry_date: vExpiryDate
         });
-        const objPayload = await fetchJson<DeltaApiResponse<DeltaTickerRow[]>>("/tickers", objParams);
+        let objPayload: DeltaApiResponse<DeltaTickerRow[]>;
+        try {
+            objPayload = await runLiveOptionTickerLookupSerial(() => fetchJson<DeltaApiResponse<DeltaTickerRow[]>>("/tickers", objParams));
+        }
+        catch (objError) {
+            if (isDeltaRateLimitError(objError)) {
+                void notifyDeltaMarketDataAlert({
+                    reason: "rate_limited",
+                    path: "/tickers",
+                    status: 429
+                });
+                return null;
+            }
+            throw objError;
+        }
         const objRows = Array.isArray(objPayload.result) ? objPayload.result : [];
 
         let objBestMatch: RollingOptionsPtDeLiveOptionContract | null = null;
@@ -445,29 +555,61 @@ export async function findBestLiveOptionContract(
 }
 
 export async function getLiveOptionTicker(pContractSymbol: string): Promise<RollingOptionsPtDeLiveOptionContract | null> {
-    const objRow = gDeltaPublicTickerFeed.getTicker(pContractSymbol)
-        || (await fetchJson<DeltaApiResponse<DeltaTickerRow>>(`/tickers/${encodeURIComponent(pContractSymbol)}`)).result;
-    if (!objRow || !objRow.symbol) {
+    const vContractSymbol = String(pContractSymbol || "").trim();
+    if (!vContractSymbol) {
         return null;
     }
 
-    const vSymbol = String(objRow.symbol || "").trim().toUpperCase();
-    const vOptionSide = vSymbol.startsWith("P-") || vSymbol.includes("-P-") || vSymbol.endsWith("-P") || vSymbol.includes("PUT")
-        ? "PE"
-        : "CE";
-    return {
-        contractSymbol: String(objRow.symbol || "").trim(),
-        optionSide: vOptionSide,
-        strike: parseNumber(objRow.strike_price, 0),
-        markPrice: parseNumber(objRow.mark_price, 0),
-        bestBid: Number.isFinite(parseNumber(objRow.quotes?.best_bid, NaN)) ? parseNumber(objRow.quotes?.best_bid, NaN) : null,
-        bestAsk: Number.isFinite(parseNumber(objRow.quotes?.best_ask, NaN)) ? parseNumber(objRow.quotes?.best_ask, NaN) : null,
-        delta: parseFiniteOrNaN(objRow.greeks?.delta),
-        gamma: parseFiniteOrNaN(objRow.greeks?.gamma),
-        theta: parseFiniteOrNaN(objRow.greeks?.theta),
-        vega: parseFiniteOrNaN(objRow.greeks?.vega),
-        expiryDate: "",
-        requestedExpiryDate: "",
-        usedNextDayFallback: false
-    };
+    const objCached = gLiveOptionTickerCacheBySymbol.get(vContractSymbol);
+    if (objCached && objCached.expiresAtMs > Date.now()) {
+        return objCached.ticker;
+    }
+
+    const objWsRow = gDeltaPublicTickerFeed.getTicker(vContractSymbol);
+    if (objWsRow) {
+        const objTicker = buildLiveOptionTickerFromRow(objWsRow, vContractSymbol);
+        if (objTicker) {
+            cacheLiveOptionTicker(vContractSymbol, objTicker);
+            return objTicker;
+        }
+    }
+
+    if (Date.now() < gLiveOptionTickerCooldownUntilMs) {
+        return objCached?.ticker || null;
+    }
+
+    try {
+        return await runLiveOptionTickerLookupSerial(async () => {
+            const objCachedAfterQueue = gLiveOptionTickerCacheBySymbol.get(vContractSymbol);
+            if (objCachedAfterQueue && objCachedAfterQueue.expiresAtMs > Date.now()) {
+                return objCachedAfterQueue.ticker;
+            }
+
+            const objQueuedWsRow = gDeltaPublicTickerFeed.getTicker(vContractSymbol);
+            if (objQueuedWsRow) {
+                const objQueuedWsTicker = buildLiveOptionTickerFromRow(objQueuedWsRow, vContractSymbol);
+                if (objQueuedWsTicker) {
+                    cacheLiveOptionTicker(vContractSymbol, objQueuedWsTicker);
+                    return objQueuedWsTicker;
+                }
+            }
+
+            const objRow = (await fetchJson<DeltaApiResponse<DeltaTickerRow>>(`/tickers/${encodeURIComponent(vContractSymbol)}`)).result;
+            const objTicker = objRow ? buildLiveOptionTickerFromRow(objRow, vContractSymbol) : null;
+            cacheLiveOptionTicker(vContractSymbol, objTicker);
+            return objTicker;
+        });
+    }
+    catch (objError) {
+        if (isDeltaRateLimitError(objError)) {
+            gLiveOptionTickerCooldownUntilMs = Date.now() + gLiveOptionTickerCooldownMs;
+            void notifyDeltaMarketDataAlert({
+                reason: "rate_limited",
+                symbol: vContractSymbol,
+                path: `/tickers/${encodeURIComponent(vContractSymbol)}`,
+                status: 429
+            });
+        }
+        return objCached?.ticker || null;
+    }
 }

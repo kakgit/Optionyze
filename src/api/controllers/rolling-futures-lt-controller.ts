@@ -45,7 +45,12 @@ import {
     listPendingStrategyExecutionRequests
 } from "../../storage/strategy-execution-request-store";
 import { getPendingStrategyAutoExecSettings } from "../../storage/admin-settings-store";
-import { findBestLiveOptionContract, getLiveMarketSnapshot, getLiveOptionTicker } from "../../strategies/rolling-options-pt-de/market-data";
+import {
+    consumeDeltaMarketDataRateLimitSignal,
+    findBestLiveOptionContract,
+    getLiveMarketSnapshot,
+    getLiveOptionTicker
+} from "../../strategies/rolling-options-pt-de/market-data";
 import { getServerId, getStrategyLeaseDurationMs } from "../../runtime/server-runtime";
 import {
     acquireStrategyLease,
@@ -13280,6 +13285,27 @@ async function getImportableOpenPositionsInternal(req: Request, res: Response, p
 async function getOpenPositionsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
     const objOpenPositions = await buildOpenPositionsPayload(vUserId, pStrategyCode);
+    const objDeltaRateLimitSignal = consumeDeltaMarketDataRateLimitSignal();
+    if (objDeltaRateLimitSignal) {
+        try {
+            await logFuturesEvent(
+                vUserId,
+                pStrategyCode,
+                "market_data",
+                "warning",
+                "Delta Market Data Rate Limited",
+                "Delta public market data returned HTTP 429. The page used cached or fallback values for this refresh.",
+                {
+                    reason: objDeltaRateLimitSignal.reason,
+                    status: objDeltaRateLimitSignal.status || 429,
+                    path: String(objDeltaRateLimitSignal.path || ""),
+                    symbol: String(objDeltaRateLimitSignal.symbol || "")
+                }
+            );
+        }
+        catch (_objError) {
+        }
+    }
     res.json({
         status: "success",
         data: objOpenPositions
