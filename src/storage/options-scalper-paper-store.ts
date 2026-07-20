@@ -215,3 +215,36 @@ export async function clearOptionsScalperPaperClosedPositions(
     const arrFiltered = arrRows.filter((objRow) => !(objRow.userId === vUserId && objRow.strategyCode === pStrategyCode));
     await writeJsonFileAtomic(gClosedPositionsFile, arrFiltered);
 }
+
+export async function deleteOptionsScalperPaperClosedPosition(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pCloseId: string
+): Promise<boolean> {
+    const vUserId = String(pUserId || "").trim();
+    const vCloseId = String(pCloseId || "").trim();
+    if (!vCloseId) {
+        return false;
+    }
+    if (isPostgresConfigured()) {
+        const objPool = getPostgresPool();
+        const objResult = await objPool.query(
+            `
+                DELETE FROM optionyze_options_scalper_closed_positions
+                WHERE user_id = $1
+                  AND strategy_code = $2
+                  AND close_id = $3
+            `,
+            [vUserId, pStrategyCode, vCloseId]
+        );
+        return Number(objResult.rowCount || 0) > 0;
+    }
+
+    const arrRows = await loadAllClosedPositionsJson();
+    const arrFiltered = arrRows.filter((objRow) => !(objRow.userId === vUserId && objRow.strategyCode === pStrategyCode && String(objRow.closeId || "").trim() === vCloseId));
+    const bDeleted = arrFiltered.length !== arrRows.length;
+    if (bDeleted) {
+        await writeJsonFileAtomic(gClosedPositionsFile, arrFiltered);
+    }
+    return bDeleted;
+}

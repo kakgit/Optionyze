@@ -25,6 +25,7 @@ import {
     clearStrangleOptionsEventsController,
     clearOptionsScalperEventsController,
     clearOptionsScalperClosedPositions,
+    deleteOptionsScalperClosedPosition,
     clearRollingFuturesLtDualEventsController,
     closeCoveredOptionsImportedOpenPosition,
     closeRenkoOptionsImportedOpenPosition,
@@ -602,6 +603,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/options-demo/closed-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await clearOptionsScalperClosedPositions(req, res);
+    });
+    objRouter.post("/options-demo/closed-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteOptionsScalperClosedPosition(req, res);
     });
     objRouter.get("/options-demo/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getOptionsScalperEvents(req, res);

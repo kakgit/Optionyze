@@ -4530,6 +4530,10 @@
         return postJson(`${endpointBase}/closed-positions/clear`, {});
     }
 
+    async function deleteSavedClosedPosition(closeId) {
+        return postJson(`${endpointBase}/closed-positions/delete`, { closeId: closeId });
+    }
+
     async function reconcileOpenPositions() {
         const objResult = await postJson(`${endpointBase}/open-positions/reconcile`, {});
         renderOpenPositions(objResult?.data);
@@ -4566,7 +4570,7 @@
             return;
         }
         if (!closedPositions.length) {
-            const closedPositionsColumnCount = isCoveredMode ? 9 : 10;
+            const closedPositionsColumnCount = isCoveredMode ? 10 : 11;
             ids.closedPositionsBody.innerHTML = `<tr><td colspan="${closedPositionsColumnCount}" class="rolling-demo-empty">${escapeHtml(closedPositionsEmptyText)}</td></tr>`;
             if (ids.closedPageInfo) {
                 ids.closedPageInfo.textContent = "Page 0 of 0";
@@ -4579,6 +4583,7 @@
         const startIndex = (closedPositionsPage - 1) * closedPositionsPageSize;
         const pageRows = closedPositions.slice(startIndex, startIndex + closedPositionsPageSize);
         const closedRowsHtml = pageRows.map(function (row) {
+            const closeId = String(row.closeId || row.rowId || "").trim();
             const contractName = String(row.symbol || "-");
             const side = String(row.side || "-").trim().toUpperCase();
             const lotSize = contractName.includes("ETH") ? 0.01 : 0.001;
@@ -4597,6 +4602,16 @@
                     <td>${row.sellPrice === null ? "-" : escapeHtml(fmt(row.sellPrice, 2))}</td>
                     <td>${escapeHtml(fmt(row.charges, 2))}</td>
                     <td>${renderPnlValue(row.pnl, false)}</td>
+                    <td>
+                        <div class="rolling-demo-table-actions">
+                            <button class="rolling-demo-icon-btn warn rolling-live-delete-closed-position" type="button" data-close-id="${escapeHtml(closeId)}" title="Delete this closed position permanently" aria-label="Delete this closed position permanently">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M18 6 6 18" />
+                                    <path d="m6 6 12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    </td>
                 </tr>
             `;
         }).join("");
@@ -4614,6 +4629,7 @@
                 <td colspan="${isCoveredMode ? 7 : 8}">Total</td>
                 <td class="rolling-demo-total-value">${escapeHtml(fmt(totalCharges, 2))}</td>
                 <td class="rolling-demo-total-value">${renderPnlValue(totalPnl, true)}</td>
+                <td>-</td>
             </tr>
         `;
         if (ids.closedPageInfo) {
@@ -5940,6 +5956,36 @@
                 setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to remove imported open position.", "danger");
             });
         }
+    });
+    ids.closedPositionsBody?.addEventListener("click", function (event) {
+        const target = event.target instanceof Element ? event.target : null;
+        const deleteButton = target ? target.closest(".rolling-live-delete-closed-position") : null;
+        if (!(deleteButton instanceof HTMLButtonElement)) {
+            return;
+        }
+        const closeId = String(deleteButton.dataset.closeId || "").trim();
+        const row = closedPositions.find(function (item) {
+            return String(item?.closeId || item?.rowId || "").trim() === closeId;
+        });
+        if (!row) {
+            setStatus(ids.pageStatus, "Unable to find the selected closed position.", "danger");
+            return;
+        }
+        const confirmed = window.confirm(`Delete ${row.symbol || "this closed position"} permanently? This will remove it from Closed Positions only.`);
+        if (!confirmed) {
+            return;
+        }
+        void deleteSavedClosedPosition(closeId).then(function () {
+            return Promise.all([
+                loadClosedPositions().catch(function () { return undefined; }),
+                loadAccountSummary().catch(function () { return undefined; }),
+                loadEvents().catch(function () { return undefined; })
+            ]);
+        }).then(function () {
+            setStatus(ids.pageStatus, "Closed position deleted.", "success");
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to delete closed position.", "danger");
+        });
     });
 
     async function loadPageForCurrentTarget() {

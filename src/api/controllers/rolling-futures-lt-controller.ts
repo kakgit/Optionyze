@@ -33,6 +33,7 @@ import {
 import {
     appendOptionsScalperPaperClosedPositions,
     clearOptionsScalperPaperClosedPositions,
+    deleteOptionsScalperPaperClosedPosition,
     listOptionsScalperPaperClosedPositions,
     type OptionsScalperPaperClosedPositionRecord
 } from "../../storage/options-scalper-paper-store";
@@ -243,6 +244,7 @@ const gDeltaUiTimezoneOffsetMinutes = 5.5 * 60;
 const gManualFutureOrderLocks = new Set<string>();
 const gManualOptionOrderLocks = new Set<string>();
 const gOptionsScalperRenkoAutoTradeLocks = new Set<string>();
+const gKillSwitchLocks = new Set<string>();
 const gExecStrategyLocks = new Set<string>();
 const gNeutralityHedgeLocks = new Set<string>();
 const gAutoTraderIntervals = new Map<string, NodeJS.Timeout>();
@@ -14931,6 +14933,59 @@ async function clearOptionsScalperClosedPositionsInternal(req: Request, res: Res
     }
 }
 
+async function deleteOptionsScalperClosedPositionInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
+    const vUserId = getAccountId(req);
+    if (!vUserId) {
+        res.status(401).json({
+            status: "warning",
+            message: "Sign in to continue."
+        });
+        return;
+    }
+    if (pStrategyCode !== "options-scalper") {
+        res.status(400).json({
+            status: "warning",
+            message: "Closed-position deletion is only supported on Options Demo."
+        });
+        return;
+    }
+    const vCloseId = String(req.body?.closeId || "").trim();
+    if (!vCloseId) {
+        res.status(400).json({
+            status: "warning",
+            message: "Closed position ID is required."
+        });
+        return;
+    }
+    try {
+        const bDeleted = await deleteOptionsScalperPaperClosedPosition(vUserId, pStrategyCode, vCloseId);
+        if (!bDeleted) {
+            res.status(404).json({
+                status: "warning",
+                message: "Closed position was not found."
+            });
+            return;
+        }
+        const objProfile = await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
+            vUserId,
+            await readLiveProfile(vUserId, pStrategyCode)
+        );
+        res.json({
+            status: "success",
+            message: "Closed demo position deleted.",
+            data: {
+                profile: objProfile
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to delete closed demo position.")
+        });
+    }
+}
+
 async function calculateRecalculatedTotalPnl(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -15086,43 +15141,81 @@ async function deleteEventInternal(req: Request, res: Response, pStrategyCode: R
 
 async function executeKillSwitchInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
+    const vKillSwitchKey = `${vUserId}::${pStrategyCode}::kill-switch`;
+    if (gKillSwitchLocks.has(vKillSwitchKey)) {
+        await logFuturesEvent(
+            vUserId,
+            pStrategyCode,
+            "engine_error",
+            "warning",
+            "Paper Kill Switch Skipped",
+            "Kill switch request was skipped because a close cycle is already running.",
+            { reason: "kill_switch_locked" }
+        );
+        res.status(409).json({
+            status: "warning",
+            message: "Kill switch is already running. Please wait for the current close cycle to finish."
+        });
+        return;
+    }
+    gKillSwitchLocks.add(vKillSwitchKey);
     if (isOptionsScalperStrategy(pStrategyCode)) {
-        const arrPositions = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
-        if (!arrPositions.length) {
+        try {
+            const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
+            const arrPositions = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
+            if (!arrPositions.length) {
+                await saveRollingFuturesLtRuntime({
+                    ...(objRuntime || getDefaultRollingFuturesLtRuntime(vUserId, pStrategyCode)),
+                    userId: vUserId,
+                    strategyCode: pStrategyCode,
+                    state: buildRuntimeStateWithProfitClosePending(objRuntime, "", 0, "")
+                });
+                res.json({
+                    status: "success",
+                    message: "No saved paper positions were open.",
+                    data: {
+                        closedPositions: [],
+                        trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, [])
+                    }
+                });
+                return;
+            }
+            const objClosed = await closeTrackedPositionsOnDelta(vUserId, pStrategyCode, "", arrPositions);
+            await saveRollingFuturesLtRuntime({
+                ...(objRuntime || getDefaultRollingFuturesLtRuntime(vUserId, pStrategyCode)),
+                userId: vUserId,
+                strategyCode: pStrategyCode,
+                lastCycleAt: new Date().toISOString(),
+                state: buildRuntimeStateWithProfitClosePending(objRuntime, "", 0, "")
+            });
+            await logFuturesEvent(
+                vUserId,
+                pStrategyCode,
+                "engine_stopped",
+                "warning",
+                "Paper Kill Switch",
+                `Kill switch closed ${objClosed.closedPositions.length} paper position${objClosed.closedPositions.length === 1 ? "" : "s"} using live Delta prices.`,
+                { qty: objClosed.closedPositions.length, reason: "paper_kill_switch" }
+            );
             res.json({
                 status: "success",
-                message: "No saved paper positions were open.",
+                message: `Kill switch closed ${objClosed.closedPositions.length} paper position${objClosed.closedPositions.length === 1 ? "" : "s"}.`,
                 data: {
-                    closedPositions: [],
+                    closedPositions: objClosed.closedPositions,
                     trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, [])
                 }
             });
             return;
         }
-        const objClosed = await closeTrackedPositionsOnDelta(vUserId, pStrategyCode, "", arrPositions);
-        await logFuturesEvent(
-            vUserId,
-            pStrategyCode,
-            "engine_stopped",
-            "warning",
-            "Paper Kill Switch",
-            `Kill switch closed ${objClosed.closedPositions.length} paper position${objClosed.closedPositions.length === 1 ? "" : "s"} using live Delta prices.`,
-            { qty: objClosed.closedPositions.length, reason: "paper_kill_switch" }
-        );
-        res.json({
-            status: "success",
-            message: `Kill switch closed ${objClosed.closedPositions.length} paper position${objClosed.closedPositions.length === 1 ? "" : "s"}.`,
-            data: {
-                closedPositions: objClosed.closedPositions,
-                trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, [])
-            }
-        });
-        return;
+        finally {
+            gKillSwitchLocks.delete(vKillSwitchKey);
+        }
     }
     const objProfile = await readLiveProfile(vUserId, pStrategyCode);
     const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
     if (!vSelectedApiProfileId) {
         res.status(400).json({ status: "warning", message: "Select an API profile before using the live kill switch." });
+        gKillSwitchLocks.delete(vKillSwitchKey);
         return;
     }
     const arrPositions = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
@@ -15132,6 +15225,7 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
             message: "No saved live futures positions were open.",
             data: { closedPositions: [] }
         });
+        gKillSwitchLocks.delete(vKillSwitchKey);
         return;
     }
     const objCheck = await performRollingFuturesLtConnectionCheck(vUserId, pStrategyCode, vSelectedApiProfileId);
@@ -15141,6 +15235,7 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
             message: objCheck.profile.connectionStatus.message || "Delta connection is not healthy.",
             data: objCheck.profile
         });
+        gKillSwitchLocks.delete(vKillSwitchKey);
         return;
     }
     try {
@@ -15238,6 +15333,9 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
             status: "danger",
             message: getErrorMessage(objError, "Unable to complete live futures kill switch.")
         });
+    }
+    finally {
+        gKillSwitchLocks.delete(vKillSwitchKey);
     }
 }
 
@@ -16984,6 +17082,9 @@ export async function getOptionsScalperClosedPositions(req: Request, res: Respon
 }
 export async function clearOptionsScalperClosedPositions(req: Request, res: Response): Promise<void> {
     await clearOptionsScalperClosedPositionsInternal(req, res, "options-scalper");
+}
+export async function deleteOptionsScalperClosedPosition(req: Request, res: Response): Promise<void> {
+    await deleteOptionsScalperClosedPositionInternal(req, res, "options-scalper");
 }
 export async function getOptionsScalperEvents(req: Request, res: Response): Promise<void> {
     await getEventsInternal(req, res, "options-scalper");
