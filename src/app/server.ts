@@ -231,8 +231,7 @@ async function bootstrap(): Promise<void> {
                     bestBidPrice: objSnapshot.bestBidPrice,
                     bestAskPrice: objSnapshot.bestAskPrice
                 });
-                const objTrackedOpenPositions = objSync.autoTrade?.trackedOpenPositions
-                    || await buildOpenPositionsPayload(userId, "options-scalper");
+                const objTrackedOpenPositions = await buildOpenPositionsPayload(userId, "options-scalper");
                 if (closed || ws.readyState !== WebSocket.OPEN) {
                     return;
                 }
@@ -248,6 +247,8 @@ async function bootstrap(): Promise<void> {
                     ts: objSnapshot.ts,
                     renko: objSync.renko,
                     renkoHistoryBySymbol: objSync.profile?.uiState?.renkoHistoryBySymbol || null,
+                    emaHistoryBySymbol: objSync.profile?.uiState?.emaHistoryBySymbol || null,
+                    emaSignal: objSync.emaSignal || "",
                     autoTrade: objSync.autoTrade || null,
                     trackedOpenPositions: objTrackedOpenPositions
                 }));

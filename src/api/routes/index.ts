@@ -111,6 +111,7 @@ import {
     getOptionsScalperOpenPositions,
     getOptionsScalperProfile,
     getOptionsScalperRuntimeStatus,
+    getOptionsScalperRsiStatus,
     setOptionsScalperRenkoManualSignal,
     listCoveredOptionsVerifierRunningUsers,
     listRenkoOptionsVerifierRunningUsers,
@@ -546,6 +547,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.get("/options-demo/indicator", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getOptionsScalperIndicator(req, res);
+    });
+    objRouter.get("/options-demo/rsi", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsScalperRsiStatus(req, res);
     });
     objRouter.post("/options-demo/renko/manual-signal", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await setOptionsScalperRenkoManualSignal(req, res);

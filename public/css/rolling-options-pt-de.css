@@ -141,6 +141,10 @@
     font-size:1.28rem;
 }
 
+.rolling-rsi-feed-card .rolling-demo-card-head h2 {
+    white-space: nowrap;
+}
+
 .rolling-demo-card-tools {
     display:flex;
     align-items:center;

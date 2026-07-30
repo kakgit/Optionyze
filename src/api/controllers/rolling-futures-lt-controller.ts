@@ -1733,6 +1733,276 @@ function normalizeRenkoHistoryValues(pValue: unknown): {
     };
 }
 
+function normalizeEmaHistoryValues(pValue: unknown): {
+    BTC: Array<{ state: "above" | "below"; changedAt: string; price: string; emaValue: string; length: string }>;
+    ETH: Array<{ state: "above" | "below"; changedAt: string; price: string; emaValue: string; length: string }>;
+} {
+    const objValue = pValue && typeof pValue === "object" ? pValue as Record<string, unknown> : {};
+    function normalizeEntries(pEntries: unknown): Array<{ state: "above" | "below"; changedAt: string; price: string; emaValue: string; length: string }> {
+        return (Array.isArray(pEntries) ? pEntries : [])
+            .map((pEntry) => {
+                const objEntry = pEntry && typeof pEntry === "object" ? pEntry as Record<string, unknown> : {};
+                const vState = String(objEntry.state || "").trim().toLowerCase() === "below" ? "below" : "above";
+                const vChangedAt = String(objEntry.changedAt || "").trim();
+                if (!vChangedAt) {
+                    return null;
+                }
+                return {
+                    state: vState,
+                    changedAt: vChangedAt,
+                    price: normalizeRenkoBaseValueString(objEntry.price),
+                    emaValue: normalizeRenkoBaseValueString(objEntry.emaValue),
+                    length: normalizeRenkoEmaLengthString(objEntry.length)
+                };
+            })
+            .filter((entry): entry is { state: "above" | "below"; changedAt: string; price: string; emaValue: string; length: string } => Boolean(entry))
+            .slice(0, 20);
+    }
+    return {
+        BTC: normalizeEntries(objValue.BTC),
+        ETH: normalizeEntries(objValue.ETH)
+    };
+}
+
+function normalizeRsiTimeframeValue(pValue: unknown): string {
+    const vValue = String(pValue || "").trim().toLowerCase();
+    return ["5s", "1m", "3m", "5m", "15m", "30m", "1h"].includes(vValue) ? vValue : "5m";
+}
+
+function normalizeRsiLengthString(pValue: unknown): string {
+    const vRaw = Math.floor(Number(pValue || 0));
+    if (!Number.isFinite(vRaw) || vRaw < 2) {
+        return "14";
+    }
+    return String(Math.min(1000, vRaw));
+}
+
+function normalizeRsiBandValueString(pValue: unknown, pFallback: number): string {
+    const vRaw = Number(pValue);
+    if (!Number.isFinite(vRaw)) {
+        return String(pFallback);
+    }
+    return String(Math.min(100, Math.max(0, Number(vRaw.toFixed(2)))));
+}
+
+function normalizeRsiCrossModeValue(pValue: unknown): "cross_above" | "cross_below" {
+    const vValue = String(pValue || "").trim().toLowerCase();
+    return vValue === "cross_below" ? "cross_below" : "cross_above";
+}
+
+function normalizeRsiLegSideValue(pValue: unknown): "ce" | "pe" {
+    return String(pValue || "").trim().toLowerCase() === "pe" ? "pe" : "ce";
+}
+
+function normalizeRsiHistoryValues(pValue: unknown): {
+    BTC: Array<{
+        signal: "upper" | "lower";
+        changedAt: string;
+        price: string;
+        rsi: string;
+        band: string;
+        crossMode: "cross_above" | "cross_below";
+        legSide: "ce" | "pe";
+        rowIndex: string;
+        action: "buy" | "sell";
+    }>;
+    ETH: Array<{
+        signal: "upper" | "lower";
+        changedAt: string;
+        price: string;
+        rsi: string;
+        band: string;
+        crossMode: "cross_above" | "cross_below";
+        legSide: "ce" | "pe";
+        rowIndex: string;
+        action: "buy" | "sell";
+    }>;
+} {
+    const objValue = pValue && typeof pValue === "object" ? pValue as Record<string, unknown> : {};
+    function normalizeEntries(pEntries: unknown): Array<{
+        signal: "upper" | "lower";
+        changedAt: string;
+        price: string;
+        rsi: string;
+        band: string;
+        crossMode: "cross_above" | "cross_below";
+        legSide: "ce" | "pe";
+        rowIndex: string;
+        action: "buy" | "sell";
+    }> {
+        return (Array.isArray(pEntries) ? pEntries : [])
+            .map((pEntry) => {
+                const objEntry = pEntry && typeof pEntry === "object" ? pEntry as Record<string, unknown> : {};
+                const vSignal = String(objEntry.signal || "").trim().toLowerCase() === "lower" ? "lower" : "upper";
+                const vChangedAt = String(objEntry.changedAt || "").trim();
+                if (!vChangedAt) {
+                    return null;
+                }
+                const vAction = String(objEntry.action || "").trim().toLowerCase() === "sell" ? "sell" : "buy";
+                return {
+                    signal: vSignal,
+                    changedAt: vChangedAt,
+                    price: normalizeRenkoBaseValueString(objEntry.price),
+                    rsi: normalizeRenkoBaseValueString(objEntry.rsi),
+                    band: normalizeRenkoBaseValueString(objEntry.band),
+                    crossMode: normalizeRsiCrossModeValue(objEntry.crossMode),
+                    legSide: normalizeRsiLegSideValue(objEntry.legSide),
+                    rowIndex: normalizeOptionRowIndex("options-scalper", objEntry.rowIndex).toString(),
+                    action: vAction
+                };
+            })
+            .filter((entry): entry is {
+                signal: "upper" | "lower";
+                changedAt: string;
+                price: string;
+                rsi: string;
+                band: string;
+                crossMode: "cross_above" | "cross_below";
+                legSide: "ce" | "pe";
+                rowIndex: string;
+                action: "buy" | "sell";
+            } => Boolean(entry))
+            .slice(0, 20);
+    }
+    return {
+        BTC: normalizeEntries(objValue.BTC),
+        ETH: normalizeEntries(objValue.ETH)
+    };
+}
+
+type OptionsDemoRsiSignal = "upper" | "lower";
+type OptionsDemoRsiRuntimeState = {
+    prices: number[];
+    lastPrice: number | null;
+    lastRsi: number | null;
+    timeframe: string;
+    sampleCount: number;
+    historyKey?: string;
+    lastSampleAt?: string;
+};
+
+function getDefaultOptionsDemoRsiRuntimeState(): OptionsDemoRsiRuntimeState {
+    return {
+        prices: [],
+        lastPrice: null,
+        lastRsi: null,
+        timeframe: "5m",
+        sampleCount: 0,
+        historyKey: "",
+        lastSampleAt: ""
+    };
+}
+
+function normalizeOptionsDemoRsiRuntimeState(pValue: unknown): OptionsDemoRsiRuntimeState {
+    const objValue = pValue && typeof pValue === "object" ? pValue as Record<string, unknown> : {};
+    const objPrices = Array.isArray(objValue.prices) ? objValue.prices : [];
+    const arrPrices = objPrices
+        .map((pEntry) => Number(pEntry))
+        .filter((pPrice) => Number.isFinite(pPrice) && pPrice > 0)
+        .map((pPrice) => Number(pPrice.toFixed(2)))
+        .slice(-500);
+    const vLastPrice = Number(objValue.lastPrice);
+    const vLastRsi = Number(objValue.lastRsi);
+    const vSampleCount = Math.max(0, Math.floor(Number(objValue.sampleCount || 0)));
+    return {
+        prices: arrPrices,
+        lastPrice: Number.isFinite(vLastPrice) && vLastPrice > 0 ? Number(vLastPrice.toFixed(2)) : null,
+        lastRsi: Number.isFinite(vLastRsi) && vLastRsi >= 0 ? Number(vLastRsi.toFixed(2)) : null,
+        timeframe: normalizeRsiTimeframeValue(objValue.timeframe || "5m"),
+        sampleCount: vSampleCount,
+        historyKey: String(objValue.historyKey || "").trim(),
+        lastSampleAt: String(objValue.lastSampleAt || "").trim()
+    };
+}
+
+function getRsiSampleIntervalSeconds(pTimeframe: string): number {
+    const vTimeframe = normalizeRsiTimeframeValue(pTimeframe);
+    if (vTimeframe === "5s") {
+        return 5;
+    }
+    if (vTimeframe === "1m") {
+        return 60;
+    }
+    if (vTimeframe === "3m") {
+        return 180;
+    }
+    if (vTimeframe === "5m") {
+        return 300;
+    }
+    if (vTimeframe === "15m") {
+        return 900;
+    }
+    if (vTimeframe === "30m") {
+        return 1800;
+    }
+    return 3600;
+}
+
+function calculateRsiFromPrices(pPrices: number[], pLength: number): number | null {
+    const vLength = Math.max(2, Math.floor(Number(pLength || 0)));
+    const arrPrices = (Array.isArray(pPrices) ? pPrices : [])
+        .map((pPrice) => Number(pPrice))
+        .filter((pPrice) => Number.isFinite(pPrice) && pPrice > 0);
+    if (arrPrices.length < vLength + 1) {
+        return null;
+    }
+    const arrRelevant = arrPrices.slice(-(vLength + 1));
+    let vGain = 0;
+    let vLoss = 0;
+    for (let vIndex = 1; vIndex < arrRelevant.length; vIndex += 1) {
+        const vChange = arrRelevant[vIndex] - arrRelevant[vIndex - 1];
+        if (vChange >= 0) {
+            vGain += vChange;
+        }
+        else {
+            vLoss += Math.abs(vChange);
+        }
+    }
+    const vAvgGain = vGain / vLength;
+    const vAvgLoss = vLoss / vLength;
+    if (vAvgLoss === 0) {
+        return 100;
+    }
+    const vRs = vAvgGain / vAvgLoss;
+    return Number((100 - (100 / (1 + vRs))).toFixed(2));
+}
+
+function buildOptionsDemoRsiHistoryKey(
+    pSymbol: "BTC" | "ETH",
+    pUiState: Record<string, unknown>
+): string {
+    return [
+        pSymbol,
+        normalizeRsiTimeframeValue(pUiState.rsiTimeframe || "5m"),
+        normalizeRsiLengthString(pUiState.rsiLength || 14),
+        normalizeRsiBandValueString(pUiState.rsiUpperBand || 70, 70),
+        normalizeRsiBandValueString(pUiState.rsiLowerBand || 30, 30),
+        normalizeRsiCrossModeValue(pUiState.rsiUpperCrossMode || "cross_above"),
+        normalizeRsiCrossModeValue(pUiState.rsiLowerCrossMode || "cross_below"),
+        normalizeRsiLegSideValue(pUiState.rsiUpperLegSide || "ce"),
+        normalizeRsiLegSideValue(pUiState.rsiLowerLegSide || "pe")
+    ].join("|");
+}
+
+function resolveOptionsDemoRsiSourcePrice(
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null | undefined
+): number {
+    const vSpotPrice = Number(pSnapshot?.spotPrice);
+    const vMarkPrice = Number(pSnapshot?.futuresPrice);
+    if (Number.isFinite(vSpotPrice) && vSpotPrice > 0) {
+        return Number(vSpotPrice.toFixed(2));
+    }
+    if (Number.isFinite(vMarkPrice) && vMarkPrice > 0) {
+        return Number(vMarkPrice.toFixed(2));
+    }
+    return Number.NaN;
+}
+
 type OptionsDemoRenkoSignal = "R" | "G";
 type OptionsDemoRenkoRuntimeState = {
     anchor: number | null;
@@ -1747,6 +2017,15 @@ type OptionsDemoRenkoRuntimeState = {
     historySyncedAt?: string;
     historyCandleCount?: number;
     manualPriceResetToken?: string;
+};
+
+type OptionsScalperEmaRuntimeEntry = {
+    emaValue: number | null;
+    lastPrice: number | null;
+    lastSide: "above" | "below" | "equal" | "";
+    length: number;
+    updatedAt: string;
+    lastSignalAt: string;
 };
 
 function getDefaultOptionsDemoRenkoRuntimeState(): OptionsDemoRenkoRuntimeState {
@@ -1789,6 +2068,117 @@ function normalizeOptionsDemoRenkoRuntimeState(pValue: unknown): OptionsDemoRenk
         historySyncedAt: String(objValue.historySyncedAt || "").trim(),
         historyCandleCount: vHistoryCandleCount,
         manualPriceResetToken: normalizeRenkoFeedManualPriceResetTokenString(objValue.manualPriceResetToken || objDefaults.manualPriceResetToken)
+    };
+}
+
+function getDefaultOptionsScalperEmaRuntimeEntry(): OptionsScalperEmaRuntimeEntry {
+    return {
+        emaValue: null,
+        lastPrice: null,
+        lastSide: "",
+        length: 20,
+        updatedAt: "",
+        lastSignalAt: ""
+    };
+}
+
+function normalizeOptionsScalperEmaRuntimeValues(pValue: unknown): {
+    BTC: OptionsScalperEmaRuntimeEntry;
+    ETH: OptionsScalperEmaRuntimeEntry;
+} {
+    const objValue = pValue && typeof pValue === "object" ? pValue as Record<string, unknown> : {};
+    function normalizeEntry(pEntry: unknown): OptionsScalperEmaRuntimeEntry {
+        const objEntry = pEntry && typeof pEntry === "object" ? pEntry as Record<string, unknown> : {};
+        const vEmaValue = Number(objEntry.emaValue);
+        const vLastPrice = Number(objEntry.lastPrice);
+        const vLength = Math.max(1, Math.floor(Number(objEntry.length || 20) || 20));
+        return {
+            emaValue: Number.isFinite(vEmaValue) && vEmaValue > 0 ? Number(vEmaValue.toFixed(2)) : null,
+            lastPrice: Number.isFinite(vLastPrice) && vLastPrice > 0 ? Number(vLastPrice.toFixed(2)) : null,
+            lastSide: String(objEntry.lastSide || "").trim().toLowerCase() === "above"
+                ? "above"
+                : (String(objEntry.lastSide || "").trim().toLowerCase() === "below" ? "below" : (String(objEntry.lastSide || "").trim().toLowerCase() === "equal" ? "equal" : "")),
+            length: Math.min(1000, vLength),
+            updatedAt: String(objEntry.updatedAt || "").trim(),
+            lastSignalAt: String(objEntry.lastSignalAt || "").trim()
+        };
+    }
+    return {
+        BTC: normalizeEntry(objValue.BTC),
+        ETH: normalizeEntry(objValue.ETH)
+    };
+}
+
+function updateOptionsScalperEmaRuntimeState(
+    pExistingState: unknown,
+    pUiState: Record<string, unknown>,
+    pClosePrice: number | null,
+    pSymbol: "BTC" | "ETH",
+    pHasBoxClose: boolean
+): {
+    emaBySymbol: {
+        BTC: OptionsScalperEmaRuntimeEntry;
+        ETH: OptionsScalperEmaRuntimeEntry;
+    };
+    emaSignal: OptionsDemoRenkoSignal | "";
+} {
+    const objDefaults = {
+        BTC: getDefaultOptionsScalperEmaRuntimeEntry(),
+        ETH: getDefaultOptionsScalperEmaRuntimeEntry()
+    };
+    const objExisting = pExistingState && typeof pExistingState === "object"
+        ? pExistingState as Record<string, unknown>
+        : {};
+    const objStored = normalizeOptionsScalperEmaRuntimeValues(
+        objExisting.optionsScalperEmaBySymbol ?? objExisting.emaBySymbol ?? objDefaults
+    );
+    const vSymbol = pSymbol === "ETH" ? "ETH" : "BTC";
+    const bEnabled = normalizeBooleanValue(pUiState.renkoEmaEnabled, false);
+    const vLength = Math.max(1, Math.floor(Number(pUiState.renkoEmaLength || 20) || 20));
+    const vPrice = Number(pClosePrice);
+    const objCurrent = {
+        ...objStored[vSymbol],
+        length: Math.min(1000, vLength)
+    };
+    if (!bEnabled || !pHasBoxClose || !Number.isFinite(vPrice) || !(vPrice > 0)) {
+        return {
+            emaBySymbol: objStored,
+            emaSignal: ""
+        };
+    }
+    const vPreviousEma = Number(objCurrent.emaValue || 0);
+    const vPreviousPrice = Number(objCurrent.lastPrice || 0);
+    if (!(vPreviousEma > 0) || !(vPreviousPrice > 0) || objCurrent.length !== vLength) {
+        objCurrent.emaValue = Number(vPrice.toFixed(2));
+        objCurrent.lastPrice = Number(vPrice.toFixed(2));
+        objCurrent.lastSide = "equal";
+        objCurrent.length = vLength;
+        objCurrent.updatedAt = new Date().toISOString();
+        objCurrent.lastSignalAt = "";
+        objStored[vSymbol] = objCurrent;
+        return {
+            emaBySymbol: objStored,
+            emaSignal: ""
+        };
+    }
+    const vPreviousSide = vPreviousPrice > vPreviousEma ? "above" : (vPreviousPrice < vPreviousEma ? "below" : "equal");
+    const vCurrentSide = vPrice > vPreviousEma ? "above" : (vPrice < vPreviousEma ? "below" : "equal");
+    const vSmoothing = 2 / (vLength + 1);
+    const vNextEma = Number((vPreviousEma + ((vPrice - vPreviousEma) * vSmoothing)).toFixed(2));
+    let vSignal: OptionsDemoRenkoSignal | "" = "";
+    if (vPreviousSide !== "equal" && vCurrentSide !== "equal" && vPreviousSide !== vCurrentSide) {
+        vSignal = vCurrentSide === "above" ? "G" : "R";
+        objCurrent.lastSignalAt = new Date().toISOString();
+    }
+    objCurrent.emaValue = vNextEma;
+    objCurrent.lastPrice = Number(vPrice.toFixed(2));
+    objCurrent.lastSide = vCurrentSide;
+    objCurrent.length = vLength;
+    objCurrent.updatedAt = new Date().toISOString();
+    objStored[vSymbol] = objCurrent;
+    return {
+        emaBySymbol: objStored,
+        emaSignal: vSignal
     };
 }
 
@@ -2197,8 +2587,18 @@ function getDefaultManualTraderUiState(
         renkoFeedPriceSrc: "spot_price",
         renkoEmaEnabled: false,
         renkoEmaLength: "20",
-        renkoEmaFilterEnabled: false,
         renkoEmaValuesBySymbol: { BTC: "", ETH: "" },
+        emaHistoryBySymbol: { BTC: [], ETH: [] },
+        rsiEnabled: false,
+        rsiTimeframe: "5m",
+        rsiLength: "14",
+        rsiUpperBand: "70",
+        rsiUpperCrossMode: "cross_above",
+        rsiUpperLegSide: "ce",
+        rsiLowerBand: "30",
+        rsiLowerCrossMode: "cross_below",
+        rsiLowerLegSide: "pe",
+        rsiHistoryBySymbol: { BTC: [], ETH: [] },
         renkoStateBySymbol: {
             BTC: { referencePrice: "", lastColor: "neutral" as const },
             ETH: { referencePrice: "", lastColor: "neutral" as const }
@@ -4150,6 +4550,8 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
     const objRenkoEmaValuesBySymbol = normalizeRenkoEmaValues(objUiState.renkoEmaValuesBySymbol ?? objDefaults.renkoEmaValuesBySymbol);
     const objRenkoStateBySymbol = normalizeRenkoStateValues(objUiState.renkoStateBySymbol ?? objDefaults.renkoStateBySymbol);
     const objRenkoHistoryBySymbol = normalizeRenkoHistoryValues(objUiState.renkoHistoryBySymbol ?? objDefaults.renkoHistoryBySymbol);
+    const objEmaHistoryBySymbol = normalizeEmaHistoryValues(objUiState.emaHistoryBySymbol ?? objDefaults.emaHistoryBySymbol);
+    const objRsiHistoryBySymbol = normalizeRsiHistoryValues(objUiState.rsiHistoryBySymbol ?? objDefaults.rsiHistoryBySymbol);
     if (!objRenkoBaseValues[vSymbol]) {
         objRenkoBaseValues[vSymbol] = normalizeRenkoBaseValueString(objUiState.renkoBaseValue ?? "");
     }
@@ -4246,9 +4648,6 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         renkoEmaLength: supportsRenkoFeedStrategy(pProfile.strategyCode)
             ? normalizeRenkoEmaLengthString(objUiState.renkoEmaLength ?? objDefaults.renkoEmaLength)
             : "20",
-        renkoEmaFilterEnabled: supportsRenkoFeedStrategy(pProfile.strategyCode)
-            ? normalizeBooleanValue(objUiState.renkoEmaFilterEnabled, Boolean(objDefaults.renkoEmaFilterEnabled))
-            : false,
         renkoEmaValuesBySymbol: supportsRenkoFeedStrategy(pProfile.strategyCode)
             ? objRenkoEmaValuesBySymbol
             : { BTC: "", ETH: "" },
@@ -4561,6 +4960,8 @@ function normalizeProfileSaveInput(
     const objRenkoEmaValuesBySymbol = normalizeRenkoEmaValues(objUiState.renkoEmaValuesBySymbol ?? objDefaults.renkoEmaValuesBySymbol);
     const objRenkoStateBySymbol = normalizeRenkoStateValues(objUiState.renkoStateBySymbol ?? objDefaults.renkoStateBySymbol);
     const objRenkoHistoryBySymbol = normalizeRenkoHistoryValues(objUiState.renkoHistoryBySymbol ?? objDefaults.renkoHistoryBySymbol);
+    const objEmaHistoryBySymbol = normalizeEmaHistoryValues(objUiState.emaHistoryBySymbol ?? objDefaults.emaHistoryBySymbol);
+    const objRsiHistoryBySymbol = normalizeRsiHistoryValues(objUiState.rsiHistoryBySymbol ?? objDefaults.rsiHistoryBySymbol);
     if (!objRenkoBaseValues[vSymbol]) {
         objRenkoBaseValues[vSymbol] = normalizeRenkoBaseValueString(objUiState.renkoBaseValue ?? "");
     }
@@ -4657,12 +5058,42 @@ function normalizeProfileSaveInput(
         renkoEmaLength: supportsRenkoFeedStrategy(pStrategyCode)
             ? normalizeRenkoEmaLengthString(objUiState.renkoEmaLength ?? objDefaults.renkoEmaLength)
             : "20",
-        renkoEmaFilterEnabled: supportsRenkoFeedStrategy(pStrategyCode)
-            ? normalizeBooleanValue(objUiState.renkoEmaFilterEnabled, Boolean(objDefaults.renkoEmaFilterEnabled))
-            : false,
         renkoEmaValuesBySymbol: supportsRenkoFeedStrategy(pStrategyCode)
             ? objRenkoEmaValuesBySymbol
             : { BTC: "", ETH: "" },
+        emaHistoryBySymbol: supportsRenkoFeedStrategy(pStrategyCode)
+            ? objEmaHistoryBySymbol
+            : { BTC: [], ETH: [] },
+        rsiEnabled: isOptionsScalperStrategy(pStrategyCode)
+            ? normalizeBooleanValue(objUiState.rsiEnabled, Boolean(objDefaults.rsiEnabled))
+            : false,
+        rsiTimeframe: isOptionsScalperStrategy(pStrategyCode)
+            ? normalizeRsiTimeframeValue(objUiState.rsiTimeframe ?? objDefaults.rsiTimeframe)
+            : "5m",
+        rsiLength: isOptionsScalperStrategy(pStrategyCode)
+            ? normalizeRsiLengthString(objUiState.rsiLength ?? objDefaults.rsiLength)
+            : "14",
+        rsiUpperBand: isOptionsScalperStrategy(pStrategyCode)
+            ? normalizeRsiBandValueString(objUiState.rsiUpperBand ?? objDefaults.rsiUpperBand, 70)
+            : "70",
+        rsiUpperCrossMode: isOptionsScalperStrategy(pStrategyCode)
+            ? normalizeRsiCrossModeValue(objUiState.rsiUpperCrossMode ?? objDefaults.rsiUpperCrossMode)
+            : "cross_above",
+        rsiUpperLegSide: isOptionsScalperStrategy(pStrategyCode)
+            ? normalizeRsiLegSideValue(objUiState.rsiUpperLegSide ?? objDefaults.rsiUpperLegSide)
+            : "ce",
+        rsiLowerBand: isOptionsScalperStrategy(pStrategyCode)
+            ? normalizeRsiBandValueString(objUiState.rsiLowerBand ?? objDefaults.rsiLowerBand, 30)
+            : "30",
+        rsiLowerCrossMode: isOptionsScalperStrategy(pStrategyCode)
+            ? normalizeRsiCrossModeValue(objUiState.rsiLowerCrossMode ?? objDefaults.rsiLowerCrossMode)
+            : "cross_below",
+        rsiLowerLegSide: isOptionsScalperStrategy(pStrategyCode)
+            ? normalizeRsiLegSideValue(objUiState.rsiLowerLegSide ?? objDefaults.rsiLowerLegSide)
+            : "pe",
+        rsiHistoryBySymbol: isOptionsScalperStrategy(pStrategyCode)
+            ? objRsiHistoryBySymbol
+            : { BTC: [], ETH: [] },
         renkoStateBySymbol: supportsRenkoFeedStrategy(pStrategyCode)
             ? objRenkoStateBySymbol
             : {
@@ -10903,6 +11334,25 @@ function appendOptionsDemoRenkoHistoryEntry(
     }, ...pHistory].slice(0, 20);
 }
 
+function appendOptionsScalperEmaHistoryEntry(
+    pHistory: Record<string, unknown>[],
+    pEntry: {
+        state: "above" | "below";
+        changedAt: string;
+        price: string;
+        emaValue: string;
+        length: string;
+    }
+): Record<string, unknown>[] {
+    return [{
+        state: pEntry.state,
+        changedAt: pEntry.changedAt,
+        price: pEntry.price,
+        emaValue: pEntry.emaValue,
+        length: pEntry.length
+    }, ...pHistory].slice(0, 20);
+}
+
 async function syncOptionsDemoRenkoRuntimeState(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -10920,13 +11370,15 @@ async function syncOptionsDemoRenkoRuntimeState(
     profile: RollingFuturesLtProfileRecord;
     renko: OptionsDemoRenkoRuntimeState;
     signals: OptionsDemoRenkoSignal[];
+    emaSignal: OptionsDemoRenkoSignal | "";
 }> {
     if (!isOptionsScalperStrategy(pStrategyCode)) {
         return {
             runtime: pRuntime,
             profile: pProfile,
             renko: getDefaultOptionsDemoRenkoRuntimeState(),
-            signals: []
+            signals: [],
+            emaSignal: ""
         };
     }
 
@@ -10938,16 +11390,28 @@ async function syncOptionsDemoRenkoRuntimeState(
         objRenkoResult.renko.lastColor = pManualSignal;
         objRenkoResult.renko.lastDir = pManualSignal === "G" ? 1 : -1;
     }
+    const objEmaResult = updateOptionsScalperEmaRuntimeState(
+        objRuntime?.state || {},
+        objUiState,
+        Number.isFinite(Number(objRenkoResult.renko.anchor)) && Number(objRenkoResult.renko.anchor) > 0
+            ? Number(objRenkoResult.renko.anchor)
+            : objRenkoResult.sourcePrice,
+        vSelectedSymbol,
+        Boolean(objRenkoResult.signals.length) || pManualSignal === "R" || pManualSignal === "G"
+    );
     const objRuntimeState = {
         ...((objRuntime?.state || {}) as Record<string, unknown>),
         renko: {
             ...objRenkoResult.renko,
             manualSignal: pManualSignal || undefined
-        }
+        },
+        optionsScalperEmaBySymbol: objEmaResult.emaBySymbol
     };
     let objNextProfile = pProfile;
     const objExistingHistory = normalizeRenkoHistoryValues(objUiState.renkoHistoryBySymbol);
+    const objExistingEmaHistory = normalizeEmaHistoryValues(objUiState.emaHistoryBySymbol);
     const objCurrentHistory = Array.isArray(objExistingHistory[vSelectedSymbol]) ? [...objExistingHistory[vSelectedSymbol]] : [];
+    const objCurrentEmaHistory = Array.isArray(objExistingEmaHistory[vSelectedSymbol]) ? [...objExistingEmaHistory[vSelectedSymbol]] : [];
     const arrHistorySignals = [...objRenkoResult.signals];
     if (pManualSignal === "R" || pManualSignal === "G") {
         arrHistorySignals.push(pManualSignal);
@@ -10965,11 +11429,26 @@ async function syncOptionsDemoRenkoRuntimeState(
             anchorPrice: vAnchorPrice,
             pointSize: vPointSize
         });
+        const objNextEmaHistory = objEmaResult.emaSignal
+            ? appendOptionsScalperEmaHistoryEntry(objCurrentEmaHistory as Record<string, unknown>[], {
+                state: objEmaResult.emaSignal === "G" ? "above" : "below",
+                changedAt: new Date().toISOString(),
+                price: normalizeRenkoBaseValueString(objRenkoResult.sourcePrice),
+                emaValue: normalizeRenkoBaseValueString(
+                    normalizeOptionsScalperEmaRuntimeValues(objRuntimeState.optionsScalperEmaBySymbol)[vSelectedSymbol].emaValue
+                ),
+                length: normalizeRenkoEmaLengthString(objUiState.renkoEmaLength || 20)
+            })
+            : objCurrentEmaHistory;
         const objNextUiState = {
             ...objUiState,
             renkoHistoryBySymbol: {
                 ...objExistingHistory,
                 [vSelectedSymbol]: objNextHistory
+            },
+            emaHistoryBySymbol: {
+                ...objExistingEmaHistory,
+                [vSelectedSymbol]: objNextEmaHistory
             }
         };
         objNextProfile = await saveRollingFuturesLtProfile(normalizeProfileSaveInput(pUserId, pStrategyCode, {
@@ -10992,7 +11471,8 @@ async function syncOptionsDemoRenkoRuntimeState(
         runtime: objSavedRuntime,
         profile: objNextProfile,
         renko: objRenkoResult.renko,
-        signals: arrHistorySignals
+        signals: arrHistorySignals,
+        emaSignal: objEmaResult.emaSignal
     };
 }
 
@@ -11010,6 +11490,7 @@ export async function syncOptionsScalperRenkoRuntimeState(
     profile: RollingFuturesLtProfileRecord;
     renko: OptionsDemoRenkoRuntimeState;
     signals: OptionsDemoRenkoSignal[];
+    emaSignal: OptionsDemoRenkoSignal | "";
 }> {
     const objProfile = await readLiveProfile(pUserId, "options-scalper");
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
@@ -11091,6 +11572,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
     profile: RollingFuturesLtProfileRecord;
     renko: OptionsDemoRenkoRuntimeState;
     signals: OptionsDemoRenkoSignal[];
+    emaSignal: OptionsDemoRenkoSignal | "";
     autoTrade: null | {
         status: "success" | "warning" | "danger";
         message: string;
@@ -11099,7 +11581,6 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
 }> {
     const objProfile = await readLiveProfile(pUserId, "options-scalper");
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
-    const vPreviousColor = normalizeOptionsDemoRenkoRuntimeState((objRuntime?.state || {}) as Record<string, unknown>).lastColor;
     const objSync = await syncOptionsDemoRenkoRuntimeState(
         pUserId,
         "options-scalper",
@@ -11108,14 +11589,11 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
         pSnapshot,
         pManualSignal
     );
-    const vNextColor = String(objSync.renko.lastColor || "").trim().toUpperCase();
     const objUiState = getMergedUiState(objSync.profile);
-    const bFirstSignalOnly = normalizeBooleanValue(objUiState.renkoFirstSignalOnlyEnabled, true);
+    const bEmaEnabled = normalizeBooleanValue(objUiState.renkoEmaEnabled, false);
     const bShouldAttemptAutoTrade = (pManualSignal === "R" || pManualSignal === "G")
         ? true
-        : (bFirstSignalOnly
-            ? (Boolean(objSync.signals.length) && Boolean(vNextColor) && vNextColor !== vPreviousColor)
-            : Boolean(objSync.signals.length));
+        : (bEmaEnabled && Boolean(objSync.emaSignal));
     if (!bShouldAttemptAutoTrade) {
         return {
             ...objSync,
@@ -11129,57 +11607,14 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
             ...objSync,
             autoTrade: {
                 status: "warning",
-                message: "Turn Auto Trader ON before Delta Renko signals can place paper option orders."
+                message: "Turn Auto Trader ON before EMA crossover signals can place paper option orders."
             }
         };
     }
 
     const vSignal = pManualSignal === "R" || pManualSignal === "G"
         ? pManualSignal
-        : (vNextColor === "R" || vNextColor === "G" ? vNextColor as OptionsDemoRenkoSignal : "");
-    const bRenkoEmaEnabled = normalizeBooleanValue(objUiState.renkoEmaEnabled, false);
-    const bRenkoEmaFilterEnabled = normalizeBooleanValue(objUiState.renkoEmaFilterEnabled, false);
-    if (bRenkoEmaFilterEnabled) {
-        const vLivePrice = Number(pSnapshot?.spotPrice || pSnapshot?.futuresPrice || pSnapshot?.bestBidPrice || pSnapshot?.bestAskPrice || 0);
-        if (!bRenkoEmaEnabled) {
-            return {
-                ...objSync,
-                autoTrade: {
-                    status: "warning",
-                    message: "Skipped Renko auto trade because EMA Filter is ON but EMA is disabled."
-                }
-            };
-        }
-        const objRenkoEmaValuesBySymbol = normalizeRenkoEmaValues(objUiState.renkoEmaValuesBySymbol || {});
-        const vEmaValue = Number(objRenkoEmaValuesBySymbol[normalizeSymbolValue(objUiState.symbol)] || 0);
-        if (!(vLivePrice > 0) || !(vEmaValue > 0)) {
-            return {
-                ...objSync,
-                autoTrade: {
-                    status: "warning",
-                    message: "Skipped Renko auto trade because EMA Filter is ON but EMA is not ready yet."
-                }
-            };
-        }
-        if (vSignal === "G" && !(vLivePrice > vEmaValue)) {
-            return {
-                ...objSync,
-                autoTrade: {
-                    status: "warning",
-                    message: `Skipped Renko GREEN auto trade because price ${vLivePrice.toFixed(2)} is not above EMA ${vEmaValue.toFixed(2)}.`
-                }
-            };
-        }
-        if (vSignal === "R" && !(vLivePrice < vEmaValue)) {
-            return {
-                ...objSync,
-                autoTrade: {
-                    status: "warning",
-                    message: `Skipped Renko RED auto trade because price ${vLivePrice.toFixed(2)} is not below EMA ${vEmaValue.toFixed(2)}.`
-                }
-            };
-        }
-    }
+        : (objSync.emaSignal === "R" || objSync.emaSignal === "G" ? objSync.emaSignal : "");
     if (!vSignal) {
         return {
             ...objSync,
@@ -11189,15 +11624,13 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
 
     const arrSignalsToProcess = (pManualSignal === "R" || pManualSignal === "G")
         ? [pManualSignal]
-        : (bFirstSignalOnly
-            ? [vSignal as OptionsDemoRenkoSignal]
-            : [...objSync.signals]);
+        : [vSignal as OptionsDemoRenkoSignal];
     if (!arrSignalsToProcess.length) {
         return {
             ...objSync,
             autoTrade: {
                 status: "warning",
-                message: "No Delta Renko trade signal was available to process."
+                message: "No EMA crossover signal was available to process."
             }
         };
     }
@@ -11208,7 +11641,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
             ...objSync,
             autoTrade: {
                 status: "warning",
-                message: "A Delta Renko paper auto trade is already being processed. Please wait for the current signal to finish."
+                message: "An EMA crossover paper auto trade is already being processed. Please wait for the current signal to finish."
             }
         };
     }
@@ -11269,7 +11702,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
                 ...objSync,
                 autoTrade: {
                     status: "warning",
-                    message: `Delta Renko signal${arrSignalsToProcess.length === 1 ? "" : "s"} were received, but no paper option order could be placed from the current Manual Trader settings.`
+                    message: `EMA crossover signal${arrSignalsToProcess.length === 1 ? "" : "s"} were received, but no paper option order could be placed from the current Manual Trader settings.`
                 }
             };
         }
@@ -11277,9 +11710,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
             ...objSync,
             autoTrade: {
                 status: "success",
-                message: bFirstSignalOnly
-                    ? `${vSignal === "G" ? "Green" : "Red"} signal opened a ${vSignal === "G" ? "GREEN" : "RED"} paper option from row ${vSignal === "G" ? 1 : 2}.`
-                    : `Delta Renko placed ${vOpenedCount} paper option order${vOpenedCount === 1 ? "" : "s"} from the latest box signals.`,
+                message: `${vSignal === "G" ? "Green" : "Red"} EMA crossover opened a ${vSignal === "G" ? "GREEN" : "RED"} paper option from row ${vSignal === "G" ? 1 : 2}.`,
                 trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrCurrentTrackedPositions)
             }
         };
@@ -11289,7 +11720,438 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
             ...objSync,
             autoTrade: {
                 status: getErrorMessage(objError, "").includes("already active") ? "warning" : "danger",
-                message: getErrorMessage(objError, "Unable to place Delta Renko paper auto trade.")
+                message: getErrorMessage(objError, "Unable to place EMA crossover paper auto trade.")
+            }
+        };
+    }
+    finally {
+        gOptionsScalperRenkoAutoTradeLocks.delete(vLockKey);
+    }
+}
+
+function getOptionsScalperRsiAutoTradeLockKey(pUserId: string): string {
+    return `${getManualFutureOrderLockKey(pUserId, "options-scalper")}::delta-rsi-auto-trade`;
+}
+
+function appendOptionsDemoRsiHistoryEntry(
+    pHistory: Record<string, unknown>[],
+    pEntry: {
+        signal: OptionsDemoRsiSignal;
+        changedAt: string;
+        price: string;
+        rsi: string;
+        band: string;
+        crossMode: "cross_above" | "cross_below";
+        legSide: "ce" | "pe";
+        rowIndex: 1 | 2;
+        action: "buy" | "sell";
+    }
+): Record<string, unknown>[] {
+    return [{
+        signal: pEntry.signal,
+        changedAt: pEntry.changedAt,
+        price: pEntry.price,
+        rsi: pEntry.rsi,
+        band: pEntry.band,
+        crossMode: pEntry.crossMode,
+        legSide: pEntry.legSide,
+        rowIndex: String(pEntry.rowIndex),
+        action: pEntry.action
+    }, ...pHistory].slice(0, 20);
+}
+
+function resolveOptionsScalperRsiAutoTradeInput(
+    pProfile: RollingFuturesLtProfileRecord,
+    pSignal: OptionsDemoRsiSignal,
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
+): {
+    rowIndex: 1 | 2;
+    action: "buy" | "sell";
+    legSide: "ce" | "pe";
+    symbol: "BTC" | "ETH";
+    expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
+    expiryDate: string;
+    qty: number;
+    targetDelta: number;
+    takeProfitDelta: number;
+    stopLossDelta: number;
+} | null {
+    const objUiState = getMergedUiState(pProfile);
+    const vSymbol = normalizeSymbolValue(objUiState.symbol);
+    const vRowIndex = pSignal === "upper" ? 1 : 2;
+    const objRowState = getNormalizedOptionRowUiState(objUiState, "options-scalper", vRowIndex);
+    if (objRowState.legs === "both") {
+        return null;
+    }
+    const vBandLeg = pSignal === "upper"
+        ? normalizeRsiLegSideValue(objUiState.rsiUpperLegSide || "ce")
+        : normalizeRsiLegSideValue(objUiState.rsiLowerLegSide || "pe");
+    let vLegSide: "ce" | "pe" = vBandLeg;
+    if (normalizeBooleanValue(objUiState.placeOppositeTrades, false)) {
+        vLegSide = vLegSide === "pe" ? "ce" : "pe";
+    }
+    const vExpiryMode = (["1", "2", "4", "5", "6", "7"].includes(String(objRowState.expiryMode || "5").trim())
+        ? String(objRowState.expiryMode || "5").trim()
+        : "5") as "1" | "2" | "4" | "5" | "6" | "7";
+    const vTargetDelta = Math.max(0, Number(objRowState.newD || 0));
+    if (!(vTargetDelta > 0)) {
+        return null;
+    }
+    return {
+        rowIndex: vRowIndex,
+        action: objRowState.action === "buy" ? "buy" : "sell",
+        legSide: vLegSide,
+        symbol: vSymbol,
+        expiryMode: vExpiryMode,
+        expiryDate: String(objRowState.expiryDate || "").trim(),
+        qty: resolveOptionsScalperIncrementedQty(
+            pTrackedPositions,
+            objUiState,
+            {
+                symbol: vSymbol,
+                legSide: vLegSide,
+                action: objRowState.action === "buy" ? "buy" : "sell",
+                qty: Math.max(1, Math.floor(Number(objRowState.qty || 1)))
+            }
+        ),
+        targetDelta: vTargetDelta,
+        takeProfitDelta: Math.max(0, Number(objRowState.tpD || 0)),
+        stopLossDelta: Math.max(0, Number(objRowState.slD || 0))
+    };
+}
+
+async function syncOptionsDemoRsiRuntimeState(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pProfile: RollingFuturesLtProfileRecord,
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null
+): Promise<{
+    runtime: RollingFuturesLtRuntimeRecord | null;
+    profile: RollingFuturesLtProfileRecord;
+    rsi: OptionsDemoRsiRuntimeState;
+    signals: OptionsDemoRsiSignal[];
+    sourcePrice: number | null;
+    isEnabled: boolean;
+}> {
+    if (!isOptionsScalperStrategy(pStrategyCode)) {
+        return {
+            runtime: pRuntime,
+            profile: pProfile,
+            rsi: getDefaultOptionsDemoRsiRuntimeState(),
+            signals: [],
+            sourcePrice: null,
+            isEnabled: false
+        };
+    }
+
+    const objUiState = getMergedUiState(pProfile);
+    const objRuntime = pRuntime || await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
+    const objExistingState = normalizeOptionsDemoRsiRuntimeState((objRuntime?.state || {}) as Record<string, unknown>);
+    const bEnabled = normalizeBooleanValue(objUiState.rsiEnabled, false);
+    const vTimeframe = normalizeRsiTimeframeValue(objUiState.rsiTimeframe ?? objExistingState.timeframe);
+    const vHistoryKey = buildOptionsDemoRsiHistoryKey(vSelectedSymbol, {
+        rsiTimeframe: vTimeframe,
+        rsiLength: objUiState.rsiLength,
+        rsiUpperBand: objUiState.rsiUpperBand,
+        rsiUpperCrossMode: objUiState.rsiUpperCrossMode,
+        rsiUpperLegSide: objUiState.rsiUpperLegSide,
+        rsiLowerBand: objUiState.rsiLowerBand,
+        rsiLowerCrossMode: objUiState.rsiLowerCrossMode,
+        rsiLowerLegSide: objUiState.rsiLowerLegSide
+    });
+    const vSourcePriceRaw = resolveOptionsDemoRsiSourcePrice(pSnapshot);
+    const vSourcePrice = Number.isFinite(vSourcePriceRaw) && vSourcePriceRaw > 0 ? Number(vSourcePriceRaw.toFixed(2)) : null;
+    const vNow = Date.now();
+    const vSampleIntervalMs = getRsiSampleIntervalSeconds(vTimeframe) * 1000;
+    const vLength = Math.max(2, Math.floor(Number(objUiState.rsiLength || 14)));
+    const objNextRsi: OptionsDemoRsiRuntimeState = {
+        ...objExistingState,
+        timeframe: vTimeframe,
+        historyKey: vHistoryKey,
+        lastPrice: vSourcePrice ?? objExistingState.lastPrice,
+        prices: Array.isArray(objExistingState.prices) ? [...objExistingState.prices] : [],
+        sampleCount: Math.max(0, Math.floor(Number(objExistingState.sampleCount || 0)))
+    };
+    const arrSignals: OptionsDemoRsiSignal[] = [];
+    let objNextProfile = pProfile;
+    const objExistingHistory = normalizeRsiHistoryValues(objUiState.rsiHistoryBySymbol);
+    const objCurrentHistory = Array.isArray(objExistingHistory[vSelectedSymbol]) ? [...objExistingHistory[vSelectedSymbol]] : [];
+    const vPreviousSampleAtMs = objNextRsi.lastSampleAt ? new Date(objNextRsi.lastSampleAt).getTime() : 0;
+    const bCanSample = !vPreviousSampleAtMs || !(Number.isFinite(vPreviousSampleAtMs)) || (vNow - vPreviousSampleAtMs) >= Math.max(1000, vSampleIntervalMs * 0.8);
+    async function persistRsiState(): Promise<{
+        runtime: RollingFuturesLtRuntimeRecord | null;
+        profile: RollingFuturesLtProfileRecord;
+        rsi: OptionsDemoRsiRuntimeState;
+        signals: OptionsDemoRsiSignal[];
+        sourcePrice: number | null;
+        isEnabled: boolean;
+    }> {
+        const objSavedRuntime = await saveRollingFuturesLtRuntime({
+            ...(objRuntime || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            currentSymbol: vSelectedSymbol,
+            state: {
+                ...((objRuntime?.state || {}) as Record<string, unknown>),
+                rsi: objNextRsi
+            },
+            lastCycleAt: new Date().toISOString()
+        });
+        return {
+            runtime: objSavedRuntime,
+            profile: objNextProfile,
+            rsi: objNextRsi,
+            signals: arrSignals,
+            sourcePrice: vSourcePrice,
+            isEnabled: bEnabled
+        };
+    }
+
+    if (!bEnabled) {
+        return persistRsiState();
+    }
+
+    if (objNextRsi.historyKey !== vHistoryKey) {
+        objNextRsi.prices = [];
+        objNextRsi.lastRsi = null;
+        objNextRsi.lastSampleAt = "";
+        objNextRsi.sampleCount = 0;
+        if (vSourcePrice && vSourcePrice > 0) {
+            objNextRsi.prices.push(vSourcePrice);
+        }
+    }
+
+    if (!Number.isFinite(vSourcePrice) || !(vSourcePrice && vSourcePrice > 0)) {
+        objNextRsi.lastPrice = vSourcePrice ?? objNextRsi.lastPrice;
+        return persistRsiState();
+    }
+
+    if (bCanSample) {
+        const arrPrices = [...objNextRsi.prices];
+        const vLastPrice = arrPrices[arrPrices.length - 1];
+        if (!Number.isFinite(vLastPrice) || Number(vLastPrice.toFixed(2)) !== Number(vSourcePrice.toFixed(2))) {
+            arrPrices.push(vSourcePrice);
+        }
+        if (arrPrices.length > 500) {
+            arrPrices.splice(0, arrPrices.length - 500);
+        }
+        const vPreviousRsi = Number.isFinite(Number(objNextRsi.lastRsi)) ? Number(objNextRsi.lastRsi) : null;
+        const vCurrentRsi = calculateRsiFromPrices(arrPrices, vLength);
+        objNextRsi.prices = arrPrices;
+        objNextRsi.lastPrice = vSourcePrice;
+        objNextRsi.lastRsi = Number.isFinite(vCurrentRsi as number) ? Number(vCurrentRsi!.toFixed(2)) : objNextRsi.lastRsi;
+        objNextRsi.sampleCount += 1;
+        objNextRsi.lastSampleAt = new Date(vNow).toISOString();
+        if (Number.isFinite(vPreviousRsi) && Number.isFinite(vCurrentRsi)) {
+            const vUpperBand = Number(normalizeRsiBandValueString(objUiState.rsiUpperBand ?? 70, 70));
+            const vLowerBand = Number(normalizeRsiBandValueString(objUiState.rsiLowerBand ?? 30, 30));
+            const vUpperCrossMode = normalizeRsiCrossModeValue(objUiState.rsiUpperCrossMode ?? "cross_above");
+            const vLowerCrossMode = normalizeRsiCrossModeValue(objUiState.rsiLowerCrossMode ?? "cross_below");
+            const bUpperCrossed = vUpperCrossMode === "cross_above"
+                ? (Number(vPreviousRsi) <= vUpperBand && Number(vCurrentRsi) > vUpperBand)
+                : (Number(vPreviousRsi) >= vUpperBand && Number(vCurrentRsi) < vUpperBand);
+            const bLowerCrossed = vLowerCrossMode === "cross_above"
+                ? (Number(vPreviousRsi) <= vLowerBand && Number(vCurrentRsi) > vLowerBand)
+                : (Number(vPreviousRsi) >= vLowerBand && Number(vCurrentRsi) < vLowerBand);
+            if (bUpperCrossed) {
+                arrSignals.push("upper");
+            }
+            if (bLowerCrossed) {
+                arrSignals.push("lower");
+            }
+        }
+    }
+
+    if (arrSignals.length) {
+        const objNextHistory = appendOptionsDemoRsiHistoryEntry(objCurrentHistory as Record<string, unknown>[], {
+            signal: arrSignals[arrSignals.length - 1],
+            changedAt: new Date().toISOString(),
+            price: String(vSourcePrice || ""),
+            rsi: String(Number(objNextRsi.lastRsi || 0)),
+            band: arrSignals[arrSignals.length - 1] === "upper"
+                ? String(normalizeRsiBandValueString(objUiState.rsiUpperBand ?? 70, 70))
+                : String(normalizeRsiBandValueString(objUiState.rsiLowerBand ?? 30, 30)),
+            crossMode: arrSignals[arrSignals.length - 1] === "upper"
+                ? normalizeRsiCrossModeValue(objUiState.rsiUpperCrossMode ?? "cross_above")
+                : normalizeRsiCrossModeValue(objUiState.rsiLowerCrossMode ?? "cross_below"),
+            legSide: arrSignals[arrSignals.length - 1] === "upper"
+                ? normalizeRsiLegSideValue(objUiState.rsiUpperLegSide ?? "ce")
+                : normalizeRsiLegSideValue(objUiState.rsiLowerLegSide ?? "pe"),
+            rowIndex: arrSignals[arrSignals.length - 1] === "upper" ? 1 : 2,
+            action: getNormalizedOptionRowUiState(objUiState, "options-scalper", arrSignals[arrSignals.length - 1] === "upper" ? 1 : 2).action
+        });
+        const objNextUiState = {
+            ...objUiState,
+            rsiHistoryBySymbol: {
+                ...objExistingHistory,
+                [vSelectedSymbol]: objNextHistory
+            }
+        };
+        objNextProfile = await saveRollingFuturesLtProfile(normalizeProfileSaveInput(pUserId, pStrategyCode, {
+            ...pProfile,
+            uiState: objNextUiState,
+            connectionStatus: pProfile.connectionStatus
+        }));
+    }
+    return persistRsiState();
+}
+
+export async function syncOptionsScalperRsiRuntimeState(
+    pUserId: string,
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null
+): Promise<{
+    runtime: RollingFuturesLtRuntimeRecord | null;
+    profile: RollingFuturesLtProfileRecord;
+    rsi: OptionsDemoRsiRuntimeState;
+    signals: OptionsDemoRsiSignal[];
+    sourcePrice: number | null;
+    isEnabled: boolean;
+}> {
+    const objProfile = await readLiveProfile(pUserId, "options-scalper");
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
+    return syncOptionsDemoRsiRuntimeState(pUserId, "options-scalper", objProfile, objRuntime, pSnapshot);
+}
+
+export async function syncOptionsScalperRsiRuntimeAndMaybeAutoTrade(
+    pUserId: string,
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null
+): Promise<{
+    runtime: RollingFuturesLtRuntimeRecord | null;
+    profile: RollingFuturesLtProfileRecord;
+    rsi: OptionsDemoRsiRuntimeState;
+    signals: OptionsDemoRsiSignal[];
+    sourcePrice: number | null;
+    autoTrade: null | {
+        status: "success" | "warning" | "danger";
+        message: string;
+        trackedOpenPositions?: Awaited<ReturnType<typeof buildOpenPositionsPayload>>;
+    };
+}> {
+    const objProfile = await readLiveProfile(pUserId, "options-scalper");
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
+    const objSync = await syncOptionsDemoRsiRuntimeState(pUserId, "options-scalper", objProfile, objRuntime, pSnapshot);
+    const bShouldAttemptAutoTrade = Boolean(objSync.signals.length);
+    if (!bShouldAttemptAutoTrade) {
+        return {
+            ...objSync,
+            autoTrade: null
+        };
+    }
+
+    const objLatestRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
+    if (!objLatestRuntime?.autoTraderEnabled || String(objLatestRuntime.status || "").trim().toLowerCase() !== "running") {
+        return {
+            ...objSync,
+            autoTrade: {
+                status: "warning",
+                message: "Turn Auto Trader ON before RSI signals can place paper option orders."
+            }
+        };
+    }
+
+    const vLockKey = getOptionsScalperRsiAutoTradeLockKey(pUserId);
+    if (gOptionsScalperRenkoAutoTradeLocks.has(vLockKey)) {
+        return {
+            ...objSync,
+            autoTrade: {
+                status: "warning",
+                message: "A Delta RSI paper auto trade is already being processed. Please wait for the current signal to finish."
+            }
+        };
+    }
+
+    gOptionsScalperRenkoAutoTradeLocks.add(vLockKey);
+    try {
+        let arrCurrentTrackedPositions = await listRollingFuturesLtImportedPositions(pUserId, "options-scalper");
+        let vOpenedCount = 0;
+        for (const vSignal of objSync.signals) {
+            const objTradeInput = resolveOptionsScalperRsiAutoTradeInput(objSync.profile, vSignal, arrCurrentTrackedPositions);
+            if (!objTradeInput) {
+                continue;
+            }
+            const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
+                pUserId,
+                "options-scalper",
+                objSync.profile,
+                {
+                    action: objTradeInput.action,
+                    symbol: objTradeInput.symbol,
+                    legSide: objTradeInput.legSide,
+                    expiryMode: objTradeInput.expiryMode,
+                    expiryDate: objTradeInput.expiryDate,
+                    qty: objTradeInput.qty,
+                    targetDelta: objTradeInput.targetDelta,
+                    rowIndex: objTradeInput.rowIndex,
+                    openedReason: "strategy_option_open",
+                    takeProfitDelta: objTradeInput.takeProfitDelta,
+                    stopLossDelta: objTradeInput.stopLossDelta,
+                    reEnterEnabled: false
+                }
+            );
+            arrCurrentTrackedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, "options-scalper", [
+                ...arrCurrentTrackedPositions,
+                objPaperOpen.position
+            ]);
+            vOpenedCount += 1;
+            await logFuturesEvent(
+                pUserId,
+                "options-scalper",
+                "option_opened",
+                "success",
+                "Paper Option Auto Opened",
+                `${objTradeInput.action.toUpperCase()} ${objTradeInput.legSide.toUpperCase()} paper option opened from RSI ${vSignal === "upper" ? "upper" : "lower"} band.`,
+                {
+                    symbol: objTradeInput.symbol,
+                    contractName: objPaperOpen.position.contractName,
+                    qty: objTradeInput.qty,
+                    targetDelta: objTradeInput.targetDelta,
+                    rowIndex: objTradeInput.rowIndex,
+                    signal: vSignal,
+                    reason: "rsi_paper_auto_trade"
+                }
+            );
+        }
+        if (!(vOpenedCount > 0)) {
+            return {
+                ...objSync,
+                autoTrade: {
+                    status: "warning",
+                    message: "RSI signal was received, but no paper option order could be placed from the current Manual Trader settings."
+                }
+            };
+        }
+        return {
+            ...objSync,
+            autoTrade: {
+                status: "success",
+                message: `RSI placed ${vOpenedCount} paper option order${vOpenedCount === 1 ? "" : "s"} from the latest band cross.`,
+                trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrCurrentTrackedPositions)
+            }
+        };
+    }
+    catch (objError) {
+        return {
+            ...objSync,
+            autoTrade: {
+                status: getErrorMessage(objError, "").includes("already active") ? "warning" : "danger",
+                message: getErrorMessage(objError, "Unable to place RSI paper auto trade.")
             }
         };
     }
@@ -16997,6 +17859,45 @@ export async function getOptionsScalperIndicator(req: Request, res: Response): P
         res.status(500).json({
             status: "danger",
             message: getErrorMessage(objError, "Unable to fetch options demo indicator.")
+        });
+    }
+}
+export async function getOptionsScalperRsiStatus(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const objProfile = await readLiveProfile(vUserId, "options-scalper");
+        const objUiState = getMergedUiState(objProfile);
+        const vSelectedSymbol = normalizeSymbolValue(req.query?.symbol || req.body?.symbol || objUiState.symbol);
+        const objSnapshot = await getLiveMarketSnapshot(buildLiveMarketSnapshotConfig(vSelectedSymbol));
+        const objSync = await syncOptionsScalperRsiRuntimeAndMaybeAutoTrade(vUserId, objSnapshot);
+        const objRsiHistoryBySymbol = normalizeRsiHistoryValues(objSync.profile.uiState?.rsiHistoryBySymbol || {});
+        const vSymbolHistory = Array.isArray(objRsiHistoryBySymbol[vSelectedSymbol]) ? objRsiHistoryBySymbol[vSelectedSymbol] : [];
+        const objCurrentUiState = getMergedUiState(objSync.profile);
+        res.json({
+            status: "success",
+            data: {
+                symbol: vSelectedSymbol,
+                rsi: objSync.rsi,
+                sourcePrice: objSync.sourcePrice,
+                timeframe: String(objCurrentUiState.rsiTimeframe || "5m"),
+                length: String(objCurrentUiState.rsiLength || "14"),
+                upperBand: String(objCurrentUiState.rsiUpperBand || "70"),
+                upperCrossMode: String(objCurrentUiState.rsiUpperCrossMode || "cross_above"),
+                upperLegSide: String(objCurrentUiState.rsiUpperLegSide || "ce"),
+                lowerBand: String(objCurrentUiState.rsiLowerBand || "30"),
+                lowerCrossMode: String(objCurrentUiState.rsiLowerCrossMode || "cross_below"),
+                lowerLegSide: String(objCurrentUiState.rsiLowerLegSide || "pe"),
+                enabled: Boolean(objCurrentUiState.rsiEnabled),
+                historyBySymbol: objRsiHistoryBySymbol,
+                history: vSymbolHistory,
+                autoTrade: objSync.autoTrade || null
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to fetch options demo RSI.")
         });
     }
 }
