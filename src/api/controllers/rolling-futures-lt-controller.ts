@@ -154,7 +154,8 @@ const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
     "covered-options": "Covered Options",
     "strangle-options": "Strangle Options",
     "renko-options": "Renko Options",
-    "options-scalper": "Options Demo"
+    "options-scalper": "Options Demo",
+    "strangle-demo": "Strangle Demo"
 };
 const gFutureLimitRetryDelayMs = 5000;
 const gFutureLimitRetryCount = 5;
@@ -460,6 +461,7 @@ function getAccountId(req: Request): string {
         && (
             req.originalUrl.includes("/covered-options")
             || req.originalUrl.includes("/strangle-options")
+            || req.originalUrl.includes("/strangle-demo")
             || req.originalUrl.includes("/renko-options")
         )
     );
@@ -480,19 +482,20 @@ function isCoveredLikeStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boo
     return pStrategyCode === "covered-options"
         || pStrategyCode === "strangle-options"
         || pStrategyCode === "renko-options"
-        || pStrategyCode === "options-scalper";
+        || pStrategyCode === "options-scalper"
+        || pStrategyCode === "strangle-demo";
 }
 
 function isOptionsScalperStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "options-scalper";
+    return pStrategyCode === "options-scalper" || pStrategyCode === "strangle-demo";
 }
 
 function supportsRenkoFeedStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "renko-options" || isOptionsScalperStrategy(pStrategyCode);
+    return pStrategyCode === "renko-options" || pStrategyCode === "options-scalper";
 }
 
 function isStrangleOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "strangle-options" || pStrategyCode === "renko-options";
+    return pStrategyCode === "strangle-options" || pStrategyCode === "strangle-demo" || pStrategyCode === "renko-options";
 }
 
 function isCoveredOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
@@ -507,12 +510,18 @@ function getCoveredLikeStrategyLabel(pStrategyCode: RollingFuturesLtStrategyCode
     if (pStrategyCode === "renko-options") {
         return "Renko Options";
     }
+    if (pStrategyCode === "strangle-demo") {
+        return "Strangle Demo";
+    }
     return pStrategyCode === "strangle-options" ? "Strangle Options" : "Covered Options";
 }
 
 function getCoveredLikeLowerLabel(pStrategyCode: RollingFuturesLtStrategyCode): string {
     if (pStrategyCode === "renko-options") {
         return "renko";
+    }
+    if (pStrategyCode === "strangle-demo") {
+        return "strangle demo";
     }
     return pStrategyCode === "strangle-options" ? "strangle" : "covered";
 }
@@ -521,12 +530,18 @@ function getCoveredLikeLegText(pStrategyCode: RollingFuturesLtStrategyCode): str
     if (pStrategyCode === "renko-options") {
         return "renko leg";
     }
+    if (pStrategyCode === "strangle-demo") {
+        return "strangle demo leg";
+    }
     return pStrategyCode === "strangle-options" ? "strangle leg" : "covered leg";
 }
 
 function getCoveredLikePositionText(pStrategyCode: RollingFuturesLtStrategyCode): string {
     if (pStrategyCode === "renko-options") {
         return "renko position";
+    }
+    if (pStrategyCode === "strangle-demo") {
+        return "strangle demo position";
     }
     return pStrategyCode === "strangle-options" ? "strangle position" : "covered position";
 }
@@ -2572,7 +2587,8 @@ function getDefaultManualTraderUiState(
         sameSideLegIncrementEnabled: true,
         allowDuplicateContracts: false,
         placeOppositeTrades: false,
-        renkoFirstSignalOnlyEnabled: true,
+        openIfTotalPnlNegative: false,
+        openIfLastPnlNegative: false,
         buyQtyPercentEnabled: false,
         buyQtyPercent: "100",
         renkoEnabled: false,
@@ -4603,9 +4619,12 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         placeOppositeTrades: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(objUiState.placeOppositeTrades, Boolean(objDefaults.placeOppositeTrades)),
-        renkoFirstSignalOnlyEnabled: isStrangleOptionsStrategy(pProfile.strategyCode)
+        openIfTotalPnlNegative: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? false
-            : normalizeBooleanValue(objUiState.renkoFirstSignalOnlyEnabled, Boolean(objDefaults.renkoFirstSignalOnlyEnabled)),
+            : normalizeBooleanValue(objUiState.openIfTotalPnlNegative, Boolean(objDefaults.openIfTotalPnlNegative)),
+        openIfLastPnlNegative: isStrangleOptionsStrategy(pProfile.strategyCode)
+            ? false
+            : normalizeBooleanValue(objUiState.openIfLastPnlNegative, Boolean(objDefaults.openIfLastPnlNegative)),
         buyQtyPercentEnabled: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.buyQtyPercentEnabled)),
@@ -5013,9 +5032,12 @@ function normalizeProfileSaveInput(
         placeOppositeTrades: isStrangleOptionsStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(objUiState.placeOppositeTrades, Boolean(objDefaults.placeOppositeTrades)),
-        renkoFirstSignalOnlyEnabled: isStrangleOptionsStrategy(pStrategyCode)
+        openIfTotalPnlNegative: isStrangleOptionsStrategy(pStrategyCode)
             ? false
-            : normalizeBooleanValue(objUiState.renkoFirstSignalOnlyEnabled, Boolean(objDefaults.renkoFirstSignalOnlyEnabled)),
+            : normalizeBooleanValue(objUiState.openIfTotalPnlNegative, Boolean(objDefaults.openIfTotalPnlNegative)),
+        openIfLastPnlNegative: isStrangleOptionsStrategy(pStrategyCode)
+            ? false
+            : normalizeBooleanValue(objUiState.openIfLastPnlNegative, Boolean(objDefaults.openIfLastPnlNegative)),
         buyQtyPercentEnabled: isStrangleOptionsStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.buyQtyPercentEnabled)),
@@ -8517,7 +8539,7 @@ async function executeStrategyPlacement(
             ...arrExisting,
             ...arrNewPositions
         ]);
-        const objNeutralCheck = pOptions?.skipNeutralityCheck
+        const objNeutralCheck = pOptions?.skipNeutralityCheck || pStrategyCode === "strangle-demo"
             ? {
                 trackedOpenPositions: arrInitialSaved,
                 hedgePlaced: false,
@@ -11558,6 +11580,50 @@ function resolveOptionsScalperRenkoAutoTradeInput(
     };
 }
 
+function evaluateOptionsDemoPnlEntryGuards(
+    pUiState: Record<string, unknown>,
+    pPositions: RollingFuturesLtImportedPositionRecord[]
+): { allowed: boolean; message: string; totalPnl: number; lastPnl: number | null; } {
+    const bRequireTotalPnlNegative = normalizeBooleanValue(pUiState.openIfTotalPnlNegative, false);
+    const bRequireLastPnlNegative = normalizeBooleanValue(pUiState.openIfLastPnlNegative, false);
+    if (!bRequireTotalPnlNegative && !bRequireLastPnlNegative) {
+        return {
+            allowed: true,
+            message: "",
+            totalPnl: 0,
+            lastPnl: null
+        };
+    }
+
+    const arrActiveOptions = listTrackedOpenOptionPositions(pPositions);
+    const vTotalPnl = Number(arrActiveOptions.reduce((pSum, objPosition) => pSum + Number(objPosition.pnl || 0), 0).toFixed(4));
+    const objLatestOpenPosition = getLatestActiveTrackedOptionPosition(arrActiveOptions);
+    const vLastPnlRaw = objLatestOpenPosition ? Number(objLatestOpenPosition.pnl || 0) : Number.NaN;
+    const vLastPnl = Number.isFinite(vLastPnlRaw) ? Number(vLastPnlRaw.toFixed(4)) : null;
+    if (bRequireTotalPnlNegative && !(vTotalPnl < 0)) {
+        return {
+            allowed: false,
+            message: `Skipped Renko paper entry because Total Open Positions PnL is ${vTotalPnl.toFixed(4)}, not below 0.`,
+            totalPnl: vTotalPnl,
+            lastPnl: vLastPnl
+        };
+    }
+    if (bRequireLastPnlNegative && !(vLastPnl !== null && vLastPnl < 0)) {
+        return {
+            allowed: false,
+            message: `Skipped Renko paper entry because Last Open Position PnL is ${vLastPnl === null ? "not available" : vLastPnl.toFixed(4)}, not below 0.`,
+            totalPnl: vTotalPnl,
+            lastPnl: vLastPnl
+        };
+    }
+    return {
+        allowed: true,
+        message: "",
+        totalPnl: vTotalPnl,
+        lastPnl: vLastPnl
+    };
+}
+
 export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
     pUserId: string,
     pSnapshot: {
@@ -11648,9 +11714,36 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
 
     gOptionsScalperRenkoAutoTradeLocks.add(vLockKey);
     try {
-        let arrCurrentTrackedPositions = await listRollingFuturesLtImportedPositions(pUserId, "options-scalper");
+        let arrCurrentTrackedPositions = await refreshOptionsScalperPaperOpenPositions(
+            await listRollingFuturesLtImportedPositions(pUserId, "options-scalper")
+        );
+        if (arrCurrentTrackedPositions.length) {
+            arrCurrentTrackedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, "options-scalper", arrCurrentTrackedPositions);
+        }
         let vOpenedCount = 0;
+        let vLastSkippedMessage = "";
         for (const vCurrentSignal of arrSignalsToProcess) {
+            const objPnlGuard = evaluateOptionsDemoPnlEntryGuards(objUiState, arrCurrentTrackedPositions);
+            if (!objPnlGuard.allowed) {
+                vLastSkippedMessage = objPnlGuard.message;
+                await logFuturesEvent(
+                    pUserId,
+                    "options-scalper",
+                    "engine_error",
+                    "warning",
+                    "Paper Option Order Skipped",
+                    objPnlGuard.message,
+                    {
+                        signal: vCurrentSignal,
+                        totalPnl: objPnlGuard.totalPnl,
+                        lastPnl: objPnlGuard.lastPnl,
+                        openIfTotalPnlNegative: normalizeBooleanValue(objUiState.openIfTotalPnlNegative, false),
+                        openIfLastPnlNegative: normalizeBooleanValue(objUiState.openIfLastPnlNegative, false),
+                        reason: "paper_option_pnl_entry_guard"
+                    }
+                );
+                continue;
+            }
             const objTradeInput = resolveOptionsScalperRenkoAutoTradeInput(objSync.profile, vCurrentSignal, arrCurrentTrackedPositions);
             if (!objTradeInput) {
                 continue;
@@ -11702,7 +11795,9 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
                 ...objSync,
                 autoTrade: {
                     status: "warning",
-                    message: `EMA crossover signal${arrSignalsToProcess.length === 1 ? "" : "s"} were received, but no paper option order could be placed from the current Manual Trader settings.`
+                    message: vLastSkippedMessage
+                        || `EMA crossover signal${arrSignalsToProcess.length === 1 ? "" : "s"} were received, but no paper option order could be placed from the current Manual Trader settings.`,
+                    trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrCurrentTrackedPositions)
                 }
             };
         }
@@ -15083,7 +15178,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
         return;
     }
 
-    if (isOptionsScalperStrategy(pStrategyCode)) {
+    if (pStrategyCode === "options-scalper") {
         const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
         if (!objRuntime?.autoTraderEnabled || String(objRuntime.status || "").trim().toLowerCase() !== "running") {
             res.status(400).json({
@@ -15465,7 +15560,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
     }
 
     const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
-    if (!objRuntime?.autoTraderEnabled || String(objRuntime.status || "").trim().toLowerCase() !== "running") {
+    if (pStrategyCode !== "strangle-demo" && (!objRuntime?.autoTraderEnabled || String(objRuntime.status || "").trim().toLowerCase() !== "running")) {
         res.status(400).json({
             status: "warning",
             message: "Turn Auto Trader ON before executing the live strategy."
@@ -15499,7 +15594,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
         }
     }
 
-    if (isCoveredLikeStrategy(pStrategyCode) && Array.isArray(req.body?.rows)) {
+    if (isCoveredLikeStrategy(pStrategyCode) && !isOptionsScalperStrategy(pStrategyCode) && Array.isArray(req.body?.rows)) {
         const objMergedUiState = getMergedUiState(objProfile);
         const arrInputs = (req.body.rows as Array<Record<string, unknown>>).map((objRow) => {
             const vRowIndex = normalizeOptionRowIndex(pStrategyCode, objRow.rowIndex);
@@ -15566,7 +15661,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
         res.status(400).json({ status: "warning", message: "Select valid Legs before executing the live strategy." });
         return;
     }
-    if (!isDualRollingFuturesStrategy(pStrategyCode) && vLegSide === "both") {
+    if (!isDualRollingFuturesStrategy(pStrategyCode) && !isOptionsScalperStrategy(pStrategyCode) && vLegSide === "both") {
         res.status(400).json({ status: "warning", message: "Select either CE or PE for this live strategy page." });
         return;
     }
@@ -15792,7 +15887,7 @@ async function clearOptionsScalperClosedPositionsInternal(req: Request, res: Res
         });
         return;
     }
-    if (pStrategyCode !== "options-scalper") {
+    if (!isOptionsScalperStrategy(pStrategyCode)) {
         res.status(400).json({
             status: "warning",
             message: "Closed-position clearing is only supported on Options Demo."
@@ -15830,7 +15925,7 @@ async function deleteOptionsScalperClosedPositionInternal(req: Request, res: Res
         });
         return;
     }
-    if (pStrategyCode !== "options-scalper") {
+    if (!isOptionsScalperStrategy(pStrategyCode)) {
         res.status(400).json({
             status: "warning",
             message: "Closed-position deletion is only supported on Options Demo."
@@ -18030,4 +18125,101 @@ export async function updateOptionsScalperRecoveryMetrics(req: Request, res: Res
 }
 export async function recalculateOptionsScalperRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "options-scalper");
+}
+
+export async function getStrangleDemoProfile(req: Request, res: Response): Promise<void> {
+    await getProfileInternal(req, res, "strangle-demo");
+}
+export async function saveStrangleDemoProfile(req: Request, res: Response): Promise<void> {
+    await saveProfileInternal(req, res, "strangle-demo");
+}
+export async function getStrangleDemoConnectionStatus(req: Request, res: Response): Promise<void> {
+    await getConnectionStatusInternal(req, res, "strangle-demo");
+}
+export async function getStrangleDemoRuntimeStatus(req: Request, res: Response): Promise<void> {
+    await getRuntimeStatusInternal(req, res, "strangle-demo");
+}
+export async function checkStrangleDemoConnection(req: Request, res: Response): Promise<void> {
+    await checkConnectionInternal(req, res, "strangle-demo");
+}
+export async function enableStrangleDemoAutoTrader(req: Request, res: Response): Promise<void> {
+    await enableAutoTraderInternal(req, res, "strangle-demo");
+}
+export async function disableStrangleDemoAutoTrader(req: Request, res: Response): Promise<void> {
+    await disableAutoTraderInternal(req, res, "strangle-demo");
+}
+export async function getStrangleDemoAccountSummary(req: Request, res: Response): Promise<void> {
+    await getAccountSummaryInternal(req, res, "strangle-demo");
+}
+export async function calculateStrangleDemoRecommendedStartQty(req: Request, res: Response): Promise<void> {
+    await calculateRecommendedStartQtyInternal(req, res, "strangle-demo");
+}
+export async function executeStrangleDemoManualFuture(req: Request, res: Response): Promise<void> {
+    await respondOptionsScalperPaperActionNotReady(req, res, "Strangle Demo paper future entries are not wired yet.");
+}
+export async function executeStrangleDemoManualOption(req: Request, res: Response): Promise<void> {
+    await executeManualOptionInternal(req, res, "strangle-demo");
+}
+export async function executeStrangleDemoStrategy(req: Request, res: Response): Promise<void> {
+    await executeStrategyInternal(req, res, "strangle-demo");
+}
+export async function confirmStrangleDemoLiveAction(req: Request, res: Response): Promise<void> {
+    res.status(400).json({
+        status: "warning",
+        message: "Paper actions do not need confirmation on Strangle Demo."
+    });
+}
+export async function rejectStrangleDemoLiveAction(req: Request, res: Response): Promise<void> {
+    res.status(400).json({
+        status: "warning",
+        message: "Paper actions do not need confirmation on Strangle Demo."
+    });
+}
+export async function getStrangleDemoImportableOpenPositions(req: Request, res: Response): Promise<void> {
+    await getImportableOpenPositionsInternal(req, res, "strangle-demo");
+}
+export async function getStrangleDemoOpenPositions(req: Request, res: Response): Promise<void> {
+    await getOpenPositionsInternal(req, res, "strangle-demo");
+}
+export async function saveStrangleDemoOpenPositions(req: Request, res: Response): Promise<void> {
+    await saveOpenPositionsInternal(req, res, "strangle-demo");
+}
+export async function deleteStrangleDemoOpenPosition(req: Request, res: Response): Promise<void> {
+    await deleteOpenPositionInternal(req, res, "strangle-demo");
+}
+export async function clearStrangleDemoOpenPositions(req: Request, res: Response): Promise<void> {
+    await clearOpenPositionsInternal(req, res, "strangle-demo");
+}
+export async function reconcileStrangleDemoOpenPositions(req: Request, res: Response): Promise<void> {
+    await reconcileOpenPositionsInternal(req, res, "strangle-demo");
+}
+export async function closeStrangleDemoImportedOpenPosition(req: Request, res: Response): Promise<void> {
+    await closeImportedOpenPositionInternal(req, res, "strangle-demo");
+}
+export async function getStrangleDemoClosedPositions(req: Request, res: Response): Promise<void> {
+    await getClosedPositionsInternal(req, res, "strangle-demo");
+}
+export async function clearStrangleDemoClosedPositions(req: Request, res: Response): Promise<void> {
+    await clearOptionsScalperClosedPositionsInternal(req, res, "strangle-demo");
+}
+export async function deleteStrangleDemoClosedPosition(req: Request, res: Response): Promise<void> {
+    await deleteOptionsScalperClosedPositionInternal(req, res, "strangle-demo");
+}
+export async function getStrangleDemoEvents(req: Request, res: Response): Promise<void> {
+    await getEventsInternal(req, res, "strangle-demo");
+}
+export async function clearStrangleDemoEventsController(req: Request, res: Response): Promise<void> {
+    await clearEventsInternal(req, res, "strangle-demo");
+}
+export async function deleteStrangleDemoEventController(req: Request, res: Response): Promise<void> {
+    await deleteEventInternal(req, res, "strangle-demo");
+}
+export async function executeStrangleDemoKillSwitch(req: Request, res: Response): Promise<void> {
+    await executeKillSwitchInternal(req, res, "strangle-demo");
+}
+export async function updateStrangleDemoRecoveryMetrics(req: Request, res: Response): Promise<void> {
+    await updateRecoveryMetricsInternal(req, res, "strangle-demo");
+}
+export async function recalculateStrangleDemoRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
+    await recalculateRecoveryTotalPnlInternal(req, res, "strangle-demo");
 }

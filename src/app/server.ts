@@ -17,6 +17,7 @@ import { getSessionById, getSessionCookieName } from "../storage/sessions-store"
 import {
     renderCoveredOptionsPage,
     renderRenkoOptionsPage,
+    renderStrangleDemoPage,
     renderStrangleOptionsPage,
     renderOptionsDemoPage
 } from "../api/controllers/strategyfo-paper-controller";
@@ -134,6 +135,7 @@ async function bootstrap(): Promise<void> {
     app.get("/strangle-options", requireAuthPage, requireFreshPasswordPage, renderStrangleOptionsPage);
     app.get("/renko-options", requireAuthPage, requireFreshPasswordPage, renderRenkoOptionsPage);
     app.get("/options-demo", requireAuthPage, requireFreshPasswordPage, renderOptionsDemoPage);
+    app.get("/strangle-demo", requireAuthPage, requireFreshPasswordPage, renderStrangleDemoPage);
     app.get("/mngusers", requireAuthPage, requireFreshPasswordPage, requireAdminPage, renderMngUsersPage);
     app.get("/account/profile", requireAuthPage, renderMyProfilePage);
     app.post("/account/profile", requireAuthPage, async (req, res) => {
@@ -155,7 +157,7 @@ async function bootstrap(): Promise<void> {
     server.on("upgrade", async (req, socket, head) => {
         try {
             const objUrl = new URL(String(req.url || ""), "http://localhost");
-            if (objUrl.pathname !== "/ws/options-demo/renko") {
+            if (objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/strangle-demo/open-positions") {
                 socket.destroy();
                 return;
             }
@@ -186,6 +188,73 @@ async function bootstrap(): Promise<void> {
 
     websocketServer.on("connection", (ws: WebSocket, req: IncomingMessage, userId: string) => {
         const objUrl = new URL(String(req.url || ""), "http://localhost");
+        if (objUrl.pathname === "/ws/strangle-demo/open-positions") {
+            let closed = false;
+            let timerRef: NodeJS.Timeout | null = null;
+            let tickInFlight = false;
+            let tickPending = false;
+
+            const sendTick = async (): Promise<void> => {
+                if (closed || ws.readyState !== WebSocket.OPEN) {
+                    return;
+                }
+                try {
+                    const objTrackedOpenPositions = await buildOpenPositionsPayload(userId, "strangle-demo");
+                    if (closed || ws.readyState !== WebSocket.OPEN) {
+                        return;
+                    }
+                    ws.send(JSON.stringify({
+                        type: "strangle_open_positions_state",
+                        userId,
+                        trackedOpenPositions: objTrackedOpenPositions
+                    }));
+                }
+                catch (objError) {
+                    if (!closed && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                            type: "strangle_open_positions_error",
+                            userId,
+                            message: objError instanceof Error ? objError.message : "Unable to load demo open positions."
+                        }));
+                    }
+                }
+            };
+
+            const scheduleTick = (): void => {
+                if (closed) {
+                    return;
+                }
+                if (tickInFlight) {
+                    tickPending = true;
+                    return;
+                }
+                tickInFlight = true;
+                void sendTick().finally(() => {
+                    tickInFlight = false;
+                    if (!closed && tickPending) {
+                        tickPending = false;
+                        scheduleTick();
+                    }
+                });
+            };
+
+            ws.on("close", () => {
+                closed = true;
+                if (timerRef) {
+                    clearInterval(timerRef);
+                    timerRef = null;
+                }
+            });
+            ws.on("error", () => {
+                if (timerRef) {
+                    clearInterval(timerRef);
+                    timerRef = null;
+                }
+            });
+            scheduleTick();
+            timerRef = setInterval(scheduleTick, 2000);
+            return;
+        }
         const symbol = normalizeDemoRenkoSymbol(objUrl.searchParams.get("symbol"));
         const contractName = getDemoRenkoContractName(symbol);
         const lotSize = getDemoRenkoLotSize(symbol);

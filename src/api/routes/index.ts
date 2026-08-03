@@ -14,43 +14,53 @@ import {
     calculateRenkoOptionsRecommendedStartQty,
     calculateStrangleOptionsRecommendedStartQty,
     calculateOptionsScalperRecommendedStartQty,
+    calculateStrangleDemoRecommendedStartQty,
     checkRollingFuturesLtDualConnection,
     checkCoveredOptionsConnection,
     checkRenkoOptionsConnection,
     checkStrangleOptionsConnection,
     checkOptionsScalperConnection,
+    checkStrangleDemoConnection,
     calculateRollingFuturesLtDualRecommendedStartQty,
     clearCoveredOptionsEventsController,
     clearRenkoOptionsEventsController,
     clearStrangleOptionsEventsController,
     clearOptionsScalperEventsController,
+    clearStrangleDemoEventsController,
     clearOptionsScalperClosedPositions,
+    clearStrangleDemoClosedPositions,
     deleteOptionsScalperClosedPosition,
+    deleteStrangleDemoClosedPosition,
     clearRollingFuturesLtDualEventsController,
     closeCoveredOptionsImportedOpenPosition,
     closeRenkoOptionsImportedOpenPosition,
     closeStrangleOptionsImportedOpenPosition,
     closeOptionsScalperImportedOpenPosition,
+    closeStrangleDemoImportedOpenPosition,
     deleteRollingFuturesLtDualEventController,
     deleteCoveredOptionsEventController,
     deleteRenkoOptionsEventController,
     deleteStrangleOptionsEventController,
     deleteOptionsScalperEventController,
+    deleteStrangleDemoEventController,
     closeRollingFuturesLtDualImportedOpenPosition,
     deleteCoveredOptionsOpenPosition,
     deleteRenkoOptionsOpenPosition,
     deleteStrangleOptionsOpenPosition,
     deleteOptionsScalperOpenPosition,
+    deleteStrangleDemoOpenPosition,
     deleteRollingFuturesLtDualOpenPosition,
     disableCoveredOptionsAutoTrader,
     disableRenkoOptionsAutoTrader,
     disableStrangleOptionsAutoTrader,
     disableOptionsScalperAutoTrader,
+    disableStrangleDemoAutoTrader,
     disableRollingFuturesLtDualAutoTrader,
     enableCoveredOptionsAutoTrader,
     enableRenkoOptionsAutoTrader,
     enableStrangleOptionsAutoTrader,
     enableOptionsScalperAutoTrader,
+    enableStrangleDemoAutoTrader,
     enableRollingFuturesLtDualAutoTrader,
     executeCoveredOptionsKillSwitch,
     executeRenkoOptionsKillSwitch,
@@ -68,10 +78,15 @@ import {
     executeStrangleOptionsManualOption,
     executeStrangleOptionsStrategy,
     executeOptionsScalperKillSwitch,
+    executeStrangleDemoKillSwitch,
     confirmOptionsScalperLiveAction,
+    confirmStrangleDemoLiveAction,
     executeOptionsScalperManualFuture,
     executeOptionsScalperManualOption,
     executeOptionsScalperStrategy,
+    executeStrangleDemoManualFuture,
+    executeStrangleDemoManualOption,
+    executeStrangleDemoStrategy,
     executeRollingFuturesLtDualKillSwitch,
     executeRollingFuturesLtDualManualFuture,
     executeRollingFuturesLtDualManualOption,
@@ -103,14 +118,22 @@ import {
     getStrangleOptionsProfile,
     getStrangleOptionsRuntimeStatus,
     getOptionsScalperAccountSummary,
+    getStrangleDemoAccountSummary,
     getOptionsScalperIndicator,
     getOptionsScalperClosedPositions,
+    getStrangleDemoClosedPositions,
     getOptionsScalperConnectionStatus,
+    getStrangleDemoConnectionStatus,
     getOptionsScalperEvents,
+    getStrangleDemoEvents,
     getOptionsScalperImportableOpenPositions,
+    getStrangleDemoImportableOpenPositions,
     getOptionsScalperOpenPositions,
+    getStrangleDemoOpenPositions,
     getOptionsScalperProfile,
+    getStrangleDemoProfile,
     getOptionsScalperRuntimeStatus,
+    getStrangleDemoRuntimeStatus,
     getOptionsScalperRsiStatus,
     setOptionsScalperRenkoManualSignal,
     listCoveredOptionsVerifierRunningUsers,
@@ -131,11 +154,13 @@ import {
     recalculateRenkoOptionsRecoveryTotalPnl,
     recalculateStrangleOptionsRecoveryTotalPnl,
     recalculateOptionsScalperRecoveryTotalPnl,
+    recalculateStrangleDemoRecoveryTotalPnl,
     recalculateRollingFuturesLtDualRecoveryTotalPnl,
     updateCoveredOptionsRecoveryMetrics,
     updateRenkoOptionsRecoveryMetrics,
     updateStrangleOptionsRecoveryMetrics,
     updateOptionsScalperRecoveryMetrics,
+    updateStrangleDemoRecoveryMetrics,
     updateRollingFuturesLtDualRecoveryMetrics,
     reconcileCoveredOptionsOpenPositions,
     rejectCoveredOptionsLiveAction,
@@ -144,7 +169,9 @@ import {
     reconcileRenkoOptionsOpenPositions,
     reconcileStrangleOptionsOpenPositions,
     rejectOptionsScalperLiveAction,
+    rejectStrangleDemoLiveAction,
     reconcileOptionsScalperOpenPositions,
+    reconcileStrangleDemoOpenPositions,
     reconcileRollingFuturesLtDualOpenPositions,
     saveCoveredOptionsOpenPositions,
     saveCoveredOptionsProfile,
@@ -154,12 +181,15 @@ import {
     saveStrangleOptionsProfile,
     saveOptionsScalperOpenPositions,
     saveOptionsScalperProfile,
+    saveStrangleDemoOpenPositions,
+    saveStrangleDemoProfile,
     saveRollingFuturesLtDualOpenPositions,
     saveRollingFuturesLtDualProfile,
     clearCoveredOptionsOpenPositions,
     clearRenkoOptionsOpenPositions,
     clearStrangleOptionsOpenPositions,
     clearOptionsScalperOpenPositions,
+    clearStrangleDemoOpenPositions,
     listAdminPendingCoveredLikeLiveActions,
     confirmAdminPendingCoveredLikeLiveAction,
     rejectAdminPendingCoveredLikeLiveAction,
@@ -619,6 +649,97 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/options-demo/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await clearOptionsScalperEventsController(req, res);
+    });
+
+    objRouter.get("/strangle-demo/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleDemoProfile(req, res);
+    });
+    objRouter.post("/strangle-demo/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveStrangleDemoProfile(req, res);
+    });
+    objRouter.get("/strangle-demo/connection/status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleDemoConnectionStatus(req, res);
+    });
+    objRouter.get("/strangle-demo/runtime", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleDemoRuntimeStatus(req, res);
+    });
+    objRouter.post("/strangle-demo/connection/check", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await checkStrangleDemoConnection(req, res);
+    });
+    objRouter.post("/strangle-demo/auto-trader/start", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await enableStrangleDemoAutoTrader(req, res);
+    });
+    objRouter.post("/strangle-demo/auto-trader/stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await disableStrangleDemoAutoTrader(req, res);
+    });
+    objRouter.get("/strangle-demo/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleDemoAccountSummary(req, res);
+    });
+    objRouter.post("/strangle-demo/start-qty/calculate", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await calculateStrangleDemoRecommendedStartQty(req, res);
+    });
+    objRouter.post("/strangle-demo/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeStrangleDemoManualFuture(req, res);
+    });
+    objRouter.post("/strangle-demo/manual/option", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeStrangleDemoManualOption(req, res);
+    });
+    objRouter.post("/strangle-demo/strategy/execute", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeStrangleDemoStrategy(req, res);
+    });
+    objRouter.post("/strangle-demo/live-action/confirm", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await confirmStrangleDemoLiveAction(req, res);
+    });
+    objRouter.post("/strangle-demo/live-action/reject", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await rejectStrangleDemoLiveAction(req, res);
+    });
+    objRouter.get("/strangle-demo/open-positions/importable", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleDemoImportableOpenPositions(req, res);
+    });
+    objRouter.get("/strangle-demo/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleDemoOpenPositions(req, res);
+    });
+    objRouter.post("/strangle-demo/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveStrangleDemoOpenPositions(req, res);
+    });
+    objRouter.post("/strangle-demo/open-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteStrangleDemoOpenPosition(req, res);
+    });
+    objRouter.post("/strangle-demo/open-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearStrangleDemoOpenPositions(req, res);
+    });
+    objRouter.post("/strangle-demo/open-positions/reconcile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await reconcileStrangleDemoOpenPositions(req, res);
+    });
+    objRouter.post("/strangle-demo/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await closeStrangleDemoImportedOpenPosition(req, res);
+    });
+    objRouter.post("/strangle-demo/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeStrangleDemoKillSwitch(req, res);
+    });
+    objRouter.post("/strangle-demo/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateStrangleDemoRecoveryMetrics(req, res);
+    });
+    objRouter.post("/strangle-demo/metrics/recalculate-total-pnl", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await recalculateStrangleDemoRecoveryTotalPnl(req, res);
+    });
+    objRouter.get("/strangle-demo/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleDemoClosedPositions(req, res);
+    });
+    objRouter.post("/strangle-demo/closed-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearStrangleDemoClosedPositions(req, res);
+    });
+    objRouter.post("/strangle-demo/closed-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteStrangleDemoClosedPosition(req, res);
+    });
+    objRouter.get("/strangle-demo/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStrangleDemoEvents(req, res);
+    });
+    objRouter.post("/strangle-demo/events/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteStrangleDemoEventController(req, res);
+    });
+    objRouter.post("/strangle-demo/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearStrangleDemoEventsController(req, res);
     });
 
     return objRouter;

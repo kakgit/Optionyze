@@ -3,12 +3,15 @@
     const pageVariant = String(document.body?.dataset?.rollingFuturesVariant || "").trim().toLowerCase();
     const isDemoVariant = pageVariant === "demo";
     const isStranglePage = pageVariant === "strangle";
+    const isStrangleDemoPage = pageVariant === "strangle-demo";
+    const isPaperDemoVariant = isDemoVariant || isStrangleDemoPage;
     const isRenkoPage = pageVariant === "renko";
-    const supportsRenkoFeed = isDemoVariant || isRenkoPage || isCoveredMode;
-    const isStrangleLikePage = isStranglePage || isRenkoPage;
     const endpointBaseOverride = String(document.body?.dataset?.rollingFuturesEndpointBase || "").trim();
     const strategyLabel = String(document.body?.dataset?.rollingFuturesStrategyLabel || "").trim() || "Covered Options";
     const mode = rawMode === "short" || rawMode === "covered" ? rawMode : "long";
+    const isCoveredMode = mode === "covered";
+    const supportsRenkoFeed = isDemoVariant || isRenkoPage || isCoveredMode;
+    const isStrangleLikePage = isStranglePage || isStrangleDemoPage || isRenkoPage;
     const initialExecStrategyEnabled = String(document.body?.dataset?.execStrategyEnabled || "").trim().toLowerCase() === "true";
     const prefix = mode === "short"
         ? "rollingShortFutures"
@@ -22,20 +25,19 @@
     const modeLabel = mode === "short"
         ? "Short Mode"
         : (mode === "covered" ? "Covered Options" : "Long Mode");
-    const isCoveredMode = mode === "covered";
     const isDualLikeMode = mode === "covered";
-    const supportsTelegramAlerts = isCoveredMode && !isDemoVariant;
-    const openPositionsEmptyText = isDemoVariant
+    const supportsTelegramAlerts = isCoveredMode && !isPaperDemoVariant;
+    const openPositionsEmptyText = isPaperDemoVariant
         ? "No demo positions are currently shown."
         : "No imported live positions are currently shown.";
-    const closedPositionsEmptyText = isDemoVariant
+    const closedPositionsEmptyText = isPaperDemoVariant
         ? "No demo trade history found for the selected date range."
         : "No Delta fill history found for the selected date range.";
-    const eventLogEmptyText = isDemoVariant
+    const eventLogEmptyText = isPaperDemoVariant
         ? "No demo activity has been logged yet."
         : "No live activity has been logged yet.";
     const importableEmptyText = isCoveredMode
-        ? (isDemoVariant
+        ? (isPaperDemoVariant
             ? "No importable demo option positions are available."
             : "No live option positions are open on Delta Exchange for the selected symbol.")
         : "No live futures positions are open on Delta Exchange for the selected symbol.";
@@ -46,7 +48,7 @@
     const currentAccountFullName = String(document.body?.dataset?.currentAccountFullName || "").trim();
     const currentAccountEmail = String(document.body?.dataset?.currentAccountEmail || "").trim();
     const currentAccountTelegramChatId = String(document.body?.dataset?.currentAccountTelegramChatId || "").trim();
-    const requiresExplicitTargetSelection = isCoveredMode && currentAccountIsVerifier && !isDemoVariant;
+    const requiresExplicitTargetSelection = isCoveredMode && currentAccountIsVerifier && !isPaperDemoVariant;
     const symbolConfig = {
         BTC: { contractName: "BTCUSD", lotSize: 0.001 },
         ETH: { contractName: "ETHUSD", lotSize: 0.01 }
@@ -141,7 +143,8 @@
         sameSideLegIncrementEnabled: document.getElementById("chkRollingFuturesSameSideLegIncrementEnabled"),
         allowDuplicateContracts: document.getElementById("chkRollingFuturesAllowDuplicateContracts"),
         placeOppositeTrades: document.getElementById("chkRollingFuturesPlaceOppositeTrades"),
-        renkoFirstSignalOnlyEnabled: document.getElementById("chkRollingFuturesRenkoFirstSignalOnlyEnabled"),
+        openIfTotalPnlNegative: document.getElementById("chkRollingFuturesOpenIfTotalPnlNegative"),
+        openIfLastPnlNegative: document.getElementById("chkRollingFuturesOpenIfLastPnlNegative"),
         renkoFeedEnabled: document.getElementById("chkRollingFuturesRenkoFeedEnabled"),
         renkoFeedPts: document.getElementById("txtRollingFuturesRenkoFeedPts"),
         renkoFeedManualPrice: document.getElementById("txtRollingFuturesRenkoFeedManualPrice"),
@@ -310,6 +313,8 @@
     let renkoFeedSocket = null;
     let renkoFeedSocketReconnectTimer = null;
     let renkoFeedSocketSymbol = "";
+    let strangleDemoOpenPositionsSocket = null;
+    let strangleDemoOpenPositionsSocketReconnectTimer = null;
     let renkoBaseValuesBySymbol = { BTC: "", ETH: "" };
     let renkoEmaValuesBySymbol = { BTC: "", ETH: "" };
     let emaStateBySymbol = {
@@ -1254,6 +1259,79 @@
         };
     }
 
+    function disconnectStrangleDemoOpenPositionsSocket() {
+        if (strangleDemoOpenPositionsSocketReconnectTimer) {
+            clearTimeout(strangleDemoOpenPositionsSocketReconnectTimer);
+            strangleDemoOpenPositionsSocketReconnectTimer = null;
+        }
+        if (strangleDemoOpenPositionsSocket) {
+            try {
+                strangleDemoOpenPositionsSocket.onopen = null;
+                strangleDemoOpenPositionsSocket.onmessage = null;
+                strangleDemoOpenPositionsSocket.onclose = null;
+                strangleDemoOpenPositionsSocket.onerror = null;
+                strangleDemoOpenPositionsSocket.close();
+            }
+            catch (_error) {
+            }
+        }
+        strangleDemoOpenPositionsSocket = null;
+    }
+
+    function scheduleStrangleDemoOpenPositionsSocketReconnect() {
+        if (strangleDemoOpenPositionsSocketReconnectTimer || !isStrangleDemoPage) {
+            return;
+        }
+        strangleDemoOpenPositionsSocketReconnectTimer = setTimeout(function () {
+            strangleDemoOpenPositionsSocketReconnectTimer = null;
+            connectStrangleDemoOpenPositionsSocket();
+        }, 3000);
+    }
+
+    function connectStrangleDemoOpenPositionsSocket() {
+        if (!isStrangleDemoPage) {
+            disconnectStrangleDemoOpenPositionsSocket();
+            return;
+        }
+        if (strangleDemoOpenPositionsSocket && (strangleDemoOpenPositionsSocket.readyState === WebSocket.OPEN || strangleDemoOpenPositionsSocket.readyState === WebSocket.CONNECTING)) {
+            return;
+        }
+        disconnectStrangleDemoOpenPositionsSocket();
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const url = `${protocol}//${window.location.host}/ws/strangle-demo/open-positions`;
+        const socket = new WebSocket(url);
+        strangleDemoOpenPositionsSocket = socket;
+
+        socket.onopen = function () {
+            if (strangleDemoOpenPositionsSocket !== socket) {
+                return;
+            }
+        };
+        socket.onmessage = function (event) {
+            try {
+                const payload = JSON.parse(String(event.data || ""));
+                if (payload && payload.type === "strangle_open_positions_state" && payload.trackedOpenPositions) {
+                    scheduleOpenPositionsRender(payload.trackedOpenPositions);
+                    return;
+                }
+                if (payload && payload.type === "strangle_open_positions_error") {
+                    setStatus(ids.pageStatus, String(payload.message || "Unable to load demo open positions."), "danger");
+                }
+            }
+            catch (_error) {
+            }
+        };
+        socket.onclose = function () {
+            if (strangleDemoOpenPositionsSocket === socket) {
+                strangleDemoOpenPositionsSocket = null;
+                scheduleStrangleDemoOpenPositionsSocketReconnect();
+            }
+        };
+        socket.onerror = function () {
+            scheduleStrangleDemoOpenPositionsSocketReconnect();
+        };
+    }
+
     function getRenkoEmaMetaText(symbol) {
         if (!getRenkoEmaEnabled()) {
             return "EMA OFF";
@@ -1536,6 +1614,9 @@
 
     function ensureCoveredExecBalance() {
         if (!isCoveredMode) {
+            return;
+        }
+        if (isStrangleDemoPage) {
             return;
         }
         const vAvailableBalance = Number(lastAccountSummary?.availableBalance);
@@ -1829,7 +1910,7 @@
             return isStrangleLikePage
                 ? {
                     ...coveredBuyDefaults,
-                    action: "sell",
+                    action: "none",
                     legs: "pe",
                     expiryMode: "6",
                     newD: "0.33",
@@ -1868,7 +1949,8 @@
         const bUseNewDForReEntry = isCoveredMode && isDemoVariant;
         const vLegs = getInputValue(nodes.legs, defaults.legs).toLowerCase();
         const rowState = {};
-        rowState[keys.action] = getInputValue(nodes.action, defaults.action).toLowerCase() === "buy" ? "buy" : "sell";
+        const vAction = getInputValue(nodes.action, defaults.action).toLowerCase();
+        rowState[keys.action] = vAction === "buy" || vAction === "sell" ? vAction : "none";
         rowState[keys.legs] = isDualLikeMode && vLegs === "both"
             ? "both"
             : (vLegs === "pe" ? "pe" : "ce");
@@ -1898,7 +1980,8 @@
         const finalLegs = isDualLikeMode
             ? ((savedLegs === "both" || savedLegs === "pe" || savedLegs === "ce") ? savedLegs : defaultLegs)
             : ((savedLegs === "pe" || savedLegs === "ce") ? savedLegs : defaultLegs);
-        setInputValue(nodes.action, String(uiState[keys.action] || defaults.action).trim().toLowerCase() === "buy" ? "buy" : "sell");
+        const savedAction = String(uiState[keys.action] || defaults.action || "").trim().toLowerCase();
+        setInputValue(nodes.action, savedAction === "buy" || savedAction === "sell" ? savedAction : "none");
         setInputValue(nodes.legs, finalLegs);
         setInputValue(nodes.expiryMode, String(uiState[keys.expiryMode] || defaults.expiryMode).trim() || defaults.expiryMode);
         setInputValue(nodes.expiryDate, String(uiState[keys.expiryDate] || defaults.expiryDate).trim());
@@ -1947,7 +2030,8 @@
             sameSideLegIncrementEnabled: true,
             allowDuplicateContracts: false,
             placeOppositeTrades: false,
-            renkoFirstSignalOnlyEnabled: true,
+            openIfTotalPnlNegative: false,
+            openIfLastPnlNegative: false,
             renkoEnabled: false,
             renkoStepPoints: "100",
             renkoBaseValue: "",
@@ -2356,12 +2440,15 @@
             });
         });
         if (ids.execStrategyButton instanceof HTMLButtonElement) {
-            ids.execStrategyButton.disabled = true;
-            ids.execStrategyButton.title = isDemoVariant
-                ? "Exec Strategy is disabled on Options Demo for now."
-                : (canUseExecStrategy()
-                    ? "Execute the live strategy"
-                    : "Not Authorised to Execute, Please Contact Admin");
+            const canRunExec = isStrangleDemoPage ? canUseLiveActions() : false;
+            ids.execStrategyButton.disabled = !canRunExec;
+            ids.execStrategyButton.title = isStrangleDemoPage
+                ? "Execute the paper strategy"
+                : (isDemoVariant
+                    ? "Exec Strategy is disabled on Options Demo for now."
+                    : (canUseExecStrategy()
+                        ? "Execute the live strategy"
+                        : "Not Authorised to Execute, Please Contact Admin"));
         }
     }
 
@@ -2565,7 +2652,7 @@
     }
 
     function maybeAutoCloseOptionsDemoFromProfitTimer(objPending, remainingMs) {
-        if (!isDemoVariant || !isCoveredMode || profitCloseAutoExitInFlight || remainingMs > 0) {
+        if (!isPaperDemoVariant || !isCoveredMode || profitCloseAutoExitInFlight || remainingMs > 0) {
             return;
         }
         const reason = String(objPending?.reason || "").trim().toLowerCase();
@@ -2602,7 +2689,7 @@
     }
 
     function syncLocalProfitClosePendingFromOpenPositions() {
-        if (!isCoveredMode || !isDemoVariant) {
+        if (!isCoveredMode || !isPaperDemoVariant) {
             localProfitClosePending = null;
             return;
         }
@@ -3596,7 +3683,8 @@
             sameSideLegIncrementEnabled: isStrangleLikePage ? false : getCheckboxValue(ids.sameSideLegIncrementEnabled, true),
             allowDuplicateContracts: isStrangleLikePage ? false : getCheckboxValue(ids.allowDuplicateContracts, false),
             placeOppositeTrades: isStrangleLikePage ? false : getCheckboxValue(ids.placeOppositeTrades, false),
-            renkoFirstSignalOnlyEnabled: isStrangleLikePage ? false : getCheckboxValue(ids.renkoFirstSignalOnlyEnabled, true),
+            openIfTotalPnlNegative: isStrangleLikePage ? false : getCheckboxValue(ids.openIfTotalPnlNegative, false),
+            openIfLastPnlNegative: isStrangleLikePage ? false : getCheckboxValue(ids.openIfLastPnlNegative, false),
             renkoEnabled: supportsRenkoFeed ? getCheckboxValue(ids.renkoEnabled, false) : false,
             renkoStepPoints: supportsRenkoFeed ? String(getRenkoBoxSizeValue()) : "100",
             renkoBaseValue: supportsRenkoFeed ? normalizeRenkoBaseValue(ids.renkoBaseValue?.value || "") : "",
@@ -3641,7 +3729,7 @@
             renkoHistoryBySymbol: supportsRenkoFeed
                 ? renkoHistoryBySymbol
                 : { BTC: [], ETH: [] },
-            autoConfirmLiveActions: isDemoVariant ? true : getCheckboxValue(ids.autoConfirmLiveActions, false),
+            autoConfirmLiveActions: isPaperDemoVariant ? true : getCheckboxValue(ids.autoConfirmLiveActions, false),
             telegramAlertTypes: supportsTelegramAlerts
                 ? ids.telegramEventCheckboxes.filter(function (checkbox) {
                     return checkbox instanceof HTMLInputElement && checkbox.checked;
@@ -3703,7 +3791,8 @@
             );
             setCheckboxValue(ids.allowDuplicateContracts, isStrangleLikePage ? false : objUiState.allowDuplicateContracts);
             setCheckboxValue(ids.placeOppositeTrades, isStrangleLikePage ? false : objUiState.placeOppositeTrades);
-            setCheckboxValue(ids.renkoFirstSignalOnlyEnabled, isStrangleLikePage ? false : (objUiState.renkoFirstSignalOnlyEnabled ?? true));
+            setCheckboxValue(ids.openIfTotalPnlNegative, isStrangleLikePage ? false : objUiState.openIfTotalPnlNegative);
+            setCheckboxValue(ids.openIfLastPnlNegative, isStrangleLikePage ? false : objUiState.openIfLastPnlNegative);
             if (isDemoRenkoFeedMode()) {
                 setCheckboxValue(ids.renkoFeedEnabled, Boolean(objUiState.renkoFeedEnabled));
                 setInputValue(ids.renkoFeedPts, objUiState.renkoFeedPts || "10");
@@ -3733,7 +3822,7 @@
             }
             setRenkoEmaDisplay(getRenkoEmaValueForSymbol(getCurrentSelectedSymbol()), getRenkoEmaEnabled());
             renderEmaFeedFromCurrentState();
-            setCheckboxValue(ids.autoConfirmLiveActions, isDemoVariant ? true : objUiState.autoConfirmLiveActions);
+            setCheckboxValue(ids.autoConfirmLiveActions, isPaperDemoVariant ? true : objUiState.autoConfirmLiveActions);
             setInputValue(ids.closedFromDate, String(objUiState.closedFromDate || "").trim());
             setInputValue(ids.closedToDate, String(objUiState.closedToDate || "").trim());
             closedFiltersChanged = previousClosedFromDate !== String(ids.closedFromDate?.value || "").trim()
@@ -4121,10 +4210,12 @@
         if (!canUseLiveActions()) {
             throw new Error("Delta connection is not healthy enough to execute the live strategy.");
         }
-        if (!autoTraderEnabled) {
+        if (!isStrangleDemoPage && !autoTraderEnabled) {
             throw new Error("Turn Auto Trader ON before executing the live strategy.");
         }
-        ensureCoveredExecBalance();
+        if (!isStrangleDemoPage) {
+            ensureCoveredExecBalance();
+        }
 
         await saveProfile();
 
@@ -4243,7 +4334,7 @@
         if (!canUseLiveActions()) {
             throw new Error("Delta connection is not healthy enough to place a live option order.");
         }
-        if (isDemoVariant && !autoTraderEnabled) {
+        if (!isStrangleDemoPage && isPaperDemoVariant && !autoTraderEnabled) {
             throw new Error("Turn Auto Trader ON before placing paper option orders.");
         }
 
@@ -4613,7 +4704,7 @@
                 ? `rolling-covered-side-row ${side.toLowerCase()}`
                 : "";
             const inactiveRowClass = isInactive ? "rolling-demo-open-row-inactive" : "";
-            const swapActionButton = isCoveredMode && !isDemoVariant
+            const swapActionButton = isCoveredMode && !isPaperDemoVariant
                 ? `
                             <button class="rolling-demo-icon-btn rolling-live-swap-open-position" type="button" data-import-id="${escapeHtml(importId)}" title="Replace this position using Manual Trader settings" aria-label="Replace this position using Manual Trader settings" ${isInactive ? "disabled" : ""}>
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -5152,7 +5243,7 @@
     }
 
     function startConfirmationPolling() {
-        if (!isCoveredMode || isDemoVariant) {
+        if (!isCoveredMode || isPaperDemoVariant) {
             return;
         }
         if (confirmationPollTimer) {
@@ -5175,6 +5266,7 @@
     resetEmaFeedState(undefined, false);
     setButtonsEnabled();
     connectRenkoFeedSocket();
+    connectStrangleDemoOpenPositionsSocket();
 
     ids.symbol?.addEventListener("change", function () {
         captureRenkoBaseValueForCurrentSymbol();
@@ -5184,6 +5276,7 @@
         resetEmaFeedState("Symbol changed. EMA history is waiting for the next crossover.");
         queueProfileSave();
         connectRenkoFeedSocket();
+        connectStrangleDemoOpenPositionsSocket();
         const refreshTasks = [
             loadAccountSummary().catch(function () { return undefined; }),
             loadClosedPositions().catch(function () { return undefined; })
@@ -5329,7 +5422,7 @@
             });
         }
     });
-    [ids.sameSideLegIncrementEnabled, ids.allowDuplicateContracts, ids.placeOppositeTrades, ids.renkoFirstSignalOnlyEnabled].forEach(function (node) {
+    [ids.sameSideLegIncrementEnabled, ids.allowDuplicateContracts, ids.placeOppositeTrades, ids.openIfTotalPnlNegative, ids.openIfLastPnlNegative].forEach(function (node) {
         node?.addEventListener("change", function () {
             syncQtyFromStartQty();
             queueProfileSave();
@@ -5505,7 +5598,7 @@
             }
         });
     });
-    if (ids.confirmationSound instanceof HTMLInputElement) {
+    if (!isPaperDemoVariant && ids.confirmationSound instanceof HTMLInputElement) {
         ids.confirmationSound.checked = confirmationSoundEnabled;
         const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
         if (typeof AudioContextConstructor !== "function") {
@@ -5529,12 +5622,14 @@
             void unlockConfirmationAudio();
         });
     }
-    document.addEventListener("pointerdown", function () {
-        void unlockConfirmationAudio();
-    }, { once: true, capture: true });
-    document.addEventListener("keydown", function () {
-        void unlockConfirmationAudio();
-    }, { once: true, capture: true });
+    if (!isPaperDemoVariant) {
+        document.addEventListener("pointerdown", function () {
+            void unlockConfirmationAudio();
+        }, { once: true, capture: true });
+        document.addEventListener("keydown", function () {
+            void unlockConfirmationAudio();
+        }, { once: true, capture: true });
+    }
     ids.confirmActionButton?.addEventListener("click", function () {
         void confirmPendingLiveAction().then(function (objResult) {
             return Promise.all([
@@ -5705,7 +5800,7 @@
             setStatus(ids.pageStatus, "Exec Strategy is disabled on Options Demo for now.", "warning");
             return;
         }
-        void (isCoveredMode ? executeCoveredStrategies() : executeStrategy(1)).then(function (objResult) {
+        void (isStrangleDemoPage ? executeStrategy(1) : (isCoveredMode ? executeCoveredStrategies() : executeStrategy(1))).then(function (objResult) {
             const trackedPayload = objResult?.data?.trackedOpenPositions || null;
             const objNeutralCheck = objResult?.data?.neutralCheck || {};
             const bHedgePlaced = Boolean(objNeutralCheck?.hedgePlaced);
