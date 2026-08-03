@@ -11596,6 +11596,14 @@ function evaluateOptionsDemoPnlEntryGuards(
     }
 
     const arrActiveOptions = listTrackedOpenOptionPositions(pPositions);
+    if (!arrActiveOptions.length) {
+        return {
+            allowed: true,
+            message: "",
+            totalPnl: 0,
+            lastPnl: null
+        };
+    }
     const vTotalPnl = Number(arrActiveOptions.reduce((pSum, objPosition) => pSum + Number(objPosition.pnl || 0), 0).toFixed(4));
     const objLatestOpenPosition = getLatestActiveTrackedOptionPosition(arrActiveOptions);
     const vLastPnlRaw = objLatestOpenPosition ? Number(objLatestOpenPosition.pnl || 0) : Number.NaN;
