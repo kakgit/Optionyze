@@ -551,16 +551,16 @@
                         <div class="rolling-demo-field rolling-futures-buy-gate-field">
                             <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
                                 <div class="rolling-futures-buy-gate-row">
-                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesOpenIfTotalPnlNegative">
-                                        <input type="checkbox" id="chkRollingFuturesOpenIfTotalPnlNegative" />
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesAlternatingLegRestrictionEnabled">
+                                        <input type="checkbox" id="chkRollingFuturesAlternatingLegRestrictionEnabled" checked />
                                     </label>
-                                    <div class="rolling-futures-buy-gate-text">Open Positions if Total PnL is &lt; 0</div>
+                                    <div class="rolling-futures-buy-gate-text">Automatic alternating-leg restriction</div>
                                     <span class="rolling-futures-help-icon-wrap">
-                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show total PnL entry help">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show alternating-leg restriction help">
                                             ?
                                         </button>
                                         <span class="rolling-futures-help-popout floating">
-                                            When enabled, Renko paper auto trades open only when the total Open Positions PnL is negative.
+                                            When enabled, Renko paper auto trades skip if the latest active option is already on the same CE/PE side. The next trade must alternate to the opposite leg.
                                         </span>
                                     </span>
                                 </div>

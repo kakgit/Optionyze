@@ -143,7 +143,7 @@
         sameSideLegIncrementEnabled: document.getElementById("chkRollingFuturesSameSideLegIncrementEnabled"),
         allowDuplicateContracts: document.getElementById("chkRollingFuturesAllowDuplicateContracts"),
         placeOppositeTrades: document.getElementById("chkRollingFuturesPlaceOppositeTrades"),
-        openIfTotalPnlNegative: document.getElementById("chkRollingFuturesOpenIfTotalPnlNegative"),
+        alternatingLegRestrictionEnabled: document.getElementById("chkRollingFuturesAlternatingLegRestrictionEnabled"),
         openIfLastPnlNegative: document.getElementById("chkRollingFuturesOpenIfLastPnlNegative"),
         renkoFeedEnabled: document.getElementById("chkRollingFuturesRenkoFeedEnabled"),
         renkoFeedPts: document.getElementById("txtRollingFuturesRenkoFeedPts"),
@@ -2030,7 +2030,7 @@
             sameSideLegIncrementEnabled: true,
             allowDuplicateContracts: false,
             placeOppositeTrades: false,
-            openIfTotalPnlNegative: false,
+            alternatingLegRestrictionEnabled: true,
             openIfLastPnlNegative: false,
             renkoEnabled: false,
             renkoStepPoints: "100",
@@ -3683,7 +3683,7 @@
             sameSideLegIncrementEnabled: isStrangleLikePage ? false : getCheckboxValue(ids.sameSideLegIncrementEnabled, true),
             allowDuplicateContracts: isStrangleLikePage ? false : getCheckboxValue(ids.allowDuplicateContracts, false),
             placeOppositeTrades: isStrangleLikePage ? false : getCheckboxValue(ids.placeOppositeTrades, false),
-            openIfTotalPnlNegative: isStrangleLikePage ? false : getCheckboxValue(ids.openIfTotalPnlNegative, false),
+            alternatingLegRestrictionEnabled: isStrangleLikePage ? true : getCheckboxValue(ids.alternatingLegRestrictionEnabled, true),
             openIfLastPnlNegative: isStrangleLikePage ? false : getCheckboxValue(ids.openIfLastPnlNegative, false),
             renkoEnabled: supportsRenkoFeed ? getCheckboxValue(ids.renkoEnabled, false) : false,
             renkoStepPoints: supportsRenkoFeed ? String(getRenkoBoxSizeValue()) : "100",
@@ -3791,7 +3791,7 @@
             );
             setCheckboxValue(ids.allowDuplicateContracts, isStrangleLikePage ? false : objUiState.allowDuplicateContracts);
             setCheckboxValue(ids.placeOppositeTrades, isStrangleLikePage ? false : objUiState.placeOppositeTrades);
-            setCheckboxValue(ids.openIfTotalPnlNegative, isStrangleLikePage ? false : objUiState.openIfTotalPnlNegative);
+            setCheckboxValue(ids.alternatingLegRestrictionEnabled, isStrangleLikePage ? true : (objUiState.alternatingLegRestrictionEnabled ?? true));
             setCheckboxValue(ids.openIfLastPnlNegative, isStrangleLikePage ? false : objUiState.openIfLastPnlNegative);
             if (isDemoRenkoFeedMode()) {
                 setCheckboxValue(ids.renkoFeedEnabled, Boolean(objUiState.renkoFeedEnabled));
@@ -5422,7 +5422,7 @@
             });
         }
     });
-    [ids.sameSideLegIncrementEnabled, ids.allowDuplicateContracts, ids.placeOppositeTrades, ids.openIfTotalPnlNegative, ids.openIfLastPnlNegative].forEach(function (node) {
+    [ids.sameSideLegIncrementEnabled, ids.allowDuplicateContracts, ids.placeOppositeTrades, ids.alternatingLegRestrictionEnabled, ids.openIfLastPnlNegative].forEach(function (node) {
         node?.addEventListener("change", function () {
             syncQtyFromStartQty();
             queueProfileSave();

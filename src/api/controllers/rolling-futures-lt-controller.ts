@@ -2587,7 +2587,7 @@ function getDefaultManualTraderUiState(
         sameSideLegIncrementEnabled: true,
         allowDuplicateContracts: false,
         placeOppositeTrades: false,
-        openIfTotalPnlNegative: false,
+        alternatingLegRestrictionEnabled: true,
         openIfLastPnlNegative: false,
         buyQtyPercentEnabled: false,
         buyQtyPercent: "100",
@@ -4619,9 +4619,9 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         placeOppositeTrades: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(objUiState.placeOppositeTrades, Boolean(objDefaults.placeOppositeTrades)),
-        openIfTotalPnlNegative: isStrangleOptionsStrategy(pProfile.strategyCode)
-            ? false
-            : normalizeBooleanValue(objUiState.openIfTotalPnlNegative, Boolean(objDefaults.openIfTotalPnlNegative)),
+        alternatingLegRestrictionEnabled: isStrangleOptionsStrategy(pProfile.strategyCode)
+            ? true
+            : normalizeBooleanValue(objUiState.alternatingLegRestrictionEnabled, Boolean(objDefaults.alternatingLegRestrictionEnabled)),
         openIfLastPnlNegative: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(objUiState.openIfLastPnlNegative, Boolean(objDefaults.openIfLastPnlNegative)),
@@ -5032,9 +5032,9 @@ function normalizeProfileSaveInput(
         placeOppositeTrades: isStrangleOptionsStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(objUiState.placeOppositeTrades, Boolean(objDefaults.placeOppositeTrades)),
-        openIfTotalPnlNegative: isStrangleOptionsStrategy(pStrategyCode)
-            ? false
-            : normalizeBooleanValue(objUiState.openIfTotalPnlNegative, Boolean(objDefaults.openIfTotalPnlNegative)),
+        alternatingLegRestrictionEnabled: isStrangleOptionsStrategy(pStrategyCode)
+            ? true
+            : normalizeBooleanValue(objUiState.alternatingLegRestrictionEnabled, Boolean(objDefaults.alternatingLegRestrictionEnabled)),
         openIfLastPnlNegative: isStrangleOptionsStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(objUiState.openIfLastPnlNegative, Boolean(objDefaults.openIfLastPnlNegative)),
@@ -9022,8 +9022,14 @@ async function buildOptionsScalperPaperOptionOpen(
         const vLatestLegSide = objLatestActiveOption
             ? getTrackedOptionLegSide(objLatestActiveOption.contractName)
             : "";
-        const bApplyAlternatingLegGuard = vOpenedReason === "strategy_option_open"
-            || vOpenedReason === "manual_option_open";
+        const bAlternatingLegRestrictionEnabled = pStrategyCode === "strangle-demo"
+            ? true
+            : normalizeBooleanValue(objUiState.alternatingLegRestrictionEnabled, true);
+        const bApplyAlternatingLegGuard = bAlternatingLegRestrictionEnabled
+            && (
+                vOpenedReason === "strategy_option_open"
+                || vOpenedReason === "manual_option_open"
+            );
         if (!bIsReEntryOpen && bApplyAlternatingLegGuard && vLatestLegSide && vLatestLegSide === pInput.legSide) {
             const vMessage = `Skipped auto trade because the latest active option is already ${vLatestLegSide.toUpperCase()}. Next option must alternate to ${vLatestLegSide === "ce" ? "PE" : "CE"}.`;
             await logFuturesEvent(
@@ -11584,9 +11590,8 @@ function evaluateOptionsDemoPnlEntryGuards(
     pUiState: Record<string, unknown>,
     pPositions: RollingFuturesLtImportedPositionRecord[]
 ): { allowed: boolean; message: string; totalPnl: number; lastPnl: number | null; } {
-    const bRequireTotalPnlNegative = normalizeBooleanValue(pUiState.openIfTotalPnlNegative, false);
     const bRequireLastPnlNegative = normalizeBooleanValue(pUiState.openIfLastPnlNegative, false);
-    if (!bRequireTotalPnlNegative && !bRequireLastPnlNegative) {
+    if (!bRequireLastPnlNegative) {
         return {
             allowed: true,
             message: "",
@@ -11608,14 +11613,6 @@ function evaluateOptionsDemoPnlEntryGuards(
     const objLatestOpenPosition = getLatestActiveTrackedOptionPosition(arrActiveOptions);
     const vLastPnlRaw = objLatestOpenPosition ? Number(objLatestOpenPosition.pnl || 0) : Number.NaN;
     const vLastPnl = Number.isFinite(vLastPnlRaw) ? Number(vLastPnlRaw.toFixed(4)) : null;
-    if (bRequireTotalPnlNegative && !(vTotalPnl < 0)) {
-        return {
-            allowed: false,
-            message: `Skipped Renko paper entry because Total Open Positions PnL is ${vTotalPnl.toFixed(4)}, not below 0.`,
-            totalPnl: vTotalPnl,
-            lastPnl: vLastPnl
-        };
-    }
     if (bRequireLastPnlNegative && !(vLastPnl !== null && vLastPnl < 0)) {
         return {
             allowed: false,
@@ -11745,7 +11742,6 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
                         signal: vCurrentSignal,
                         totalPnl: objPnlGuard.totalPnl,
                         lastPnl: objPnlGuard.lastPnl,
-                        openIfTotalPnlNegative: normalizeBooleanValue(objUiState.openIfTotalPnlNegative, false),
                         openIfLastPnlNegative: normalizeBooleanValue(objUiState.openIfLastPnlNegative, false),
                         reason: "paper_option_pnl_entry_guard"
                     }
