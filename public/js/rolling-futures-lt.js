@@ -988,9 +988,6 @@
     }
 
     function getRenkoEmaEnabled() {
-        if (isDemoEmaCrossoverMode()) {
-            return true;
-        }
         return supportsRenkoFeed && ids.renkoEmaEnabled instanceof HTMLInputElement && ids.renkoEmaEnabled.checked;
     }
 
@@ -3712,7 +3709,7 @@
             renkoFeedPriceSrc: isDemoRenkoFeedMode()
                 ? String(ids.renkoFeedPriceSrc?.value || "spot_price").trim().toLowerCase()
                 : "spot_price",
-            renkoEmaEnabled: supportsRenkoFeed ? (isDemoEmaCrossoverMode() ? true : getCheckboxValue(ids.renkoEmaEnabled, false)) : false,
+            renkoEmaEnabled: supportsRenkoFeed ? getCheckboxValue(ids.renkoEmaEnabled, false) : false,
             renkoEmaLength: supportsRenkoFeed ? String(getRenkoEmaLengthValue()) : "20",
             renkoEmaValuesBySymbol: supportsRenkoFeed
                 ? renkoEmaValuesBySymbol
