@@ -11662,9 +11662,12 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
     );
     const objUiState = getMergedUiState(objSync.profile);
     const bEmaEnabled = normalizeBooleanValue(objUiState.renkoEmaEnabled, false);
+    const arrRenkoSignals = objSync.signals.filter((vSignal) => vSignal === "R" || vSignal === "G");
     const bShouldAttemptAutoTrade = (pManualSignal === "R" || pManualSignal === "G")
         ? true
-        : (bEmaEnabled && Boolean(objSync.emaSignal));
+        : (bEmaEnabled
+            ? Boolean(objSync.emaSignal)
+            : arrRenkoSignals.length > 0);
     if (!bShouldAttemptAutoTrade) {
         return {
             ...objSync,
@@ -11678,14 +11681,16 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
             ...objSync,
             autoTrade: {
                 status: "warning",
-                message: "Turn Auto Trader ON before EMA crossover signals can place paper option orders."
+                message: `Turn Auto Trader ON before ${bEmaEnabled ? "EMA crossover" : "Renko"} signals can place paper option orders.`
             }
         };
     }
 
     const vSignal = pManualSignal === "R" || pManualSignal === "G"
         ? pManualSignal
-        : (objSync.emaSignal === "R" || objSync.emaSignal === "G" ? objSync.emaSignal : "");
+        : (bEmaEnabled
+            ? (objSync.emaSignal === "R" || objSync.emaSignal === "G" ? objSync.emaSignal : "")
+            : (arrRenkoSignals[arrRenkoSignals.length - 1] || ""));
     if (!vSignal) {
         return {
             ...objSync,
@@ -11695,13 +11700,13 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
 
     const arrSignalsToProcess = (pManualSignal === "R" || pManualSignal === "G")
         ? [pManualSignal]
-        : [vSignal as OptionsDemoRenkoSignal];
+        : (bEmaEnabled ? [vSignal as OptionsDemoRenkoSignal] : arrRenkoSignals);
     if (!arrSignalsToProcess.length) {
         return {
             ...objSync,
             autoTrade: {
                 status: "warning",
-                message: "No EMA crossover signal was available to process."
+                message: `No ${bEmaEnabled ? "EMA crossover" : "Renko"} signal was available to process.`
             }
         };
     }
@@ -11712,7 +11717,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
             ...objSync,
             autoTrade: {
                 status: "warning",
-                message: "An EMA crossover paper auto trade is already being processed. Please wait for the current signal to finish."
+                message: `A ${bEmaEnabled ? "EMA crossover" : "Renko"} paper auto trade is already being processed. Please wait for the current signal to finish.`
             }
         };
     }
@@ -11805,11 +11810,12 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
                 }
             };
         }
+        const vSignalSourceLabel = bEmaEnabled ? "EMA crossover" : "Renko";
         return {
             ...objSync,
             autoTrade: {
                 status: "success",
-                message: `${vSignal === "G" ? "Green" : "Red"} EMA crossover opened a ${vSignal === "G" ? "GREEN" : "RED"} paper option from row ${vSignal === "G" ? 1 : 2}.`,
+                message: `${vSignal === "G" ? "Green" : "Red"} ${vSignalSourceLabel} opened a ${vSignal === "G" ? "GREEN" : "RED"} paper option from row ${vSignal === "G" ? 1 : 2}.`,
                 trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrCurrentTrackedPositions)
             }
         };
@@ -11819,7 +11825,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
             ...objSync,
             autoTrade: {
                 status: getErrorMessage(objError, "").includes("already active") ? "warning" : "danger",
-                message: getErrorMessage(objError, "Unable to place EMA crossover paper auto trade.")
+                message: getErrorMessage(objError, `Unable to place ${bEmaEnabled ? "EMA crossover" : "Renko"} paper auto trade.`)
             }
         };
     }
