@@ -372,7 +372,7 @@
     }
 
     function getCoveredMultiplierMin() {
-        return (isDemoVariant || isStrangleLikePage) ? 1 : 2;
+        return (isDemoVariant || isStrangleLikePage || isCoveredMode) ? 1 : 2;
     }
 
     function clampCoveredMultiplierValue(value) {

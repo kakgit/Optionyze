@@ -78,19 +78,21 @@
                     <div class="rolling-futures-hero-badge">
                         <div class="rolling-futures-start-qty-label-row">
                             <label for="txtRollingFuturesStartQty">Multiplier</label>
-                            <button class="rolling-futures-start-qty-calc-btn" type="button" id="btnRollingFuturesCalcStartQty" title="Calculate Multiplier from Available Balance" aria-label="Calculate Multiplier from Available Balance">
-                                <svg viewBox="0 0 24 24" aria-hidden="true">
-                                    <rect x="4" y="3" width="16" height="18" rx="2" />
-                                    <path d="M8 7h8" />
-                                    <path d="M8 12h2" />
-                                    <path d="M14 12h2" />
-                                    <path d="M8 16h2" />
-                                    <path d="M14 16h2" />
-                                </svg>
-                            </button>
+                            <% if (!bIsCoveredLivePage) { %>
+                                <button class="rolling-futures-start-qty-calc-btn" type="button" id="btnRollingFuturesCalcStartQty" title="Calculate Multiplier from Available Balance" aria-label="Calculate Multiplier from Available Balance">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <rect x="4" y="3" width="16" height="18" rx="2" />
+                                        <path d="M8 7h8" />
+                                        <path d="M8 12h2" />
+                                        <path d="M14 12h2" />
+                                        <path d="M8 16h2" />
+                                        <path d="M14 16h2" />
+                                    </svg>
+                                </button>
+                            <% } %>
                         </div>
                         <div class="rolling-futures-start-qty-row">
-                            <input class="rolling-futures-start-qty" type="number" min="<%= (bIsDemoPage || bIsStrangleLikePage) ? '1' : '2' %>" max="1000" step="1" id="txtRollingFuturesStartQty" value="<%= (bIsDemoPage || bIsStrangleLikePage) ? '1' : '2' %>" />
+                            <input class="rolling-futures-start-qty" type="number" min="<%= (bIsDemoPage || bIsStrangleLikePage || bIsCoveredLivePage) ? '1' : '2' %>" max="1000" step="1" id="txtRollingFuturesStartQty" value="<%= (bIsDemoPage || bIsStrangleLikePage || bIsCoveredLivePage) ? '1' : '2' %>" />
                         </div>
                     </div>
                     <div class="rolling-futures-hero-badge action">

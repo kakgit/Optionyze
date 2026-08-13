@@ -599,7 +599,7 @@ function normalizeExecStrategyInput(
 }
 
 function getCoveredMultiplierMin(pStrategyCode: RollingFuturesLtStrategyCode): number {
-    return (isOptionsScalperStrategy(pStrategyCode) || isStrangleOptionsStrategy(pStrategyCode)) ? 1 : 2;
+    return (pStrategyCode === "covered-options" || isOptionsScalperStrategy(pStrategyCode) || isStrangleOptionsStrategy(pStrategyCode)) ? 1 : 2;
 }
 
 function normalizeCoveredMultiplierValue(

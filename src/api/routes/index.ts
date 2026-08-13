@@ -10,7 +10,6 @@ import {
 } from "../controllers/users-controller";
 import { listSurvivalAdminRunningUsers } from "../controllers/survival-admin-controller";
 import {
-    calculateCoveredOptionsRecommendedStartQty,
     calculateRenkoOptionsRecommendedStartQty,
     calculateStrangleOptionsRecommendedStartQty,
     calculateOptionsScalperRecommendedStartQty,
@@ -312,9 +311,6 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.get("/covered-options/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getCoveredOptionsAccountSummary(req, res);
-    });
-    objRouter.post("/covered-options/start-qty/calculate", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
-        await calculateCoveredOptionsRecommendedStartQty(req, res);
     });
     objRouter.post("/covered-options/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await executeCoveredOptionsManualFuture(req, res);
