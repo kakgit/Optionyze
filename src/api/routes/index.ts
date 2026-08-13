@@ -31,6 +31,8 @@ import {
     clearStrangleDemoClosedPositions,
     deleteOptionsScalperClosedPosition,
     deleteStrangleDemoClosedPosition,
+    updateOptionsScalperClosedPosition,
+    updateStrangleDemoClosedPosition,
     clearRollingFuturesLtDualEventsController,
     closeCoveredOptionsImportedOpenPosition,
     closeRenkoOptionsImportedOpenPosition,
@@ -641,6 +643,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     objRouter.post("/options-demo/closed-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await deleteOptionsScalperClosedPosition(req, res);
     });
+    objRouter.post("/options-demo/closed-positions/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateOptionsScalperClosedPosition(req, res);
+    });
     objRouter.get("/options-demo/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getOptionsScalperEvents(req, res);
     });
@@ -731,6 +736,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/strangle-demo/closed-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await deleteStrangleDemoClosedPosition(req, res);
+    });
+    objRouter.post("/strangle-demo/closed-positions/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateStrangleDemoClosedPosition(req, res);
     });
     objRouter.get("/strangle-demo/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getStrangleDemoEvents(req, res);

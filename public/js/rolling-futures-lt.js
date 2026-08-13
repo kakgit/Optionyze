@@ -234,8 +234,14 @@
         importModal: document.getElementById(`${prefix}ImportModal`),
         importList: document.getElementById(`${prefix}ImportList`),
         closeImportModalButton: document.getElementById(`btn${idPrefix}CloseImportModal`),
-        applyImportedPositionsButton: document.getElementById(`btn${idPrefix}ApplyImportedPositions`)
-        ,
+        applyImportedPositionsButton: document.getElementById(`btn${idPrefix}ApplyImportedPositions`),
+        closedEditOverlay: document.getElementById(`${prefix}ClosedEditOverlay`),
+        closedEditModal: document.getElementById(`${prefix}ClosedEditModal`),
+        closedEditSymbol: document.getElementById(`${prefix}ClosedEditSymbol`),
+        closedEditStatus: document.getElementById(`${prefix}ClosedEditStatus`),
+        closedEditQty: document.getElementById(`txt${idPrefix}ClosedEditQty`),
+        closeClosedEditModalButton: document.getElementById(`btn${idPrefix}CloseClosedEditModal`),
+        saveClosedEditButton: document.getElementById(`btn${idPrefix}SaveClosedEdit`),
         savedProfilePanel: document.getElementById("rollingFuturesSavedProfilePanel"),
         savedProfileBody: document.getElementById("rollingFuturesSavedProfileBody")
     };
@@ -247,6 +253,7 @@
     let importablePositions = [];
     let closedPositions = [];
     let closedPositionsPage = 1;
+    let editingClosedPositionCloseId = "";
     let connectionPollTimer = null;
     let confirmationPollTimer = null;
     let isApplyingState = false;
@@ -4882,6 +4889,10 @@
         return postJson(`${endpointBase}/closed-positions/delete`, { closeId: closeId });
     }
 
+    async function updateSavedClosedPositionQty(closeId, qty) {
+        return postJson(`${endpointBase}/closed-positions/update`, { closeId: closeId, qty: qty });
+    }
+
     async function reconcileOpenPositions() {
         const objResult = await postJson(`${endpointBase}/open-positions/reconcile`, {});
         renderOpenPositions(objResult?.data);
@@ -4952,6 +4963,14 @@
                     <td>${renderPnlValue(row.pnl, false)}</td>
                     <td>
                         <div class="rolling-demo-table-actions">
+                            ${isPaperDemoVariant ? `
+                                <button class="rolling-demo-icon-btn primary rolling-live-edit-closed-position" type="button" data-close-id="${escapeHtml(closeId)}" title="Edit closed position qty" aria-label="Edit closed position qty">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M12 20h9" />
+                                        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                                    </svg>
+                                </button>
+                            ` : ""}
                             <button class="rolling-demo-icon-btn warn rolling-live-delete-closed-position" type="button" data-close-id="${escapeHtml(closeId)}" title="Delete this closed position permanently" aria-label="Delete this closed position permanently">
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="M18 6 6 18" />
@@ -5090,6 +5109,56 @@
         ids.importOverlay?.classList.remove("show");
         ids.importModal?.classList.remove("show");
         ids.importModal?.setAttribute("aria-hidden", "true");
+    }
+
+    function openClosedEditModal(row) {
+        const closeId = String(row?.closeId || row?.rowId || "").trim();
+        if (!closeId) {
+            setStatus(ids.pageStatus, "Unable to find the selected closed position.", "danger");
+            return;
+        }
+        editingClosedPositionCloseId = closeId;
+        if (ids.closedEditSymbol) {
+            ids.closedEditSymbol.textContent = `Update Qty for ${String(row?.symbol || "this closed position").trim() || "this closed position"}.`;
+        }
+        if (ids.closedEditQty instanceof HTMLInputElement) {
+            ids.closedEditQty.value = String(Math.max(1, Math.floor(Number(row?.qty || 1))));
+            window.setTimeout(function () {
+                ids.closedEditQty?.focus();
+                ids.closedEditQty?.select();
+            }, 0);
+        }
+        setStatus(ids.closedEditStatus, "", "");
+        ids.closedEditOverlay?.classList.add("show");
+        ids.closedEditModal?.classList.add("show");
+        ids.closedEditModal?.setAttribute("aria-hidden", "false");
+    }
+
+    function closeClosedEditModal() {
+        editingClosedPositionCloseId = "";
+        ids.closedEditOverlay?.classList.remove("show");
+        ids.closedEditModal?.classList.remove("show");
+        ids.closedEditModal?.setAttribute("aria-hidden", "true");
+        setStatus(ids.closedEditStatus, "", "");
+    }
+
+    async function saveClosedEditQty() {
+        const closeId = String(editingClosedPositionCloseId || "").trim();
+        const qty = Math.max(0, Math.floor(Number(ids.closedEditQty?.value || 0)));
+        if (!closeId) {
+            throw new Error("Select a closed position to edit.");
+        }
+        if (!(qty > 0)) {
+            throw new Error("Qty must be greater than 0.");
+        }
+        const objResult = await updateSavedClosedPositionQty(closeId, qty);
+        await Promise.all([
+            loadClosedPositions().catch(function () { return undefined; }),
+            loadAccountSummary().catch(function () { return undefined; }),
+            loadEvents().catch(function () { return undefined; })
+        ]);
+        closeClosedEditModal();
+        return objResult;
     }
 
     function renderImportablePositions(rows) {
@@ -6195,6 +6264,24 @@
     });
     ids.importOverlay?.addEventListener("click", closeImportModal);
     ids.closeImportModalButton?.addEventListener("click", closeImportModal);
+    ids.closedEditOverlay?.addEventListener("click", closeClosedEditModal);
+    ids.closeClosedEditModalButton?.addEventListener("click", closeClosedEditModal);
+    ids.saveClosedEditButton?.addEventListener("click", function () {
+        void saveClosedEditQty().then(function (objResult) {
+            setStatus(ids.pageStatus, objResult?.message || "Closed position qty updated.", "success");
+        }).catch(function (error) {
+            setStatus(ids.closedEditStatus, error instanceof Error ? error.message : "Unable to update closed position qty.", "danger");
+        });
+    });
+    ids.closedEditQty?.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            ids.saveClosedEditButton?.click();
+        }
+        if (event.key === "Escape") {
+            closeClosedEditModal();
+        }
+    });
     ids.applyImportedPositionsButton?.addEventListener("click", function () {
         void applyImportedPositions().then(function (objResult) {
             setStatus(
@@ -6334,6 +6421,19 @@
     });
     ids.closedPositionsBody?.addEventListener("click", function (event) {
         const target = event.target instanceof Element ? event.target : null;
+        const editButton = target ? target.closest(".rolling-live-edit-closed-position") : null;
+        if (editButton instanceof HTMLButtonElement) {
+            const closeId = String(editButton.dataset.closeId || "").trim();
+            const row = closedPositions.find(function (item) {
+                return String(item?.closeId || item?.rowId || "").trim() === closeId;
+            });
+            if (!row) {
+                setStatus(ids.pageStatus, "Unable to find the selected closed position.", "danger");
+                return;
+            }
+            openClosedEditModal(row);
+            return;
+        }
         const deleteButton = target ? target.closest(".rolling-live-delete-closed-position") : null;
         if (!(deleteButton instanceof HTMLButtonElement)) {
             return;

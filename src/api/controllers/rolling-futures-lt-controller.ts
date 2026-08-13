@@ -35,6 +35,7 @@ import {
     clearOptionsScalperPaperClosedPositions,
     deleteOptionsScalperPaperClosedPosition,
     listOptionsScalperPaperClosedPositions,
+    updateOptionsScalperPaperClosedPositionQty,
     type OptionsScalperPaperClosedPositionRecord
 } from "../../storage/options-scalper-paper-store";
 import { getOptionsDemoOiIndicatorSummary } from "../../strategies/directional-options-demo/oi-indicator";
@@ -15981,6 +15982,68 @@ async function deleteOptionsScalperClosedPositionInternal(req: Request, res: Res
     }
 }
 
+async function updateOptionsScalperClosedPositionInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
+    const vUserId = getAccountId(req);
+    if (!vUserId) {
+        res.status(401).json({
+            status: "warning",
+            message: "Sign in to continue."
+        });
+        return;
+    }
+    if (!isOptionsScalperStrategy(pStrategyCode)) {
+        res.status(400).json({
+            status: "warning",
+            message: "Closed-position editing is only supported on demo pages."
+        });
+        return;
+    }
+    const vCloseId = String(req.body?.closeId || "").trim();
+    const vQty = Math.max(0, Math.floor(Number(req.body?.qty || 0)));
+    if (!vCloseId) {
+        res.status(400).json({
+            status: "warning",
+            message: "Closed position ID is required."
+        });
+        return;
+    }
+    if (!(vQty > 0)) {
+        res.status(400).json({
+            status: "warning",
+            message: "Qty must be greater than 0."
+        });
+        return;
+    }
+    try {
+        const objUpdated = await updateOptionsScalperPaperClosedPositionQty(vUserId, pStrategyCode, vCloseId, vQty);
+        if (!objUpdated) {
+            res.status(404).json({
+                status: "warning",
+                message: "Closed position was not found."
+            });
+            return;
+        }
+        const objProfile = await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
+            vUserId,
+            await readLiveProfile(vUserId, pStrategyCode)
+        );
+        res.json({
+            status: "success",
+            message: "Closed demo position qty updated.",
+            data: {
+                profile: objProfile,
+                position: mapOptionsScalperPaperClosedPosition(objUpdated, 0)
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to update closed demo position.")
+        });
+    }
+}
+
 async function calculateRecalculatedTotalPnl(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -18120,6 +18183,9 @@ export async function clearOptionsScalperClosedPositions(req: Request, res: Resp
 export async function deleteOptionsScalperClosedPosition(req: Request, res: Response): Promise<void> {
     await deleteOptionsScalperClosedPositionInternal(req, res, "options-scalper");
 }
+export async function updateOptionsScalperClosedPosition(req: Request, res: Response): Promise<void> {
+    await updateOptionsScalperClosedPositionInternal(req, res, "options-scalper");
+}
 export async function getOptionsScalperEvents(req: Request, res: Response): Promise<void> {
     await getEventsInternal(req, res, "options-scalper");
 }
@@ -18216,6 +18282,9 @@ export async function clearStrangleDemoClosedPositions(req: Request, res: Respon
 }
 export async function deleteStrangleDemoClosedPosition(req: Request, res: Response): Promise<void> {
     await deleteOptionsScalperClosedPositionInternal(req, res, "strangle-demo");
+}
+export async function updateStrangleDemoClosedPosition(req: Request, res: Response): Promise<void> {
+    await updateOptionsScalperClosedPositionInternal(req, res, "strangle-demo");
 }
 export async function getStrangleDemoEvents(req: Request, res: Response): Promise<void> {
     await getEventsInternal(req, res, "strangle-demo");

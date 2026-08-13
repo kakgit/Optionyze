@@ -248,3 +248,66 @@ export async function deleteOptionsScalperPaperClosedPosition(
     }
     return bDeleted;
 }
+
+export async function updateOptionsScalperPaperClosedPositionQty(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pCloseId: string,
+    pQty: number
+): Promise<OptionsScalperPaperClosedPositionRecord | null> {
+    const vUserId = String(pUserId || "").trim();
+    const vCloseId = String(pCloseId || "").trim();
+    const vQty = Math.max(0, Math.floor(Number(pQty || 0)));
+    const vUpdatedAt = new Date().toISOString();
+    if (!vCloseId || !(vQty > 0)) {
+        return null;
+    }
+    if (isPostgresConfigured()) {
+        const objPool = getPostgresPool();
+        const objResult = await objPool.query<OptionsScalperPaperClosedPositionRow>(
+            `
+                UPDATE optionyze_options_scalper_closed_positions
+                SET qty = $4,
+                    updated_at = $5
+                WHERE user_id = $1
+                  AND strategy_code = $2
+                  AND close_id = $3
+                RETURNING
+                    close_id,
+                    user_id,
+                    strategy_code,
+                    contract_name,
+                    side,
+                    qty,
+                    buy_price,
+                    sell_price,
+                    charges,
+                    pnl,
+                    start_at,
+                    end_at,
+                    metadata_json,
+                    updated_at
+            `,
+            [vUserId, pStrategyCode, vCloseId, vQty, vUpdatedAt]
+        );
+        return objResult.rows[0] ? mapClosedPositionRow(objResult.rows[0]) : null;
+    }
+
+    const arrRows = await loadAllClosedPositionsJson();
+    let objUpdated: OptionsScalperPaperClosedPositionRecord | null = null;
+    const arrNext = arrRows.map((objRow) => {
+        if (objRow.userId === vUserId && objRow.strategyCode === pStrategyCode && String(objRow.closeId || "").trim() === vCloseId) {
+            objUpdated = {
+                ...objRow,
+                qty: vQty,
+                updatedAt: vUpdatedAt
+            };
+            return objUpdated;
+        }
+        return objRow;
+    });
+    if (objUpdated) {
+        await writeJsonFileAtomic(gClosedPositionsFile, arrNext);
+    }
+    return objUpdated;
+}

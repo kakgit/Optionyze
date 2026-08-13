@@ -1088,6 +1088,31 @@
             </div>
         </section>
     <% } %>
+    <% if (bIsPaperDemoPage) { %>
+        <div class="rolling-live-overlay" id="rollingDualFuturesClosedEditOverlay"></div>
+        <section class="app-panel rolling-live-modal" id="rollingDualFuturesClosedEditModal" aria-hidden="true">
+            <div class="rolling-live-modal-head">
+                <div>
+                    <h2 class="rolling-live-modal-title">Edit Closed Position Qty</h2>
+                    <p class="app-copy" id="rollingDualFuturesClosedEditSymbol">Update the demo closed-position quantity only.</p>
+                </div>
+                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesCloseClosedEditModal" title="Close edit dialog" aria-label="Close edit dialog">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="rolling-live-status" id="rollingDualFuturesClosedEditStatus"></div>
+            <div class="rolling-demo-field">
+                <label for="txtRollingDualFuturesClosedEditQty">Qty</label>
+                <input type="number" min="1" step="1" id="txtRollingDualFuturesClosedEditQty" />
+            </div>
+            <div class="rolling-live-modal-actions">
+                <button class="rolling-demo-btn primary" type="button" id="btnRollingDualFuturesSaveClosedEdit">Save Qty</button>
+            </div>
+        </section>
+    <% } %>
     <script src="/js/rolling-futures-lt.js"></script>
 </body>
 </html>
