@@ -266,27 +266,48 @@ export async function updateOptionsScalperPaperClosedPositionQty(
         const objPool = getPostgresPool();
         const objResult = await objPool.query<OptionsScalperPaperClosedPositionRow>(
             `
-                UPDATE optionyze_options_scalper_closed_positions
+                WITH selected_closed_position AS (
+                    SELECT
+                        qty AS old_qty,
+                        charges AS old_charges,
+                        pnl AS old_pnl
+                    FROM optionyze_options_scalper_closed_positions
+                    WHERE user_id = $1
+                      AND strategy_code = $2
+                      AND close_id = $3
+                )
+                UPDATE optionyze_options_scalper_closed_positions target
                 SET qty = $4,
+                    charges = CASE
+                        WHEN selected_closed_position.old_qty > 0
+                            THEN ROUND((selected_closed_position.old_charges * ($4 / selected_closed_position.old_qty))::numeric, 6)
+                        ELSE target.charges
+                    END,
+                    pnl = CASE
+                        WHEN selected_closed_position.old_qty > 0
+                            THEN ROUND((selected_closed_position.old_pnl * ($4 / selected_closed_position.old_qty))::numeric, 6)
+                        ELSE target.pnl
+                    END,
                     updated_at = $5
+                FROM selected_closed_position
                 WHERE user_id = $1
                   AND strategy_code = $2
                   AND close_id = $3
                 RETURNING
-                    close_id,
-                    user_id,
-                    strategy_code,
-                    contract_name,
-                    side,
-                    qty,
-                    buy_price,
-                    sell_price,
-                    charges,
-                    pnl,
-                    start_at,
-                    end_at,
-                    metadata_json,
-                    updated_at
+                    target.close_id,
+                    target.user_id,
+                    target.strategy_code,
+                    target.contract_name,
+                    target.side,
+                    target.qty,
+                    target.buy_price,
+                    target.sell_price,
+                    target.charges,
+                    target.pnl,
+                    target.start_at,
+                    target.end_at,
+                    target.metadata_json,
+                    target.updated_at
             `,
             [vUserId, pStrategyCode, vCloseId, vQty, vUpdatedAt]
         );
@@ -297,9 +318,13 @@ export async function updateOptionsScalperPaperClosedPositionQty(
     let objUpdated: OptionsScalperPaperClosedPositionRecord | null = null;
     const arrNext = arrRows.map((objRow) => {
         if (objRow.userId === vUserId && objRow.strategyCode === pStrategyCode && String(objRow.closeId || "").trim() === vCloseId) {
+            const vOldQty = Number(objRow.qty || 0);
+            const vScale = vOldQty > 0 ? vQty / vOldQty : 1;
             objUpdated = {
                 ...objRow,
                 qty: vQty,
+                charges: Number((Number(objRow.charges || 0) * vScale).toFixed(6)),
+                pnl: Number((Number(objRow.pnl || 0) * vScale).toFixed(6)),
                 updatedAt: vUpdatedAt
             };
             return objUpdated;
