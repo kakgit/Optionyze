@@ -5617,7 +5617,9 @@ async function enrichTrackedOpenPositions(
         objTotals.totalCharges += vCharges;
         objTotals.totalPnl += vPnl;
         objTotals.totalMargin += Number(objPosition.margin || 0);
-        objTotals.totalQty += vQty;
+        if (!bInactivePosition) {
+            objTotals.totalQty += vQty;
+        }
         objTotals.positionCount += 1;
         if (!bInactivePosition && !bIsFuture) {
             const vLegSide = inferTrackedOptionLegSide(vContractName);
