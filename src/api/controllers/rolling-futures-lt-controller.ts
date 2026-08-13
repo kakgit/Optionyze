@@ -3875,6 +3875,41 @@ function mapOptionsScalperPaperClosedPosition(
     };
 }
 
+async function calculateOptionsScalperPaperClosedPositionEditTotals(
+    pRow: OptionsScalperPaperClosedPositionRecord,
+    pQty: number
+): Promise<{ charges: number; pnl: number; }> {
+    const vContractName = String(pRow.contractName || "").trim();
+    const vSymbol = normalizeSymbolValue(vContractName.includes("ETH") ? "ETH" : "BTC");
+    const vLotSize = getLotSizeForSymbol(vSymbol);
+    const vQty = Math.max(0, Math.floor(Number(pQty || 0)));
+    const vBuyPrice = Number(pRow.buyPrice || 0);
+    const vSellPrice = Number(pRow.sellPrice || 0);
+    const vPnl = Number(((vSellPrice - vBuyPrice) * vQty * vLotSize).toFixed(4));
+    let vUnderlyingPrice = 0;
+    if (isOptionContractSymbol(vContractName)) {
+        try {
+            const objSnapshot = await getLiveMarketSnapshot(buildLiveMarketSnapshotConfig(vSymbol));
+            vUnderlyingPrice = Number(objSnapshot.futuresPrice || objSnapshot.spotPrice || 0);
+        }
+        catch (_objError) {
+            vUnderlyingPrice = 0;
+        }
+    }
+    const vEntryPrice = String(pRow.side || "").trim().toUpperCase() === "BUY"
+        ? vBuyPrice
+        : vSellPrice;
+    const vExitPrice = String(pRow.side || "").trim().toUpperCase() === "BUY"
+        ? vSellPrice
+        : vBuyPrice;
+    const vEntryCharge = estimateLivePositionCharges(vContractName, vQty, vLotSize, vEntryPrice, vUnderlyingPrice);
+    const vExitCharge = estimateLivePositionCharges(vContractName, vQty, vLotSize, vExitPrice, vUnderlyingPrice);
+    return {
+        charges: Number((vEntryCharge + vExitCharge).toFixed(4)),
+        pnl: vPnl
+    };
+}
+
 function filterPaperClosedPositionsByRange(
     pRows: OptionsScalperPaperClosedPositionRecord[],
     pFromDateValue: string,
@@ -16015,7 +16050,24 @@ async function updateOptionsScalperClosedPositionInternal(req: Request, res: Res
         return;
     }
     try {
-        const objUpdated = await updateOptionsScalperPaperClosedPositionQty(vUserId, pStrategyCode, vCloseId, vQty);
+        const objExisting = (await listOptionsScalperPaperClosedPositions(vUserId, pStrategyCode))
+            .find((objRow) => String(objRow.closeId || "").trim() === vCloseId);
+        if (!objExisting) {
+            res.status(404).json({
+                status: "warning",
+                message: "Closed position was not found."
+            });
+            return;
+        }
+        const objTotals = await calculateOptionsScalperPaperClosedPositionEditTotals(objExisting, vQty);
+        const objUpdated = await updateOptionsScalperPaperClosedPositionQty(
+            vUserId,
+            pStrategyCode,
+            vCloseId,
+            vQty,
+            objTotals.charges,
+            objTotals.pnl
+        );
         if (!objUpdated) {
             res.status(404).json({
                 status: "warning",
