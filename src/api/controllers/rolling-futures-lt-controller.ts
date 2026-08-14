@@ -323,6 +323,10 @@ interface RollingFuturesLtPositionGreeks {
 interface RollingFuturesLtEnrichedPositionRecord extends RollingFuturesLtImportedPositionRecord {
     contractKind: "future" | "option";
     lotSize: number;
+    ltpPrice?: number;
+    bestBid: number | null;
+    bestAsk: number | null;
+    markPriceSource: "best_bid" | "best_ask" | "mark_price" | "unavailable" | "stored_price";
     greeks: RollingFuturesLtPositionGreeks;
 }
 
@@ -368,10 +372,12 @@ interface RollingFuturesLtOpenPositionsPayload {
     positions: RollingFuturesLtEnrichedPositionRecord[];
     totals: RollingFuturesLtOpenPositionTotals;
     neutralStatus: RollingFuturesLtNeutralStatus;
+    closedFromDate: string;
     recoveryMetrics: {
         totalBrokerageToRecover: number;
         totalPnl: number;
         netPnl: number;
+        includesOpenPositions?: boolean;
     };
 }
 
@@ -491,8 +497,16 @@ function isOptionsScalperStrategy(pStrategyCode: RollingFuturesLtStrategyCode): 
     return pStrategyCode === "options-scalper" || pStrategyCode === "strangle-demo";
 }
 
+function usesOptionsDemoManualTraderSettings(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
+    return pStrategyCode === "covered-options" || pStrategyCode === "options-scalper";
+}
+
 function supportsRenkoFeedStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
     return pStrategyCode === "renko-options" || pStrategyCode === "options-scalper";
+}
+
+function supportsRenkoSettingsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
+    return pStrategyCode === "covered-options" || supportsRenkoFeedStrategy(pStrategyCode);
 }
 
 function isStrangleOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
@@ -810,7 +824,9 @@ async function runCoveredExecStrategyBatchPlacement(
                 return pLeft.action === "sell" ? -1 : 1;
             })
             : [...pInputs];
-        await resetRecoveryMetrics(pUserId, pStrategyCode);
+        if (!isCoveredOptionsStrategy(pStrategyCode)) {
+            await resetRecoveryMetrics(pUserId, pStrategyCode);
+        }
         for (const objInput of arrInputsToExecute) {
             objLastResult = await executeStrategyPlacement(
                 pUserId,
@@ -820,7 +836,7 @@ async function runCoveredExecStrategyBatchPlacement(
                 objInput,
                 {
                     strategyStartedAt: vStrategyStartedAt,
-                    skipRecoveryReset: true,
+                    skipRecoveryReset: !isCoveredOptionsStrategy(pStrategyCode),
                     skipNeutralityCheck: true
                 }
             );
@@ -1395,6 +1411,14 @@ function getBlockedMarginUsd(pRow: DeltaWalletBalanceRow | null): number {
     return vAvailableBalance > vBalance
         ? vBalancePlusCashflowMinusAvailable
         : vBalanceMinusAvailable;
+}
+
+function getActualBlockedMarginUsd(pRow: DeltaWalletBalanceRow | null): number {
+    if (!pRow) {
+        return Number.NaN;
+    }
+    const vBlockedMargin = toFiniteNumber(pRow.blocked_margin, Number.NaN);
+    return Number.isFinite(vBlockedMargin) ? Math.abs(vBlockedMargin) : Number.NaN;
 }
 
 function getBlockedMarginDisplayDetails(pRow: DeltaWalletBalanceRow | null): {
@@ -2446,23 +2470,25 @@ function getDefaultOptionRowUiState(
         reD: bIsDual ? "0.25" : "0.53",
         tpD: bIsDual ? "0.12" : "0.25",
         slD: bIsDual ? "0.50" : "0.65",
-        reEnter: isOptionsScalperStrategy(pStrategyCode) || !supportsRenkoFeedStrategy(pStrategyCode)
+        reEnter: usesOptionsDemoManualTraderSettings(pStrategyCode) || !supportsRenkoFeedStrategy(pStrategyCode)
     };
     if (isCoveredLikeStrategy(pStrategyCode) && vRowIndex === 1) {
         objDefaults.action = "sell";
+        objDefaults.legs = pStrategyCode === "covered-options" ? "pe" : objDefaults.legs;
         objDefaults.expiryMode = "6";
-        objDefaults.newD = "0.33";
-        objDefaults.reD = "0.33";
-        objDefaults.tpD = "0.10";
-        objDefaults.slD = "0.50";
+        objDefaults.newD = pStrategyCode === "covered-options" ? "0.27" : "0.33";
+        objDefaults.reD = objDefaults.newD;
+        objDefaults.tpD = pStrategyCode === "covered-options" ? "0.14" : "0.10";
+        objDefaults.slD = pStrategyCode === "covered-options" ? "0.54" : "0.50";
     }
     if (isCoveredLikeStrategy(pStrategyCode) && vRowIndex === 2) {
-        objDefaults.action = "buy";
-        objDefaults.expiryMode = "1";
-        objDefaults.newD = "0.13";
-        objDefaults.reD = "0.13";
-        objDefaults.tpD = "1.00";
-        objDefaults.slD = "0.05";
+        objDefaults.action = pStrategyCode === "covered-options" ? "sell" : "buy";
+        objDefaults.legs = pStrategyCode === "covered-options" ? "ce" : objDefaults.legs;
+        objDefaults.expiryMode = pStrategyCode === "covered-options" ? "6" : "1";
+        objDefaults.newD = pStrategyCode === "covered-options" ? "0.27" : "0.13";
+        objDefaults.reD = objDefaults.newD;
+        objDefaults.tpD = pStrategyCode === "covered-options" ? "0.14" : "1.00";
+        objDefaults.slD = pStrategyCode === "covered-options" ? "0.54" : "0.05";
     }
     if (isStrangleOptionsStrategy(pStrategyCode)) {
         objDefaults.action = "sell";
@@ -2505,12 +2531,12 @@ function getNormalizedOptionRowUiState(
         expiryDate: normalizeRollingFuturesExpiryDate(vExpiryMode, pUiState[objKeys.expiryDate]),
         qty: normalizeStringValue(pUiState[objKeys.qty], String(objDefaults.qty)),
         newD: normalizeStringValue(pUiState[objKeys.newD], String(objDefaults.newD)),
-        reD: (isStrangleOptionsStrategy(pStrategyCode) || isOptionsScalperStrategy(pStrategyCode))
+        reD: (isStrangleOptionsStrategy(pStrategyCode) || usesOptionsDemoManualTraderSettings(pStrategyCode))
             ? normalizeStringValue(pUiState[objKeys.newD], String(objDefaults.newD))
             : normalizeStringValue(pUiState[objKeys.reD], String(objDefaults.reD)),
         tpD: normalizeStringValue(pUiState[objKeys.tpD], String(objDefaults.tpD)),
         slD: normalizeStringValue(pUiState[objKeys.slD], String(objDefaults.slD)),
-        reEnter: (supportsRenkoFeedStrategy(pStrategyCode) && !isOptionsScalperStrategy(pStrategyCode))
+        reEnter: (supportsRenkoFeedStrategy(pStrategyCode) && !usesOptionsDemoManualTraderSettings(pStrategyCode))
             ? false
             : normalizeBooleanValue(pUiState[objKeys.reEnter], Boolean(objDefaults.reEnter))
     };
@@ -2573,37 +2599,37 @@ function getDefaultManualTraderUiState(
         onlyDeltaNeutral: false,
         rangeDeltaNeutral: false,
         gammaAwareNeutral: false,
-        closeNetProfitBrokerage: false,
-        brokerageMultiplier: isStrangleOptionsStrategy(pStrategyCode) ? "5" : "10",
+        closeNetProfitBrokerage: pStrategyCode === "covered-options",
+        brokerageMultiplier: pStrategyCode === "covered-options" ? "7" : (isStrangleOptionsStrategy(pStrategyCode) ? "5" : "10"),
         profitCloseTimerSecs: isCoveredLikeStrategy(pStrategyCode) ? "120" : "",
         reEnterBrok: bIsDual,
         closeBlockedMargin: false,
         blockedMarginPct: isStrangleOptionsStrategy(pStrategyCode) ? "10" : "20",
         reEnterBlock: bIsDual,
-        buyHedgeSellPremiumGate: isCoveredLikeStrategy(pStrategyCode),
-        buyHedgeSellPremiumPct: "2",
+        buyHedgeSellPremiumGate: pStrategyCode === "covered-options" ? false : isCoveredLikeStrategy(pStrategyCode),
+        buyHedgeSellPremiumPct: pStrategyCode === "covered-options" ? "1" : "2",
         strangleDeltaDiffReplaceEnabled: isStrangleOptionsStrategy(pStrategyCode),
         strangleDeltaDiffReplacePct: isStrangleOptionsStrategy(pStrategyCode) ? "40" : "50",
         buyHedgeOppositeLegOnGate: false,
-        sameSideLegIncrementEnabled: true,
+        sameSideLegIncrementEnabled: pStrategyCode === "covered-options" ? false : true,
         allowDuplicateContracts: false,
         placeOppositeTrades: false,
         alternatingLegRestrictionEnabled: true,
-        openIfLastPnlNegative: false,
+        openIfLastPnlNegative: pStrategyCode === "covered-options",
         buyQtyPercentEnabled: false,
         buyQtyPercent: "100",
         renkoEnabled: false,
         renkoStepPoints: "100",
         renkoBaseValue: "",
         renkoBaseValues: { BTC: "", ETH: "" },
-        renkoFeedEnabled: false,
-        renkoFeedPts: "10",
+        renkoFeedEnabled: pStrategyCode === "covered-options",
+        renkoFeedPts: pStrategyCode === "covered-options" ? "50" : "10",
         renkoFeedManualPrice: "",
         renkoManualPriceResetToken: "0",
-        renkoFeedTimeframe: "5m",
-        renkoFeedPriceSrc: "spot_price",
+        renkoFeedTimeframe: pStrategyCode === "covered-options" ? "5s" : "5m",
+        renkoFeedPriceSrc: pStrategyCode === "covered-options" ? "mark_price" : "spot_price",
         renkoEmaEnabled: false,
-        renkoEmaLength: "20",
+        renkoEmaLength: pStrategyCode === "covered-options" ? "5" : "20",
         renkoEmaValuesBySymbol: { BTC: "", ETH: "" },
         emaHistoryBySymbol: { BTC: [], ETH: [] },
         rsiEnabled: false,
@@ -3670,6 +3696,57 @@ function getDeltaPositionUnrealizedValue(pRow: DeltaPositionRow): number {
     return 0;
 }
 
+async function getLivePositionMarginByContract(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode | "",
+    pSelectedApiProfileId: string,
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<Map<string, number>> {
+    const objMarginByContract = new Map<string, number>();
+    if (!pUserId
+        || !pSelectedApiProfileId
+        || !isCoveredOptionsStrategy(pStrategyCode as RollingFuturesLtStrategyCode)
+        || !(Array.isArray(pTrackedPositions) && pTrackedPositions.length > 0)) {
+        return objMarginByContract;
+    }
+    try {
+        const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
+        const objPositionsApi = client.apis?.Positions as {
+            getMarginedPositions?: (pParams: Record<string, unknown>) => Promise<unknown>;
+            getPositions?: (pParams: Record<string, unknown>) => Promise<unknown>;
+        };
+        if (typeof objPositionsApi?.getMarginedPositions !== "function"
+            && typeof objPositionsApi?.getPositions !== "function") {
+            return objMarginByContract;
+        }
+        const objResponse = typeof objPositionsApi.getMarginedPositions === "function"
+            ? await objPositionsApi.getMarginedPositions({})
+            : await objPositionsApi.getPositions!({});
+        const objPayload = readResponsePayload(objResponse);
+        const arrRows = Array.isArray(objPayload.result)
+            ? objPayload.result as DeltaPositionRow[]
+            : (objPayload.result ? [objPayload.result as DeltaPositionRow] : []);
+        const objTrackedContracts = new Set(
+            pTrackedPositions
+                .map((objRow) => String(objRow.contractName || "").trim().toUpperCase())
+                .filter(Boolean)
+        );
+        arrRows.forEach((objRow) => {
+            const vContractName = String(objRow.product_symbol || objRow.symbol || "").trim().toUpperCase();
+            const vQty = Math.abs(toFiniteNumber(objRow.net_size ?? objRow.size, 0));
+            if (!vContractName || !objTrackedContracts.has(vContractName) || !(vQty > 0)) {
+                return;
+            }
+            const vMargin = getDeltaPositionMarginValue(objRow);
+            objMarginByContract.set(vContractName, Number(((objMarginByContract.get(vContractName) || 0) + vMargin).toFixed(4)));
+        });
+    }
+    catch (_objError) {
+        return objMarginByContract;
+    }
+    return objMarginByContract;
+}
+
 function mapLivePosition(
     pRow: DeltaPositionRow,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -4667,52 +4744,52 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         buyQtyPercent: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? "100"
             : normalizeCoveredBuyQtyPercentString(objUiState.buyQtyPercent ?? objDefaults.buyQtyPercent),
-        renkoEnabled: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoEnabled: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? normalizeBooleanValue(objUiState.renkoEnabled, Boolean(objDefaults.renkoEnabled))
             : false,
-        renkoStepPoints: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoStepPoints: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? String(Math.min(1000000, Math.max(1, Math.floor(Number((objUiState.renkoStepPoints ?? objDefaults.renkoStepPoints) || 100)) || 100)))
             : "100",
-        renkoBaseValue: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoBaseValue: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? objRenkoBaseValues[vSymbol]
             : "",
-        renkoBaseValues: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoBaseValues: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? objRenkoBaseValues
             : { BTC: "", ETH: "" },
-        renkoFeedEnabled: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoFeedEnabled: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? normalizeBooleanValue(objUiState.renkoFeedEnabled ?? objUiState.renkoEnabled, Boolean(objUiState.renkoFeedEnabled ?? objDefaults.renkoFeedEnabled))
             : false,
-        renkoFeedPts: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoFeedPts: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? normalizeRenkoFeedPointSizeString(objUiState.renkoFeedPts ?? objUiState.renkoStepPoints ?? objDefaults.renkoFeedPts)
             : "10",
-        renkoFeedManualPrice: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoFeedManualPrice: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? normalizeRenkoFeedManualPriceString(objUiState.renkoFeedManualPrice ?? objUiState.renkoBaseValue ?? "")
             : "",
-        renkoManualPriceResetToken: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoManualPriceResetToken: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? normalizeRenkoFeedManualPriceResetTokenString(objUiState.renkoManualPriceResetToken ?? objDefaults.renkoManualPriceResetToken)
             : "0",
-        renkoFeedTimeframe: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoFeedTimeframe: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? normalizeRenkoFeedTimeframeValue(objUiState.renkoFeedTimeframe ?? objDefaults.renkoFeedTimeframe)
             : "5m",
-        renkoFeedPriceSrc: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoFeedPriceSrc: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? normalizeRenkoFeedPriceSourceValue(objUiState.renkoFeedPriceSrc ?? objDefaults.renkoFeedPriceSrc)
             : "spot_price",
-        renkoEmaEnabled: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoEmaEnabled: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? normalizeBooleanValue(objUiState.renkoEmaEnabled, Boolean(objDefaults.renkoEmaEnabled))
             : false,
-        renkoEmaLength: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoEmaLength: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? normalizeRenkoEmaLengthString(objUiState.renkoEmaLength ?? objDefaults.renkoEmaLength)
             : "20",
-        renkoEmaValuesBySymbol: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoEmaValuesBySymbol: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? objRenkoEmaValuesBySymbol
             : { BTC: "", ETH: "" },
-        renkoStateBySymbol: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoStateBySymbol: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? objRenkoStateBySymbol
             : {
                 BTC: { referencePrice: "", lastColor: "neutral" as const },
                 ETH: { referencePrice: "", lastColor: "neutral" as const }
             },
-        renkoHistoryBySymbol: supportsRenkoFeedStrategy(pProfile.strategyCode)
+        renkoHistoryBySymbol: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? objRenkoHistoryBySymbol
             : { BTC: [], ETH: [] },
         strangleReopenAtNewD: isStrangleOptionsStrategy(pProfile.strategyCode)
@@ -5080,46 +5157,46 @@ function normalizeProfileSaveInput(
         buyQtyPercent: isStrangleOptionsStrategy(pStrategyCode)
             ? "100"
             : normalizeCoveredBuyQtyPercentString(objUiState.buyQtyPercent ?? objDefaults.buyQtyPercent),
-        renkoEnabled: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoEnabled: supportsRenkoSettingsStrategy(pStrategyCode)
             ? normalizeBooleanValue(objUiState.renkoEnabled, Boolean(objDefaults.renkoEnabled))
             : false,
-        renkoStepPoints: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoStepPoints: supportsRenkoSettingsStrategy(pStrategyCode)
             ? String(Math.min(1000000, Math.max(1, Math.floor(Number((objUiState.renkoStepPoints ?? objDefaults.renkoStepPoints) || 100)) || 100)))
             : "100",
-        renkoBaseValue: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoBaseValue: supportsRenkoSettingsStrategy(pStrategyCode)
             ? objRenkoBaseValues[vSymbol]
             : "",
-        renkoBaseValues: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoBaseValues: supportsRenkoSettingsStrategy(pStrategyCode)
             ? objRenkoBaseValues
             : { BTC: "", ETH: "" },
-        renkoFeedEnabled: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoFeedEnabled: supportsRenkoSettingsStrategy(pStrategyCode)
             ? normalizeBooleanValue(objUiState.renkoFeedEnabled ?? objUiState.renkoEnabled, Boolean(objUiState.renkoFeedEnabled ?? objDefaults.renkoFeedEnabled))
             : false,
-        renkoFeedPts: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoFeedPts: supportsRenkoSettingsStrategy(pStrategyCode)
             ? normalizeRenkoFeedPointSizeString(objUiState.renkoFeedPts ?? objUiState.renkoStepPoints ?? objDefaults.renkoFeedPts)
             : "10",
-        renkoFeedManualPrice: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoFeedManualPrice: supportsRenkoSettingsStrategy(pStrategyCode)
             ? normalizeRenkoFeedManualPriceString(objUiState.renkoFeedManualPrice ?? objUiState.renkoBaseValue ?? "")
             : "",
-        renkoManualPriceResetToken: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoManualPriceResetToken: supportsRenkoSettingsStrategy(pStrategyCode)
             ? normalizeRenkoFeedManualPriceResetTokenString(objUiState.renkoManualPriceResetToken ?? objDefaults.renkoManualPriceResetToken)
             : "0",
-        renkoFeedTimeframe: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoFeedTimeframe: supportsRenkoSettingsStrategy(pStrategyCode)
             ? normalizeRenkoFeedTimeframeValue(objUiState.renkoFeedTimeframe ?? objDefaults.renkoFeedTimeframe)
             : "5m",
-        renkoFeedPriceSrc: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoFeedPriceSrc: supportsRenkoSettingsStrategy(pStrategyCode)
             ? normalizeRenkoFeedPriceSourceValue(objUiState.renkoFeedPriceSrc ?? objDefaults.renkoFeedPriceSrc)
             : "spot_price",
-        renkoEmaEnabled: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoEmaEnabled: supportsRenkoSettingsStrategy(pStrategyCode)
             ? normalizeBooleanValue(objUiState.renkoEmaEnabled, Boolean(objDefaults.renkoEmaEnabled))
             : false,
-        renkoEmaLength: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoEmaLength: supportsRenkoSettingsStrategy(pStrategyCode)
             ? normalizeRenkoEmaLengthString(objUiState.renkoEmaLength ?? objDefaults.renkoEmaLength)
             : "20",
-        renkoEmaValuesBySymbol: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoEmaValuesBySymbol: supportsRenkoSettingsStrategy(pStrategyCode)
             ? objRenkoEmaValuesBySymbol
             : { BTC: "", ETH: "" },
-        emaHistoryBySymbol: supportsRenkoFeedStrategy(pStrategyCode)
+        emaHistoryBySymbol: supportsRenkoSettingsStrategy(pStrategyCode)
             ? objEmaHistoryBySymbol
             : { BTC: [], ETH: [] },
         rsiEnabled: isOptionsScalperStrategy(pStrategyCode)
@@ -5152,13 +5229,13 @@ function normalizeProfileSaveInput(
         rsiHistoryBySymbol: isOptionsScalperStrategy(pStrategyCode)
             ? objRsiHistoryBySymbol
             : { BTC: [], ETH: [] },
-        renkoStateBySymbol: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoStateBySymbol: supportsRenkoSettingsStrategy(pStrategyCode)
             ? objRenkoStateBySymbol
             : {
                 BTC: { referencePrice: "", lastColor: "neutral" as const },
                 ETH: { referencePrice: "", lastColor: "neutral" as const }
             },
-        renkoHistoryBySymbol: supportsRenkoFeedStrategy(pStrategyCode)
+        renkoHistoryBySymbol: supportsRenkoSettingsStrategy(pStrategyCode)
             ? objRenkoHistoryBySymbol
             : { BTC: [], ETH: [] },
         strangleReopenAtNewD: isStrangleOptionsStrategy(pStrategyCode)
@@ -5503,7 +5580,10 @@ async function fetchAccountSummarySnapshot(
 }
 
 async function enrichTrackedOpenPositions(
-    pPositions: RollingFuturesLtImportedPositionRecord[]
+    pPositions: RollingFuturesLtImportedPositionRecord[],
+    pUserId = "",
+    pStrategyCode: RollingFuturesLtStrategyCode | "" = "",
+    pSelectedApiProfileId = ""
 ): Promise<{
     positions: RollingFuturesLtEnrichedPositionRecord[];
     totals: RollingFuturesLtOpenPositionTotals;
@@ -5531,6 +5611,19 @@ async function enrichTrackedOpenPositions(
             objUnderlyingPriceBySymbol.set(pSymbol, 0);
         }
     }));
+    const objLiveMarginByContract = await getLivePositionMarginByContract(
+        pUserId,
+        pStrategyCode,
+        pSelectedApiProfileId,
+        arrPositions
+    );
+    const objTrackedCountByContract = arrPositions.reduce<Map<string, number>>((pMap, objRow) => {
+        const vContractName = String(objRow.contractName || "").trim().toUpperCase();
+        if (vContractName && !isTrackedPositionInactive(objRow)) {
+            pMap.set(vContractName, (pMap.get(vContractName) || 0) + 1);
+        }
+        return pMap;
+    }, new Map<string, number>());
 
     const objTotals: RollingFuturesLtOpenPositionTotals = {
         totalDeltaPerContract: 0,
@@ -5561,6 +5654,10 @@ async function enrichTrackedOpenPositions(
         const bIsFuture = isFutureContractSymbol(vContractName);
         const objTicker = bIsFuture ? null : (objTickerByContract.get(vContractName) || null);
         const objMetadata = getTrackedOptionMetadata(objPosition);
+        const vTickerBestBid = Number(objTicker?.bestBid);
+        const vTickerBestAsk = Number(objTicker?.bestAsk);
+        const vTickerMarkPrice = Number(objTicker?.markPrice);
+        const vFallbackLivePrice = Number(objPosition.markPrice || objPosition.entryPrice || 0);
         const vDeltaRaw = bIsFuture
             ? 1
             : getSignedOptionBaseDelta(vContractName, Number(objTicker?.delta || 0));
@@ -5568,13 +5665,22 @@ async function enrichTrackedOpenPositions(
         const vThetaRaw = bIsFuture ? 0 : Number(objTicker?.theta || 0);
         const vVegaRaw = bIsFuture ? 0 : Number(objTicker?.vega || 0);
         const bInactivePosition = isTrackedPositionInactive(objPosition);
-        const vMarkPrice = bInactivePosition
+        const vLtpPriceSource: RollingFuturesLtEnrichedPositionRecord["markPriceSource"] = bInactivePosition
+            ? "stored_price"
+            : (bIsFuture && Number.isFinite(vTickerMarkPrice) && vTickerMarkPrice > 0
+                ? "mark_price"
+                : (String(objPosition.side || "").trim().toUpperCase() === "SELL" && Number.isFinite(vTickerBestAsk) && vTickerBestAsk > 0
+                ? "best_ask"
+                : (String(objPosition.side || "").trim().toUpperCase() === "BUY" && Number.isFinite(vTickerBestBid) && vTickerBestBid > 0
+                    ? "best_bid"
+                    : "unavailable")));
+        const vLtpPrice = bInactivePosition
             ? Number(objPosition.markPrice || objPosition.entryPrice || 0)
-            : (
-                Number.isFinite(Number(objTicker?.markPrice))
-                    ? Number(objTicker?.markPrice || 0)
-                    : Number(objPosition.markPrice || 0)
-            );
+            : (vLtpPriceSource === "best_ask"
+                ? vTickerBestAsk
+                : (vLtpPriceSource === "best_bid"
+                    ? vTickerBestBid
+                    : (vLtpPriceSource === "mark_price" ? vTickerMarkPrice : Number.NaN)));
         const vPositionSymbol = normalizeSymbolValue(vContractName.includes("ETH") ? "ETH" : "BTC");
         const vLotSize = getLotSizeForSymbol(vPositionSymbol);
         const vUnderlyingPrice = Number(objUnderlyingPriceBySymbol.get(vPositionSymbol) || 0);
@@ -5616,13 +5722,18 @@ async function enrichTrackedOpenPositions(
             );
         const vPnl = bInactivePosition
             ? Number(objPosition.pnl || 0)
-            : calculateLivePositionPnl(
+            : (Number.isFinite(vLtpPrice) ? calculateLivePositionPnl(
                 objPosition.side,
                 vQty,
                 vLotSize,
                 Number(objPosition.entryPrice || 0),
-                vMarkPrice
-            );
+                vLtpPrice
+            ) : Number(objPosition.pnl || 0));
+        const vLiveMargin = Number(objLiveMarginByContract.get(vContractName.toUpperCase()) || 0);
+        const vMarginDivisor = Math.max(1, Number(objTrackedCountByContract.get(vContractName.toUpperCase()) || 1));
+        const vPositionMargin = bInactivePosition
+            ? Number(objPosition.margin || 0)
+            : (vLiveMargin > 0 ? Number((vLiveMargin / vMarginDivisor).toFixed(4)) : Number(objPosition.margin || 0));
         const objGreeks: RollingFuturesLtPositionGreeks = {
             deltaPerContract: Number(((bInactivePosition ? 0 : (vSideMultiplier * (Number.isFinite(vDeltaRaw) ? vDeltaRaw : 0)))).toFixed(6)),
             deltaTotal: Number(((bInactivePosition ? 0 : (vSideMultiplier * (Number.isFinite(vDeltaRaw) ? vDeltaRaw : 0) * vQty))).toFixed(6)),
@@ -5652,7 +5763,7 @@ async function enrichTrackedOpenPositions(
         objTotals.totalVega += objGreeks.vegaTotal;
         objTotals.totalCharges += vCharges;
         objTotals.totalPnl += vPnl;
-        objTotals.totalMargin += Number(objPosition.margin || 0);
+        objTotals.totalMargin += vPositionMargin;
         if (!bInactivePosition) {
             objTotals.totalQty += vQty;
         }
@@ -5671,9 +5782,14 @@ async function enrichTrackedOpenPositions(
             ...objPosition,
             contractKind: bIsFuture ? "future" : "option",
             lotSize: vLotSize,
-            markPrice: Number.isFinite(vMarkPrice) ? vMarkPrice : Number(objPosition.markPrice || 0),
+            markPrice: Number.isFinite(vLtpPrice) ? vLtpPrice : Number(objPosition.markPrice || 0),
+            ...(Number.isFinite(vLtpPrice) ? { ltpPrice: vLtpPrice } : {}),
+            bestBid: Number.isFinite(vTickerBestBid) && vTickerBestBid > 0 ? vTickerBestBid : null,
+            bestAsk: Number.isFinite(vTickerBestAsk) && vTickerBestAsk > 0 ? vTickerBestAsk : null,
+            markPriceSource: vLtpPriceSource,
             charges: vCharges,
             pnl: vPnl,
+            margin: vPositionMargin,
             greeks: objGreeks
         } satisfies RollingFuturesLtEnrichedPositionRecord;
     });
@@ -5861,6 +5977,7 @@ export async function buildOpenPositionsPayload(
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const objUiState = getMergedUiState(objProfile);
     const bCoveredOptionsRecoveryBaseline = isCoveredLikeStrategy(pStrategyCode);
+    const bLiveCoveredOptionsRecovery = isCoveredOptionsStrategy(pStrategyCode);
     let arrPositions = pPositions || await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
     const objNormalizedBaseDeltaSigns = normalizeTrackedOptionBaseDeltaSigns(arrPositions);
     if (objNormalizedBaseDeltaSigns.changed) {
@@ -5871,7 +5988,12 @@ export async function buildOpenPositionsPayload(
         arrPositions = await applyImportedOptionBaseGreeks(arrPositions, Number(objUiState.newD1 || 0));
         await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrPositions);
     }
-    const objEnriched = await enrichTrackedOpenPositions(arrPositions);
+    const objEnriched = await enrichTrackedOpenPositions(
+        arrPositions,
+        pUserId,
+        pStrategyCode,
+        String(objProfile.selectedApiProfileId || "").trim()
+    );
     const bAutoTraderActive = Boolean(objRuntime?.autoTraderEnabled)
         && String(objRuntime?.status || "").trim().toLowerCase() === "running";
     const vRuntimeBrokerageTotal = getBrokerageRecoveryTotal(objRuntime);
@@ -5907,7 +6029,8 @@ export async function buildOpenPositionsPayload(
         ? Number(objOpenPnlSnapshot.totalPnl || 0)
         : vCurrentOpenPnl;
     const vCoveredNetBrokerageBase = Number((vRuntimeBrokerageTotal + vOpenPositionCharges).toFixed(4));
-    const vCoveredNetPnl = Number((vRecoveredTotalPnl + vEffectiveOpenPnl - vCoveredNetBrokerageBase).toFixed(4));
+    const vCombinedTotalPnl = Number((vRecoveredTotalPnl + vEffectiveOpenPnl).toFixed(4));
+    const vCoveredNetPnl = Number((vCombinedTotalPnl - vCoveredNetBrokerageBase).toFixed(4));
     if (!arrCurrentPositionKeys.length) {
         if (objOpenPnlSnapshot.positionKeys.length) {
             await saveRollingFuturesLtRuntime({
@@ -5940,12 +6063,18 @@ export async function buildOpenPositionsPayload(
         positions: objEnriched.positions,
         totals: objEnriched.totals,
         neutralStatus: buildNeutralStatus(pStrategyCode, objUiState, objEnriched.totals, bAutoTraderActive, objRuntime),
+        closedFromDate: String(objUiState.closedFromDate || "").trim(),
         recoveryMetrics: {
-            totalBrokerageToRecover: Number(vEffectiveBrokerageTotal.toFixed(4)),
-            totalPnl: Number(vRecoveredTotalPnl.toFixed(4)),
+            totalBrokerageToRecover: bLiveCoveredOptionsRecovery
+                ? vCoveredNetBrokerageBase
+                : Number(vEffectiveBrokerageTotal.toFixed(4)),
+            totalPnl: bLiveCoveredOptionsRecovery
+                ? vCombinedTotalPnl
+                : Number(vRecoveredTotalPnl.toFixed(4)),
             netPnl: bCoveredOptionsRecoveryBaseline
                 ? vCoveredNetPnl
-                : Number((vRecoveredTotalPnl + vEffectiveOpenPnl - vEffectiveBrokerageTotal).toFixed(4))
+                : Number((vCombinedTotalPnl - vEffectiveBrokerageTotal).toFixed(4)),
+            includesOpenPositions: bLiveCoveredOptionsRecovery
         }
     };
 }
@@ -6187,23 +6316,28 @@ function getProfitCloseRule(
     const vBrokerageMultiplier = Math.max(0, Number(pUiState.brokerageMultiplier || 0));
     const vOpenPositionsTotalPnl = Number(pOpenPositions.totals?.totalPnl || 0);
     const vOpenPositionsTotalBrokerage = Math.max(0, Number(pOpenPositions.totals?.totalCharges || 0));
+    const bUseCombinedLiveTotals = isCoveredOptionsStrategy(pStrategyCode);
+    const vCombinedTotalPnl = Number(pOpenPositions.recoveryMetrics?.totalPnl || 0);
+    const vCombinedTotalBrokerage = Math.max(0, Number(pOpenPositions.recoveryMetrics?.totalBrokerageToRecover || 0));
+    const vBrokerageRulePnl = bUseCombinedLiveTotals ? vCombinedTotalPnl : vOpenPositionsTotalPnl;
+    const vBrokerageRuleBrokerage = bUseCombinedLiveTotals ? vCombinedTotalBrokerage : vOpenPositionsTotalBrokerage;
     const vNetProfit = Number(pOpenPositions.recoveryMetrics?.netPnl || 0);
-    if (bBrokerageEnabled && !(vOpenPositionsTotalPnl > 0)) {
+    if (bBrokerageEnabled && !(vBrokerageRulePnl > 0)) {
         return { triggered: false, reason: "", message: "", thresholdValue: 0, reEnterEnabled: false };
     }
     if (!bBrokerageEnabled && !(vNetProfit > 0)) {
         return { triggered: false, reason: "", message: "", thresholdValue: 0, reEnterEnabled: false };
     }
 
-    const vBrokerageBase = vOpenPositionsTotalBrokerage;
+    const vBrokerageBase = vBrokerageRuleBrokerage;
     const vBrokerageBaseRounded = Number(vBrokerageBase.toFixed(4));
     if (bBrokerageEnabled && vBrokerageMultiplier > 0 && vBrokerageBaseRounded > 0) {
         const vThreshold = vBrokerageBaseRounded * vBrokerageMultiplier;
-        if (vOpenPositionsTotalPnl >= vThreshold) {
+        if (vBrokerageRulePnl >= vThreshold) {
             return {
                 triggered: true,
                 reason: "brokerage",
-                message: `Open Positions Total PnL ${vOpenPositionsTotalPnl.toFixed(2)} reached the brokerage target ${vThreshold.toFixed(2)} (${vBrokerageBaseRounded.toFixed(2)} x ${vBrokerageMultiplier.toFixed(2)}).`,
+                message: `${bUseCombinedLiveTotals ? "Total PnL" : "Open Positions Total PnL"} ${vBrokerageRulePnl.toFixed(2)} reached the brokerage target ${vThreshold.toFixed(2)} (${vBrokerageBaseRounded.toFixed(2)} x ${vBrokerageMultiplier.toFixed(2)}).`,
                 thresholdValue: Number(vThreshold.toFixed(6)),
                 reEnterEnabled: Boolean(pUiState.reEnterBrok)
             };
@@ -6696,12 +6830,16 @@ async function sendCoveredLiveConfirmationTelegramPrompt(
 async function requestCoveredLiveConfirmation(
     pUserId: string,
     pProfile: RollingFuturesLtProfileRecord,
-    pAction: Omit<CoveredLiveConfirmationState, "actionId" | "createdAt">
+    pAction: Omit<CoveredLiveConfirmationState, "actionId" | "createdAt">,
+    pOptions: {
+        forceQueue?: boolean;
+        suppressTelegram?: boolean;
+    } = {}
 ): Promise<"auto_confirm" | "queued" | "suppressed"> {
     if (!isCoveredOptionsStrategy(pProfile.strategyCode)) {
         return "auto_confirm";
     }
-    if (isCoveredLiveAutoConfirmEnabled(pProfile)) {
+    if (!pOptions.forceQueue && isCoveredLiveAutoConfirmEnabled(pProfile)) {
         return "auto_confirm";
     }
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pProfile.strategyCode)
@@ -6769,7 +6907,9 @@ async function requestCoveredLiveConfirmation(
     }).catch((objError) => {
         console.error(`[mobile-push] covered confirmation delivery failed for account ${pUserId}:`, objError);
     });
-    void sendCoveredLiveConfirmationTelegramPrompt(pUserId, objPending).catch(() => undefined);
+    if (!pOptions.suppressTelegram) {
+        void sendCoveredLiveConfirmationTelegramPrompt(pUserId, objPending).catch(() => undefined);
+    }
     return "queued";
 }
 
@@ -7713,8 +7853,54 @@ async function resetRecoveryMetrics(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode
 ): Promise<void> {
-    await saveBrokerageRecoveryTotal(pUserId, pStrategyCode, 0);
-    await saveRecoveredTotalPnl(pUserId, pStrategyCode, 0);
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    await saveRollingFuturesLtRuntime({
+        ...objRuntime,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        state: {
+            ...((objRuntime.state || {}) as Record<string, unknown>),
+            ...buildRuntimeStateWithOpenPnlSnapshot(objRuntime, null),
+            ...buildRuntimeStateWithBrokerageRecoveryTotal(objRuntime, 0),
+            ...buildRuntimeStateWithRecoveredTotalPnl(objRuntime, 0)
+        }
+    });
+}
+
+async function resetCoveredRecoveryMetricsBeforeFirstOpen(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pExistingPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<void> {
+    if (!isCoveredOptionsStrategy(pStrategyCode) || pExistingPositions.length > 0) {
+        return;
+    }
+    await resetRecoveryMetrics(pUserId, pStrategyCode);
+}
+
+function evaluateCoveredAlternatingLegRestriction(
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pUiState: Record<string, unknown>,
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pRequestedLegSides: Array<"ce" | "pe">
+): { allowed: boolean; message: string; latestLegSide: "ce" | "pe" | ""; } {
+    if (!isCoveredOptionsStrategy(pStrategyCode)
+        || !normalizeBooleanValue(pUiState.alternatingLegRestrictionEnabled, true)) {
+        return { allowed: true, message: "", latestLegSide: "" };
+    }
+    const objLatestActiveOption = getLatestActiveTrackedOptionPosition(pTrackedPositions);
+    const vLatestLegSide = objLatestActiveOption
+        ? getTrackedOptionLegSide(objLatestActiveOption.contractName)
+        : "";
+    if ((vLatestLegSide === "ce" || vLatestLegSide === "pe") && pRequestedLegSides.includes(vLatestLegSide)) {
+        return {
+            allowed: false,
+            latestLegSide: vLatestLegSide,
+            message: `Skipped live trade because the latest active option is already ${vLatestLegSide.toUpperCase()}. Next option must alternate to ${vLatestLegSide === "ce" ? "PE" : "CE"}.`
+        };
+    }
+    return { allowed: true, message: "", latestLegSide: vLatestLegSide === "ce" || vLatestLegSide === "pe" ? vLatestLegSide : "" };
 }
 
 async function incrementBrokerageRecoveryTotal(
@@ -8507,7 +8693,7 @@ async function executeStrategyPlacement(
     };
 }> {
     const vStrategyStartedAt = String(pOptions?.strategyStartedAt || new Date().toISOString()).trim() || new Date().toISOString();
-    if (!pOptions?.skipRecoveryReset) {
+    if (!pOptions?.skipRecoveryReset && !isCoveredOptionsStrategy(pStrategyCode)) {
         await resetRecoveryMetrics(pUserId, pStrategyCode);
     }
     const objRuntimeBeforeExec = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
@@ -8619,6 +8805,28 @@ async function executeStrategyPlacement(
     if (!arrOptionSides.length) {
         throw new Error("Only one option position can be open at a time. Select either CE or PE, not both.");
     }
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        const objPnlGuard = evaluateOptionsDemoPnlEntryGuards(objUiState, arrExisting);
+        if (!objPnlGuard.allowed) {
+            const vMessage = objPnlGuard.message.replace("Renko paper entry", "Renko live entry");
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "engine_error",
+                "warning",
+                "Live Option Order Skipped",
+                vMessage,
+                {
+                    rowIndex: vRowIndex,
+                    totalPnl: objPnlGuard.totalPnl,
+                    lastPnl: objPnlGuard.lastPnl,
+                    openIfLastPnlNegative: normalizeBooleanValue(objUiState.openIfLastPnlNegative, false),
+                    reason: "live_option_pnl_entry_guard"
+                }
+            );
+            throw new Error(vMessage);
+        }
+    }
     if (isCoveredOptionsStrategy(pStrategyCode) && pInput.action === "buy") {
         const arrEligibleOptionSides = arrOptionSides.filter((pOptionSide) => {
             const objGate = evaluateCoveredBuyHedgeSellPremiumGate(
@@ -8687,6 +8895,30 @@ async function executeStrategyPlacement(
         }
         arrOptionSides = arrResolvedOptionSides;
     }
+    const arrRequestedLegSides = arrOptionSides.map((pOptionSide) => pOptionSide === "PE" ? "pe" : "ce");
+    const objAlternatingLegCheck = evaluateCoveredAlternatingLegRestriction(
+        pStrategyCode,
+        objUiState,
+        arrExisting,
+        arrRequestedLegSides
+    );
+    if (!objAlternatingLegCheck.allowed) {
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            "engine_error",
+            "warning",
+            "Live Option Order Skipped",
+            objAlternatingLegCheck.message,
+            {
+                rowIndex: vRowIndex,
+                legSide: arrRequestedLegSides.join(","),
+                latestLegSide: objAlternatingLegCheck.latestLegSide,
+                reason: "live_option_alternating_leg_guard"
+            }
+        );
+        throw new Error(objAlternatingLegCheck.message);
+    }
     const objConfig = {
         symbol: pInput.symbol,
         contractName: getContractNameForSymbol(pInput.symbol),
@@ -8714,6 +8946,7 @@ async function executeStrategyPlacement(
 
         const arrOrders: Array<Record<string, unknown>> = [];
         const arrContracts: Array<Record<string, unknown>> = [];
+        let bResetBeforeFirstCoveredOpen = false;
         try {
         for (const vOptionSide of arrOptionSides) {
             const objContract = await findBestLiveOptionContractWithNearestFallback(objConfig, vOptionSide, pInput.targetDelta);
@@ -8737,6 +8970,11 @@ async function executeStrategyPlacement(
             );
             if (objImmediateRuleDecision.shouldAct) {
                 throw new Error(`The selected ${vOptionSide} contract delta ${vAbsoluteDelta.toFixed(2)} already violates the configured ${objImmediateRuleDecision.reason.toUpperCase()} rule for row ${vRowIndex}. Adjust New D / SL / TP before executing.`);
+            }
+
+            if (!bResetBeforeFirstCoveredOpen && !pOptions?.skipRecoveryReset) {
+                await resetCoveredRecoveryMetricsBeforeFirstOpen(pUserId, pStrategyCode, arrExisting);
+                bResetBeforeFirstCoveredOpen = true;
             }
 
             const vClientOrderId = await allocateStrategyClientOrderId(pUserId, pStrategyCode, "EN");
@@ -10819,7 +11057,11 @@ async function findTriggeredTrackedOptions(
             arrTriggered.push({
                 position: objPosition,
                 currentDelta: vCurrentDelta,
-                currentMarkPrice: Number.isFinite(Number(objTicker?.markPrice)) ? Number(objTicker?.markPrice) : null,
+                currentMarkPrice: resolveTrackedOptionLivePrice(
+                    objPosition.side,
+                    objTicker,
+                    Number(objPosition.markPrice || objPosition.entryPrice || 0)
+                ),
                 reason: objDecision.reason,
                 ruleAudit: {
                     rowIndex: vRowIndex,
@@ -11438,7 +11680,7 @@ async function syncOptionsDemoRenkoRuntimeState(
     signals: OptionsDemoRenkoSignal[];
     emaSignal: OptionsDemoRenkoSignal | "";
 }> {
-    if (!isOptionsScalperStrategy(pStrategyCode)) {
+    if (!isOptionsScalperStrategy(pStrategyCode) && pStrategyCode !== "covered-options") {
         return {
             runtime: pRuntime,
             profile: pProfile,
@@ -11567,6 +11809,10 @@ function getOptionsScalperRenkoAutoTradeLockKey(pUserId: string): string {
     return `${getManualFutureOrderLockKey(pUserId, "options-scalper")}::delta-renko-auto-trade`;
 }
 
+function getCoveredOptionsRenkoAutoTradeLockKey(pUserId: string): string {
+    return `${getManualFutureOrderLockKey(pUserId, "covered-options")}::delta-renko-live-auto-trade`;
+}
+
 function resolveOptionsScalperRenkoAutoTradeInput(
     pProfile: RollingFuturesLtProfileRecord,
     pSignal: OptionsDemoRenkoSignal,
@@ -11622,6 +11868,171 @@ function resolveOptionsScalperRenkoAutoTradeInput(
         takeProfitDelta: Math.max(0, Number(objRowState.tpD || 0)),
         stopLossDelta: Math.max(0, Number(objRowState.slD || 0))
     };
+}
+
+function resolveCoveredOptionsRenkoAutoTradeInput(
+    pProfile: RollingFuturesLtProfileRecord,
+    pSignal: OptionsDemoRenkoSignal,
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
+): {
+    rowIndex: 1 | 2;
+    action: "buy" | "sell";
+    legSide: "ce" | "pe";
+    symbol: "BTC" | "ETH";
+    expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
+    expiryDate: string;
+    qty: number;
+    targetDelta: number;
+} | null {
+    const objUiState = getMergedUiState(pProfile);
+    const vSymbol = normalizeSymbolValue(objUiState.symbol);
+    const vRowIndex = pSignal === "G" ? 1 : 2;
+    const objRowState = getNormalizedOptionRowUiState(objUiState, "covered-options", vRowIndex);
+    if (objRowState.legs === "both") {
+        return null;
+    }
+    let vLegSide: "ce" | "pe" = objRowState.legs === "pe" ? "pe" : "ce";
+    if (normalizeBooleanValue(objUiState.placeOppositeTrades, false)) {
+        vLegSide = vLegSide === "pe" ? "ce" : "pe";
+    }
+    const vExpiryMode = (["1", "2", "4", "5", "6", "7"].includes(String(objRowState.expiryMode || "5").trim())
+        ? String(objRowState.expiryMode || "5").trim()
+        : "5") as "1" | "2" | "4" | "5" | "6" | "7";
+    const vTargetDelta = Math.max(0, Number(objRowState.newD || 0));
+    if (!(vTargetDelta > 0)) {
+        return null;
+    }
+    return {
+        rowIndex: vRowIndex,
+        action: objRowState.action === "buy" ? "buy" : "sell",
+        legSide: vLegSide,
+        symbol: vSymbol,
+        expiryMode: vExpiryMode,
+        expiryDate: String(objRowState.expiryDate || "").trim(),
+        qty: resolveOptionsScalperIncrementedQty(
+            pTrackedPositions,
+            objUiState,
+            {
+                symbol: vSymbol,
+                legSide: vLegSide,
+                action: objRowState.action === "buy" ? "buy" : "sell",
+                qty: Math.max(1, Math.floor(Number(objRowState.qty || 1)))
+            }
+        ),
+        targetDelta: vTargetDelta
+    };
+}
+
+async function validateCoveredOptionsRenkoAutoTradeInputBeforeConfirmation(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pProfile: RollingFuturesLtProfileRecord,
+    pInput: {
+        action: "buy" | "sell";
+        symbol: "BTC" | "ETH";
+        legSide: "ce" | "pe";
+        expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
+        expiryDate: string;
+        qty: number;
+        targetDelta: number;
+        rowIndex: 1 | 2;
+    },
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<{ allowed: boolean; message: string; contractName?: string; }> {
+    const objUiState = getMergedUiState(pProfile);
+    const objPnlGuard = evaluateOptionsDemoPnlEntryGuards(objUiState, pTrackedPositions);
+    if (!objPnlGuard.allowed) {
+        return {
+            allowed: false,
+            message: objPnlGuard.message.replace("Renko paper entry", "Renko live entry")
+        };
+    }
+    const objAlternatingLegCheck = evaluateCoveredAlternatingLegRestriction(
+        pStrategyCode,
+        objUiState,
+        pTrackedPositions,
+        [pInput.legSide]
+    );
+    if (!objAlternatingLegCheck.allowed) {
+        return {
+            allowed: false,
+            message: objAlternatingLegCheck.message
+        };
+    }
+    if (pInput.action === "buy") {
+        const objGate = evaluateCoveredBuyHedgeSellPremiumGate(pTrackedPositions, objUiState, pInput.legSide);
+        if (!objGate.allowed) {
+            return {
+                allowed: false,
+                message: objGate.message || `Matching ${pInput.legSide.toUpperCase()} sell premium gate blocked buy hedge entry.`
+            };
+        }
+        const vResolvedLegSide = resolveCoveredBuyHedgeTargetLegSide(pStrategyCode, pTrackedPositions, objUiState, pInput.rowIndex, pInput.legSide);
+        if (!vResolvedLegSide) {
+            return {
+                allowed: false,
+                message: "Covered buy hedge is already open. No duplicate order confirmation was queued."
+            };
+        }
+    }
+    const objConfig = {
+        symbol: pInput.symbol,
+        contractName: getContractNameForSymbol(pInput.symbol),
+        lotSize: getLotSizeForSymbol(pInput.symbol),
+        futureQty: 1,
+        futureOrderType: "market_order" as const,
+        action: pInput.action,
+        legSide: pInput.legSide,
+        expiryMode: pInput.expiryMode,
+        expiryDate: pInput.expiryDate,
+        optionQty: pInput.qty,
+        redOptionQtyPct: 100,
+        greenOptionQtyPct: 100,
+        newDelta: pInput.targetDelta,
+        reDelta: pInput.targetDelta,
+        deltaTakeProfit: 0.25,
+        deltaStopLoss: 0.65,
+        reEnter: false,
+        addOneLotFuture: false,
+        renkoEnabled: false,
+        renkoStepPoints: 10,
+        renkoPriceSource: "spot_price" as const,
+        loopSeconds: 8
+    };
+    const objContract = await findBestLiveOptionContractWithNearestFallback(
+        objConfig,
+        pInput.legSide === "pe" ? "PE" : "CE",
+        pInput.targetDelta
+    );
+    if (!objContract) {
+        return {
+            allowed: false,
+            message: `No live ${pInput.legSide.toUpperCase()} contract was found for ${pInput.symbol} near target delta ${pInput.targetDelta.toFixed(2)}.`
+        };
+    }
+    const vContractName = String(objContract.contractSymbol || "").trim();
+    const bAllowDuplicateContracts = normalizeBooleanValue(objUiState.allowDuplicateContracts, false);
+    if (!bAllowDuplicateContracts && hasActiveTrackedOptionContract(pTrackedPositions, vContractName)) {
+        return {
+            allowed: false,
+            message: `Skipped order because ${vContractName} is already active in Open Positions.`
+        };
+    }
+    const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(objUiState, "strategy_option_open", pStrategyCode, pInput.rowIndex);
+    const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
+    const objImmediateRuleDecision = shouldTriggerTrackedOption(
+        pInput.action.toUpperCase(),
+        vAbsoluteDelta,
+        Number(objOptionMetadata.takeProfitDelta || 0.25),
+        Number(objOptionMetadata.stopLossDelta || 0.65)
+    );
+    if (objImmediateRuleDecision.shouldAct) {
+        return {
+            allowed: false,
+            message: `The selected ${pInput.legSide.toUpperCase()} contract delta ${vAbsoluteDelta.toFixed(2)} already violates the configured ${objImmediateRuleDecision.reason.toUpperCase()} rule for row ${pInput.rowIndex}. Adjust New D / SL / TP before executing.`
+        };
+    }
+    return { allowed: true, message: "", contractName: vContractName };
 }
 
 function evaluateOptionsDemoPnlEntryGuards(
@@ -11864,6 +12275,253 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
             autoTrade: {
                 status: getErrorMessage(objError, "").includes("already active") ? "warning" : "danger",
                 message: getErrorMessage(objError, `Unable to place ${bEmaEnabled ? "EMA crossover" : "Renko"} paper auto trade.`)
+            }
+        };
+    }
+    finally {
+        gOptionsScalperRenkoAutoTradeLocks.delete(vLockKey);
+    }
+}
+
+export async function syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(
+    pUserId: string,
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null,
+    pManualSignal: OptionsDemoRenkoSignal | "" = ""
+): Promise<{
+    runtime: RollingFuturesLtRuntimeRecord | null;
+    profile: RollingFuturesLtProfileRecord;
+    renko: OptionsDemoRenkoRuntimeState;
+    signals: OptionsDemoRenkoSignal[];
+    emaSignal: OptionsDemoRenkoSignal | "";
+    autoTrade: null | {
+        status: "success" | "warning" | "danger";
+        message: string;
+        trackedOpenPositions?: Awaited<ReturnType<typeof buildOpenPositionsPayload>>;
+    };
+}> {
+    let objProfile = await readLiveProfile(pUserId, "covered-options");
+    objProfile = await refreshModeDrivenExpiryDatesInProfile(pUserId, "covered-options", objProfile);
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, "covered-options");
+    const objSync = await syncOptionsDemoRenkoRuntimeState(
+        pUserId,
+        "covered-options",
+        objProfile,
+        objRuntime,
+        pSnapshot,
+        pManualSignal
+    );
+    const objUiState = getMergedUiState(objSync.profile);
+    const bEmaEnabled = normalizeBooleanValue(objUiState.renkoEmaEnabled, false);
+    const arrRenkoSignals = objSync.signals.filter((vSignal) => vSignal === "R" || vSignal === "G");
+    const bShouldAttemptAutoTrade = (pManualSignal === "R" || pManualSignal === "G")
+        ? true
+        : (bEmaEnabled
+            ? Boolean(objSync.emaSignal)
+            : arrRenkoSignals.length > 0);
+    if (!bShouldAttemptAutoTrade) {
+        return {
+            ...objSync,
+            autoTrade: null
+        };
+    }
+
+    const objLatestRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(pUserId, "covered-options");
+    if (!objLatestRuntime?.autoTraderEnabled || String(objLatestRuntime.status || "").trim().toLowerCase() !== "running") {
+        const vSignalSourceLabel = bEmaEnabled ? "EMA crossover" : "Renko";
+        const vMessage = `AutoTrade - OFF: ${vSignalSourceLabel} signal detected, but no live option order was placed.`;
+        await logFuturesEvent(
+            pUserId,
+            "covered-options",
+            "manual_action",
+            "warning",
+            "AutoTrade - OFF",
+            vMessage,
+            {
+                signalSource: vSignalSourceLabel,
+                reason: "renko_ema_autotrade_off"
+            }
+        );
+        return {
+            ...objSync,
+            autoTrade: {
+                status: "warning",
+                message: vMessage
+            }
+        };
+    }
+
+    const vSelectedApiProfileId = String(objSync.profile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        return {
+            ...objSync,
+            autoTrade: {
+                status: "warning",
+                message: "Select an API profile before live Renko/EMA auto trades can place orders."
+            }
+        };
+    }
+
+    const vSignal = pManualSignal === "R" || pManualSignal === "G"
+        ? pManualSignal
+        : (bEmaEnabled
+            ? (objSync.emaSignal === "R" || objSync.emaSignal === "G" ? objSync.emaSignal : "")
+            : (arrRenkoSignals[arrRenkoSignals.length - 1] || ""));
+    const arrSignalsToProcess = (pManualSignal === "R" || pManualSignal === "G")
+        ? [pManualSignal]
+        : (bEmaEnabled
+            ? (vSignal ? [vSignal as OptionsDemoRenkoSignal] : [])
+            : arrRenkoSignals);
+    if (!arrSignalsToProcess.length) {
+        return {
+            ...objSync,
+            autoTrade: null
+        };
+    }
+
+    const vLockKey = getCoveredOptionsRenkoAutoTradeLockKey(pUserId);
+    if (gOptionsScalperRenkoAutoTradeLocks.has(vLockKey)) {
+        return {
+            ...objSync,
+            autoTrade: {
+                status: "warning",
+                message: `A ${bEmaEnabled ? "EMA crossover" : "Renko"} live auto trade is already being processed. Please wait for the current signal to finish.`
+            }
+        };
+    }
+
+    gOptionsScalperRenkoAutoTradeLocks.add(vLockKey);
+    try {
+        const objCheck = await performRollingFuturesLtConnectionCheck(pUserId, "covered-options", vSelectedApiProfileId);
+        if (objCheck.profile.connectionStatus.state !== "connected") {
+            throw new Error(objCheck.profile.connectionStatus.message || "Delta connection is not healthy.");
+        }
+
+        let arrCurrentTrackedPositions = await listRollingFuturesLtImportedPositions(pUserId, "covered-options");
+        let vQueuedCount = 0;
+        let vLastSkippedMessage = "";
+        for (const vCurrentSignal of arrSignalsToProcess) {
+            const objPnlGuard = evaluateOptionsDemoPnlEntryGuards(objUiState, arrCurrentTrackedPositions);
+            if (!objPnlGuard.allowed) {
+                vLastSkippedMessage = objPnlGuard.message.replace("Renko paper entry", "Renko live entry");
+                await logFuturesEvent(
+                    pUserId,
+                    "covered-options",
+                    "engine_error",
+                    "warning",
+                    "Live Option Order Skipped",
+                    vLastSkippedMessage,
+                    {
+                        signal: vCurrentSignal,
+                        totalPnl: objPnlGuard.totalPnl,
+                        lastPnl: objPnlGuard.lastPnl,
+                        openIfLastPnlNegative: normalizeBooleanValue(objUiState.openIfLastPnlNegative, false),
+                        reason: "live_option_pnl_entry_guard"
+                    }
+                );
+                continue;
+            }
+            const objTradeInput = resolveCoveredOptionsRenkoAutoTradeInput(objSync.profile, vCurrentSignal, arrCurrentTrackedPositions);
+            if (!objTradeInput) {
+                continue;
+            }
+            const objPreConfirmCheck = await validateCoveredOptionsRenkoAutoTradeInputBeforeConfirmation(
+                pUserId,
+                "covered-options",
+                objSync.profile,
+                objTradeInput,
+                arrCurrentTrackedPositions
+            );
+            if (!objPreConfirmCheck.allowed) {
+                vLastSkippedMessage = objPreConfirmCheck.message;
+                await logFuturesEvent(
+                    pUserId,
+                    "covered-options",
+                    "engine_error",
+                    "warning",
+                    "Live Option Confirmation Skipped",
+                    objPreConfirmCheck.message,
+                    {
+                        signal: vCurrentSignal,
+                        rowIndex: objTradeInput.rowIndex,
+                        legSide: objTradeInput.legSide,
+                        action: objTradeInput.action,
+                        targetDelta: objTradeInput.targetDelta,
+                        reason: "live_option_pre_confirmation_guard"
+                    }
+                );
+                continue;
+            }
+            const vSignalSourceLabel = bEmaEnabled ? "EMA crossover" : "Renko";
+            const vConfirmationResult = await requestCoveredLiveConfirmation(
+                pUserId,
+                objSync.profile,
+                {
+                    kind: "exec_batch",
+                    title: `Confirm ${vSignalSourceLabel} Live Order`,
+                    message: `${vCurrentSignal === "G" ? "Green" : "Red"} ${vSignalSourceLabel} signal passed all enabled entry rules and is ready to place row ${objTradeInput.rowIndex} ${objTradeInput.action.toUpperCase()} ${objTradeInput.legSide.toUpperCase()} qty ${objTradeInput.qty} live option order. Confirm to execute now.`,
+                    payload: {
+                        inputs: [{
+                            action: objTradeInput.action,
+                            symbol: objTradeInput.symbol,
+                            legSide: objTradeInput.legSide,
+                            expiryMode: objTradeInput.expiryMode,
+                            expiryDate: objTradeInput.expiryDate,
+                            qty: objTradeInput.qty,
+                            targetDelta: objTradeInput.targetDelta,
+                            rowIndex: objTradeInput.rowIndex
+                        }],
+                        suppressClosedFromDateUpdate: false,
+                        signal: vCurrentSignal,
+                        signalSource: vSignalSourceLabel,
+                        reason: "delta_renko_live_auto_trade"
+                    }
+                },
+                {
+                    forceQueue: true,
+                    suppressTelegram: true
+                }
+            );
+            if (vConfirmationResult === "queued") {
+                vQueuedCount += 1;
+                break;
+            }
+            if (vConfirmationResult === "suppressed") {
+                vLastSkippedMessage = "Another live action confirmation is already pending. No duplicate Renko/EMA live order was queued.";
+                break;
+            }
+        }
+        if (!(vQueuedCount > 0)) {
+            return {
+                ...objSync,
+                autoTrade: {
+                    status: "warning",
+                    message: vLastSkippedMessage
+                        || `${bEmaEnabled ? "EMA crossover" : "Renko"} signal was received, but no live option confirmation could be queued from the current Manual Trader settings.`,
+                    trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "covered-options", arrCurrentTrackedPositions)
+                }
+            };
+        }
+        const vSignalSourceLabel = bEmaEnabled ? "EMA crossover" : "Renko";
+        return {
+            ...objSync,
+            autoTrade: {
+                status: "warning",
+                message: `${vSignal === "G" ? "Green" : "Red"} ${vSignalSourceLabel} live order is waiting for mobile/browser confirmation. No Delta order has been placed yet.`,
+                trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "covered-options", arrCurrentTrackedPositions)
+            }
+        };
+    }
+    catch (objError) {
+        return {
+            ...objSync,
+            autoTrade: {
+                status: getErrorMessage(objError, "").includes("already active") ? "warning" : "danger",
+                message: getErrorMessage(objError, `Unable to place ${bEmaEnabled ? "EMA crossover" : "Renko"} live auto trade.`)
             }
         };
     }
@@ -13996,11 +14654,20 @@ async function getAccountSummaryInternal(req: Request, res: Response, pStrategyC
         const objBlockedMarginDetails = getBlockedMarginDisplayDetails(objUsdRow);
         const vTrackedPositionMargin = getTrackedPositionMarginTotal(arrPositions, vSelectedSymbol);
         const vTrackedPositiveUnrealizedPnl = getTrackedPositionPositiveUnrealizedPnlTotal(arrPositions, vSelectedSymbol);
-        const vBaseBlockedMargin = Math.max(objBlockedMarginDetails.blockedMargin, vTrackedPositionMargin);
-        const vBlockedMarginDisplay = vBaseBlockedMargin + vTrackedPositiveUnrealizedPnl;
-        const vBlockedMarginHint = vTrackedPositiveUnrealizedPnl > 0
+        const vActualBlockedMargin = getActualBlockedMarginUsd(objUsdRow);
+        const bUseActualBlockedMargin = isCoveredOptionsStrategy(pStrategyCode)
+            && Number.isFinite(vActualBlockedMargin);
+        const vBaseBlockedMargin = bUseActualBlockedMargin
+            ? vActualBlockedMargin
+            : Math.max(objBlockedMarginDetails.blockedMargin, vTrackedPositionMargin);
+        const vBlockedMarginDisplay = bUseActualBlockedMargin
+            ? vBaseBlockedMargin
+            : vBaseBlockedMargin + vTrackedPositiveUnrealizedPnl;
+        const vBlockedMarginHint = bUseActualBlockedMargin
+            ? "Actual blocked amount from Delta wallet blocked_margin."
+            : (vTrackedPositiveUnrealizedPnl > 0
             ? `Blocked ${vBaseBlockedMargin.toFixed(2)} + Unrealized PnL ${vTrackedPositiveUnrealizedPnl.toFixed(2)}`
-            : (vBaseBlockedMargin > 0 ? `Blocked ${vBaseBlockedMargin.toFixed(2)}` : objBlockedMarginDetails.hint);
+            : (vBaseBlockedMargin > 0 ? `Blocked ${vBaseBlockedMargin.toFixed(2)}` : objBlockedMarginDetails.hint));
         const vBlockedMargin = vBlockedMarginDisplay;
         const vTotalBalance = getTotalBalanceUsd(objUsdRow);
         const vLivePrice = Number(objMarketSnapshot?.futuresPrice || 0);
@@ -15419,6 +16086,7 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
         }
 
         const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
+        await resetCoveredRecoveryMetricsBeforeFirstOpen(vUserId, pStrategyCode, arrExisting);
         const vClientOrderId = await allocateStrategyClientOrderId(vUserId, pStrategyCode, "EN");
         const objOrderPayload: Record<string, unknown> = {
             product_symbol: objContract.contractSymbol,
@@ -15908,13 +16576,23 @@ async function getClosedPositionsInternal(req: Request, res: Response, pStrategy
                     && doesClosedOrderHistoryRowBelongToStrategy(objRow, pStrategyCode);
             })
             .map(mapLiveClosedPosition);
+        let objOpenPositions: RollingFuturesLtOpenPositionsPayload | null = null;
+        if (isCoveredOptionsStrategy(pStrategyCode)) {
+            const vClosedBrokerageTotal = Number(arrClosedPositions.reduce((pSum, objRow) => pSum + Number(objRow.charges || 0), 0).toFixed(4));
+            const vClosedTotalPnl = Number(arrClosedPositions.reduce((pSum, objRow) => pSum + Number(objRow.pnl || 0), 0).toFixed(4));
+            await saveBrokerageRecoveryTotal(getAccountId(req), pStrategyCode, vClosedBrokerageTotal);
+            await saveRecoveredTotalPnl(getAccountId(req), pStrategyCode, vClosedTotalPnl);
+            objOpenPositions = await buildOpenPositionsPayload(getAccountId(req), pStrategyCode);
+        }
         res.json({
             status: "success",
             data: {
                 profileId: profile.profileId,
                 profileName: profile.referenceName,
                 totalCount: arrClosedPositions.length,
-                positions: arrClosedPositions
+                positions: arrClosedPositions,
+                recoveryMetrics: objOpenPositions?.recoveryMetrics || null,
+                trackedOpenPositions: objOpenPositions || null
             }
         });
     }
@@ -17719,6 +18397,63 @@ export async function confirmCoveredOptionsLiveAction(req: Request, res: Respons
 export async function rejectCoveredOptionsLiveAction(req: Request, res: Response): Promise<void> {
     await rejectCoveredLiveActionInternal(req, res, "covered-options");
 }
+export async function setCoveredOptionsRenkoManualSignal(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const objProfile = await readLiveProfile(vUserId, "covered-options");
+        const objUiState = getMergedUiState(objProfile);
+        const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
+        const vSignal = String(req.body?.signal || req.body?.color || "").trim().toUpperCase() === "G" ? "G"
+            : (String(req.body?.signal || req.body?.color || "").trim().toUpperCase() === "R" ? "R" : "");
+        if (!vSignal) {
+            res.status(400).json({
+                status: "warning",
+                message: "Select R or G for the manual Renko signal."
+            });
+            return;
+        }
+        const objSnapshot = await getLiveMarketSnapshot({
+            symbol: vSelectedSymbol,
+            contractName: getContractNameForSymbol(vSelectedSymbol),
+            lotSize: getLotSizeForSymbol(vSelectedSymbol),
+            futureQty: 1,
+            futureOrderType: "market_order",
+            action: "buy",
+            legSide: "ce",
+            expiryMode: "1",
+            expiryDate: "",
+            optionQty: 1,
+            redOptionQtyPct: 100,
+            greenOptionQtyPct: 100,
+            newDelta: 0.53,
+            reDelta: 0.53,
+            deltaTakeProfit: 0.15,
+            deltaStopLoss: 0.85,
+            reEnter: false,
+            addOneLotFuture: false,
+            renkoEnabled: Boolean(objUiState.renkoFeedEnabled ?? objUiState.renkoEnabled),
+            renkoStepPoints: Math.max(1, Math.floor(Number(objUiState.renkoFeedPts || objUiState.renkoStepPoints || 10) || 10)),
+            renkoPriceSource: normalizeRenkoFeedPriceSourceValue(objUiState.renkoFeedPriceSrc || "spot_price"),
+            loopSeconds: 8
+        });
+        const objSync = await syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(vUserId, objSnapshot, vSignal);
+        res.json({
+            status: objSync.autoTrade?.status || "success",
+            message: objSync.autoTrade?.message || `Manual Renko signal set to ${vSignal}.`,
+            data: {
+                renko: objSync.renko,
+                renkoHistoryBySymbol: getMergedUiState(objSync.profile).renkoHistoryBySymbol,
+                autoTrade: objSync.autoTrade || null
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to set the manual Renko signal.")
+        });
+    }
+}
 export async function getStrangleOptionsProfile(req: Request, res: Response): Promise<void> {
     await getProfileInternal(req, res, "strangle-options");
 }
@@ -18356,3 +19091,4 @@ export async function updateStrangleDemoRecoveryMetrics(req: Request, res: Respo
 export async function recalculateStrangleDemoRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "strangle-demo");
 }
+

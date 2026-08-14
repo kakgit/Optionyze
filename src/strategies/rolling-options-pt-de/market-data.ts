@@ -12,6 +12,8 @@ interface DeltaTickerRow {
     symbol?: string;
     contract_type?: string;
     mark_price?: string | number;
+    best_bid?: string | number;
+    best_ask?: string | number;
     spot_price?: string | number;
     strike_price?: string | number;
     greeks?: DeltaTickerGreeks;
@@ -50,6 +52,16 @@ function parseFiniteOrNaN(pValue: unknown): number {
 function parseNumber(pValue: unknown, pFallback = 0): number {
     const vNum = Number(pValue);
     return Number.isFinite(vNum) ? vNum : pFallback;
+}
+
+function getTickerBestBid(pRow: DeltaTickerRow): number | null {
+    const vBestBid = parseNumber(pRow.quotes?.best_bid ?? pRow.best_bid, NaN);
+    return Number.isFinite(vBestBid) && vBestBid > 0 ? vBestBid : null;
+}
+
+function getTickerBestAsk(pRow: DeltaTickerRow): number | null {
+    const vBestAsk = parseNumber(pRow.quotes?.best_ask ?? pRow.best_ask, NaN);
+    return Number.isFinite(vBestAsk) && vBestAsk > 0 ? vBestAsk : null;
 }
 
 function getApiBaseUrl(): string {
@@ -182,8 +194,8 @@ function buildLiveOptionTickerFromRow(pRow: DeltaTickerRow, pFallbackSymbol: str
         optionSide: vOptionSide,
         strike: parseNumber(pRow.strike_price, 0),
         markPrice: parseNumber(pRow.mark_price, 0),
-        bestBid: Number.isFinite(parseNumber(pRow.quotes?.best_bid, NaN)) ? parseNumber(pRow.quotes?.best_bid, NaN) : null,
-        bestAsk: Number.isFinite(parseNumber(pRow.quotes?.best_ask, NaN)) ? parseNumber(pRow.quotes?.best_ask, NaN) : null,
+        bestBid: getTickerBestBid(pRow),
+        bestAsk: getTickerBestAsk(pRow),
         delta: parseFiniteOrNaN(pRow.greeks?.delta),
         gamma: parseFiniteOrNaN(pRow.greeks?.gamma),
         theta: parseFiniteOrNaN(pRow.greeks?.theta),
@@ -448,8 +460,8 @@ export async function getLiveMarketSnapshot(
         || {};
     const vSpotPrice = parseNumber(objTicker.spot_price);
     const vMarkPrice = parseNumber(objTicker.mark_price, vSpotPrice);
-    const vBestBid = parseNumber(objTicker.quotes?.best_bid, vMarkPrice);
-    const vBestAsk = parseNumber(objTicker.quotes?.best_ask, vMarkPrice);
+    const vBestBid = getTickerBestBid(objTicker) ?? vMarkPrice;
+    const vBestAsk = getTickerBestAsk(objTicker) ?? vMarkPrice;
 
     if (!(vSpotPrice > 0) && !(vMarkPrice > 0)) {
         throw new Error(`No live ticker price available for ${pConfig.contractName}.`);
@@ -534,8 +546,8 @@ export async function findBestLiveOptionContract(
                 optionSide: pOptionSide,
                 strike: vStrike,
                 markPrice: vMarkPrice,
-                bestBid: Number.isFinite(parseNumber(objRow.quotes?.best_bid, NaN)) ? parseNumber(objRow.quotes?.best_bid, NaN) : null,
-                bestAsk: Number.isFinite(parseNumber(objRow.quotes?.best_ask, NaN)) ? parseNumber(objRow.quotes?.best_ask, NaN) : null,
+                bestBid: getTickerBestBid(objRow),
+                bestAsk: getTickerBestAsk(objRow),
                 delta: parseFiniteOrNaN(objRow.greeks?.delta),
                 gamma: parseFiniteOrNaN(objRow.greeks?.gamma),
                 theta: parseFiniteOrNaN(objRow.greeks?.theta),

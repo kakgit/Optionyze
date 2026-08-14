@@ -21,7 +21,7 @@ import {
     renderStrangleOptionsPage,
     renderOptionsDemoPage
 } from "../api/controllers/strategyfo-paper-controller";
-import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
+import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
 import { ensureLiveTickerSymbols, getLiveMarketSnapshot } from "../strategies/rolling-options-pt-de/market-data";
 import type { RollingOptionsPtDeConfig } from "../strategies/rolling-options-pt-de/types";
 import {
@@ -157,7 +157,7 @@ async function bootstrap(): Promise<void> {
     server.on("upgrade", async (req, socket, head) => {
         try {
             const objUrl = new URL(String(req.url || ""), "http://localhost");
-            if (objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/strangle-demo/open-positions") {
+            if (objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/covered-options/renko" && objUrl.pathname !== "/ws/strangle-demo/open-positions") {
                 socket.destroy();
                 return;
             }
@@ -258,6 +258,8 @@ async function bootstrap(): Promise<void> {
         const symbol = normalizeDemoRenkoSymbol(objUrl.searchParams.get("symbol"));
         const contractName = getDemoRenkoContractName(symbol);
         const lotSize = getDemoRenkoLotSize(symbol);
+        const bCoveredRenkoSocket = objUrl.pathname === "/ws/covered-options/renko";
+        const vRenkoStrategyCode = bCoveredRenkoSocket ? "covered-options" : "options-scalper";
         let closed = false;
         let timerRef: NodeJS.Timeout | null = null;
         let tickInFlight = false;
@@ -294,13 +296,20 @@ async function bootstrap(): Promise<void> {
                     renkoPriceSource: "spot_price",
                     loopSeconds: 1
                 });
-                const objSync = await syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(userId, {
-                    spotPrice: objSnapshot.spotPrice,
-                    futuresPrice: objSnapshot.futuresPrice,
-                    bestBidPrice: objSnapshot.bestBidPrice,
-                    bestAskPrice: objSnapshot.bestAskPrice
-                });
-                const objTrackedOpenPositions = await buildOpenPositionsPayload(userId, "options-scalper");
+                const objSync = bCoveredRenkoSocket
+                    ? await syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(userId, {
+                        spotPrice: objSnapshot.spotPrice,
+                        futuresPrice: objSnapshot.futuresPrice,
+                        bestBidPrice: objSnapshot.bestBidPrice,
+                        bestAskPrice: objSnapshot.bestAskPrice
+                    })
+                    : await syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(userId, {
+                        spotPrice: objSnapshot.spotPrice,
+                        futuresPrice: objSnapshot.futuresPrice,
+                        bestBidPrice: objSnapshot.bestBidPrice,
+                        bestAskPrice: objSnapshot.bestAskPrice
+                    });
+                const objTrackedOpenPositions = await buildOpenPositionsPayload(userId, vRenkoStrategyCode);
                 if (closed || ws.readyState !== WebSocket.OPEN) {
                     return;
                 }
