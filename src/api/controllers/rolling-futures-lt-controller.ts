@@ -13730,7 +13730,7 @@ async function runAutoTraderCycle(
         }
 
         let arrSavedPositions: RollingFuturesLtImportedPositionRecord[] = [];
-        if (isOptionsScalperStrategy(pStrategyCode)) {
+        if (pStrategyCode === "covered-options" || isOptionsScalperStrategy(pStrategyCode)) {
             const vLotSize = getLotSizeForSymbol(vSymbol);
             const objMarketSnapshot = await getLiveMarketSnapshot({
                 symbol: vSymbol,
@@ -13756,12 +13756,20 @@ async function runAutoTraderCycle(
                 renkoPriceSource: "spot_price",
                 loopSeconds: 8
             });
-            await syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(pUserId, {
+            const objRenkoSnapshot = {
                 spotPrice: objMarketSnapshot.spotPrice,
                 futuresPrice: objMarketSnapshot.futuresPrice,
                 bestBidPrice: objMarketSnapshot.bestBidPrice,
                 bestAskPrice: objMarketSnapshot.bestAskPrice
-            });
+            };
+            if (pStrategyCode === "covered-options") {
+                await syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(pUserId, objRenkoSnapshot);
+            }
+            else {
+                await syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(pUserId, objRenkoSnapshot);
+            }
+        }
+        if (isOptionsScalperStrategy(pStrategyCode)) {
             arrSavedPositions = await replaceRollingFuturesLtImportedPositions(
                 pUserId,
                 pStrategyCode,
@@ -14454,6 +14462,7 @@ export async function recoverRollingFuturesLtAutoTraderCycles(): Promise<void> {
             && (
                 vStrategyCode === "rolling-futures-lt-long"
                 || vStrategyCode === "rolling-futures-lt-short"
+                || vStrategyCode === "covered-options"
                 || isDualRollingFuturesStrategy(vStrategyCode)
                 || isOptionsScalperStrategy(vStrategyCode)
             );
