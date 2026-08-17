@@ -2604,6 +2604,7 @@ function getDefaultManualTraderUiState(
         profitCloseTimerSecs: isCoveredLikeStrategy(pStrategyCode) ? "120" : "",
         reEnterBrok: bIsDual,
         closeBlockedMargin: false,
+        autoTraderOffOnProfitClose: false,
         blockedMarginPct: isStrangleOptionsStrategy(pStrategyCode) ? "10" : "20",
         reEnterBlock: bIsDual,
         buyHedgeSellPremiumGate: pStrategyCode === "covered-options" ? false : isCoveredLikeStrategy(pStrategyCode),
@@ -4703,6 +4704,9 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
             : "",
         reEnterBrok: normalizeBooleanValue(objUiState.reEnterBrok, Boolean(objDefaults.reEnterBrok)),
         closeBlockedMargin: normalizeBooleanValue(objUiState.closeBlockedMargin, Boolean(objDefaults.closeBlockedMargin)),
+        autoTraderOffOnProfitClose: pProfile.strategyCode === "covered-options"
+            ? normalizeBooleanValue(objUiState.autoTraderOffOnProfitClose, Boolean(objDefaults.autoTraderOffOnProfitClose))
+            : false,
         blockedMarginPct: normalizeStringValue(objUiState.blockedMarginPct, String(objDefaults.blockedMarginPct)),
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
         buyHedgeSellPremiumGate: isStrangleOptionsStrategy(pProfile.strategyCode)
@@ -5116,6 +5120,9 @@ function normalizeProfileSaveInput(
             : "",
         reEnterBrok: normalizeBooleanValue(objUiState.reEnterBrok, Boolean(objDefaults.reEnterBrok)),
         closeBlockedMargin: normalizeBooleanValue(objUiState.closeBlockedMargin, Boolean(objDefaults.closeBlockedMargin)),
+        autoTraderOffOnProfitClose: pStrategyCode === "covered-options"
+            ? normalizeBooleanValue(objUiState.autoTraderOffOnProfitClose, Boolean(objDefaults.autoTraderOffOnProfitClose))
+            : false,
         blockedMarginPct: normalizeStringValue(objUiState.blockedMarginPct, String(objDefaults.blockedMarginPct)),
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
         buyHedgeSellPremiumGate: isStrangleOptionsStrategy(pStrategyCode)
@@ -6832,14 +6839,13 @@ async function requestCoveredLiveConfirmation(
     pProfile: RollingFuturesLtProfileRecord,
     pAction: Omit<CoveredLiveConfirmationState, "actionId" | "createdAt">,
     pOptions: {
-        forceQueue?: boolean;
         suppressTelegram?: boolean;
     } = {}
 ): Promise<"auto_confirm" | "queued" | "suppressed"> {
     if (!isCoveredOptionsStrategy(pProfile.strategyCode)) {
         return "auto_confirm";
     }
-    if (!pOptions.forceQueue && isCoveredLiveAutoConfirmEnabled(pProfile)) {
+    if (isCoveredLiveAutoConfirmEnabled(pProfile)) {
         return "auto_confirm";
     }
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pProfile.strategyCode)
@@ -12403,6 +12409,7 @@ export async function syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(
 
         let arrCurrentTrackedPositions = await listRollingFuturesLtImportedPositions(pUserId, "covered-options");
         let vQueuedCount = 0;
+        let vExecutedCount = 0;
         let vLastSkippedMessage = "";
         for (const vCurrentSignal of arrSignalsToProcess) {
             const objPnlGuard = evaluateOptionsDemoPnlEntryGuards(objUiState, arrCurrentTrackedPositions);
@@ -12482,10 +12489,31 @@ export async function syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(
                     }
                 },
                 {
-                    forceQueue: true,
                     suppressTelegram: true
                 }
             );
+            if (vConfirmationResult === "auto_confirm") {
+                const objExecResult = await runCoveredExecStrategyBatchPlacement(
+                    pUserId,
+                    "covered-options",
+                    vSelectedApiProfileId,
+                    objSync.profile,
+                    [{
+                        action: objTradeInput.action,
+                        symbol: objTradeInput.symbol,
+                        legSide: objTradeInput.legSide,
+                        expiryMode: objTradeInput.expiryMode,
+                        expiryDate: objTradeInput.expiryDate,
+                        qty: objTradeInput.qty,
+                        targetDelta: objTradeInput.targetDelta,
+                        rowIndex: objTradeInput.rowIndex
+                    }],
+                    "exec_strategy"
+                );
+                arrCurrentTrackedPositions = objExecResult.trackedOpenPositions;
+                vExecutedCount += 1;
+                break;
+            }
             if (vConfirmationResult === "queued") {
                 vQueuedCount += 1;
                 break;
@@ -12494,6 +12522,17 @@ export async function syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(
                 vLastSkippedMessage = "Another live action confirmation is already pending. No duplicate Renko/EMA live order was queued.";
                 break;
             }
+        }
+        if (vExecutedCount > 0) {
+            const vSignalSourceLabel = bEmaEnabled ? "EMA crossover" : "Renko";
+            return {
+                ...objSync,
+                autoTrade: {
+                    status: "success",
+                    message: `${vSignal === "G" ? "Green" : "Red"} ${vSignalSourceLabel} live order auto-confirmed and executed.`,
+                    trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "covered-options", arrCurrentTrackedPositions)
+                }
+            };
         }
         if (!(vQueuedCount > 0)) {
             return {
@@ -14183,7 +14222,52 @@ async function runAutoTraderCycle(
                 }
             );
             const objLatestRuntimeAfterClose = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
-            if (objLatestRuntimeAfterClose?.autoTraderEnabled && String(objLatestRuntimeAfterClose.status || "").trim().toLowerCase() === "running") {
+            const bAutoTraderWasRunning = Boolean(objLatestRuntimeAfterClose?.autoTraderEnabled)
+                && String(objLatestRuntimeAfterClose?.status || "").trim().toLowerCase() === "running";
+            const bStopAutoTraderOnProfitClose = isCoveredOptionsStrategy(pStrategyCode)
+                && Boolean(objUiState.autoTraderOffOnProfitClose)
+                && bAutoTraderWasRunning;
+            if (bStopAutoTraderOnProfitClose && objLatestRuntimeAfterClose) {
+                await saveRollingFuturesLtRuntime({
+                    ...objLatestRuntimeAfterClose,
+                    userId: pUserId,
+                    strategyCode: pStrategyCode,
+                    status: "stopped",
+                    autoTraderEnabled: false,
+                    selectedApiProfileId: vSelectedApiProfileId,
+                    currentSymbol: vSymbol,
+                    lastSignal: "PROFIT_EXIT",
+                    lastCycleAt: new Date().toISOString(),
+                    lastError: "",
+                    state: buildRuntimeStateWithPendingReEntry(
+                        {
+                            ...objLatestRuntimeAfterClose,
+                            state: buildRuntimeStateWithProfitClosePending(objLatestRuntimeAfterClose, "", 0, "")
+                        },
+                        "",
+                        ""
+                    )
+                });
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "engine_stopped",
+                    "info",
+                    "Live Auto Trader Stopped",
+                    objProfitRule.reason === "brokerage"
+                        ? "Auto trader stopped because Auto Trader-Off was enabled when the brokerage profit target closed all positions."
+                        : "Auto trader stopped because Auto Trader-Off was enabled when the blocked-margin profit target closed all positions.",
+                    {
+                        symbol: vSymbol,
+                        reason: objProfitRule.reason === "brokerage"
+                            ? "brokerage_profit_close_auto_trader_off"
+                            : "blockmargin_profit_close_auto_trader_off"
+                    }
+                );
+                stopAutoTraderCycle(pUserId, pStrategyCode);
+                await releaseDualStrategyLease(pUserId, pStrategyCode, true);
+            }
+            else if (bAutoTraderWasRunning && objLatestRuntimeAfterClose) {
                 await saveRollingFuturesLtRuntime({
                     ...objLatestRuntimeAfterClose,
                     userId: pUserId,

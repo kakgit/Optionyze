@@ -132,6 +132,7 @@
         netPl: document.getElementById("divRollingFuturesNetPl"),
         reEnterBrok: document.getElementById("chkRollingFuturesReEnterBrok"),
         closeBlockedMargin: document.getElementById("chkRollingFuturesCloseBlockedMargin"),
+        autoTraderOffOnProfitClose: document.getElementById("chkRollingFuturesAutoTraderOffOnProfitClose"),
         blockedMarginPct: document.getElementById("txtRollingFuturesBlockedMarginPct"),
         reEnterBlock: document.getElementById("chkRollingFuturesReEnterBlock"),
         buyHedgeSellPremiumGate: document.getElementById("chkRollingFuturesBuyHedgeSellPremiumGate"),
@@ -2069,6 +2070,7 @@
             profitCloseTimerSecs: isCoveredMode ? String(defaultProfitCloseConfirmationSeconds) : "",
             reEnterBrok: false,
             closeBlockedMargin: false,
+            autoTraderOffOnProfitClose: false,
             blockedMarginPct: isStrangleLikePage ? "10" : "20",
             reEnterBlock: false,
             buyHedgeSellPremiumGate: !isCoveredLivePageMode(),
@@ -2852,8 +2854,23 @@
         setButtonsEnabled();
     }
 
+    function isAutoConfirmLiveActionsEnabled() {
+        return isPaperDemoVariant
+            || (ids.autoConfirmLiveActions instanceof HTMLInputElement && ids.autoConfirmLiveActions.checked);
+    }
+
     function renderPendingLiveConfirmation() {
         if (!isCoveredMode) {
+            return;
+        }
+        if (isAutoConfirmLiveActionsEnabled()) {
+            queuedConfirmationSoundActionId = "";
+            if (ids.confirmationEmpty) {
+                ids.confirmationEmpty.style.display = "";
+            }
+            if (ids.confirmationPanel) {
+                ids.confirmationPanel.style.display = "none";
+            }
             return;
         }
         const objPending = pendingLiveConfirmation && typeof pendingLiveConfirmation === "object"
@@ -3732,6 +3749,7 @@
             profitCloseTimerSecs: isCoveredMode ? String(getProfitCloseConfirmationSeconds()) : "",
             reEnterBrok: false,
             closeBlockedMargin: getCheckboxValue(ids.closeBlockedMargin, false),
+            autoTraderOffOnProfitClose: isCoveredLivePageMode() ? getCheckboxValue(ids.autoTraderOffOnProfitClose, false) : false,
             blockedMarginPct: getInputValue(ids.blockedMarginPct, "20"),
             reEnterBlock: false,
             buyHedgeSellPremiumGate: isStrangleLikePage ? false : getCheckboxValue(ids.buyHedgeSellPremiumGate, false),
@@ -3838,6 +3856,7 @@
             setInputValue(ids.brokerageMultiplier, objUiState.brokerageMultiplier);
             setInputValue(ids.profitCloseTimerInput, isCoveredMode ? String(objUiState.profitCloseTimerSecs || defaultProfitCloseConfirmationSeconds) : "");
             setCheckboxValue(ids.closeBlockedMargin, objUiState.closeBlockedMargin);
+            setCheckboxValue(ids.autoTraderOffOnProfitClose, isCoveredLivePageMode() ? objUiState.autoTraderOffOnProfitClose : false);
             setInputValue(ids.blockedMarginPct, objUiState.blockedMarginPct);
             setCheckboxValue(ids.buyHedgeSellPremiumGate, isStrangleLikePage ? false : objUiState.buyHedgeSellPremiumGate);
             setInputValue(ids.buyHedgeSellPremiumPct, isStrangleLikePage ? "2" : objUiState.buyHedgeSellPremiumPct);
@@ -4154,6 +4173,7 @@
         }
         applyUiState(objData.uiState || {});
         applyConnectionStatus(objData.connectionStatus || {});
+        startConfirmationPolling();
     }
 
     async function loadConnectionStatus() {
@@ -5390,7 +5410,7 @@
     }
 
     function startConfirmationPolling() {
-        if (!isCoveredMode || isPaperDemoVariant) {
+        if (!isCoveredMode || isPaperDemoVariant || isAutoConfirmLiveActionsEnabled()) {
             return;
         }
         if (confirmationPollTimer) {
@@ -5557,6 +5577,20 @@
                 syncLocalProfitClosePendingFromOpenPositions();
                 restartProfitCloseCountdown();
             });
+        }
+    });
+    ids.autoTraderOffOnProfitClose?.addEventListener("change", queueProfileSave);
+    ids.autoConfirmLiveActions?.addEventListener("change", function () {
+        queueProfileSave();
+        renderPendingLiveConfirmation();
+        if (isAutoConfirmLiveActionsEnabled()) {
+            if (confirmationPollTimer) {
+                clearInterval(confirmationPollTimer);
+                confirmationPollTimer = null;
+            }
+        }
+        else {
+            startConfirmationPolling();
         }
     });
     [ids.buyHedgeSellPremiumGate, ids.buyHedgeSellPremiumPct, ids.strangleDeltaDiffReplaceEnabled, ids.strangleDeltaDiffReplacePct].forEach(function (node) {

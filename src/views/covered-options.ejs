@@ -613,6 +613,12 @@
                     </div>
                     <div class="rolling-live-open-signal rolling-live-profit-close-timer" id="rollingDualFuturesProfitCloseTimer" hidden></div>
                     <div class="rolling-demo-card-tools">
+                        <% if (bIsCoveredLivePage) { %>
+                            <label class="rolling-futures-neutral-mode rolling-live-auto-trader-off" for="chkRollingFuturesAutoTraderOffOnProfitClose" title="Stop Auto Trader when Exit All profit rules close all positions">
+                                <input type="checkbox" id="chkRollingFuturesAutoTraderOffOnProfitClose" />
+                                <span>Auto Trader-Off</span>
+                            </label>
+                        <% } %>
                         <% if (bShowImportPositionsUi) { %>
                             <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesImportPositions" title="Import existing live positions" aria-label="Import existing live positions">
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
