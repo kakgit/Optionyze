@@ -1,6 +1,6 @@
 {
   "name": "optionyze",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Server-side multi-user trading runners for Covered Call live and StrategyFOGreeks paper.",
   "main": "dist/app/server.js",
