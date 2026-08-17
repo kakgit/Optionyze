@@ -4884,13 +4884,13 @@ function buildCoveredQueuedExecBatchInputsFromPayload(
         const vRowIndex = normalizeOptionRowIndex(pProfile.strategyCode, objRow.rowIndex);
         const objRowState = getNormalizedOptionRowUiState(objMergedUiState, pProfile.strategyCode, vRowIndex);
         const objInput = normalizeExecStrategyInput(
-            objRowState.action,
-            objMergedUiState.symbol,
-            objRowState.legs,
-            objRowState.expiryMode,
-            objRowState.expiryDate,
-            objRowState.qty || 1,
-            objRowState.newD || 0.53
+            String(objRow.action || objRowState.action || "").trim(),
+            objRow.symbol ?? objMergedUiState.symbol,
+            String(objRow.legSide || objRowState.legs || "").trim(),
+            String(objRow.expiryMode || objRowState.expiryMode || "5").trim(),
+            objRow.expiryDate ?? objRowState.expiryDate,
+            objRow.qty ?? objRowState.qty ?? 1,
+            objRow.targetDelta ?? objRowState.newD ?? 0.53
         );
         return {
             ...objInput,
@@ -12525,8 +12525,10 @@ export async function syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(
         }
         if (vExecutedCount > 0) {
             const vSignalSourceLabel = bEmaEnabled ? "EMA crossover" : "Renko";
+            const objExecutedRuntime = await loadRollingFuturesLtRuntime(pUserId, "covered-options");
             return {
                 ...objSync,
+                runtime: objExecutedRuntime || objSync.runtime,
                 autoTrade: {
                     status: "success",
                     message: `${vSignal === "G" ? "Green" : "Red"} ${vSignalSourceLabel} live order auto-confirmed and executed.`,
@@ -12546,8 +12548,10 @@ export async function syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(
             };
         }
         const vSignalSourceLabel = bEmaEnabled ? "EMA crossover" : "Renko";
+        const objQueuedRuntime = await loadRollingFuturesLtRuntime(pUserId, "covered-options");
         return {
             ...objSync,
+            runtime: objQueuedRuntime || objSync.runtime,
             autoTrade: {
                 status: "warning",
                 message: `${vSignal === "G" ? "Green" : "Red"} ${vSignalSourceLabel} live order is waiting for mobile/browser confirmation. No Delta order has been placed yet.`,

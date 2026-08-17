@@ -22,6 +22,7 @@ import {
     renderOptionsDemoPage
 } from "../api/controllers/strategyfo-paper-controller";
 import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
+import { loadRollingFuturesLtRuntime } from "../storage/rolling-futures-lt-runtime-store";
 import { ensureLiveTickerSymbols, getLiveMarketSnapshot } from "../strategies/rolling-options-pt-de/market-data";
 import type { RollingOptionsPtDeConfig } from "../strategies/rolling-options-pt-de/types";
 import {
@@ -310,6 +311,13 @@ async function bootstrap(): Promise<void> {
                         bestAskPrice: objSnapshot.bestAskPrice
                     });
                 const objTrackedOpenPositions = await buildOpenPositionsPayload(userId, vRenkoStrategyCode);
+                const objLatestRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(userId, vRenkoStrategyCode);
+                const objPendingConfirmation = objLatestRuntime?.state
+                    && typeof objLatestRuntime.state === "object"
+                    && objLatestRuntime.state.pendingCoveredLiveConfirmation
+                    && typeof objLatestRuntime.state.pendingCoveredLiveConfirmation === "object"
+                    ? objLatestRuntime.state.pendingCoveredLiveConfirmation
+                    : null;
                 if (closed || ws.readyState !== WebSocket.OPEN) {
                     return;
                 }
@@ -328,6 +336,7 @@ async function bootstrap(): Promise<void> {
                     emaHistoryBySymbol: objSync.profile?.uiState?.emaHistoryBySymbol || null,
                     emaSignal: objSync.emaSignal || "",
                     autoTrade: objSync.autoTrade || null,
+                    pendingCoveredLiveConfirmation: objPendingConfirmation,
                     trackedOpenPositions: objTrackedOpenPositions
                 }));
             }

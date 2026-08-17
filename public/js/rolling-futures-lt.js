@@ -1238,6 +1238,13 @@
                     updateRenkoEmaValue(normalizedSymbol, renkoLastLivePrice, Date.parse(String(payload.ts || "")) || Date.now());
                     renderDemoRenkoFeedState(getDemoRenkoRuntimeForSymbol(normalizedSymbol), renkoHistoryBySymbol, getUiState());
                     renderEmaFeedFromCurrentState();
+                    if (payload.pendingCoveredLiveConfirmation && typeof payload.pendingCoveredLiveConfirmation === "object") {
+                        pendingLiveConfirmation = payload.pendingCoveredLiveConfirmation;
+                        renderPendingLiveConfirmation();
+                    }
+                    if (payload.emaSignal === "G" || payload.emaSignal === "R" || payload.autoTrade || payload.pendingCoveredLiveConfirmation) {
+                        void loadRuntimeStatus().catch(function () { return undefined; });
+                    }
                     if (payload.emaSignal === "G" || payload.emaSignal === "R") {
                         setStatus(
                             ids.pageStatus,
@@ -2863,7 +2870,10 @@
         if (!isCoveredMode) {
             return;
         }
-        if (isAutoConfirmLiveActionsEnabled()) {
+        const objPending = pendingLiveConfirmation && typeof pendingLiveConfirmation === "object"
+            ? pendingLiveConfirmation
+            : null;
+        if (!objPending && isAutoConfirmLiveActionsEnabled()) {
             queuedConfirmationSoundActionId = "";
             if (ids.confirmationEmpty) {
                 ids.confirmationEmpty.style.display = "";
@@ -2873,9 +2883,6 @@
             }
             return;
         }
-        const objPending = pendingLiveConfirmation && typeof pendingLiveConfirmation === "object"
-            ? pendingLiveConfirmation
-            : null;
         if (!objPending) {
             queuedConfirmationSoundActionId = "";
             if (ids.confirmationEmpty) {
