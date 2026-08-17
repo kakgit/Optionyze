@@ -9162,6 +9162,10 @@ async function updateStrategyClosedFromDateAfterExec(
     pProfile: RollingFuturesLtProfileRecord,
     pTrackedOpenPositions: RollingFuturesLtImportedPositionRecord[]
 ): Promise<RollingFuturesLtProfileRecord> {
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    if (getClosedFromDateManualLockState(objRuntime)) {
+        return pProfile;
+    }
     const objFirstOpenedOption = pTrackedOpenPositions
         .filter((objPosition) => isOptionContractSymbol(objPosition.contractName))
         .sort((pLeft, pRight) => new Date(String(pLeft.openedAt || "")).getTime() - new Date(String(pRight.openedAt || "")).getTime())[0];
@@ -11562,16 +11566,15 @@ async function saveProfileInternal(req: Request, res: Response, pStrategyCode: R
     await ensureRuntimeProfileSelection(vUserId, pStrategyCode, objSaved.selectedApiProfileId);
     const objSavedUiState = getMergedUiState(objSaved);
     const vClosedFromDateChanged = String(objExistingUiState.closedFromDate || "").trim() !== String(objSavedUiState.closedFromDate || "").trim();
-    if (vClosedFromDateChanged && String(objSaved.selectedApiProfileId || "").trim()) {
-        if (objRuntime && getStrategyStartedAtState(objRuntime)) {
-            await saveRollingFuturesLtRuntime({
-                ...objRuntime,
-                userId: vUserId,
-                strategyCode: pStrategyCode,
-                state: buildRuntimeStateWithClosedFromDateManualLock(objRuntime, true)
-            });
-        }
-        if (isCoveredOptionsStrategy(pStrategyCode)) {
+    if (vClosedFromDateChanged) {
+        const bManualClosedFromDateLock = String(objSavedUiState.closedFromDate || "").trim().length > 0;
+        await saveRollingFuturesLtRuntime({
+            ...(objRuntime || getDefaultRollingFuturesLtRuntime(vUserId, pStrategyCode)),
+            userId: vUserId,
+            strategyCode: pStrategyCode,
+            state: buildRuntimeStateWithClosedFromDateManualLock(objRuntime, bManualClosedFromDateLock)
+        });
+        if (isCoveredOptionsStrategy(pStrategyCode) && String(objSaved.selectedApiProfileId || "").trim()) {
             const arrTrackedOpenPositions = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
             objSaved = await syncCoveredRecoveryMetricsFromClosedHistory(
                 vUserId,

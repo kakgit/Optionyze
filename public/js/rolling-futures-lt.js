@@ -292,6 +292,7 @@
     let lastNeutralStatus = null;
     let lastRecoveryMetrics = null;
     let pendingLiveConfirmation = null;
+    let closedFromDateManualLock = false;
     let profitClosePending = null;
     let localProfitClosePending = null;
     let lastOpenPositionsPayload = null;
@@ -2819,6 +2820,7 @@
         runtimeStatus = String(objRuntime.status || "idle").trim() || "idle";
         autoTraderEnabled = Boolean(objRuntime.autoTraderEnabled);
         pendingLiveConfirmation = objRuntime?.state?.pendingCoveredLiveConfirmation || null;
+        closedFromDateManualLock = Boolean(objRuntime?.state?.closedFromDateManualLock);
         profitClosePending = objRuntime?.state?.profitClosePending || null;
         const strategyStartedAt = String(objRuntime?.state?.strategyStartedAt || "").trim();
         const closedPositionsRefreshAt = String(objRuntime?.state?.closedPositionsRefreshAt || "").trim();
@@ -2844,7 +2846,10 @@
                 netPnl: 0
             });
         }
-        if (ids.closedFromDate instanceof HTMLInputElement && !String(ids.closedFromDate.value || "").trim() && strategyStartedAt) {
+        if (ids.closedFromDate instanceof HTMLInputElement
+            && !String(ids.closedFromDate.value || "").trim()
+            && strategyStartedAt
+            && !closedFromDateManualLock) {
             const vClosedFromDate = formatDateTimeInputValue(new Date(strategyStartedAt));
             if (vClosedFromDate) {
                 ids.closedFromDate.value = vClosedFromDate;
@@ -4761,8 +4766,12 @@
         renderCoveredHedgeGateSummary(arrRows);
         lastNeutralStatus = objPayload.neutralStatus || null;
         applyRecoveryMetrics(objPayload.recoveryMetrics || null);
-        if (ids.closedFromDate instanceof HTMLInputElement && String(objPayload.closedFromDate || "").trim()) {
-            ids.closedFromDate.value = String(objPayload.closedFromDate || "").trim();
+        const vPayloadClosedFromDate = String(objPayload.closedFromDate || "").trim();
+        if (ids.closedFromDate instanceof HTMLInputElement && vPayloadClosedFromDate) {
+            const vCurrentClosedFromDate = String(ids.closedFromDate.value || "").trim();
+            if (!vCurrentClosedFromDate || !closedFromDateManualLock) {
+                ids.closedFromDate.value = vPayloadClosedFromDate;
+            }
         }
         updateNeutralBadges(lastNeutralStatus);
         syncLocalProfitClosePendingFromOpenPositions();
