@@ -894,6 +894,17 @@ async function runCoveredExecStrategyBatchPlacement(
             }
         );
 
+        if (isCoveredOptionsStrategy(pStrategyCode)) {
+            const objCurrentProfile = await readLiveProfile(pUserId, pStrategyCode);
+            await syncCoveredRecoveryMetricsFromClosedHistory(
+                pUserId,
+                pStrategyCode,
+                pSelectedApiProfileId,
+                objCurrentProfile,
+                objNeutralCheck.trackedOpenPositions
+            );
+        }
+
         return {
             ...objLastResult,
             trackedOpenPositions: objNeutralCheck.trackedOpenPositions,
@@ -5014,15 +5025,6 @@ async function queueCoveredExecBatchAction(
         }>,
         "exec_strategy"
     );
-    if (!pSuppressClosedFromDateUpdate) {
-        await syncCoveredRecoveryMetricsFromClosedHistory(
-            pUserId,
-            pStrategyCode,
-            vSelectedApiProfileId,
-            pProfile,
-            objExecResult.trackedOpenPositions
-        );
-    }
     return {
         created: true,
         message: "Exec Strategy executed successfully."
@@ -7089,24 +7091,6 @@ function buildRuntimeStateWithStrategyStartedAt(
     return objState;
 }
 
-function getClosedFromDateManualLockState(pRuntime: RollingFuturesLtRuntimeRecord | null): boolean {
-    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
-    return Boolean(objState.closedFromDateManualLock);
-}
-
-function buildRuntimeStateWithClosedFromDateManualLock(
-    pRuntime: RollingFuturesLtRuntimeRecord | null,
-    pLocked: boolean
-): Record<string, unknown> {
-    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
-    if (!pLocked) {
-        delete objState.closedFromDateManualLock;
-        return objState;
-    }
-    objState.closedFromDateManualLock = true;
-    return objState;
-}
-
 function getEarliestOpenedAtFromTrackedPositions(
     pPositions: RollingFuturesLtImportedPositionRecord[]
 ): string {
@@ -7354,8 +7338,7 @@ async function clearActiveStrategyRun(
         strategyCode: pStrategyCode,
         state: {
             ...buildRuntimeStateWithStrategyStartedAt(objRuntime, ""),
-            ...buildRuntimeStateWithStrategyRun(objRuntime, {}),
-            ...buildRuntimeStateWithClosedFromDateManualLock(objRuntime, false)
+            ...buildRuntimeStateWithStrategyRun(objRuntime, {})
         }
     });
 }
@@ -7883,6 +7866,67 @@ async function resetCoveredRecoveryMetricsBeforeFirstOpen(
         return;
     }
     await resetRecoveryMetrics(pUserId, pStrategyCode);
+}
+
+async function setCoveredClosedFromDateOnFirstOpen(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pProfile: RollingFuturesLtProfileRecord,
+    pTrackedOpenPositions: RollingFuturesLtImportedPositionRecord[],
+    pHadOpenPositionsBefore: boolean
+): Promise<RollingFuturesLtProfileRecord> {
+    if (!isCoveredOptionsStrategy(pStrategyCode) || pHadOpenPositionsBefore) {
+        return pProfile;
+    }
+    const vExistingClosedFromDate = String(getMergedUiState(pProfile).closedFromDate || "").trim();
+    if (vExistingClosedFromDate) {
+        return pProfile;
+    }
+    const objFirstOpenedOption = pTrackedOpenPositions
+        .filter((objPosition) => isOptionContractSymbol(objPosition.contractName))
+        .sort((pLeft, pRight) => new Date(String(pLeft.openedAt || "")).getTime() - new Date(String(pRight.openedAt || "")).getTime())[0];
+    if (!objFirstOpenedOption?.openedAt) {
+        return pProfile;
+    }
+    return saveRollingFuturesLtProfile({
+        ...pProfile,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        uiState: {
+            ...getMergedUiState(pProfile),
+            closedFromDate: formatDeltaUiDateTimeLocalString(objFirstOpenedOption.openedAt)
+        }
+    });
+}
+
+async function resetCoveredClosedPositionsSessionAfterProfitClose(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode
+): Promise<RollingFuturesLtProfileRecord> {
+    const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+    await resetRecoveryMetrics(pUserId, pStrategyCode);
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const vRefreshAt = new Date().toISOString();
+    await saveRollingFuturesLtRuntime({
+        ...objRuntime,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        state: {
+            ...((objRuntime.state || {}) as Record<string, unknown>),
+            ...buildRuntimeStateWithStrategyStartedAt(objRuntime, ""),
+            ...buildRuntimeStateWithClosedPositionsRefreshAt(objRuntime, vRefreshAt)
+        }
+    });
+    return saveRollingFuturesLtProfile({
+        ...objProfile,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        uiState: {
+            ...getMergedUiState(objProfile),
+            closedFromDate: ""
+        }
+    });
 }
 
 function evaluateCoveredAlternatingLegRestriction(
@@ -8710,7 +8754,6 @@ async function executeStrategyPlacement(
         strategyCode: pStrategyCode,
         state: {
             ...buildRuntimeStateWithProfitClosePending(objRuntimeBeforeExec, "", 0, ""),
-            ...buildRuntimeStateWithClosedFromDateManualLock(objRunState.runtime, false),
             ...buildRuntimeStateWithStrategyStartedAt(objRunState.runtime, vStrategyStartedAt),
             ...buildRuntimeStateWithStrategyRun(objRunState.runtime, {
                 strategyRunId: objRunState.strategyRunId,
@@ -9133,6 +9176,24 @@ async function executeStrategyPlacement(
             }
         }
 
+        if (isCoveredOptionsStrategy(pStrategyCode) && arrOrders.length > 0) {
+            let objCurrentProfile = await readLiveProfile(pUserId, pStrategyCode);
+            objCurrentProfile = await setCoveredClosedFromDateOnFirstOpen(
+                pUserId,
+                pStrategyCode,
+                objCurrentProfile,
+                objNeutralCheck.trackedOpenPositions,
+                arrExisting.length > 0
+            );
+            await syncCoveredRecoveryMetricsFromClosedHistory(
+                pUserId,
+                pStrategyCode,
+                pSelectedApiProfileId,
+                objCurrentProfile,
+                objNeutralCheck.trackedOpenPositions
+            );
+        }
+
         return {
             profileLabel: profile.referenceName || profile.apiKey || "",
             trackedOpenPositions: objNeutralCheck.trackedOpenPositions,
@@ -9162,10 +9223,6 @@ async function updateStrategyClosedFromDateAfterExec(
     pProfile: RollingFuturesLtProfileRecord,
     pTrackedOpenPositions: RollingFuturesLtImportedPositionRecord[]
 ): Promise<RollingFuturesLtProfileRecord> {
-    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
-    if (getClosedFromDateManualLockState(objRuntime)) {
-        return pProfile;
-    }
     const objFirstOpenedOption = pTrackedOpenPositions
         .filter((objPosition) => isOptionContractSymbol(objPosition.contractName))
         .sort((pLeft, pRight) => new Date(String(pLeft.openedAt || "")).getTime() - new Date(String(pRight.openedAt || "")).getTime())[0];
@@ -9456,27 +9513,13 @@ async function syncCoveredRecoveryMetricsFromClosedHistory(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pSelectedApiProfileId: string,
     pProfile: RollingFuturesLtProfileRecord,
-    pTrackedOpenPositions: RollingFuturesLtImportedPositionRecord[],
-    pOptions?: {
-        preserveClosedFromDate?: boolean;
-    }
+    pTrackedOpenPositions: RollingFuturesLtImportedPositionRecord[]
 ): Promise<RollingFuturesLtProfileRecord> {
     if (!isCoveredOptionsStrategy(pStrategyCode)) {
         return pProfile;
     }
 
-    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
-    const bPreserveClosedFromDate = Boolean(pOptions?.preserveClosedFromDate)
-        || getClosedFromDateManualLockState(objRuntime);
-    const objProfileWithClosedFromDate = bPreserveClosedFromDate
-        ? pProfile
-        : await updateStrategyClosedFromDateAfterExec(
-            pUserId,
-            pStrategyCode,
-            pProfile,
-            pTrackedOpenPositions
-        );
-    const objUiState = getMergedUiState(objProfileWithClosedFromDate);
+    const objUiState = getMergedUiState(pProfile);
     const vClosedFromDate = String(objUiState.closedFromDate || "").trim();
     const vClosedFromDateIso = parseDeltaUiDateTimeLocalToIsoString(vClosedFromDate);
     const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
@@ -9500,7 +9543,7 @@ async function syncCoveredRecoveryMetricsFromClosedHistory(
         Number(vClosedBrokerageTotal.toFixed(4))
     );
     await saveRecoveredTotalPnl(pUserId, pStrategyCode, vClosedTotalPnl);
-    return objProfileWithClosedFromDate;
+    return pProfile;
 }
 
 async function closeTrackedPositionOnDelta(
@@ -11286,15 +11329,6 @@ async function processCoveredLiveActionDecision(
                 arrInputs,
                 "exec_strategy"
             );
-            if (!Boolean(objPending.payload.suppressClosedFromDateUpdate)) {
-                await syncCoveredRecoveryMetricsFromClosedHistory(
-                    pUserId,
-                    pStrategyCode,
-                    vSelectedApiProfileId,
-                    objProfile,
-                    objExecResult.trackedOpenPositions
-                );
-            }
             return {
                 status: "success",
                 message: `${vStrategyLabel} Exec Strategy confirmed and executed.`
@@ -11554,7 +11588,6 @@ async function saveProfileInternal(req: Request, res: Response, pStrategyCode: R
     const vUserId = getAccountId(req);
     const objExisting = await readLiveProfile(vUserId, pStrategyCode);
     const objExistingUiState = getMergedUiState(objExisting);
-    const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
     const objIncoming = normalizeProfileSaveInput(vUserId, pStrategyCode, {
         ...objExisting,
         selectedApiProfileId: String(req.body?.selectedApiProfileId || objExisting.selectedApiProfileId || "").trim(),
@@ -11566,30 +11599,18 @@ async function saveProfileInternal(req: Request, res: Response, pStrategyCode: R
     await ensureRuntimeProfileSelection(vUserId, pStrategyCode, objSaved.selectedApiProfileId);
     const objSavedUiState = getMergedUiState(objSaved);
     const vClosedFromDateChanged = String(objExistingUiState.closedFromDate || "").trim() !== String(objSavedUiState.closedFromDate || "").trim();
-    if (vClosedFromDateChanged) {
-        const bManualClosedFromDateLock = String(objSavedUiState.closedFromDate || "").trim().length > 0;
-        await saveRollingFuturesLtRuntime({
-            ...(objRuntime || getDefaultRollingFuturesLtRuntime(vUserId, pStrategyCode)),
-            userId: vUserId,
-            strategyCode: pStrategyCode,
-            state: buildRuntimeStateWithClosedFromDateManualLock(objRuntime, bManualClosedFromDateLock)
-        });
-        if (isCoveredOptionsStrategy(pStrategyCode) && String(objSaved.selectedApiProfileId || "").trim()) {
-            const arrTrackedOpenPositions = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
-            objSaved = await syncCoveredRecoveryMetricsFromClosedHistory(
-                vUserId,
-                pStrategyCode,
-                String(objSaved.selectedApiProfileId || "").trim(),
-                objSaved,
-                arrTrackedOpenPositions,
-                {
-                    preserveClosedFromDate: true
-                }
-            );
-        }
-        else if (isOptionsScalperStrategy(pStrategyCode)) {
-            objSaved = await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(vUserId, objSaved);
-        }
+    if (vClosedFromDateChanged && isCoveredOptionsStrategy(pStrategyCode) && String(objSaved.selectedApiProfileId || "").trim()) {
+        const arrTrackedOpenPositions = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
+        objSaved = await syncCoveredRecoveryMetricsFromClosedHistory(
+            vUserId,
+            pStrategyCode,
+            String(objSaved.selectedApiProfileId || "").trim(),
+            objSaved,
+            arrTrackedOpenPositions
+        );
+    }
+    else if (vClosedFromDateChanged && isOptionsScalperStrategy(pStrategyCode)) {
+        objSaved = await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(vUserId, objSaved);
     }
     res.json({
         status: "success",
@@ -14228,6 +14249,9 @@ async function runAutoTraderCycle(
                         : "blockmargin_profit_close_all"
                 }
             );
+            if (isCoveredOptionsStrategy(pStrategyCode)) {
+                await resetCoveredClosedPositionsSessionAfterProfitClose(pUserId, pStrategyCode);
+            }
             const objLatestRuntimeAfterClose = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
             const bAutoTraderWasRunning = Boolean(objLatestRuntimeAfterClose?.autoTraderEnabled)
                 && String(objLatestRuntimeAfterClose?.status || "").trim().toLowerCase() === "running";
@@ -15123,10 +15147,7 @@ async function saveOpenPositionsInternal(req: Request, res: Response, pStrategyC
             pStrategyCode,
             String(objProfile.selectedApiProfileId || "").trim(),
             objProfile,
-            arrSaved,
-            {
-                preserveClosedFromDate: true
-            }
+            arrSaved
         );
     }
     const objOpenPositions = await buildOpenPositionsPayload(vUserId, pStrategyCode, arrSaved);
@@ -16254,13 +16275,21 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
             });
         await incrementBrokerageRecoveryTotal(vUserId, pStrategyCode, vEntryCharge, arrSaved.length);
         if (isCoveredOptionsStrategy(pStrategyCode)) {
-            objProfile = await syncCoveredRecoveryMetricsFromClosedHistory(
+            let objProfileAfterOpen = await setCoveredClosedFromDateOnFirstOpen(
+                vUserId,
+                pStrategyCode,
+                objProfile,
+                arrSaved,
+                arrExisting.length > 0
+            );
+            objProfileAfterOpen = await syncCoveredRecoveryMetricsFromClosedHistory(
                 vUserId,
                 pStrategyCode,
                 vSelectedApiProfileId,
-                objProfile,
+                objProfileAfterOpen,
                 arrSaved
             );
+            objProfile = objProfileAfterOpen;
         }
 
         await logFuturesEvent(
@@ -16552,16 +16581,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
             "exec_strategy"
         );
         if (!Boolean(req.body?.suppressClosedFromDateUpdate)) {
-            if (isCoveredOptionsStrategy(pStrategyCode)) {
-                objProfile = await syncCoveredRecoveryMetricsFromClosedHistory(
-                    vUserId,
-                    pStrategyCode,
-                    vSelectedApiProfileId,
-                    objProfile,
-                    objExecResult.trackedOpenPositions
-                );
-            }
-            else if (isOptionsScalperStrategy(pStrategyCode)) {
+            if (isOptionsScalperStrategy(pStrategyCode)) {
                 objProfile = await updateStrategyClosedFromDateAfterExec(
                     vUserId,
                     pStrategyCode,
@@ -16639,12 +16659,33 @@ async function getClosedPositionsInternal(req: Request, res: Response, pStrategy
         const objProfile = await readLiveProfile(getAccountId(req), pStrategyCode);
         const objUiState = getMergedUiState(objProfile);
         const vSelectedSymbol = normalizeSymbolValue(req.query?.symbol || req.body?.symbol || objUiState.symbol);
+        const vFromDate = String(req.query?.fromDate || req.body?.fromDate || "").trim();
         const { client, profile } = await getDeltaClientForAccountId(getAccountId(req), vProfileId);
+        if (isCoveredOptionsStrategy(pStrategyCode) && !vFromDate) {
+            const objOpenPositions = await buildOpenPositionsPayload(getAccountId(req), pStrategyCode);
+            res.json({
+                status: "success",
+                data: {
+                    profileId: profile.profileId,
+                    profileName: profile.referenceName,
+                    totalCount: 0,
+                    positions: [],
+                    recoveryMetrics: {
+                        totalBrokerageToRecover: 0,
+                        totalPnl: 0,
+                        netPnl: 0,
+                        includesOpenPositions: true
+                    },
+                    trackedOpenPositions: objOpenPositions
+                }
+            });
+            return;
+        }
         const vPageSize = 100;
         const arrRows: DeltaOrderHistoryRow[] = [];
         let vAfterCursor = "";
         let vSafetyCounter = 0;
-        const vStartTime = toEpochMicros(String(req.query?.fromDate || ""));
+        const vStartTime = toEpochMicros(vFromDate);
         const vEndTime = toEpochMicros(String(req.query?.toDate || ""), true);
         while (vSafetyCounter < 100) {
             const objParams: Record<string, string | number> = { page_size: vPageSize };

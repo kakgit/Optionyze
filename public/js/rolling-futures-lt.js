@@ -250,6 +250,7 @@
     let selectedApiProfileId = "";
     let connectionState = "not_selected";
     let displayedPositions = [];
+    let previousOpenPositionCount = 0;
     let openPositionsPage = 1;
     let importablePositions = [];
     let closedPositions = [];
@@ -292,7 +293,6 @@
     let lastNeutralStatus = null;
     let lastRecoveryMetrics = null;
     let pendingLiveConfirmation = null;
-    let closedFromDateManualLock = false;
     let profitClosePending = null;
     let localProfitClosePending = null;
     let lastOpenPositionsPayload = null;
@@ -2820,9 +2820,7 @@
         runtimeStatus = String(objRuntime.status || "idle").trim() || "idle";
         autoTraderEnabled = Boolean(objRuntime.autoTraderEnabled);
         pendingLiveConfirmation = objRuntime?.state?.pendingCoveredLiveConfirmation || null;
-        closedFromDateManualLock = Boolean(objRuntime?.state?.closedFromDateManualLock);
         profitClosePending = objRuntime?.state?.profitClosePending || null;
-        const strategyStartedAt = String(objRuntime?.state?.strategyStartedAt || "").trim();
         const closedPositionsRefreshAt = String(objRuntime?.state?.closedPositionsRefreshAt || "").trim();
         if (ids.engineStatus) {
             ids.engineStatus.textContent = runtimeStatus.charAt(0).toUpperCase() + runtimeStatus.slice(1);
@@ -2846,18 +2844,12 @@
                 netPnl: 0
             });
         }
-        if (ids.closedFromDate instanceof HTMLInputElement
-            && !String(ids.closedFromDate.value || "").trim()
-            && strategyStartedAt
-            && !closedFromDateManualLock) {
-            const vClosedFromDate = formatDateTimeInputValue(new Date(strategyStartedAt));
-            if (vClosedFromDate) {
-                ids.closedFromDate.value = vClosedFromDate;
-            }
-        }
         if (closedPositionsRefreshAt && closedPositionsRefreshAt !== lastClosedPositionsRefreshAt) {
             lastClosedPositionsRefreshAt = closedPositionsRefreshAt;
             queueClosedPositionsRefresh();
+            if (isCoveredMode) {
+                void loadProfile().catch(function () { return undefined; });
+            }
         }
         updateNeutralBadges(lastNeutralStatus);
         restartProfitCloseCountdown();
@@ -4762,15 +4754,22 @@
             })
             : [];
         const objTotals = objPayload.totals || {};
+        const vPreviousOpenCount = previousOpenPositionCount;
+        const bFirstOpenTransition = isCoveredMode && vPreviousOpenCount === 0 && arrRows.length > 0;
+        const bSessionResetTransition = isCoveredMode && vPreviousOpenCount > 0 && arrRows.length === 0;
+        previousOpenPositionCount = arrRows.length;
         displayedPositions = arrRows;
         renderCoveredHedgeGateSummary(arrRows);
         lastNeutralStatus = objPayload.neutralStatus || null;
         applyRecoveryMetrics(objPayload.recoveryMetrics || null);
         const vPayloadClosedFromDate = String(objPayload.closedFromDate || "").trim();
-        if (ids.closedFromDate instanceof HTMLInputElement && vPayloadClosedFromDate) {
-            const vCurrentClosedFromDate = String(ids.closedFromDate.value || "").trim();
-            if (!vCurrentClosedFromDate || !closedFromDateManualLock) {
+        if (isCoveredMode && ids.closedFromDate instanceof HTMLInputElement) {
+            if (bFirstOpenTransition && vPayloadClosedFromDate && !String(ids.closedFromDate.value || "").trim()) {
                 ids.closedFromDate.value = vPayloadClosedFromDate;
+            }
+            else if (bSessionResetTransition && !vPayloadClosedFromDate) {
+                ids.closedFromDate.value = "";
+                renderClosedPositions([]);
             }
         }
         updateNeutralBadges(lastNeutralStatus);
@@ -5366,15 +5365,11 @@
             return oldest;
         }, null);
         const objResult = await saveImportedPositions(selectedRows);
-        if (ids.closedFromDate instanceof HTMLInputElement) {
+        if (ids.closedFromDate instanceof HTMLInputElement && !isCoveredMode) {
             const vClosedFromDate = formatDateTimeInputValue(oldestOpenedAt);
             if (vClosedFromDate) {
-                const shouldApplyImportedClosedFromDate = !isCoveredMode
-                    || window.confirm(`Change Closed Positions Start Date to ${vClosedFromDate.replace("T", " ")} based on the earliest imported live position?`);
-                if (shouldApplyImportedClosedFromDate) {
-                    ids.closedFromDate.value = vClosedFromDate;
-                    await saveProfile();
-                }
+                ids.closedFromDate.value = vClosedFromDate;
+                await saveProfile();
             }
         }
         await Promise.all([
