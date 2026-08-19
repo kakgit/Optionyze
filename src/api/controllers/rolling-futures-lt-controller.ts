@@ -6786,9 +6786,11 @@ function buildCoveredLiveConfirmationPushCopy(
     }
 
     if (pPending.kind === "exec_batch") {
+        const vSignalSource = String(pPending.payload?.signalSource || "").trim();
+        const vLiveOrderLabel = vSignalSource || "Live Order";
         return {
-            title: vTitleContext("Exec Strategy", vExecSymbol),
-            message: `${vStrategyLabel} Exec Strategy is ready. Confirm to place ${Math.max(1, vExecRowCount)} row${Math.max(1, vExecRowCount) === 1 ? "" : "s"}${vExecSymbol ? ` for ${vExecSymbol}` : ""}.`
+            title: vTitleContext(vLiveOrderLabel, vExecSymbol),
+            message: `${vLiveOrderLabel} is ready. Confirm to place ${Math.max(1, vExecRowCount)} row${Math.max(1, vExecRowCount) === 1 ? "" : "s"}${vExecSymbol ? ` for ${vExecSymbol}` : ""}.`
         };
     }
 
@@ -11319,19 +11321,24 @@ async function processCoveredLiveActionDecision(
         if (objPending.kind === "exec_batch") {
             const arrInputs = buildCoveredQueuedExecBatchInputsFromPayload(objProfile, objPending.payload);
             if (!arrInputs.length) {
-                throw new Error("The pending Exec Strategy confirmation no longer has valid rows.");
+                throw new Error("The pending live order confirmation no longer has valid rows.");
             }
-            const objExecResult = await runCoveredExecStrategyBatchPlacement(
-                pUserId,
-                pStrategyCode,
-                vSelectedApiProfileId,
-                objProfile,
-                arrInputs,
-                "exec_strategy"
-            );
+            let objLastExecResult: Awaited<ReturnType<typeof executeStrategyPlacement>> | null = null;
+            for (const objInput of arrInputs) {
+                objLastExecResult = await executeStrategyPlacement(
+                    pUserId,
+                    pStrategyCode,
+                    vSelectedApiProfileId,
+                    objProfile,
+                    objInput
+                );
+            }
+            const vSignalSource = String(objPending.payload.signalSource || "").trim();
             return {
                 status: "success",
-                message: `${vStrategyLabel} Exec Strategy confirmed and executed.`
+                message: vSignalSource
+                    ? `${vSignalSource} live order confirmed and executed.`
+                    : `${vStrategyLabel} live order confirmed and executed.`
             };
         }
 
@@ -12517,12 +12524,12 @@ export async function syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(
                 }
             );
             if (vConfirmationResult === "auto_confirm") {
-                const objExecResult = await runCoveredExecStrategyBatchPlacement(
+                const objExecResult = await executeStrategyPlacement(
                     pUserId,
                     "covered-options",
                     vSelectedApiProfileId,
                     objSync.profile,
-                    [{
+                    {
                         action: objTradeInput.action,
                         symbol: objTradeInput.symbol,
                         legSide: objTradeInput.legSide,
@@ -12531,8 +12538,7 @@ export async function syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(
                         qty: objTradeInput.qty,
                         targetDelta: objTradeInput.targetDelta,
                         rowIndex: objTradeInput.rowIndex
-                    }],
-                    "exec_strategy"
+                    }
                 );
                 arrCurrentTrackedPositions = objExecResult.trackedOpenPositions;
                 vExecutedCount += 1;
@@ -16379,6 +16385,13 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
 
 async function executeStrategyInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        res.status(400).json({
+            status: "warning",
+            message: "Covered live positions open only through Delta Renko-Style Feed or EMA Trigger while Auto Trader is ON. Manual Exec Strategy is not available on this page."
+        });
+        return;
+    }
     const objTargetAccount = await getAccountById(vUserId);
     if (!isDualExecStrategyAllowed(pStrategyCode, objTargetAccount?.execStrategy)) {
         res.status(403).json({
@@ -18717,7 +18730,7 @@ export async function listAdminPendingCoveredLikeLiveActions(req: Request, res: 
                         ? "TP Trigger"
                         : (vReason === "expiry_cutoff" ? "Replacement Ready" : "Close Trigger")))
                 : (objPending.kind === "exec_batch"
-                    ? "Exec Strategy"
+                    ? (String(objPayload.signalSource || "").trim() || "Live Order")
                     : (objPending.kind === "covered_reentry"
                         ? "Re-entry Ready"
                         : (objPending.kind === "manual_swap" ? "Replacement Ready" : "Live Action")));

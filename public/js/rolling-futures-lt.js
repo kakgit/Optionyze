@@ -2470,6 +2470,9 @@
     }
 
     function canUseExecStrategy() {
+        if (isCoveredMode) {
+            return false;
+        }
         return !isDualLikeMode || execStrategyEnabled;
     }
 
@@ -4357,67 +4360,6 @@
         }
     }
 
-    function buildCoveredStrategyRowPayload(rowIndex) {
-        const optionRowIndex = normalizeOptionRowIndex(rowIndex);
-        const rowNodes = getOptionRowNodes(optionRowIndex);
-        const vAction = String(rowNodes.action?.value || "").trim().toLowerCase();
-        const vLegSide = String(rowNodes.legs?.value || "").trim().toLowerCase();
-        const vExpiryMode = String(rowNodes.expiryMode?.value || "5").trim();
-        const vExpiryDate = String(rowNodes.expiryDate?.value || "").trim();
-        const vBaseQty = Math.max(1, Math.floor(Number(rowNodes.qty?.value || 1)));
-        const vTargetDelta = Math.max(0, Number(rowNodes.newD?.value || 0.53));
-        const vSymbol = String(ids.symbol?.value || "BTC").trim().toUpperCase();
-        const vQty = resolveCoveredTradeQty(vAction, vLegSide, vBaseQty, vSymbol);
-
-        if (vAction !== "buy" && vAction !== "sell") {
-            throw new Error(`Select Buy or Sell in Action for row ${optionRowIndex} before executing the live strategy.`);
-        }
-        if (!vExpiryDate) {
-            throw new Error(`Select an expiry date for row ${optionRowIndex} before executing the live strategy.`);
-        }
-
-        return {
-            rowIndex: optionRowIndex,
-            action: vAction,
-            symbol: vSymbol,
-            legSide: vLegSide,
-            expiryMode: vExpiryMode,
-            expiryDate: vExpiryDate,
-            qty: vQty,
-            targetDelta: vTargetDelta
-        };
-    }
-
-    async function executeCoveredStrategies() {
-        if (!isCoveredMode) {
-            return executeStrategy(1);
-        }
-
-        await checkConnection();
-        if (!canUseLiveActions()) {
-            throw new Error("Delta connection is not healthy enough to execute the live covered strategy.");
-        }
-        ensureCoveredExecBalance();
-
-        await saveProfile();
-        execStrategyInFlight = true;
-        setButtonsEnabled();
-        try {
-            const rows = getSupportedOptionRowIndexes().map(function (rowIndex) {
-                return buildCoveredStrategyRowPayload(rowIndex);
-            });
-            return await postJson(`${endpointBase}/strategy/execute`, {
-                selectedApiProfileId: String(ids.apiProfile?.value || selectedApiProfileId || "").trim(),
-                uiState: getUiState(),
-                rows: rows
-            });
-        }
-        finally {
-            execStrategyInFlight = false;
-            setButtonsEnabled();
-        }
-    }
-
     async function placeManualOption(action, legSide, rowIndex, openedReason) {
         const optionRowIndex = normalizeOptionRowIndex(rowIndex);
         const rowNodes = getOptionRowNodes(optionRowIndex);
@@ -5994,11 +5936,15 @@
         });
     });
     ids.execStrategyButton?.addEventListener("click", function () {
+        if (isCoveredMode) {
+            setStatus(ids.pageStatus, "Covered live trades run only through Delta Renko-Style Feed or EMA Trigger while Auto Trader is ON.", "warning");
+            return;
+        }
         if (isDemoVariant) {
             setStatus(ids.pageStatus, "Exec Strategy is disabled on Options Demo for now.", "warning");
             return;
         }
-        void (isStrangleDemoPage ? executeStrategy(1) : (isCoveredMode ? executeCoveredStrategies() : executeStrategy(1))).then(function (objResult) {
+        void (isStrangleDemoPage ? executeStrategy(1) : executeStrategy(1)).then(function (objResult) {
             const trackedPayload = objResult?.data?.trackedOpenPositions || null;
             const objNeutralCheck = objResult?.data?.neutralCheck || {};
             const bHedgePlaced = Boolean(objNeutralCheck?.hedgePlaced);
