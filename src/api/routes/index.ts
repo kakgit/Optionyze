@@ -96,6 +96,7 @@ import {
     forceRollingFuturesLtDualTakeoverHereController,
     enableRollingFuturesLtDualSimulatedPrimaryOutageController,
     getCoveredOptionsAccountSummary,
+    getCoveredOptionsResistance,
     getCoveredOptionsClosedPositions,
     getCoveredOptionsConnectionStatus,
     getCoveredOptionsEvents,
@@ -312,6 +313,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.get("/covered-options/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getCoveredOptionsAccountSummary(req, res);
+    });
+    objRouter.get("/covered-options/resistance", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCoveredOptionsResistance(req, res);
     });
     objRouter.post("/covered-options/renko/manual-signal", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await setCoveredOptionsRenkoManualSignal(req, res);

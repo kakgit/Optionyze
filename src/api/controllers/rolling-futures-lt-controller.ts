@@ -49,6 +49,7 @@ import { getPendingStrategyAutoExecSettings } from "../../storage/admin-settings
 import {
     consumeDeltaMarketDataRateLimitSignal,
     findBestLiveOptionContract,
+    getCallOiResistanceSnapshot,
     getLiveMarketSnapshot,
     getLiveOptionTicker
 } from "../../strategies/rolling-options-pt-de/market-data";
@@ -12148,6 +12149,173 @@ function buildRuntimeStateWithLastClosedOptionPnlGuard(
     return objState;
 }
 
+type CoveredResistanceLogEntry = {
+    id: string;
+    type: "given" | "hit";
+    at: string;
+    currentPrice: number;
+    resistance: number | null;
+    contractSymbol: string;
+    openInterest: number | null;
+    message: string;
+};
+
+function getCoveredResistanceTrackerState(
+    pRuntime: RollingFuturesLtRuntimeRecord | null
+): {
+    resistanceStrike: number | null;
+    contractSymbol: string;
+    openInterest: number | null;
+    givenAt: string;
+    hitAt: string;
+    log: CoveredResistanceLogEntry[];
+} {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    const objTracker = objState.resistanceTracker && typeof objState.resistanceTracker === "object"
+        ? objState.resistanceTracker as Record<string, unknown>
+        : null;
+    const arrRawLog = Array.isArray(objTracker?.log) ? objTracker.log : [];
+    const arrLog = arrRawLog
+        .map((objRow) => {
+            if (!objRow || typeof objRow !== "object") {
+                return null;
+            }
+            const objEntry = objRow as Record<string, unknown>;
+            const vType = String(objEntry.type || "").trim().toLowerCase();
+            if (vType !== "given" && vType !== "hit") {
+                return null;
+            }
+            const vResistance = Number(objEntry.resistance);
+            const vCurrentPrice = Number(objEntry.currentPrice);
+            const vOpenInterest = Number(objEntry.openInterest);
+            return {
+                id: String(objEntry.id || "").trim() || crypto.randomUUID(),
+                type: vType as "given" | "hit",
+                at: String(objEntry.at || "").trim() || new Date().toISOString(),
+                currentPrice: Number.isFinite(vCurrentPrice) ? Number(vCurrentPrice.toFixed(2)) : 0,
+                resistance: Number.isFinite(vResistance) ? Number(vResistance.toFixed(2)) : null,
+                contractSymbol: String(objEntry.contractSymbol || "").trim(),
+                openInterest: Number.isFinite(vOpenInterest) ? Number(vOpenInterest.toFixed(4)) : null,
+                message: String(objEntry.message || "").trim()
+            } as CoveredResistanceLogEntry;
+        })
+        .filter((objRow): objRow is CoveredResistanceLogEntry => Boolean(objRow));
+    const vResistanceStrike = Number(objTracker?.resistanceStrike);
+    const vOpenInterest = Number(objTracker?.openInterest);
+    return {
+        resistanceStrike: Number.isFinite(vResistanceStrike) ? Number(vResistanceStrike.toFixed(2)) : null,
+        contractSymbol: String(objTracker?.contractSymbol || "").trim(),
+        openInterest: Number.isFinite(vOpenInterest) ? Number(vOpenInterest.toFixed(4)) : null,
+        givenAt: String(objTracker?.givenAt || "").trim(),
+        hitAt: String(objTracker?.hitAt || "").trim(),
+        log: arrLog
+    };
+}
+
+function appendCoveredResistanceLogEntry(
+    pLog: CoveredResistanceLogEntry[],
+    pEntry: CoveredResistanceLogEntry
+): CoveredResistanceLogEntry[] {
+    return [pEntry, ...(Array.isArray(pLog) ? pLog : [])].slice(0, 50);
+}
+
+async function syncCoveredOptionsResistanceTracker(
+    pUserId: string,
+    pSymbol: "BTC" | "ETH"
+): Promise<{
+    currentPrice: number;
+    priceSource: string;
+    resistance: null | {
+        strike: number;
+        contractSymbol: string;
+        openInterest: number;
+        expiryDate: string;
+        distance: number;
+    };
+    givenAt: string;
+    hitAt: string;
+    evaluatedAt: string;
+    log: CoveredResistanceLogEntry[];
+}> {
+    const objSnapshot = await getCallOiResistanceSnapshot(pSymbol);
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, "covered-options")
+        || getDefaultRollingFuturesLtRuntime(pUserId, "covered-options");
+    const objTracker = getCoveredResistanceTrackerState(objRuntime);
+    let arrLog = objTracker.log.slice();
+    let vGivenAt = objTracker.givenAt;
+    let vHitAt = objTracker.hitAt;
+    let vTrackedStrike = objTracker.resistanceStrike;
+    let vTrackedContract = objTracker.contractSymbol;
+    let vTrackedOi = objTracker.openInterest;
+    const vNextStrike = objSnapshot.resistance?.strike ?? null;
+    const vNextContract = String(objSnapshot.resistance?.contractSymbol || "").trim();
+    const vNextOi = objSnapshot.resistance ? Number(objSnapshot.resistance.openInterest) : null;
+    const vNowIso = objSnapshot.evaluatedAt || new Date().toISOString();
+
+    if (vNextStrike !== null && vTrackedStrike !== vNextStrike) {
+        vGivenAt = vNowIso;
+        vHitAt = "";
+        vTrackedStrike = vNextStrike;
+        vTrackedContract = vNextContract;
+        vTrackedOi = vNextOi;
+        arrLog = appendCoveredResistanceLogEntry(arrLog, {
+            id: crypto.randomUUID(),
+            type: "given",
+            at: vNowIso,
+            currentPrice: objSnapshot.currentPrice,
+            resistance: vNextStrike,
+            contractSymbol: vNextContract,
+            openInterest: vNextOi,
+            message: `Resistance given at ${vNextStrike.toFixed(2)} (call OI ${Number(vNextOi || 0).toFixed(0)}) while price was ${objSnapshot.currentPrice.toFixed(2)}.`
+        });
+    }
+
+    if (
+        vTrackedStrike !== null
+        && objSnapshot.currentPrice >= vTrackedStrike
+        && !vHitAt
+    ) {
+        vHitAt = vNowIso;
+        arrLog = appendCoveredResistanceLogEntry(arrLog, {
+            id: crypto.randomUUID(),
+            type: "hit",
+            at: vNowIso,
+            currentPrice: objSnapshot.currentPrice,
+            resistance: vTrackedStrike,
+            contractSymbol: vTrackedContract,
+            openInterest: vTrackedOi,
+            message: `Resistance ${vTrackedStrike.toFixed(2)} hit at price ${objSnapshot.currentPrice.toFixed(2)}.`
+        });
+    }
+
+    await saveRollingFuturesLtRuntime({
+        ...objRuntime,
+        userId: pUserId,
+        strategyCode: "covered-options",
+        state: {
+            ...((objRuntime.state || {}) as Record<string, unknown>),
+            resistanceTracker: {
+                resistanceStrike: vTrackedStrike,
+                contractSymbol: vTrackedContract,
+                openInterest: vTrackedOi,
+                givenAt: vGivenAt,
+                hitAt: vHitAt,
+                log: arrLog
+            }
+        }
+    });
+
+    return {
+        currentPrice: objSnapshot.currentPrice,
+        priceSource: objSnapshot.priceSource,
+        resistance: objSnapshot.resistance,
+        givenAt: vGivenAt,
+        hitAt: vHitAt,
+        evaluatedAt: vNowIso,
+        log: arrLog
+    };
+}
+
 async function recordLastClosedOptionPnlForEntryGuard(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -18714,6 +18882,28 @@ export async function disableCoveredOptionsAutoTrader(req: Request, res: Respons
 }
 export async function getCoveredOptionsAccountSummary(req: Request, res: Response): Promise<void> {
     await getAccountSummaryInternal(req, res, "covered-options");
+}
+export async function getCoveredOptionsResistance(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const objProfile = await readLiveProfile(vUserId, "covered-options");
+        const objUiState = getMergedUiState(objProfile);
+        const vSymbol = normalizeSymbolValue(req.query.symbol || objUiState.symbol);
+        const objResistance = await syncCoveredOptionsResistanceTracker(vUserId, vSymbol);
+        res.json({
+            status: "success",
+            message: objResistance.resistance
+                ? `Next resistance ${objResistance.resistance.strike.toFixed(2)} from call OI.`
+                : "No call-OI resistance found above the current price.",
+            data: objResistance
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to load BTCUSD resistance.")
+        });
+    }
 }
 export async function calculateCoveredOptionsRecommendedStartQty(req: Request, res: Response): Promise<void> {
     await calculateRecommendedStartQtyInternal(req, res, "covered-options");

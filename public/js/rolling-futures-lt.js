@@ -244,7 +244,15 @@
         closeClosedEditModalButton: document.getElementById(`btn${idPrefix}CloseClosedEditModal`),
         saveClosedEditButton: document.getElementById(`btn${idPrefix}SaveClosedEdit`),
         savedProfilePanel: document.getElementById("rollingFuturesSavedProfilePanel"),
-        savedProfileBody: document.getElementById("rollingFuturesSavedProfileBody")
+        savedProfileBody: document.getElementById("rollingFuturesSavedProfileBody"),
+        resistanceRefreshButton: document.getElementById("btnRollingFuturesResistanceRefresh"),
+        resistanceCurrentPrice: document.getElementById("rollingFuturesResistanceCurrentPrice"),
+        resistanceNext: document.getElementById("rollingFuturesResistanceNext"),
+        resistanceDistance: document.getElementById("rollingFuturesResistanceDistance"),
+        resistanceGivenAt: document.getElementById("rollingFuturesResistanceGivenAt"),
+        resistanceHitAt: document.getElementById("rollingFuturesResistanceHitAt"),
+        resistanceMeta: document.getElementById("rollingFuturesResistanceMeta"),
+        resistanceLog: document.getElementById("rollingFuturesResistanceLog")
     };
 
     let selectedApiProfileId = "";
@@ -252,6 +260,7 @@
     let displayedPositions = [];
     let previousOpenPositionCount = 0;
     let openPositionSideEffectsRefreshTimer = null;
+    let resistanceRefreshTimer = null;
     let openPositionsPage = 1;
     let importablePositions = [];
     let closedPositions = [];
@@ -4429,6 +4438,109 @@
         applyAccountSummaryData(objResult?.data || {});
     }
 
+    function renderResistanceLog(rows) {
+        if (!ids.resistanceLog) {
+            return;
+        }
+        const arrRows = Array.isArray(rows) ? rows : [];
+        if (!arrRows.length) {
+            ids.resistanceLog.innerHTML = `<div class="rolling-demo-event-empty">No resistance events yet.</div>`;
+            return;
+        }
+        ids.resistanceLog.innerHTML = arrRows.map(function (row) {
+            const type = String(row?.type || "").trim().toLowerCase() === "hit" ? "hit" : "given";
+            const title = type === "hit" ? "Hit" : "Given";
+            const at = formatDateTimeDisplay(row?.at);
+            const message = String(row?.message || "").trim() || "-";
+            return `
+                <article class="rolling-resistance-log-item ${type}">
+                    <div class="rolling-resistance-log-item-head">
+                        <strong>${escapeHtml(title)}</strong>
+                        <span class="rolling-resistance-log-time">${escapeHtml(at)}</span>
+                    </div>
+                    <p>${escapeHtml(message)}</p>
+                </article>
+            `;
+        }).join("");
+    }
+
+    function renderResistanceSnapshot(data) {
+        if (!isCoveredLivePageMode()) {
+            return;
+        }
+        const objData = data && typeof data === "object" ? data : {};
+        const currentPrice = Number(objData.currentPrice);
+        const resistance = objData.resistance && typeof objData.resistance === "object" ? objData.resistance : null;
+        const strike = Number(resistance?.strike);
+        const distance = Number(resistance?.distance);
+        const openInterest = Number(resistance?.openInterest);
+        const contractSymbol = String(resistance?.contractSymbol || "").trim();
+        const expiryDate = String(resistance?.expiryDate || "").trim();
+        const givenAt = String(objData.givenAt || "").trim();
+        const hitAt = String(objData.hitAt || "").trim();
+        if (ids.resistanceCurrentPrice) {
+            ids.resistanceCurrentPrice.textContent = Number.isFinite(currentPrice) && currentPrice > 0
+                ? fmt(currentPrice, 2)
+                : "-";
+        }
+        if (ids.resistanceNext) {
+            ids.resistanceNext.textContent = Number.isFinite(strike) && strike > 0
+                ? fmt(strike, 2)
+                : "-";
+        }
+        if (ids.resistanceDistance) {
+            ids.resistanceDistance.textContent = Number.isFinite(distance)
+                ? fmt(distance, 2)
+                : "-";
+        }
+        if (ids.resistanceGivenAt) {
+            ids.resistanceGivenAt.textContent = givenAt ? formatDateTimeDisplay(givenAt) : "-";
+        }
+        if (ids.resistanceHitAt) {
+            ids.resistanceHitAt.textContent = hitAt ? formatDateTimeDisplay(hitAt) : "-";
+        }
+        if (ids.resistanceMeta) {
+            const parts = [];
+            if (contractSymbol) {
+                parts.push(contractSymbol);
+            }
+            if (Number.isFinite(openInterest) && openInterest > 0) {
+                parts.push(`OI ${fmt(openInterest, 0)}`);
+            }
+            if (expiryDate) {
+                parts.push(`Expiry ${expiryDate}`);
+            }
+            ids.resistanceMeta.textContent = parts.length
+                ? parts.join(" · ")
+                : "Resistance uses nearest-expiry call open interest above the current price.";
+        }
+        renderResistanceLog(objData.log);
+    }
+
+    async function loadResistanceSnapshot() {
+        if (!isCoveredLivePageMode()) {
+            return null;
+        }
+        const query = new URLSearchParams();
+        query.set("symbol", String(ids.symbol?.value || "BTC").trim().toUpperCase());
+        const objResult = await getJson(`${endpointBase}/resistance?${query.toString()}`);
+        renderResistanceSnapshot(objResult?.data || {});
+        return objResult?.data || null;
+    }
+
+    function scheduleResistanceAutoRefresh() {
+        if (!isCoveredLivePageMode()) {
+            return;
+        }
+        if (resistanceRefreshTimer) {
+            clearInterval(resistanceRefreshTimer);
+            resistanceRefreshTimer = null;
+        }
+        resistanceRefreshTimer = window.setInterval(function () {
+            void loadResistanceSnapshot().catch(function () { return undefined; });
+        }, 20000);
+    }
+
     async function loadOptionsDemoIndicator() {
         if (!isDemoVariant) {
             return;
@@ -6124,6 +6236,20 @@
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to load closed positions.", "danger");
         });
     });
+    ids.resistanceRefreshButton?.addEventListener("click", function () {
+        void loadResistanceSnapshot().then(function (data) {
+            const strike = Number(data?.resistance?.strike);
+            setStatus(
+                ids.pageStatus,
+                Number.isFinite(strike) && strike > 0
+                    ? `Resistance refreshed. Next level ${fmt(strike, 2)}.`
+                    : "Resistance refreshed. No call-OI wall found above price.",
+                "success"
+            );
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to refresh resistance.", "danger");
+        });
+    });
     ids.clearClosedPositionsButton?.addEventListener("click", function () {
         const confirmed = window.confirm("Clear all Closed Positions for this demo page?");
         if (!confirmed) {
@@ -6671,8 +6797,10 @@
         await checkConnection();
         await Promise.all([
             loadAccountSummary().catch(function () { return undefined; }),
-            loadClosedPositions().catch(function () { return undefined; })
+            loadClosedPositions().catch(function () { return undefined; }),
+            loadResistanceSnapshot().catch(function () { return undefined; })
         ]);
+        scheduleResistanceAutoRefresh();
     }
 
     ids.adminTargetUser?.addEventListener("change", function () {

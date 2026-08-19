@@ -2,3 +2,164 @@
     font-size: 0.82rem;
     white-space: nowrap;
 }
+
+.app-panel.rolling-demo-card.rolling-resistance-card {
+    margin-top: 0.85rem;
+    background: linear-gradient(180deg, #123248 0%, #0d2436 100%);
+    border: 1px solid rgba(101, 212, 232, 0.28);
+    color: #e8f4f8;
+}
+
+.rolling-resistance-card .rolling-demo-card-head h2 {
+    color: #f2f9fc;
+}
+
+.rolling-resistance-method-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.18rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    font-weight: 600;
+    color: #083443;
+    background: #65d4e8;
+}
+
+.rolling-resistance-metrics {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.rolling-resistance-metric {
+    background: rgba(8, 24, 38, 0.72);
+    border: 1px solid rgba(125, 211, 252, 0.22);
+    border-radius: 0.55rem;
+    padding: 0.65rem 0.75rem;
+}
+
+.rolling-resistance-card .rolling-demo-metric-label {
+    color: #c5dce6;
+    font-weight: 600;
+}
+
+.rolling-resistance-card .rolling-demo-metric-value {
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.rolling-resistance-datetime {
+    font-size: 0.9rem !important;
+    white-space: nowrap;
+    color: #7de8ff !important;
+}
+
+.rolling-resistance-meta {
+    font-size: 0.86rem;
+    color: #d2e7ef;
+    font-weight: 500;
+    margin-bottom: 0.85rem;
+}
+
+.rolling-resistance-log-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.45rem;
+    font-size: 0.9rem;
+    color: #eaf6fa;
+}
+
+.rolling-resistance-log-head strong {
+    color: #ffffff;
+}
+
+.rolling-resistance-log-head span {
+    color: #b7d5e0;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.rolling-resistance-log {
+    max-height: 240px;
+    overflow: auto;
+    display: grid;
+    gap: 0.5rem;
+}
+
+.rolling-resistance-log-item {
+    border: 1px solid rgba(125, 211, 252, 0.24);
+    border-radius: 0.55rem;
+    padding: 0.6rem 0.75rem;
+    background: rgba(7, 22, 34, 0.78);
+    color: #e7f3f8;
+}
+
+.rolling-resistance-log-item.given {
+    border-color: rgba(101, 212, 232, 0.45);
+    background: rgba(18, 64, 82, 0.88);
+}
+
+.rolling-resistance-log-item.hit {
+    border-color: rgba(242, 182, 90, 0.5);
+    background: rgba(74, 48, 22, 0.88);
+}
+
+.rolling-resistance-log-item-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.28rem;
+    font-size: 0.82rem;
+}
+
+.rolling-resistance-log-item-head strong {
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.rolling-resistance-log-item-head .rolling-resistance-log-time {
+    color: #7de8ff;
+    font-weight: 700;
+    font-size: 0.84rem;
+    white-space: nowrap;
+}
+
+.rolling-resistance-log-item p {
+    margin: 0;
+    font-size: 0.84rem;
+    color: #d7ebf2;
+    font-weight: 500;
+}
+
+.rolling-resistance-card .rolling-demo-event-empty {
+    color: #c5dce6;
+    font-weight: 500;
+}
+
+@media (max-width: 1100px) {
+    .rolling-resistance-metrics {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 760px) {
+    .rolling-resistance-metrics {
+        grid-template-columns: 1fr;
+    }
+
+    .rolling-resistance-datetime {
+        white-space: normal;
+    }
+
+    .rolling-resistance-log-item-head {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}

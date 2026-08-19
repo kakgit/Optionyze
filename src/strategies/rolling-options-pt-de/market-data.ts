@@ -16,6 +16,10 @@ interface DeltaTickerRow {
     best_ask?: string | number;
     spot_price?: string | number;
     strike_price?: string | number;
+    oi?: string | number;
+    open_interest?: string | number;
+    expiry_date?: string;
+    settlement_time?: string;
     greeks?: DeltaTickerGreeks;
     quotes?: {
         best_bid?: string | number;
@@ -624,4 +628,196 @@ export async function getLiveOptionTicker(pContractSymbol: string): Promise<Roll
         }
         return objCached?.ticker || null;
     }
+}
+
+export interface CallOiResistanceSnapshot {
+    symbol: "BTC" | "ETH";
+    contractName: string;
+    currentPrice: number;
+    priceSource: "spot_price" | "mark_price";
+    resistance: null | {
+        strike: number;
+        contractSymbol: string;
+        openInterest: number;
+        expiryDate: string;
+        distance: number;
+    };
+    evaluatedAt: string;
+}
+
+function formatDdMmYyyyFromDate(pDate: Date): string {
+    const vDay = String(pDate.getDate()).padStart(2, "0");
+    const vMonth = String(pDate.getMonth() + 1).padStart(2, "0");
+    return `${vDay}-${vMonth}-${pDate.getFullYear()}`;
+}
+
+function getNearTermExpiryCandidates(): string[] {
+    const vNow = new Date();
+    const arrDays = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 21, 28, 30, 37, 45, 60];
+    return [...new Set(arrDays.map((vDays) => {
+        const objDate = new Date(vNow);
+        objDate.setDate(objDate.getDate() + vDays);
+        return formatDdMmYyyyFromDate(objDate);
+    }))];
+}
+
+function parseOptionExpiryFromSymbol(pSymbol: string): string {
+    const vMatch = String(pSymbol || "").trim().toUpperCase().match(/-(\d{6})$/);
+    if (!vMatch) {
+        return "";
+    }
+    const vRaw = vMatch[1];
+    const vDay = vRaw.slice(0, 2);
+    const vMonth = vRaw.slice(2, 4);
+    const vYear = `20${vRaw.slice(4, 6)}`;
+    return `${vYear}-${vMonth}-${vDay}`;
+}
+
+function parseOptionExpiryMs(pExpiry: string): number {
+    const vValue = String(pExpiry || "").trim();
+    if (!vValue) {
+        return Number.NaN;
+    }
+    if (/^\d{2}-\d{2}-\d{4}$/.test(vValue)) {
+        const [vDay, vMonth, vYear] = vValue.split("-").map((vPart) => Number(vPart));
+        return new Date(vYear, vMonth - 1, vDay).getTime();
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(vValue)) {
+        return new Date(`${vValue}T00:00:00`).getTime();
+    }
+    return new Date(vValue).getTime();
+}
+
+function getTickerOpenInterest(pRow: DeltaTickerRow): number {
+    const vOi = parseNumber(pRow.oi ?? pRow.open_interest, NaN);
+    return Number.isFinite(vOi) && vOi > 0 ? vOi : 0;
+}
+
+export async function getCallOiResistanceSnapshot(
+    pSymbol: "BTC" | "ETH"
+): Promise<CallOiResistanceSnapshot> {
+    const vSymbol = pSymbol === "ETH" ? "ETH" : "BTC";
+    const vContractName = `${vSymbol}USD`;
+    const objTicker = gDeltaPublicTickerFeed.getTicker(vContractName)
+        || (await fetchJson<DeltaApiResponse<DeltaTickerRow>>(`/tickers/${encodeURIComponent(vContractName)}`)).result
+        || {};
+    const vSpotPrice = parseNumber(objTicker.spot_price);
+    const vMarkPrice = parseNumber(objTicker.mark_price, vSpotPrice);
+    const vCurrentPrice = vSpotPrice > 0 ? vSpotPrice : vMarkPrice;
+    const vPriceSource: "spot_price" | "mark_price" = vSpotPrice > 0 ? "spot_price" : "mark_price";
+    const vEvaluatedAt = new Date().toISOString();
+
+    if (!(vCurrentPrice > 0)) {
+        return {
+            symbol: vSymbol,
+            contractName: vContractName,
+            currentPrice: 0,
+            priceSource: vPriceSource,
+            resistance: null,
+            evaluatedAt: vEvaluatedAt
+        };
+    }
+
+    const arrCallRows: DeltaTickerRow[] = [];
+    try {
+        const objAllParams = new URLSearchParams({
+            contract_types: "call_options",
+            underlying_asset_symbols: vSymbol
+        });
+        const objAllPayload = await runLiveOptionTickerLookupSerial(() => (
+            fetchJson<DeltaApiResponse<DeltaTickerRow[]>>("/tickers", objAllParams)
+        ));
+        if (Array.isArray(objAllPayload.result) && objAllPayload.result.length) {
+            arrCallRows.push(...objAllPayload.result);
+        }
+    }
+    catch (_error) {
+    }
+
+    if (!arrCallRows.length) {
+        for (const vExpiryDate of getNearTermExpiryCandidates()) {
+            const objParams = new URLSearchParams({
+                contract_types: "call_options",
+                underlying_asset_symbols: vSymbol,
+                expiry_date: vExpiryDate
+            });
+            try {
+                const objPayload = await runLiveOptionTickerLookupSerial(() => (
+                    fetchJson<DeltaApiResponse<DeltaTickerRow[]>>("/tickers", objParams)
+                ));
+                const arrRows = Array.isArray(objPayload.result) ? objPayload.result : [];
+                if (arrRows.length) {
+                    arrCallRows.push(...arrRows);
+                }
+            }
+            catch (objError) {
+                if (isDeltaRateLimitError(objError)) {
+                    break;
+                }
+            }
+            if (arrCallRows.length >= 40) {
+                break;
+            }
+        }
+    }
+
+    const arrCandidates = arrCallRows
+        .map((objRow) => {
+            const vContractSymbol = String(objRow.symbol || "").trim().toUpperCase();
+            const vStrike = parseNumber(objRow.strike_price, NaN);
+            const vOpenInterest = getTickerOpenInterest(objRow);
+            const vExpiryDate = String(objRow.expiry_date || objRow.settlement_time || "").trim()
+                || parseOptionExpiryFromSymbol(vContractSymbol);
+            const vExpiryMs = parseOptionExpiryMs(vExpiryDate);
+            return {
+                contractSymbol: vContractSymbol,
+                strike: vStrike,
+                openInterest: vOpenInterest,
+                expiryDate: vExpiryDate,
+                expiryMs: vExpiryMs
+            };
+        })
+        .filter((objRow) => (
+            objRow.contractSymbol.startsWith("C-")
+            && Number.isFinite(objRow.strike)
+            && objRow.strike > vCurrentPrice
+            && objRow.openInterest > 0
+            && Number.isFinite(objRow.expiryMs)
+            && objRow.expiryMs >= Date.now() - (6 * 60 * 60 * 1000)
+        ));
+
+    if (!arrCandidates.length) {
+        return {
+            symbol: vSymbol,
+            contractName: vContractName,
+            currentPrice: Number(vCurrentPrice.toFixed(2)),
+            priceSource: vPriceSource,
+            resistance: null,
+            evaluatedAt: vEvaluatedAt
+        };
+    }
+
+    const vNearestExpiryMs = Math.min(...arrCandidates.map((objRow) => objRow.expiryMs));
+    const arrNearestExpiry = arrCandidates.filter((objRow) => objRow.expiryMs === vNearestExpiryMs);
+    arrNearestExpiry.sort((pLeft, pRight) => {
+        if (pRight.openInterest !== pLeft.openInterest) {
+            return pRight.openInterest - pLeft.openInterest;
+        }
+        return pLeft.strike - pRight.strike;
+    });
+    const objBest = arrNearestExpiry[0];
+    return {
+        symbol: vSymbol,
+        contractName: vContractName,
+        currentPrice: Number(vCurrentPrice.toFixed(2)),
+        priceSource: vPriceSource,
+        resistance: {
+            strike: Number(objBest.strike.toFixed(2)),
+            contractSymbol: objBest.contractSymbol,
+            openInterest: Number(objBest.openInterest.toFixed(4)),
+            expiryDate: objBest.expiryDate,
+            distance: Number((objBest.strike - vCurrentPrice).toFixed(2))
+        },
+        evaluatedAt: vEvaluatedAt
+    };
 }
