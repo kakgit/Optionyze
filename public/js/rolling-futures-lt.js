@@ -251,6 +251,7 @@
     let connectionState = "not_selected";
     let displayedPositions = [];
     let previousOpenPositionCount = 0;
+    let openPositionSideEffectsRefreshTimer = null;
     let openPositionsPage = 1;
     let importablePositions = [];
     let closedPositions = [];
@@ -4686,6 +4687,22 @@
         return vFallbackValue;
     }
 
+    function scheduleRefreshAfterNewOpenPosition() {
+        if (!isCoveredLivePageMode()) {
+            return;
+        }
+        if (openPositionSideEffectsRefreshTimer) {
+            window.clearTimeout(openPositionSideEffectsRefreshTimer);
+        }
+        openPositionSideEffectsRefreshTimer = window.setTimeout(function () {
+            openPositionSideEffectsRefreshTimer = null;
+            void Promise.all([
+                loadAccountSummary().catch(function () { return undefined; }),
+                loadClosedPositions().catch(function () { return undefined; })
+            ]);
+        }, 250);
+    }
+
     function renderOpenPositions(payload) {
         const objPayload = extractOpenPositionsPayload(payload);
         lastOpenPositionsPayload = objPayload;
@@ -4699,8 +4716,12 @@
         const vPreviousOpenCount = previousOpenPositionCount;
         const bFirstOpenTransition = isCoveredMode && vPreviousOpenCount === 0 && arrRows.length > 0;
         const bSessionResetTransition = isCoveredMode && vPreviousOpenCount > 0 && arrRows.length === 0;
+        const bNewOpenPositionAdded = isCoveredLivePageMode() && arrRows.length > vPreviousOpenCount;
         previousOpenPositionCount = arrRows.length;
         displayedPositions = arrRows;
+        if (bNewOpenPositionAdded) {
+            scheduleRefreshAfterNewOpenPosition();
+        }
         renderCoveredHedgeGateSummary(arrRows);
         lastNeutralStatus = objPayload.neutralStatus || null;
         applyRecoveryMetrics(objPayload.recoveryMetrics || null);

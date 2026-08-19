@@ -7914,11 +7914,17 @@ async function resetCoveredClosedPositionsSessionAfterProfitClose(
         ...objRuntime,
         userId: pUserId,
         strategyCode: pStrategyCode,
-        state: {
-            ...((objRuntime.state || {}) as Record<string, unknown>),
-            ...buildRuntimeStateWithStrategyStartedAt(objRuntime, ""),
-            ...buildRuntimeStateWithClosedPositionsRefreshAt(objRuntime, vRefreshAt)
-        }
+        state: buildRuntimeStateWithLastClosedOptionPnlGuard(
+            {
+                ...objRuntime,
+                state: {
+                    ...((objRuntime.state || {}) as Record<string, unknown>),
+                    ...buildRuntimeStateWithStrategyStartedAt(objRuntime, ""),
+                    ...buildRuntimeStateWithClosedPositionsRefreshAt(objRuntime, vRefreshAt)
+                }
+            },
+            null
+        )
     });
     return saveRollingFuturesLtProfile({
         ...objProfile,
@@ -8857,9 +8863,9 @@ async function executeStrategyPlacement(
         throw new Error("Only one option position can be open at a time. Select either CE or PE, not both.");
     }
     if (isCoveredOptionsStrategy(pStrategyCode)) {
-        const objPnlGuard = evaluateOptionsDemoPnlEntryGuards(objUiState, arrExisting);
+        const objPnlGuard = await evaluateCoveredLivePnlEntryGuards(pUserId, objUiState, arrExisting);
         if (!objPnlGuard.allowed) {
-            const vMessage = objPnlGuard.message.replace("Renko paper entry", "Renko live entry");
+            const vMessage = objPnlGuard.message;
             await logFuturesEvent(
                 pUserId,
                 pStrategyCode,
@@ -10642,6 +10648,15 @@ async function applyTriggeredOptionRule(
             reason: pReason
         }
     );
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        await recordLastClosedOptionPnlForEntryGuard(
+            pUserId,
+            pStrategyCode,
+            pPosition,
+            vClosePnl,
+            objCloseResult.placedAt
+        );
+    }
     if (pReason === "sl" || pReason === "tp") {
         await schedulePendingOptionRecoveryRefresh(pUserId, pStrategyCode, pReason);
     }
@@ -11242,6 +11257,24 @@ async function closeTrackedPositionsOnDelta(
         arrClosePnls.reduce((pSum, vValue) => pSum + Number(vValue || 0), 0),
         0
     );
+    if (isCoveredOptionsStrategy(pStrategyCode)) {
+        const arrClosedOptions = (Array.isArray(pPositions) ? pPositions : []).filter((objPosition) => {
+            return isOptionContractSymbol(objPosition.contractName);
+        });
+        const objLatestClosedOption = getLatestActiveTrackedOptionPosition(arrClosedOptions);
+        if (objLatestClosedOption) {
+            const vClosedIndex = pPositions.findIndex((objPosition) => objPosition.importId === objLatestClosedOption.importId);
+            const vClosedPnl = vClosedIndex >= 0 ? arrClosePnls[vClosedIndex] : null;
+            if (vClosedPnl !== null && Number.isFinite(Number(vClosedPnl))) {
+                await recordLastClosedOptionPnlForEntryGuard(
+                    pUserId,
+                    pStrategyCode,
+                    objLatestClosedOption,
+                    Number(vClosedPnl)
+                );
+            }
+        }
+    }
     await syncDualStrategySurvivalState(pUserId, pStrategyCode, pSelectedApiProfileId, [], "ended");
     await clearActiveStrategyRun(pUserId, pStrategyCode);
     return {
@@ -11977,11 +12010,11 @@ async function validateCoveredOptionsRenkoAutoTradeInputBeforeConfirmation(
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
 ): Promise<{ allowed: boolean; message: string; contractName?: string; }> {
     const objUiState = getMergedUiState(pProfile);
-    const objPnlGuard = evaluateOptionsDemoPnlEntryGuards(objUiState, pTrackedPositions);
+    const objPnlGuard = await evaluateCoveredLivePnlEntryGuards(pUserId, objUiState, pTrackedPositions);
     if (!objPnlGuard.allowed) {
         return {
             allowed: false,
-            message: objPnlGuard.message.replace("Renko paper entry", "Renko live entry")
+            message: objPnlGuard.message
         };
     }
     const objAlternatingLegCheck = evaluateCoveredAlternatingLegRestriction(
@@ -12070,6 +12103,146 @@ async function validateCoveredOptionsRenkoAutoTradeInputBeforeConfirmation(
         };
     }
     return { allowed: true, message: "", contractName: vContractName };
+}
+
+function getLastClosedOptionPnlGuardState(
+    pRuntime: RollingFuturesLtRuntimeRecord | null
+): {
+    pnl: number | null;
+    closedAt: string;
+    contractName: string;
+} {
+    const objState = (pRuntime?.state || {}) as Record<string, unknown>;
+    const objEntry = objState.lastClosedOptionPnlGuard && typeof objState.lastClosedOptionPnlGuard === "object"
+        ? objState.lastClosedOptionPnlGuard as Record<string, unknown>
+        : null;
+    if (!objEntry) {
+        return { pnl: null, closedAt: "", contractName: "" };
+    }
+    const vPnl = Number(objEntry.pnl);
+    return {
+        pnl: Number.isFinite(vPnl) ? Number(vPnl.toFixed(4)) : null,
+        closedAt: String(objEntry.closedAt || "").trim(),
+        contractName: String(objEntry.contractName || "").trim()
+    };
+}
+
+function buildRuntimeStateWithLastClosedOptionPnlGuard(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pEntry: {
+        pnl: number;
+        closedAt: string;
+        contractName: string;
+    } | null
+): Record<string, unknown> {
+    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    if (!pEntry || !Number.isFinite(Number(pEntry.pnl))) {
+        delete objState.lastClosedOptionPnlGuard;
+        return objState;
+    }
+    objState.lastClosedOptionPnlGuard = {
+        pnl: Number(Number(pEntry.pnl).toFixed(4)),
+        closedAt: String(pEntry.closedAt || "").trim() || new Date().toISOString(),
+        contractName: String(pEntry.contractName || "").trim()
+    };
+    return objState;
+}
+
+async function recordLastClosedOptionPnlForEntryGuard(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pPosition: RollingFuturesLtImportedPositionRecord,
+    pRealizedPnl: number,
+    pClosedAtIso = ""
+): Promise<void> {
+    if (!isCoveredOptionsStrategy(pStrategyCode)) {
+        return;
+    }
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
+        || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    await saveRollingFuturesLtRuntime({
+        ...objRuntime,
+        userId: pUserId,
+        strategyCode: pStrategyCode,
+        state: buildRuntimeStateWithLastClosedOptionPnlGuard(objRuntime, {
+            pnl: Number(pRealizedPnl),
+            closedAt: String(pClosedAtIso || new Date().toISOString()).trim(),
+            contractName: String(pPosition.contractName || "").trim()
+        })
+    });
+}
+
+async function evaluateCoveredLivePnlEntryGuards(
+    pUserId: string,
+    pUiState: Record<string, unknown>,
+    pPositions: RollingFuturesLtImportedPositionRecord[],
+    pRuntime: RollingFuturesLtRuntimeRecord | null = null
+): Promise<{
+    allowed: boolean;
+    message: string;
+    totalPnl: number;
+    lastPnl: number | null;
+    lastPnlSource: string;
+}> {
+    const bRequireLastPnlNegative = normalizeBooleanValue(pUiState.openIfLastPnlNegative, false);
+    if (!bRequireLastPnlNegative) {
+        return {
+            allowed: true,
+            message: "",
+            totalPnl: 0,
+            lastPnl: null,
+            lastPnlSource: ""
+        };
+    }
+
+    const arrRefreshedPositions = await refreshOptionsScalperPaperOpenPositions(pPositions);
+    const arrActiveOptions = listTrackedOpenOptionPositions(arrRefreshedPositions);
+    if (arrActiveOptions.length) {
+        const vTotalPnl = Number(arrActiveOptions.reduce((pSum, objPosition) => {
+            return pSum + Number(objPosition.pnl || 0);
+        }, 0).toFixed(4));
+        const objLatestOpenPosition = getLatestActiveTrackedOptionPosition(arrActiveOptions);
+        const vLastPnlRaw = objLatestOpenPosition ? Number(objLatestOpenPosition.pnl || 0) : Number.NaN;
+        const vLastPnl = Number.isFinite(vLastPnlRaw) ? Number(vLastPnlRaw.toFixed(4)) : null;
+        if (!(vLastPnl !== null && vLastPnl < 0)) {
+            return {
+                allowed: false,
+                message: `Skipped Renko live entry because Last Open Position PnL is ${vLastPnl === null ? "not available" : vLastPnl.toFixed(4)}, not below 0.`,
+                totalPnl: vTotalPnl,
+                lastPnl: vLastPnl,
+                lastPnlSource: "open_position_live"
+            };
+        }
+        return {
+            allowed: true,
+            message: "",
+            totalPnl: vTotalPnl,
+            lastPnl: vLastPnl,
+            lastPnlSource: "open_position_live"
+        };
+    }
+
+    const objRuntime = pRuntime || await loadRollingFuturesLtRuntime(pUserId, "covered-options");
+    const objLastClosed = getLastClosedOptionPnlGuardState(objRuntime);
+    const vLastClosedPnl = objLastClosed.pnl;
+    if (vLastClosedPnl !== null && vLastClosedPnl < 0) {
+        return {
+            allowed: true,
+            message: "",
+            totalPnl: 0,
+            lastPnl: vLastClosedPnl,
+            lastPnlSource: "last_closed_position"
+        };
+    }
+    return {
+        allowed: false,
+        message: vLastClosedPnl === null
+            ? "Skipped Renko live entry because no open option position is available and no last closed position PnL was recorded."
+            : `Skipped Renko live entry because the last closed option position PnL is ${vLastClosedPnl.toFixed(4)}, not below 0.`,
+        totalPnl: 0,
+        lastPnl: vLastClosedPnl,
+        lastPnlSource: "last_closed_position"
+    };
 }
 
 function evaluateOptionsDemoPnlEntryGuards(
@@ -12438,14 +12611,22 @@ export async function syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(
             throw new Error(objCheck.profile.connectionStatus.message || "Delta connection is not healthy.");
         }
 
-        let arrCurrentTrackedPositions = await listRollingFuturesLtImportedPositions(pUserId, "covered-options");
+        let arrCurrentTrackedPositions = await refreshOptionsScalperPaperOpenPositions(
+            await listRollingFuturesLtImportedPositions(pUserId, "covered-options")
+        );
+        const objGuardRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(pUserId, "covered-options");
         let vQueuedCount = 0;
         let vExecutedCount = 0;
         let vLastSkippedMessage = "";
         for (const vCurrentSignal of arrSignalsToProcess) {
-            const objPnlGuard = evaluateOptionsDemoPnlEntryGuards(objUiState, arrCurrentTrackedPositions);
+            const objPnlGuard = await evaluateCoveredLivePnlEntryGuards(
+                pUserId,
+                objUiState,
+                arrCurrentTrackedPositions,
+                objGuardRuntime
+            );
             if (!objPnlGuard.allowed) {
-                vLastSkippedMessage = objPnlGuard.message.replace("Renko paper entry", "Renko live entry");
+                vLastSkippedMessage = objPnlGuard.message;
                 await logFuturesEvent(
                     pUserId,
                     "covered-options",
@@ -12457,6 +12638,7 @@ export async function syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(
                         signal: vCurrentSignal,
                         totalPnl: objPnlGuard.totalPnl,
                         lastPnl: objPnlGuard.lastPnl,
+                        lastPnlSource: objPnlGuard.lastPnlSource,
                         openIfLastPnlNegative: normalizeBooleanValue(objUiState.openIfLastPnlNegative, false),
                         reason: "live_option_pnl_entry_guard"
                     }
