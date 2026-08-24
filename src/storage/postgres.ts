@@ -384,6 +384,104 @@ export async function ensurePostgresSchema(): Promise<void> {
     `);
 
     await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_cs_delta_api_profiles (
+            profile_id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            user_name TEXT NOT NULL,
+            delta_api_key TEXT NOT NULL DEFAULT '',
+            delta_api_secret TEXT NOT NULL DEFAULT '',
+            coinswitch_api_key TEXT NOT NULL DEFAULT '',
+            coinswitch_api_secret TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+
+    await objPool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_optionyze_cs_delta_api_profiles_account_user
+        ON optionyze_cs_delta_api_profiles(account_id, LOWER(user_name));
+    `);
+
+    await objPool.query(`
+        CREATE INDEX IF NOT EXISTS idx_optionyze_cs_delta_api_profiles_account_id
+        ON optionyze_cs_delta_api_profiles(account_id);
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_cs_delta_open_positions (
+            position_id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            profile_id TEXT NOT NULL REFERENCES optionyze_cs_delta_api_profiles(profile_id) ON DELETE CASCADE,
+            user_name TEXT NOT NULL,
+            side TEXT NOT NULL,
+            base_coin TEXT NOT NULL DEFAULT 'BTC',
+            strike DOUBLE PRECISION NOT NULL,
+            multiplier INTEGER NOT NULL DEFAULT 1,
+            coinswitch_symbol TEXT NOT NULL DEFAULT '',
+            coinswitch_qty DOUBLE PRECISION NOT NULL DEFAULT 0,
+            coinswitch_entry_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+            coinswitch_order_id TEXT NOT NULL DEFAULT '',
+            delta_symbol TEXT NOT NULL DEFAULT '',
+            delta_size INTEGER NOT NULL DEFAULT 0,
+            delta_entry_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+            delta_order_id TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'open',
+            opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT optionyze_cs_delta_open_positions_side_chk CHECK (side IN ('put', 'call')),
+            CONSTRAINT optionyze_cs_delta_open_positions_status_chk CHECK (status IN ('open'))
+        );
+    `);
+
+    await objPool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_optionyze_cs_delta_open_positions_profile_side
+        ON optionyze_cs_delta_open_positions(profile_id, side)
+        WHERE status = 'open';
+    `);
+
+    await objPool.query(`
+        CREATE INDEX IF NOT EXISTS idx_optionyze_cs_delta_open_positions_account_id
+        ON optionyze_cs_delta_open_positions(account_id);
+    `);
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_cs_delta_imported_positions (
+            import_id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            profile_id TEXT NOT NULL REFERENCES optionyze_cs_delta_api_profiles(profile_id) ON DELETE CASCADE,
+            user_name TEXT NOT NULL,
+            source TEXT NOT NULL,
+            side TEXT NOT NULL,
+            base_coin TEXT NOT NULL DEFAULT 'BTC',
+            symbol TEXT NOT NULL,
+            strike DOUBLE PRECISION NOT NULL,
+            size DOUBLE PRECISION NOT NULL DEFAULT 0,
+            entry_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+            mark_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+            position_side TEXT NOT NULL DEFAULT 'long',
+            status TEXT NOT NULL DEFAULT 'open',
+            imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT optionyze_cs_delta_imported_positions_source_chk CHECK (source IN ('delta', 'coinswitch')),
+            CONSTRAINT optionyze_cs_delta_imported_positions_side_chk CHECK (side IN ('put', 'call')),
+            CONSTRAINT optionyze_cs_delta_imported_positions_pos_side_chk CHECK (position_side IN ('long', 'short')),
+            CONSTRAINT optionyze_cs_delta_imported_positions_status_chk CHECK (status IN ('open'))
+        );
+    `);
+
+    await objPool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_optionyze_cs_delta_imported_positions_unique_open
+        ON optionyze_cs_delta_imported_positions(profile_id, source, symbol)
+        WHERE status = 'open';
+    `);
+
+    await objPool.query(`
+        CREATE INDEX IF NOT EXISTS idx_optionyze_cs_delta_imported_positions_account_id
+        ON optionyze_cs_delta_imported_positions(account_id);
+    `);
+
+
+    await objPool.query(`
         CREATE TABLE IF NOT EXISTS optionyze_rolling_options_pt_de_events (
             event_id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,

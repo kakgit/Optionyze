@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= pageTitle %></title>
+    <%- include('partials/brand-head') %>
+    <link rel="stylesheet" href="/css/app-shell.css" />
+    <link rel="stylesheet" href="/css/account-menu.css" />
+    <link rel="stylesheet" href="/css/arbitrage.css" />
+</head>
+<body class="app-page" data-page="coinswitch-delta">
+    <div class="app-layout">
+        <%- include('partials/app-header', { currentAccount }) %>
+
+        <section class="arbitrage-hero">
+            <div class="app-panel arbitrage-hero-panel">
+                <div class="arbitrage-eyebrow">CoinSwitch vs Delta</div>
+                <h1 class="arbitrage-title">CoinSwitch-Delta</h1>
+                <p class="app-copy">
+                    Fetch Put and Call strikes (x1000) for the same instrument and expiry. Compare CoinSwitch (left) and Delta Exchange (right) bid/ask side by side. Rows filter on CoinSwitch |Δ| 0.05–0.80. Cross alerts fire when CoinSwitch Bid &gt; Delta Ask with edge ≥ 5.
+                </p>
+            </div>
+        </section>
+
+        <section class="app-panel arbitrage-workspace">
+            <div class="arbitrage-workspace-head">
+                <h2>Controls</h2>
+                <div class="arbitrage-workspace-head-actions">
+                    <span class="arbitrage-pill balance-pill balance-pill-delta" id="deltaBalancePill" title="Delta Exchange USD available for options trading">Δ –</span>
+                    <span class="arbitrage-pill balance-pill balance-pill-cs" id="csBalancePill" title="CoinSwitch USDT available for options trading">CS –</span>
+                    <button class="app-ghost-btn" type="button" id="btnManageApi">Manage API</button>
+                    <span class="arbitrage-pill" id="arbitrageStatusPill">Ready</span>
+                </div>
+            </div>
+
+            <div class="arbitrage-controls">
+                <div class="arbitrage-field">
+                    <label for="ddlArbitrageInstrument">Instrument</label>
+                    <select id="ddlArbitrageInstrument">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+                <div class="arbitrage-field">
+                    <label for="ddlArbitrageExpiry">Expiry Date</label>
+                    <select id="ddlArbitrageExpiry" disabled>
+                        <option value="">Select instrument first</option>
+                    </select>
+                </div>
+                <div class="arbitrage-field arbitrage-field-action">
+                    <label>&nbsp;</label>
+                    <button class="app-solid-btn" type="button" id="btnArbitrageFetch" disabled>Fetch Puts &amp; Calls</button>
+                </div>
+            </div>
+
+            <div class="arbitrage-controls arbitrage-order-controls">
+                <div class="arbitrage-field">
+                    <label for="ddlOrderUserName">Username</label>
+                    <select id="ddlOrderUserName">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+                <div class="arbitrage-field arbitrage-field-multiplier">
+                    <label for="txtOrderMultiplier">Multiplier</label>
+                    <input id="txtOrderMultiplier" type="number" min="1" max="50" step="1" value="1" />
+                </div>
+                <div class="arbitrage-field arbitrage-field-action">
+                    <label>&nbsp;</label>
+                    <button class="app-solid-btn arbitrage-side-btn call" type="button" id="btnPlaceCallOrders" disabled>CALL</button>
+                </div>
+                <div class="arbitrage-field arbitrage-field-action">
+                    <label>&nbsp;</label>
+                    <button class="app-solid-btn arbitrage-side-btn put" type="button" id="btnPlacePutOrders" disabled>PUT</button>
+                </div>
+            </div>
+
+            <div class="arbitrage-status" id="arbitragePageStatus"></div>
+        </section>
+
+        <section class="app-panel arbitrage-workspace" id="openPositionsSection">
+            <div class="arbitrage-workspace-head">
+                <h2>Open Positions</h2>
+                <div class="arbitrage-workspace-head-actions">
+                    <button class="app-ghost-btn open-pos-import-btn" type="button" id="btnImportPositions" title="Import positions from Delta / CoinSwitch" aria-label="Import positions">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 8 12 3 17 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <span>Import</span>
+                    </button>
+                    <button class="app-ghost-btn" type="button" id="btnRefreshOpenPositions">Refresh</button>
+                    <span class="arbitrage-pill" id="openPositionsCount">0</span>
+                </div>
+            </div>
+            <p class="arbitrage-alerts-copy">
+                Paired CoinSwitch sell + Delta buy positions. Each username can hold one CALL and one PUT at a time.
+            </p>
+            <div class="cs-api-table-wrap">
+                <table class="cs-api-table" id="openPositionsTable">
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Side</th>
+                            <th>Strike</th>
+                            <th>CoinSwitch</th>
+                            <th>Delta</th>
+                            <th>Opened</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="openPositionsTableBody">
+                        <tr><td colspan="7" class="cs-api-empty">No open positions yet.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="imported-groups">
+                <div class="imported-group" id="importedCallsGroup">
+                    <h3 class="imported-group-title imported-group-title-call">Imported Calls <span class="arbitrage-pill" id="importedCallsCount">0</span></h3>
+                    <div class="cs-api-table-wrap">
+                        <table class="cs-api-table">
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>Exchange</th>
+                                    <th>Symbol</th>
+                                    <th>Strike</th>
+                                    <th>Qty</th>
+                                    <th>Entry</th>
+                                    <th>Mark</th>
+                                    <th>Direction</th>
+                                    <th>Imported</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="importedCallsTableBody">
+                                <tr><td colspan="10" class="cs-api-empty">No imported call positions.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="imported-group" id="importedPutsGroup">
+                    <h3 class="imported-group-title imported-group-title-put">Imported Puts <span class="arbitrage-pill" id="importedPutsCount">0</span></h3>
+                    <div class="cs-api-table-wrap">
+                        <table class="cs-api-table">
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>Exchange</th>
+                                    <th>Symbol</th>
+                                    <th>Strike</th>
+                                    <th>Qty</th>
+                                    <th>Entry</th>
+                                    <th>Mark</th>
+                                    <th>Direction</th>
+                                    <th>Imported</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="importedPutsTableBody">
+                                <tr><td colspan="10" class="cs-api-empty">No imported put positions.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="app-panel arbitrage-workspace" data-side="put">
+            <div class="arbitrage-workspace-head">
+                <h2>Put Compare</h2>
+                <span class="arbitrage-pill" id="putStatusPill">Idle</span>
+            </div>
+            <div class="arbitrage-meta" id="putMeta">Choose instrument and expiry, then fetch.</div>
+            <div class="arbitrage-table-wrap">
+                <table class="arbitrage-table arbitrage-compare-table">
+                    <thead>
+                        <tr>
+                            <th rowspan="2" class="arbitrage-col-select">
+                                <input type="checkbox" id="chkSelectAllPuts" title="Select all puts" aria-label="Select all puts" />
+                            </th>
+                            <th rowspan="2" class="arbitrage-col-group shark">CS Δ</th>
+                            <th rowspan="2">Strike</th>
+                            <th colspan="2" class="arbitrage-col-group shark">CoinSwitch</th>
+                            <th colspan="2" class="arbitrage-col-group delta">Delta</th>
+                        </tr>
+                        <tr>
+                            <th class="arbitrage-col-group shark">Bid</th>
+                            <th class="arbitrage-col-group shark">Ask</th>
+                            <th class="arbitrage-col-group delta">Bid</th>
+                            <th class="arbitrage-col-group delta">Ask</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tBodyArbitragePuts">
+                        <tr>
+                            <td colspan="7" class="arbitrage-empty-cell">No put compare loaded yet.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="app-panel arbitrage-alerts-panel" data-side="put">
+            <div class="arbitrage-workspace-head">
+                <h2>Put Cross Alerts</h2>
+                <div class="arbitrage-alerts-actions">
+                    <span class="arbitrage-pill" id="putAlertCount">0</span>
+                    <button class="app-ghost-btn" type="button" id="btnPutClearAlerts">Clear</button>
+                </div>
+            </div>
+            <p class="arbitrage-alerts-copy">
+                Logged when CoinSwitch Put Bid crosses above Delta Put Ask with edge &ge; 5.
+            </p>
+            <div class="arbitrage-alerts-list" id="putAlertsList">
+                <div class="arbitrage-alerts-empty">No put crossings yet.</div>
+            </div>
+        </section>
+
+        <section class="app-panel arbitrage-workspace" data-side="call">
+            <div class="arbitrage-workspace-head">
+                <h2>Call Compare</h2>
+                <span class="arbitrage-pill" id="callStatusPill">Idle</span>
+            </div>
+            <div class="arbitrage-meta" id="callMeta">Choose instrument and expiry, then fetch.</div>
+            <div class="arbitrage-table-wrap">
+                <table class="arbitrage-table arbitrage-compare-table">
+                    <thead>
+                        <tr>
+                            <th rowspan="2" class="arbitrage-col-select">
+                                <input type="checkbox" id="chkSelectAllCalls" title="Select all calls" aria-label="Select all calls" />
+                            </th>
+                            <th rowspan="2" class="arbitrage-col-group shark">CS Δ</th>
+                            <th rowspan="2">Strike</th>
+                            <th colspan="2" class="arbitrage-col-group shark">CoinSwitch</th>
+                            <th colspan="2" class="arbitrage-col-group delta">Delta</th>
+                        </tr>
+                        <tr>
+                            <th class="arbitrage-col-group shark">Bid</th>
+                            <th class="arbitrage-col-group shark">Ask</th>
+                            <th class="arbitrage-col-group delta">Bid</th>
+                            <th class="arbitrage-col-group delta">Ask</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tBodyArbitrageCalls">
+                        <tr>
+                            <td colspan="7" class="arbitrage-empty-cell">No call compare loaded yet.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="app-panel arbitrage-alerts-panel" data-side="call">
+            <div class="arbitrage-workspace-head">
+                <h2>Call Cross Alerts</h2>
+                <div class="arbitrage-alerts-actions">
+                    <span class="arbitrage-pill" id="callAlertCount">0</span>
+                    <button class="app-ghost-btn" type="button" id="btnCallClearAlerts">Clear</button>
+                </div>
+            </div>
+            <p class="arbitrage-alerts-copy">
+                Logged when CoinSwitch Call Bid crosses above Delta Call Ask with edge &ge; 5.
+            </p>
+            <div class="arbitrage-alerts-list" id="callAlertsList">
+                <div class="arbitrage-alerts-empty">No call crossings yet.</div>
+            </div>
+        </section>
+    </div>
+
+    <div class="cs-api-overlay" id="orderConfirmOverlay"></div>
+    <section class="app-panel cs-api-modal order-confirm-modal" id="orderConfirmModal" aria-hidden="true">
+        <div class="cs-api-modal-head">
+            <div>
+                <h2 class="cs-api-modal-title" id="orderConfirmTitle">Confirm Orders</h2>
+                <p class="app-copy" id="orderConfirmHint">Review dual legs before submit. CoinSwitch sells at bid; Delta buys at ask.</p>
+            </div>
+            <button id="btnCloseOrderConfirm" class="app-ghost-btn" type="button">Close</button>
+        </div>
+        <div id="orderConfirmStatus" class="cs-api-status"></div>
+        <div class="order-confirm-meta" id="orderConfirmMeta"></div>
+        <div class="cs-api-table-wrap">
+            <table class="cs-api-table" id="orderConfirmTable">
+                <thead>
+                    <tr>
+                        <th>Strike</th>
+                        <th>CoinSwitch Sell</th>
+                        <th>Delta Buy</th>
+                    </tr>
+                </thead>
+                <tbody id="orderConfirmTableBody">
+                    <tr><td colspan="3" class="cs-api-empty">No legs selected.</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="cs-api-form-actions">
+            <button id="btnCancelOrderConfirm" class="app-ghost-btn" type="button">Cancel</button>
+            <button id="btnSubmitOrderConfirm" class="app-solid-btn" type="button">Place Orders</button>
+        </div>
+    </section>
+
+    <div class="cs-api-overlay" id="csApiOverlay"></div>
+    <section class="app-panel cs-api-modal" id="csApiModal" aria-hidden="true">
+        <div class="cs-api-modal-head">
+            <div>
+                <h2 class="cs-api-modal-title" id="csApiModalTitle">Manage API</h2>
+                <p class="app-copy">Save a user name with paired Delta Exchange and CoinSwitch credentials for later order placement.</p>
+            </div>
+            <button id="btnCloseCsApiModal" class="app-ghost-btn" type="button">Close</button>
+        </div>
+
+        <div id="csApiModalStatus" class="cs-api-status"></div>
+
+        <form id="csApiProfileForm" class="cs-api-form">
+            <div class="cs-api-form-grid">
+                <div class="cs-api-field cs-api-field-full">
+                    <label for="csApiUserName">User Name</label>
+                    <input id="csApiUserName" name="userName" type="text" required autocomplete="off" />
+                </div>
+                <div class="cs-api-field">
+                    <label for="csApiDeltaKey">Delta API Key</label>
+                    <input id="csApiDeltaKey" name="deltaApiKey" type="text" autocomplete="off" />
+                </div>
+                <div class="cs-api-field">
+                    <label for="csApiDeltaSecret">Delta API Secret</label>
+                    <input id="csApiDeltaSecret" name="deltaApiSecret" type="password" autocomplete="new-password" />
+                </div>
+                <div class="cs-api-field">
+                    <label for="csApiCoinswitchKey">CoinSwitch API Key</label>
+                    <input id="csApiCoinswitchKey" name="coinswitchApiKey" type="text" autocomplete="off" />
+                </div>
+                <div class="cs-api-field">
+                    <label for="csApiCoinswitchSecret">CoinSwitch API Secret</label>
+                    <input id="csApiCoinswitchSecret" name="coinswitchApiSecret" type="password" autocomplete="new-password" />
+                </div>
+            </div>
+            <p class="cs-api-hint" id="csApiSecretHint">All credential fields are required for new entries.</p>
+            <div class="cs-api-form-actions">
+                <button id="btnCancelCsApiForm" class="app-ghost-btn" type="button">Cancel Edit</button>
+                <button class="app-solid-btn" type="submit" id="btnSaveCsApiProfile">Save Credentials</button>
+            </div>
+        </form>
+
+        <div class="cs-api-grid-head">
+            <div>
+                <div class="cs-api-grid-title">Saved Credentials</div>
+                <div class="cs-api-grid-sub">Edit or delete existing paired API sets.</div>
+            </div>
+            <button id="btnRefreshCsApiProfiles" class="app-ghost-btn" type="button">Refresh</button>
+        </div>
+        <div class="cs-api-table-wrap">
+            <table class="cs-api-table">
+                <thead>
+                    <tr>
+                        <th>User Name</th>
+                        <th>Delta Key</th>
+                        <th>CoinSwitch Key</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="csApiProfileTableBody">
+                    <tr><td colspan="4" class="cs-api-empty">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <div class="cs-api-overlay" id="positionImportOverlay"></div>
+    <section class="app-panel cs-api-modal position-import-modal" id="positionImportModal" aria-hidden="true">
+        <div class="cs-api-modal-head">
+            <div>
+                <h2 class="cs-api-modal-title">Import Positions</h2>
+                <p class="app-copy">Select a username, then pick live positions from Delta Exchange and CoinSwitch to track in the Open Positions book.</p>
+            </div>
+            <button id="btnClosePositionImport" class="app-ghost-btn" type="button">Close</button>
+        </div>
+
+        <div id="positionImportStatus" class="cs-api-status"></div>
+
+        <div class="cs-api-form-actions position-import-toolbar">
+            <select id="importProfileSelect" class="import-profile-select" aria-label="Select username"></select>
+            <button id="btnLoadExchangePositions" class="app-solid-btn" type="button">Load Positions</button>
+        </div>
+
+        <div id="positionImportIpNotice" class="ip-whitelist-notice" hidden>
+            <div class="ip-whitelist-text">
+                <strong>Delta IP whitelist required.</strong>
+                <span>Whitelist this server IP on your Delta API key, then retry:</span>
+                <code id="ipWhitelistValue" class="ip-whitelist-value"></code>
+            </div>
+            <button id="btnCopyWhitelistIp" class="app-ghost-btn ip-whitelist-copy" type="button">Copy IP</button>
+        </div>
+
+        <div class="import-exchange-block">
+            <h3 class="import-exchange-title delta">Delta Exchange</h3>
+            <div class="cs-api-table-wrap">
+                <table class="cs-api-table">
+                    <thead>
+                        <tr>
+                            <th class="arbitrage-col-select"><input type="checkbox" id="chkAllDeltaImport" title="Select all Delta positions" aria-label="Select all Delta positions" /></th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Strike</th>
+                            <th>Qty</th>
+                            <th>Entry</th>
+                            <th>Mark</th>
+                        </tr>
+                    </thead>
+                    <tbody id="deltaImportTableBody">
+                        <tr><td colspan="7" class="cs-api-empty">Load positions to view.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="import-exchange-block">
+            <h3 class="import-exchange-title coinswitch">CoinSwitch</h3>
+            <div class="cs-api-table-wrap">
+                <table class="cs-api-table">
+                    <thead>
+                        <tr>
+                            <th class="arbitrage-col-select"><input type="checkbox" id="chkAllCoinswitchImport" title="Select all CoinSwitch positions" aria-label="Select all CoinSwitch positions" /></th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Strike</th>
+                            <th>Qty</th>
+                            <th>Entry</th>
+                            <th>Mark</th>
+                        </tr>
+                    </thead>
+                    <tbody id="coinswitchImportTableBody">
+                        <tr><td colspan="7" class="cs-api-empty">Load positions to view.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="cs-api-form-actions">
+            <button id="btnCancelPositionImport" class="app-ghost-btn" type="button">Cancel</button>
+            <button id="btnImportSelectedPositions" class="app-solid-btn" type="button" disabled>Import Selected</button>
+        </div>
+    </section>
+
+    <script src="/js/coinswitch-delta.js"></script>
+</body>
+</html>

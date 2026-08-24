@@ -10,6 +10,36 @@ import {
 } from "../controllers/users-controller";
 import { listSurvivalAdminRunningUsers } from "../controllers/survival-admin-controller";
 import {
+    getArbitrageCompareCalls,
+    getArbitrageComparePuts,
+    getArbitrageExpiries,
+    getArbitrageInstruments,
+    getArbitragePutChain
+} from "../controllers/arbitrage-controller";
+import {
+    getBybitArbitrageExpiries,
+    getBybitArbitrageInstruments,
+    getBybitCompareCalls,
+    getBybitComparePuts
+} from "../controllers/bybit-arbitrage-controller";
+import {
+    getCoinSwitchArbitrageExpiries,
+    getCoinSwitchArbitrageInstruments,
+    getCoinSwitchCompareCalls,
+    getCoinSwitchComparePuts,
+    getCoinSwitchLiveQuotes,
+    placeCoinSwitchDualOrders,
+    listCoinSwitchOpenPositions,
+    deleteCoinSwitchOpenPosition
+} from "../controllers/coinswitch-arbitrage-controller";
+import {
+    deleteImportedPositionController,
+    getWalletBalancesController,
+    importExchangePositionsController,
+    listExchangePositionsController,
+    listImportedPositionsController
+} from "../controllers/cs-delta-position-import-controller";
+import {
     calculateRenkoOptionsRecommendedStartQty,
     calculateStrangleOptionsRecommendedStartQty,
     calculateOptionsScalperRecommendedStartQty,
@@ -208,6 +238,12 @@ import {
     testDeltaApiProfileLoginController,
     updateDeltaApiProfileController
 } from "../controllers/delta-api-controller";
+import {
+    createCsDeltaApiProfileController,
+    deleteCsDeltaApiProfileController,
+    listCsDeltaApiProfilesController,
+    updateCsDeltaApiProfileController
+} from "../controllers/cs-delta-api-controller";
 import { getMyProfileApi } from "../controllers/account-controller";
 import { registerMobilePushTokenController } from "../controllers/mobile-push-controller";
 import type { RunnerManager } from "../../runners/runner-manager";
@@ -217,6 +253,72 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     const objRouter = Router();
 
     objRouter.get("/health", getHealth);
+    objRouter.get("/arbitrage/instruments", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getArbitrageInstruments(req, res);
+    });
+    objRouter.get("/arbitrage/expiries", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getArbitrageExpiries(req, res);
+    });
+    objRouter.get("/arbitrage/put-chain", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getArbitragePutChain(req, res);
+    });
+    objRouter.get("/arbitrage/compare-puts", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getArbitrageComparePuts(req, res);
+    });
+    objRouter.get("/arbitrage/compare-calls", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getArbitrageCompareCalls(req, res);
+    });
+    objRouter.get("/bybit-delta/instruments", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getBybitArbitrageInstruments(req, res);
+    });
+    objRouter.get("/bybit-delta/expiries", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getBybitArbitrageExpiries(req, res);
+    });
+    objRouter.get("/bybit-delta/compare-puts", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getBybitComparePuts(req, res);
+    });
+    objRouter.get("/bybit-delta/compare-calls", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getBybitCompareCalls(req, res);
+    });
+    objRouter.get("/arbitrage/coinswitch/instruments", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCoinSwitchArbitrageInstruments(req, res);
+    });
+    objRouter.get("/arbitrage/coinswitch/expiries", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCoinSwitchArbitrageExpiries(req, res);
+    });
+    objRouter.get("/arbitrage/coinswitch/compare-puts", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCoinSwitchComparePuts(req, res);
+    });
+    objRouter.get("/arbitrage/coinswitch/compare-calls", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCoinSwitchCompareCalls(req, res);
+    });
+    objRouter.get("/arbitrage/coinswitch/live-quotes", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCoinSwitchLiveQuotes(req, res);
+    });
+    objRouter.post("/arbitrage/coinswitch/place-dual-orders", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await placeCoinSwitchDualOrders(req, res);
+    });
+    objRouter.get("/arbitrage/coinswitch/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await listCoinSwitchOpenPositions(req, res);
+    });
+    objRouter.delete("/arbitrage/coinswitch/open-positions/:positionId", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteCoinSwitchOpenPosition(req, res);
+    });
+    objRouter.get("/arbitrage/coinswitch/exchange-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await listExchangePositionsController(req, res);
+    });
+    objRouter.post("/arbitrage/coinswitch/import-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await importExchangePositionsController(req, res);
+    });
+    objRouter.get("/arbitrage/coinswitch/imported-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await listImportedPositionsController(req, res);
+    });
+    objRouter.delete("/arbitrage/coinswitch/imported-positions/:importId", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteImportedPositionController(req, res);
+    });
+    objRouter.get("/arbitrage/coinswitch/wallet-balances", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getWalletBalancesController(req, res);
+    });
     objRouter.post("/telegram/webhook", async (req, res) => {
         await handleTelegramWebhook(req, res);
     });
@@ -270,6 +372,19 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/account/delta-api-profiles/:profileId/test-login", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await testDeltaApiProfileLoginController(req, res);
+    });
+
+    objRouter.get("/account/cs-delta-api-profiles", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await listCsDeltaApiProfilesController(req, res);
+    });
+    objRouter.post("/account/cs-delta-api-profiles", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await createCsDeltaApiProfileController(req, res);
+    });
+    objRouter.put("/account/cs-delta-api-profiles/:profileId", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateCsDeltaApiProfileController(req, res);
+    });
+    objRouter.delete("/account/cs-delta-api-profiles/:profileId", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteCsDeltaApiProfileController(req, res);
     });
 
     objRouter.get("/covered-options/admin/running-users", requireAuthApi, requireFreshPasswordApi, async (req, res) => {

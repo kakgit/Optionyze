@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= pageTitle %></title>
+    <%- include('partials/brand-head') %>
+    <link rel="stylesheet" href="/css/app-shell.css" />
+    <link rel="stylesheet" href="/css/account-menu.css" />
+    <link rel="stylesheet" href="/css/arbitrage.css" />
+</head>
+<body class="app-page" data-page="bybit-delta">
+    <div class="app-layout">
+        <%- include('partials/app-header', { currentAccount }) %>
+
+        <section class="arbitrage-hero">
+            <div class="app-panel arbitrage-hero-panel">
+                <div class="arbitrage-eyebrow">Bybit vs Delta</div>
+                <h1 class="arbitrage-title">Bybit-Delta</h1>
+                <p class="app-copy">
+                    Fetch Put and Call strikes (x1000) for the same instrument and expiry. Compare Bybit (left) and Delta Exchange (right) bid/ask side by side. Rows filter on Bybit |Δ| 0.05–0.80. Cross alerts fire when Bybit Bid &gt; Delta Ask with edge ≥ 5.
+                </p>
+            </div>
+        </section>
+
+        <section class="app-panel arbitrage-workspace">
+            <div class="arbitrage-workspace-head">
+                <h2>Controls</h2>
+                <span class="arbitrage-pill" id="arbitrageStatusPill">Ready</span>
+            </div>
+
+            <div class="arbitrage-controls">
+                <div class="arbitrage-field">
+                    <label for="ddlArbitrageInstrument">Instrument</label>
+                    <select id="ddlArbitrageInstrument">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+                <div class="arbitrage-field">
+                    <label for="ddlArbitrageExpiry">Expiry Date</label>
+                    <select id="ddlArbitrageExpiry" disabled>
+                        <option value="">Select instrument first</option>
+                    </select>
+                </div>
+                <div class="arbitrage-field arbitrage-field-action">
+                    <label>&nbsp;</label>
+                    <button class="app-solid-btn" type="button" id="btnArbitrageFetch" disabled>Fetch Puts &amp; Calls</button>
+                </div>
+            </div>
+
+            <div class="arbitrage-status" id="arbitragePageStatus"></div>
+        </section>
+
+        <section class="app-panel arbitrage-workspace" data-side="put">
+            <div class="arbitrage-workspace-head">
+                <h2>Put Compare</h2>
+                <span class="arbitrage-pill" id="putStatusPill">Idle</span>
+            </div>
+            <div class="arbitrage-meta" id="putMeta">Choose instrument and expiry, then fetch.</div>
+            <div class="arbitrage-table-wrap">
+                <table class="arbitrage-table arbitrage-compare-table">
+                    <thead>
+                        <tr>
+                            <th rowspan="2" class="arbitrage-col-group bybit">Bybit Δ</th>
+                            <th rowspan="2">Strike</th>
+                            <th colspan="2" class="arbitrage-col-group bybit">Bybit</th>
+                            <th colspan="2" class="arbitrage-col-group delta">Delta</th>
+                        </tr>
+                        <tr>
+                            <th class="arbitrage-col-group bybit">Bid</th>
+                            <th class="arbitrage-col-group bybit">Ask</th>
+                            <th class="arbitrage-col-group delta">Ask</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tBodyArbitragePuts">
+                        <tr>
+                            <td colspan="6" class="arbitrage-empty-cell">No put compare loaded yet.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="app-panel arbitrage-alerts-panel" data-side="put">
+            <div class="arbitrage-workspace-head">
+                <h2>Put Cross Alerts</h2>
+                <div class="arbitrage-alerts-actions">
+                    <span class="arbitrage-pill" id="putAlertCount">0</span>
+                    <button class="app-ghost-btn" type="button" id="btnPutClearAlerts">Clear</button>
+                </div>
+            </div>
+            <p class="arbitrage-alerts-copy">
+                Logged when Bybit Put Bid crosses above Delta Put Ask with edge &ge; 5.
+            </p>
+            <div class="arbitrage-alerts-list" id="putAlertsList">
+                <div class="arbitrage-alerts-empty">No put crossings yet.</div>
+            </div>
+        </section>
+
+        <section class="app-panel arbitrage-workspace" data-side="call">
+            <div class="arbitrage-workspace-head">
+                <h2>Call Compare</h2>
+                <span class="arbitrage-pill" id="callStatusPill">Idle</span>
+            </div>
+            <div class="arbitrage-meta" id="callMeta">Choose instrument and expiry, then fetch.</div>
+            <div class="arbitrage-table-wrap">
+                <table class="arbitrage-table arbitrage-compare-table">
+                    <thead>
+                        <tr>
+                            <th rowspan="2" class="arbitrage-col-group bybit">Bybit Δ</th>
+                            <th rowspan="2">Strike</th>
+                            <th colspan="2" class="arbitrage-col-group bybit">Bybit</th>
+                            <th colspan="2" class="arbitrage-col-group delta">Delta</th>
+                        </tr>
+                        <tr>
+                            <th class="arbitrage-col-group bybit">Bid</th>
+                            <th class="arbitrage-col-group bybit">Ask</th>
+                            <th class="arbitrage-col-group delta">Bid</th>
+                            <th class="arbitrage-col-group delta">Ask</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tBodyArbitrageCalls">
+                        <tr>
+                            <td colspan="6" class="arbitrage-empty-cell">No call compare loaded yet.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="app-panel arbitrage-alerts-panel" data-side="call">
+            <div class="arbitrage-workspace-head">
+                <h2>Call Cross Alerts</h2>
+                <div class="arbitrage-alerts-actions">
+                    <span class="arbitrage-pill" id="callAlertCount">0</span>
+                    <button class="app-ghost-btn" type="button" id="btnCallClearAlerts">Clear</button>
+                </div>
+            </div>
+            <p class="arbitrage-alerts-copy">
+                Logged when Bybit Call Bid crosses above Delta Call Ask with edge &ge; 5.
+            </p>
+            <div class="arbitrage-alerts-list" id="callAlertsList">
+                <div class="arbitrage-alerts-empty">No call crossings yet.</div>
+            </div>
+        </section>
+    </div>
+    <script src="/js/bybit-delta.js"></script>
+</body>
+</html>

@@ -25,6 +25,8 @@ import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syn
 import { loadRollingFuturesLtRuntime } from "../storage/rolling-futures-lt-runtime-store";
 import { ensureLiveTickerSymbols, getLiveMarketSnapshot } from "../strategies/rolling-options-pt-de/market-data";
 import type { RollingOptionsPtDeConfig } from "../strategies/rolling-options-pt-de/types";
+import { renderArbitragePage, renderCoinSwitchDeltaPage } from "../api/controllers/arbitrage-controller";
+import { renderBybitDeltaPage } from "../api/controllers/bybit-arbitrage-controller";
 import {
     changePassword,
     renderChangePasswordPage,
@@ -132,6 +134,12 @@ async function bootstrap(): Promise<void> {
     app.get("/survival-admin/dashboard", requireSurvivalAdminPage, renderSurvivalAdminDashboardPage);
     app.get("/survival-admin/running-users", requireSurvivalAdminPage, renderSurvivalAdminRunningUsersPage);
     app.get("/dashboard", requireAuthPage, requireFreshPasswordPage, renderDashboardPage);
+    app.get("/arbitrage", requireAuthPage, requireFreshPasswordPage, (_req, res) => {
+        res.redirect(302, "/arbitrage/shark-delta");
+    });
+    app.get("/arbitrage/shark-delta", requireAuthPage, requireFreshPasswordPage, renderArbitragePage);
+    app.get("/arbitrage/bybit-delta", requireAuthPage, requireFreshPasswordPage, renderBybitDeltaPage);
+    app.get("/arbitrage/coinswitch-delta", requireAuthPage, requireFreshPasswordPage, renderCoinSwitchDeltaPage);
     app.get("/covered-options", requireAuthPage, requireFreshPasswordPage, renderCoveredOptionsPage);
     app.get("/strangle-options", requireAuthPage, requireFreshPasswordPage, renderStrangleOptionsPage);
     app.get("/renko-options", requireAuthPage, requireFreshPasswordPage, renderRenkoOptionsPage);
