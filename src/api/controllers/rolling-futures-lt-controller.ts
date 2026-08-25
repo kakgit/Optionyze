@@ -8775,7 +8775,7 @@ async function executeStrategyPlacement(
     const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
     const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pInput.rowIndex);
     const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
-    if (!isCoveredLikeStrategy(pStrategyCode) && arrOpenOptions.length > 0) {
+    if (!isCoveredLikeStrategy(pStrategyCode) && pStrategyCode !== "strangle-demo" && arrOpenOptions.length > 0) {
         throw new Error(`An option position is already open (${arrOpenOptions[0].contractName}). Close the existing option before opening a new one.`);
     }
     if (isOptionsScalperStrategy(pStrategyCode)) {
@@ -8786,7 +8786,7 @@ async function executeStrategyPlacement(
         const arrOrders: Array<Record<string, unknown>> = [];
         const arrNewPositions: RollingFuturesLtImportedPositionRecord[] = [];
         for (const vLegSide of arrOptionSides) {
-            if (hasTrackedOptionRowLeg(arrExisting, vRowIndex, vLegSide)) {
+            if (pStrategyCode !== "strangle-demo" && hasTrackedOptionRowLeg(arrExisting, vRowIndex, vLegSide)) {
                 throw new Error(`Row ${vRowIndex} ${vLegSide.toUpperCase()} paper option is already open. Close it before executing again.`);
             }
             const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
@@ -9375,12 +9375,13 @@ async function buildOptionsScalperPaperOptionOpen(
             ? getTrackedOptionLegSide(objLatestActiveOption.contractName)
             : "";
         const bAlternatingLegRestrictionEnabled = pStrategyCode === "strangle-demo"
-            ? true
+            ? false
             : normalizeBooleanValue(objUiState.alternatingLegRestrictionEnabled, true);
         const bApplyAlternatingLegGuard = bAlternatingLegRestrictionEnabled
             && (
                 vOpenedReason === "strategy_option_open"
                 || vOpenedReason === "manual_option_open"
+                || vOpenedReason === "webhook_option_open"
             );
         if (!bIsReEntryOpen && bApplyAlternatingLegGuard && vLatestLegSide && vLatestLegSide === pInput.legSide) {
             const vMessage = `Skipped auto trade because the latest active option is already ${vLatestLegSide.toUpperCase()}. Next option must alternate to ${vLatestLegSide === "ce" ? "PE" : "CE"}.`;
@@ -9400,9 +9401,11 @@ async function buildOptionsScalperPaperOptionOpen(
             );
             throw new Error(vMessage);
         }
-        if (!bIsReEntryOpen && vOpenedReason === "strategy_option_open") {
+        if (!bIsReEntryOpen && (vOpenedReason === "strategy_option_open" || vOpenedReason === "webhook_option_open")) {
             const vContractName = String(objContract.contractSymbol || "").trim();
-            const bAllowDuplicateContracts = normalizeBooleanValue(objUiState.allowDuplicateContracts, false);
+            const bAllowDuplicateContracts = pStrategyCode === "strangle-demo"
+                ? true
+                : normalizeBooleanValue(objUiState.allowDuplicateContracts, false);
             if (!bAllowDuplicateContracts && hasActiveTrackedOptionContract(arrExisting, vContractName)) {
                 const vMessage = `Skipped auto trade because ${vContractName} is already active in Open Positions.`;
                 await logFuturesEvent(
@@ -9427,7 +9430,7 @@ async function buildOptionsScalperPaperOptionOpen(
     const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
     const vTakeProfitDelta = Math.max(0, Number(pInput.takeProfitDelta ?? objOptionMetadata.takeProfitDelta ?? objRowState.tpD ?? 0.25));
     const vStopLossDelta = Math.max(0, Number(pInput.stopLossDelta ?? objOptionMetadata.stopLossDelta ?? objRowState.slD ?? 0.65));
-    if (!bIsReEntryOpen) {
+    if (!bIsReEntryOpen && pStrategyCode !== "strangle-demo") {
         const objImmediateRuleDecision = shouldTriggerTrackedOption(
             pInput.action.toUpperCase(),
             vAbsoluteDelta,
@@ -9509,7 +9512,7 @@ async function buildOptionsScalperPaperOptionOpen(
             size: pInput.qty,
             side: pInput.action,
             order_type: "paper_market_order",
-            average_fill_price: Number(objContract.markPrice || 0),
+            average_fill_price: Number(vEntryPrice || 0),
             status: "filled",
             isPaperTrade: true,
             filled_at: vOpenedAtIso
@@ -19165,6 +19168,166 @@ export async function rejectAdminPendingCoveredLikeLiveAction(req: Request, res:
 }
 export async function handleTelegramWebhook(req: Request, res: Response): Promise<void> {
     await handleTelegramWebhookInternal(req, res);
+}
+
+export async function handleOptionsDemoTradeWebhook(req: Request, res: Response): Promise<void> {
+    try {
+        const vExpectedSecret = String(process.env.OPTIONS_DEMO_WEBHOOK_SECRET || "").trim();
+        if (vExpectedSecret) {
+            const vProvidedSecret = String(
+                req.header("x-options-demo-webhook-secret")
+                || req.header("x-webhook-secret")
+                || ""
+            ).trim();
+            if (vProvidedSecret !== vExpectedSecret) {
+                res.status(403).json({ status: "warning", message: "Unauthorized receiving webhook request." });
+                return;
+            }
+        }
+
+        const vOptionType = String(req.body?.optionType || "").trim().toUpperCase();
+        const vTransType = String(req.body?.transType || "").trim().toLowerCase();
+        if (vOptionType !== "C" && vOptionType !== "CE" && vOptionType !== "P" && vOptionType !== "PE") {
+            res.status(400).json({ status: "warning", message: "Invalid optionType. Expected \"C\" (Call) or \"P\" (Put)." });
+            return;
+        }
+        if (vTransType !== "buy" && vTransType !== "sell") {
+            res.status(400).json({ status: "warning", message: "Invalid transType. Expected \"buy\" or \"sell\"." });
+            return;
+        }
+
+        const vLegSide: "ce" | "pe" = (vOptionType === "P" || vOptionType === "PE") ? "pe" : "ce";
+        const vAction: "buy" | "sell" = vTransType === "buy" ? "buy" : "sell";
+        const vRequestedSymbol: "BTC" | "ETH" | null = (req.body?.symbol && String(req.body.symbol).trim())
+            ? normalizeSymbolValue(req.body.symbol)
+            : null;
+
+        const arrRuntimes = (await listRollingFuturesLtRuntime()).filter((objRuntime) =>
+            objRuntime.strategyCode === "options-scalper"
+            && objRuntime.autoTraderEnabled
+            && String(objRuntime.status || "").trim().toLowerCase() === "running"
+        );
+        if (!arrRuntimes.length) {
+            res.json({
+                status: "success",
+                message: "No running options-demo auto trader accounts were found; no trade was executed.",
+                data: { symbol: vRequestedSymbol ? vRequestedSymbol : null, optionType: vOptionType, transType: vTransType, executed: [], failed: [] }
+            });
+            return;
+        }
+
+        const arrExecuted: Array<Record<string, unknown>> = [];
+        const arrFailed: Array<Record<string, unknown>> = [];
+        for (const objRuntime of arrRuntimes) {
+            try {
+                const objResult = await executeOptionsScalperWebhookPaperOrder(objRuntime.userId, vAction, vLegSide, vRequestedSymbol || undefined);
+                arrExecuted.push({
+                    accountId: objRuntime.userId,
+                    symbol: objResult.symbol,
+                    contractName: objResult.contractName,
+                    qty: objResult.qty,
+                    order: objResult.order
+                });
+            }
+            catch (objError) {
+                arrFailed.push({
+                    accountId: objRuntime.userId,
+                    message: objError instanceof Error ? objError.message : "Unable to place the webhook paper option order."
+                });
+            }
+        }
+
+        res.json({
+            status: "success",
+            message: `${vAction.toUpperCase()} ${vLegSide.toUpperCase()} paper option executed for ${arrExecuted.length} running options-demo account${arrExecuted.length === 1 ? "" : "s"}${arrFailed.length ? `; ${arrFailed.length} account${arrFailed.length === 1 ? "" : "s"} failed.` : "."}`,
+            data: { symbol: vRequestedSymbol ? vRequestedSymbol : null, optionType: vOptionType, transType: vTransType, executed: arrExecuted, failed: arrFailed }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: objError instanceof Error ? objError.message : "Receiving webhook processing failed."
+        });
+    }
+}
+
+async function executeOptionsScalperWebhookPaperOrder(
+    pUserId: string,
+    pAction: "buy" | "sell",
+    pLegSide: "ce" | "pe",
+    pSymbolOverride?: "BTC" | "ETH"
+): Promise<{
+    symbol: "BTC" | "ETH";
+    contractName: string;
+    qty: number;
+    order: Record<string, unknown>;
+}> {
+    const pStrategyCode: RollingFuturesLtStrategyCode = "options-scalper";
+    const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+    const objUiState = getMergedUiState(objProfile);
+    const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, 1);
+    const vSymbol = pSymbolOverride || normalizeSymbolValue(objUiState.symbol);
+    const vExpiryMode = (["1", "2", "4", "5", "6", "7"].includes(objRowState.expiryMode)
+        ? objRowState.expiryMode
+        : "5") as "1" | "2" | "4" | "5" | "6" | "7";
+    const vExpiryDate = normalizeRollingFuturesExpiryDate(vExpiryMode, objRowState.expiryDate);
+    const vBaseQty = Math.max(1, Math.floor(Number(objRowState.qty || 1)));
+    const vTargetDelta = Math.max(0, Number(objRowState.newD || 0.53));
+    // Honor the "Place Opposite Trades" Manual Trader setting the same way the
+    // Renko/EMA/RSI signal paths do: flip the requested CE/PE leg when enabled.
+    const vResolvedLegSide: "ce" | "pe" = normalizeBooleanValue(objUiState.placeOppositeTrades, false)
+        ? (pLegSide === "pe" ? "ce" : "pe")
+        : pLegSide;
+
+    const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    // Honor the Manual Trader increment rules the same way an auto-trade signal does:
+    // row quantity plus X extra lots per already-active same-side/any-side position.
+    const vEffectiveQty = resolveOptionsScalperIncrementedQty(arrExisting, objUiState, {
+        symbol: vSymbol,
+        legSide: vResolvedLegSide,
+        action: pAction,
+        qty: vBaseQty
+    });
+    const objPaperOpen = await buildOptionsScalperPaperOptionOpen(pUserId, pStrategyCode, objProfile, {
+        action: pAction,
+        symbol: vSymbol,
+        legSide: vResolvedLegSide,
+        expiryMode: vExpiryMode,
+        expiryDate: vExpiryDate,
+        qty: vEffectiveQty,
+        targetDelta: vTargetDelta,
+        rowIndex: 1,
+        openedReason: "webhook_option_open"
+    });
+    const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, [
+        ...arrExisting,
+        objPaperOpen.position
+    ]);
+    await logFuturesEvent(
+        pUserId,
+        pStrategyCode,
+        "option_opened",
+        "success",
+        "Manual Paper Option Opened",
+        `${pAction.toUpperCase()} ${vResolvedLegSide.toUpperCase()} paper option opened via receiving webhook using Manual Trader settings${vEffectiveQty === vBaseQty ? "." : ` (qty ${vBaseQty} -> ${vEffectiveQty}).`}`,
+        {
+            symbol: vSymbol,
+            contractName: objPaperOpen.position.contractName,
+            qty: vEffectiveQty,
+            baseQty: vBaseQty,
+            targetDelta: vTargetDelta,
+            rowIndex: 1,
+            requestedLegSide: pLegSide,
+            resolvedLegSide: vResolvedLegSide,
+            reason: "webhook_paper_option"
+        }
+    );
+    return {
+        symbol: vSymbol,
+        contractName: String(objPaperOpen.position.contractName || "").trim(),
+        qty: vEffectiveQty,
+        order: objPaperOpen.order
+    };
 }
 export async function getCoveredOptionsImportableOpenPositions(req: Request, res: Response): Promise<void> {
     await getImportableOpenPositionsInternal(req, res, "covered-options");

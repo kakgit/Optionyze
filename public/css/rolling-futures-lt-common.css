@@ -1012,9 +1012,69 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-action-sel
     white-space: nowrap;
 }
 
+.rolling-futures-manual-tools .rolling-futures-exec-strategy-btn {
+    flex: 0 0 auto;
+    width: auto;
+    min-height: 40px;
+    padding: 0 14px;
+    margin-left: 6px;
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
 .rolling-demo-manual-title {
     white-space: nowrap;
     flex: 0 0 auto;
+}
+
+.rolling-futures-three-way {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex: 0 0 auto;
+    padding: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.rolling-futures-three-way input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.rolling-futures-three-way label {
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 28px;
+    padding: 0 14px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: .82rem;
+    font-weight: 700;
+    white-space: nowrap;
+    color: var(--app-muted);
+    transition: background .16s ease, color .16s ease, border-color .16s ease;
+}
+
+.rolling-futures-three-way label:hover {
+    color: var(--app-text);
+}
+
+.rolling-futures-three-way input:checked + label {
+    background: rgba(101, 212, 232, 0.16);
+    border-color: rgba(101, 212, 232, 0.35);
+    color: #65d4e8;
+}
+
+.rolling-futures-three-way input:focus-visible + label {
+    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.28);
 }
 
 .rolling-futures-start-qty {

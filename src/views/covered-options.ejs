@@ -102,6 +102,7 @@
                         <button class="rolling-demo-btn warn" type="button" id="btnRollingFuturesDemoAutoTrader">Auto Trader - OFF</button>
                     </div>
                 </div>
+                <% if (!bIsStrangleDemoPage) { %>
                 <div class="rolling-futures-help-sample-inline rolling-futures-hero-rules">
                     <div class="rolling-futures-help-inline-row">
                         <div class="rolling-futures-help-inline-main">
@@ -150,6 +151,7 @@
                         </div>
                     </div>
                 </div>
+                <% } %>
                 <div class="rolling-futures-hero-metrics rolling-futures-help-sample-inline">
                     <div class="rolling-futures-hero-metric">
                         <label for="txtRollingFuturesBrok2Rec">Total Brokerage</label>
@@ -251,6 +253,14 @@
                 <div class="rolling-demo-card-head">
                     <div class="rolling-futures-inline-tools">
                         <span class="rolling-demo-manual-title">Manual Trader</span>
+                        <div class="rolling-futures-three-way" role="group" aria-label="Manual Trader strategy">
+                            <input type="radio" id="rollingFuturesThreeWayCe" name="rollingFuturesThreeWaySwitch" value="ce" />
+                            <label for="rollingFuturesThreeWayCe">CE</label>
+                            <input type="radio" id="rollingFuturesThreeWayBoth" name="rollingFuturesThreeWaySwitch" value="both" checked />
+                            <label for="rollingFuturesThreeWayBoth">Both</label>
+                            <input type="radio" id="rollingFuturesThreeWayPe" name="rollingFuturesThreeWaySwitch" value="pe" />
+                            <label for="rollingFuturesThreeWayPe">PE</label>
+                        </div>
                     </div>
                     <div class="rolling-demo-card-tools rolling-futures-manual-tools">
                         <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingFuturesShowSavedProfile" title="Show saved manual trader values from DB" aria-label="Show saved manual trader values from DB">
@@ -265,6 +275,9 @@
                                 <path d="M3 12a9 9 0 1 0 3-6.7" />
                                 <path d="M3 3v6h6" />
                             </svg>
+                        </button>
+                        <button class="rolling-demo-btn primary rolling-futures-exec-strategy-btn" type="button" id="btnRollingFuturesExecAllLegs" title="Open paper trades using the Manual Trader settings" aria-label="Open paper trades using the Manual Trader settings">
+                            Exec Strategy
                         </button>
                     </div>
                 </div>
@@ -436,6 +449,7 @@
                     </div>
                 </div>
 
+                <% if (!bIsStrangleDemoPage) { %>
                 <div class="rolling-futures-demo-grid actions-row rolling-futures-actions-row-with-gate">
                     <div class="rolling-demo-field rolling-futures-buy-gate-field">
                         <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
@@ -588,6 +602,7 @@
                         </div>
                     <% } %>
                 </div>
+                <% } %>
 
                 <div class="rolling-futures-saved-profile-panel" id="rollingFuturesSavedProfilePanel" style="display:none;">
                     <div class="rolling-futures-saved-profile-head">

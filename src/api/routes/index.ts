@@ -229,7 +229,8 @@ import {
     swapCoveredOptionsImportedOpenPosition,
     swapRenkoOptionsImportedOpenPosition,
     swapStrangleOptionsImportedOpenPosition,
-    handleTelegramWebhook
+    handleTelegramWebhook,
+    handleOptionsDemoTradeWebhook
 } from "../controllers/rolling-futures-lt-controller";
 import {
     createDeltaApiProfileController,
@@ -321,6 +322,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/telegram/webhook", async (req, res) => {
         await handleTelegramWebhook(req, res);
+    });
+    objRouter.post("/options-demo/webhook", async (req, res) => {
+        await handleOptionsDemoTradeWebhook(req, res);
     });
     objRouter.get("/runners", requireAdminApi, async (req, res) => {
         await listRunnerStates(req, res, pRunnerManager);

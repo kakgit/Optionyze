@@ -2480,6 +2480,9 @@
     }
 
     function canUseExecStrategy() {
+        if (isStrangleDemoPage) {
+            return true;
+        }
         if (isCoveredMode) {
             return false;
         }
@@ -6069,7 +6072,7 @@
         });
     });
     ids.execStrategyButton?.addEventListener("click", function () {
-        if (isCoveredMode) {
+        if (isCoveredMode && !isStrangleDemoPage) {
             setStatus(ids.pageStatus, "Covered live trades run only through Delta Renko-Style Feed or EMA Trigger while Auto Trader is ON.", "warning");
             return;
         }
