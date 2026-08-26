@@ -218,6 +218,16 @@
         closedNextPageButton: document.getElementById(`btn${idPrefix}ClosedNextPage`),
         closedPageInfo: document.getElementById(`${prefix}ClosedPositionsPageInfo`),
         closedPageNumbers: document.getElementById(`${prefix}ClosedPageNumbers`),
+        closedAltFromDate: document.getElementById("txtRollingDualFuturesClosedAltFromDate"),
+        closedAltToDate: document.getElementById("txtRollingDualFuturesClosedAltToDate"),
+        closedAltClearFiltersButton: document.getElementById("btnRollingDualFuturesClosedAltClearFilters"),
+        closedAltRefreshButton: document.getElementById("btnRollingDualFuturesClosedAltRefresh"),
+        closedAltClearButton: document.getElementById("btnRollingDualFuturesClosedAltClear"),
+        closedAltPositionsBody: document.getElementById("rollingDualFuturesClosedAltClosedPositionsBody"),
+        closedAltPrevPageButton: document.getElementById("btnRollingDualFuturesClosedAltPrevPage"),
+        closedAltNextPageButton: document.getElementById("btnRollingDualFuturesClosedAltNextPage"),
+        closedAltPageInfo: document.getElementById("rollingDualFuturesClosedAltClosedPositionsPageInfo"),
+        closedAltPageNumbers: document.getElementById("rollingDualFuturesClosedAltClosedPageNumbers"),
         refreshEventsButton: document.getElementById(`btn${idPrefix}RefreshEvents`),
         clearEventsButton: document.getElementById(`btn${idPrefix}ClearEvents`),
         eventLog: document.getElementById(`${prefix}EventLog`),
@@ -256,6 +266,8 @@
     let importablePositions = [];
     let closedPositions = [];
     let closedPositionsPage = 1;
+    let closedAltPositions = [];
+    let closedAltPositionsPage = 1;
     let editingClosedPositionCloseId = "";
     let connectionPollTimer = null;
     let confirmationPollTimer = null;
@@ -5087,6 +5099,101 @@
             ids.closedPageNumbers.innerHTML = pageNumbers.join("");
         }
     }
+function renderClosedAltPositions(rows) {
+        closedAltPositions = Array.isArray(rows)
+            ? rows.slice().sort(function (left, right) {
+                return new Date(String(right?.startAt || right?.endAt || "")).getTime()
+                    - new Date(String(left?.startAt || left?.endAt || "")).getTime();
+            })
+            : [];
+        const totalPages = Math.max(1, Math.ceil(closedAltPositions.length / closedPositionsPageSize));
+        closedAltPositionsPage = Math.min(closedAltPositionsPage, totalPages);
+        closedAltPositionsPage = Math.max(closedAltPositionsPage, 1);
+        if (!ids.closedAltPositionsBody) {
+            return;
+        }
+        if (!closedAltPositions.length) {
+            const closedPositionsColumnCount = isCoveredMode ? 10 : 11;
+            ids.closedAltPositionsBody.innerHTML = `<tr><td colspan="${closedPositionsColumnCount}" class="rolling-demo-empty">${escapeHtml(closedPositionsEmptyText)}</td></tr>`;
+            if (ids.closedAltPageInfo) {
+                ids.closedAltPageInfo.textContent = "Page 0 of 0";
+            }
+            if (ids.closedAltPageNumbers) {
+                ids.closedAltPageNumbers.innerHTML = "";
+            }
+            return;
+        }
+        const startIndex = (closedAltPositionsPage - 1) * closedPositionsPageSize;
+        const pageRows = closedAltPositions.slice(startIndex, startIndex + closedPositionsPageSize);
+        const closedRowsHtml = pageRows.map(function (row) {
+            const closeId = String(row.closeId || row.rowId || "").trim();
+            const contractName = String(row.symbol || "-");
+            const side = String(row.side || "-").trim().toUpperCase();
+            const lotSize = contractName.includes("ETH") ? 0.01 : 0.001;
+            const coveredSideRowClass = isCoveredMode && (side === "BUY" || side === "SELL")
+                ? `rolling-covered-side-row ${side.toLowerCase()}`
+                : "";
+            return `
+                <tr class="${coveredSideRowClass}">
+                    <td>${escapeHtml(formatDateTimeDisplay(isCoveredMode ? (row.endAt || row.startAt) : row.startAt))}</td>
+                    ${isCoveredMode ? "" : `<td>${escapeHtml(formatDateTimeDisplay(row.endAt))}</td>`}
+                    <td>${escapeHtml(contractName)}</td>
+                    <td>${renderPositionSide(side)}</td>
+                    <td>${escapeHtml(fmt(lotSize, 3))}</td>
+                    <td>${escapeHtml(fmt(row.qty, 0))}</td>
+                    <td>${row.buyPrice === null ? "-" : escapeHtml(fmt(row.buyPrice, 2))}</td>
+                    <td>${row.sellPrice === null ? "-" : escapeHtml(fmt(row.sellPrice, 2))}</td>
+                    <td>${escapeHtml(fmt(row.charges, 2))}</td>
+                    <td>${renderPnlValue(row.pnl, false)}</td>
+                    <td>
+                        <div class="rolling-demo-table-actions">
+                            ${isPaperDemoVariant ? `
+                                <button class="rolling-demo-icon-btn primary rolling-live-edit-closed-position" type="button" data-close-id="${escapeHtml(closeId)}" title="Edit closed position qty" aria-label="Edit closed position qty">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M12 20h9" />
+                                        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                                    </svg>
+                                </button>
+                            ` : ""}
+                            <button class="rolling-demo-icon-btn warn rolling-live-delete-closed-position" type="button" data-close-id="${escapeHtml(closeId)}" title="Delete this closed position permanently" aria-label="Delete this closed position permanently">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M18 6 6 18" />
+                                    <path d="m6 6 12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join("");
+        const totalCharges = closedAltPositions.reduce(function (sum, row) {
+            return sum + Number(row?.charges || 0);
+        }, 0);
+        const hasPnl = closedAltPositions.some(function (row) {
+            return Number.isFinite(Number(row?.pnl));
+        });
+        const totalPnl = hasPnl ? closedAltPositions.reduce(function (sum, row) {
+            return sum + Number(row?.pnl || 0);
+        }, 0) : null;
+        ids.closedAltPositionsBody.innerHTML = `${closedRowsHtml}
+            <tr class="rolling-demo-total-row">
+                <td colspan="${isCoveredMode ? 7 : 8}">Total</td>
+                <td class="rolling-demo-total-value">${escapeHtml(fmt(totalCharges, 2))}</td>
+                <td class="rolling-demo-total-value">${renderPnlValue(totalPnl, true)}</td>
+                <td>-</td>
+            </tr>
+        `;
+        if (ids.closedAltPageInfo) {
+            ids.closedAltPageInfo.textContent = `Page ${closedAltPositionsPage} of ${totalPages} | ${closedAltPositions.length} records`;
+        }
+        if (ids.closedAltPageNumbers) {
+            const pageNumbers = [];
+            for (let page = 1; page <= totalPages; page += 1) {
+                pageNumbers.push(`<button class="rolling-demo-icon-btn ${page === closedAltPositionsPage ? "primary" : "warn"} rolling-live-closed-page-btn" type="button" data-page="${page}">${page}</button>`);
+            }
+            ids.closedAltPageNumbers.innerHTML = pageNumbers.join("");
+        }
+    }
 
     async function loadClosedPositions() {
         if (!canUseLiveActions()) {
@@ -5111,6 +5218,25 @@
         }
         closedPositionsPage = 1;
         renderClosedPositions(arrRows);
+        return arrRows;
+    }
+async function loadClosedAltPositions() {
+        if (!canUseLiveActions()) {
+            renderClosedAltPositions([]);
+            return [];
+        }
+        const query = new URLSearchParams();
+        query.set("symbol", String(ids.symbol?.value || "BTC").trim().toUpperCase());
+        if (ids.closedAltFromDate instanceof HTMLInputElement && ids.closedAltFromDate.value) {
+            query.set("fromDate", ids.closedAltFromDate.value);
+        }
+        if (ids.closedAltToDate instanceof HTMLInputElement && ids.closedAltToDate.value) {
+            query.set("toDate", ids.closedAltToDate.value);
+        }
+        const objResult = await getJson(`${endpointBase}/closed-positions?${query.toString()}`);
+        const arrRows = Array.isArray(objResult?.data?.positions) ? objResult.data.positions : [];
+        closedAltPositionsPage = 1;
+        renderClosedAltPositions(arrRows);
         return arrRows;
     }
 
@@ -5237,6 +5363,7 @@
         const objResult = await updateSavedClosedPositionQty(closeId, qty);
         await Promise.all([
             loadClosedPositions().catch(function () { return undefined; }),
+            loadClosedAltPositions().catch(function () { return undefined; }),
             loadAccountSummary().catch(function () { return undefined; }),
             loadEvents().catch(function () { return undefined; })
         ]);
@@ -5710,6 +5837,51 @@
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to filter closed positions.", "danger");
         });
     });
+ids.closedAltFromDate?.addEventListener("change", function () {
+        void loadClosedAltPositions().catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to update Closed Positions start date.", "danger");
+        });
+    });
+    ids.closedAltToDate?.addEventListener("change", function () {
+        void loadClosedAltPositions().catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to filter closed positions.", "danger");
+        });
+    });
+    ids.closedAltClearFiltersButton?.addEventListener("click", function () {
+        if (ids.closedAltFromDate instanceof HTMLInputElement) {
+            ids.closedAltFromDate.value = "";
+        }
+        if (ids.closedAltToDate instanceof HTMLInputElement) {
+            ids.closedAltToDate.value = "";
+        }
+        void loadClosedAltPositions().catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to clear closed-position filters.", "danger");
+        });
+    });
+    ids.closedAltRefreshButton?.addEventListener("click", function () {
+        void loadClosedAltPositions().then(function () {
+            setStatus(ids.pageStatus, "Closed-position history refreshed.", "success");
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to refresh closed positions.", "danger");
+        });
+    });
+    ids.closedAltClearButton?.addEventListener("click", function () {
+        const confirmed = window.confirm("Clear all Closed Positions for this demo page?");
+        if (!confirmed) {
+            return;
+        }
+        void clearSavedClosedPositions().then(function () {
+            renderClosedAltPositions([]);
+            return Promise.all([
+                loadClosedPositions().catch(function () { return undefined; }),
+                loadAccountSummary().catch(function () { return undefined; })
+            ]);
+        }).then(function () {
+            setStatus(ids.pageStatus, "Closed positions cleared.", "success");
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to clear closed positions.", "danger");
+        });
+    });
     [ids.brok2Rec, ids.yet2Recover].forEach(function (node) {
         node?.addEventListener("change", function () {
             void saveRecoveryMetricsOverride().then(function (objResult) {
@@ -6135,6 +6307,7 @@
         }
         void clearSavedClosedPositions().then(function (objResult) {
             renderClosedPositions([]);
+            renderClosedAltPositions([]);
             if (ids.updateRecoveryTotalsCheckbox instanceof HTMLInputElement) {
                 ids.updateRecoveryTotalsCheckbox.checked = false;
             }
@@ -6214,6 +6387,33 @@
         }
         closedPositionsPage = page;
         renderClosedPositions(closedPositions);
+    });
+ids.closedAltPrevPageButton?.addEventListener("click", function () {
+        if (closedAltPositionsPage <= 1) {
+            return;
+        }
+        closedAltPositionsPage -= 1;
+        renderClosedAltPositions(closedAltPositions);
+    });
+    ids.closedAltNextPageButton?.addEventListener("click", function () {
+        const totalPages = Math.max(1, Math.ceil(closedAltPositions.length / closedPositionsPageSize));
+        if (closedAltPositionsPage >= totalPages) {
+            return;
+        }
+        closedAltPositionsPage += 1;
+        renderClosedAltPositions(closedAltPositions);
+    });
+    ids.closedAltPageNumbers?.addEventListener("click", function (event) {
+        const target = event.target instanceof Element ? event.target.closest(".rolling-live-closed-page-btn") : null;
+        if (!(target instanceof HTMLButtonElement)) {
+            return;
+        }
+        const page = Number(target.dataset.page || 0);
+        if (!Number.isFinite(page) || page <= 0) {
+            return;
+        }
+        closedAltPositionsPage = page;
+        renderClosedAltPositions(closedAltPositions);
     });
     ids.refreshEventsButton?.addEventListener("click", function () {
         void loadEvents().catch(function (error) {
@@ -6618,6 +6818,51 @@
         void deleteSavedClosedPosition(closeId).then(function () {
             return Promise.all([
                 loadClosedPositions().catch(function () { return undefined; }),
+                loadClosedAltPositions().catch(function () { return undefined; }),
+                loadAccountSummary().catch(function () { return undefined; }),
+                loadEvents().catch(function () { return undefined; })
+            ]);
+        }).then(function () {
+            setStatus(ids.pageStatus, "Closed position deleted.", "success");
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to delete closed position.", "danger");
+        });
+    });
+ids.closedAltPositionsBody?.addEventListener("click", function (event) {
+        const target = event.target instanceof Element ? event.target : null;
+        const editButton = target ? target.closest(".rolling-live-edit-closed-position") : null;
+        if (editButton instanceof HTMLButtonElement) {
+            const closeId = String(editButton.dataset.closeId || "").trim();
+            const row = closedAltPositions.find(function (item) {
+                return String(item?.closeId || item?.rowId || "").trim() === closeId;
+            });
+            if (!row) {
+                setStatus(ids.pageStatus, "Unable to find the selected closed position.", "danger");
+                return;
+            }
+            openClosedEditModal(row);
+            return;
+        }
+        const deleteButton = target ? target.closest(".rolling-live-delete-closed-position") : null;
+        if (!(deleteButton instanceof HTMLButtonElement)) {
+            return;
+        }
+        const closeId = String(deleteButton.dataset.closeId || "").trim();
+        const row = closedAltPositions.find(function (item) {
+            return String(item?.closeId || item?.rowId || "").trim() === closeId;
+        });
+        if (!row) {
+            setStatus(ids.pageStatus, "Unable to find the selected closed position.", "danger");
+            return;
+        }
+        const confirmed = window.confirm(`Delete ${row.symbol || "this closed position"} permanently? This will remove it from Closed Positions only.`);
+        if (!confirmed) {
+            return;
+        }
+        void deleteSavedClosedPosition(closeId).then(function () {
+            return Promise.all([
+                loadClosedPositions().catch(function () { return undefined; }),
+                loadClosedAltPositions().catch(function () { return undefined; }),
                 loadAccountSummary().catch(function () { return undefined; }),
                 loadEvents().catch(function () { return undefined; })
             ]);
@@ -6633,10 +6878,13 @@
         importablePositions = [];
         closedPositions = [];
         closedPositionsPage = 1;
+        closedAltPositions = [];
+        closedAltPositionsPage = 1;
         selectedApiProfileId = "";
         renderEvents([]);
         renderOpenPositions([]);
         renderClosedPositions([]);
+        renderClosedAltPositions([]);
         clearAccountSummary();
         applyConnectionStatus({
             state: "not_selected",
@@ -6676,6 +6924,7 @@
         await Promise.all([
             loadAccountSummary().catch(function () { return undefined; }),
             loadClosedPositions().catch(function () { return undefined; }),
+            loadClosedAltPositions().catch(function () { return undefined; }),
         ]);
     }
 
