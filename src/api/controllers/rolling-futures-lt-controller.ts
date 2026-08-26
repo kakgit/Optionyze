@@ -7948,7 +7948,7 @@ function evaluateCoveredAlternatingLegRestriction(
         || !normalizeBooleanValue(pUiState.alternatingLegRestrictionEnabled, true)) {
         return { allowed: true, message: "", latestLegSide: "" };
     }
-    const objLatestActiveOption = getLatestActiveTrackedOptionPosition(pTrackedPositions);
+    const objLatestActiveOption = getLatestEligibleTrackedOptionPosition(pTrackedPositions);
     const vLatestLegSide = objLatestActiveOption
         ? getTrackedOptionLegSide(objLatestActiveOption.contractName)
         : "";
@@ -8112,6 +8112,25 @@ function getLatestActiveTrackedOptionPosition(
         return new Date(String(pRight.openedAt || pRight.updatedAt || "")).getTime()
             - new Date(String(pLeft.openedAt || pLeft.updatedAt || "")).getTime();
     })[0] || null;
+}
+function isReentryTrackedOptionPosition(
+    pPosition: RollingFuturesLtImportedPositionRecord
+): boolean {
+    const objMetadata = getTrackedOptionMetadata(pPosition);
+    const vOpenedReason = String(objMetadata.openedReason || "").trim().toLowerCase();
+    return vOpenedReason.includes("reentry");
+}
+
+function getLatestEligibleTrackedOptionPosition(
+    pPositions: RollingFuturesLtImportedPositionRecord[]
+): RollingFuturesLtImportedPositionRecord | null {
+    // For the alternating-leg restriction we must only look at fresh directional
+    // entries. SL/TP/delta-diff/expiry re-entries are continuations of the same
+    // closed leg's cycle (same leg side), so they should not count as the "latest
+    // active option" and force the next entry to alternate.
+    const arrEligiblePositions = (Array.isArray(pPositions) ? pPositions : [])
+        .filter((objPosition) => !isReentryTrackedOptionPosition(objPosition));
+    return getLatestActiveTrackedOptionPosition(arrEligiblePositions);
 }
 
 function isIncrementEligibleTrackedOptionPosition(
@@ -9370,7 +9389,7 @@ async function buildOptionsScalperPaperOptionOpen(
     }
     if (isOptionsScalperStrategy(pStrategyCode)) {
         const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
-        const objLatestActiveOption = getLatestActiveTrackedOptionPosition(arrExisting);
+        const objLatestActiveOption = getLatestEligibleTrackedOptionPosition(arrExisting);
         const vLatestLegSide = objLatestActiveOption
             ? getTrackedOptionLegSide(objLatestActiveOption.contractName)
             : "";
