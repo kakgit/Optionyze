@@ -127,11 +127,12 @@
                             </div>
                         </div>
                     </div>
+                    <% const vShowPosPnlCloseRule = bIsCoveredLivePage || bIsDemoPage; %>
                     <div class="rolling-futures-help-inline-row">
                         <div class="rolling-futures-help-inline-main">
                             <div class="rolling-futures-help-inline-top">
-                                <label class="rolling-futures-neutral-mode rolling-futures-help-mode" for="<%= bIsCoveredLivePage ? 'chkRollingFuturesClosePosPnlBelowBrokerage' : 'chkRollingFuturesCloseBlockedMargin' %>">
-                                    <% if (bIsCoveredLivePage) { %>
+                                <label class="rolling-futures-neutral-mode rolling-futures-help-mode" for="<%= vShowPosPnlCloseRule ? 'chkRollingFuturesClosePosPnlBelowBrokerage' : 'chkRollingFuturesCloseBlockedMargin' %>">
+                                    <% if (vShowPosPnlCloseRule) { %>
                                     <input type="checkbox" id="chkRollingFuturesClosePosPnlBelowBrokerage" />
                                     <span>Close if Pos PnL &lt; X of Pos Brokerage</span>
                                     <span class="rolling-futures-help-icon-wrap">
@@ -158,7 +159,7 @@
                             </div>
                             <div class="rolling-futures-help-inline-bottom">
                                 <div class="rolling-demo-field rolling-futures-help-input-field">
-                                    <input type="number" id="<%= bIsCoveredLivePage ? 'txtRollingFuturesClosePosPnlBelowBrokerageX' : 'txtRollingFuturesBlockedMarginPct' %>" value="<%= bIsCoveredLivePage ? '5' : (bIsStrangleLikePage ? '10' : '20') %>" />
+                                    <input type="number" id="<%= vShowPosPnlCloseRule ? 'txtRollingFuturesClosePosPnlBelowBrokerageX' : 'txtRollingFuturesBlockedMarginPct' %>" value="<%= vShowPosPnlCloseRule ? '5' : (bIsStrangleLikePage ? '10' : '20') %>" />
                                 </div>
                             </div>
                         </div>

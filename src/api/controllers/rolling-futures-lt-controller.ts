@@ -6359,11 +6359,12 @@ function getProfitCloseRule(
         }
     }
 
-    // The "Exit All if Net PnL is X% of Blocked Margin" control was replaced on the
-    // covered-options live page by the per-position "Close if Pos PnL < X of Pos
-    // Brokerage" rule, so stale saved profiles from before that switch must not
-    // keep firing an exit-all that no longer has a visible control there.
-    const bBlockedMarginEnabled = pStrategyCode === "covered-options"
+    // The "Exit All if Net PnL is X% of Blocked Margin" control was replaced on
+    // the covered-options live page AND the options-demo (options-scalper) page
+    // by the per-position "Close if Pos PnL < X of Pos Brokerage" rule, so stale
+    // saved profiles from before that switch must not keep firing an exit-all
+    // that no longer has a visible control on those pages.
+    const bBlockedMarginEnabled = (pStrategyCode === "covered-options" || pStrategyCode === "options-scalper")
         ? false
         : Boolean(pUiState.closeBlockedMargin);
     const vBlockedMarginPct = Math.max(0, Number(pUiState.blockedMarginPct || 0));
@@ -7949,11 +7950,14 @@ async function resetCoveredClosedPositionsSessionAfterProfitClose(
     });
 }
 
+// "Close if Pos PnL < X of Pos Brokerage" is available on the covered-options
+// live page and the options-demo (options-scalper paper) page. Strangle/renko
+// pages keep their exit-all Blocked Margin control instead.
 function getPosPnlBelowBrokerageCloseConfig(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pUiState: Record<string, unknown>
 ): { enabled: boolean; x: number } {
-    if (!isCoveredOptionsStrategy(pStrategyCode)) {
+    if (!isCoveredOptionsStrategy(pStrategyCode) && !isOptionsScalperStrategy(pStrategyCode)) {
         return { enabled: false, x: 0 };
     }
     const vRawX = Number(pUiState.closePosPnlBelowBrokerageX ?? 5);
