@@ -2617,6 +2617,8 @@ function getDefaultManualTraderUiState(
         closeBlockedMargin: false,
         autoTraderOffOnProfitClose: false,
         blockedMarginPct: isStrangleOptionsStrategy(pStrategyCode) ? "10" : "20",
+        closePosPnlBelowBrokerage: false,
+        closePosPnlBelowBrokerageX: "5",
         reEnterBlock: bIsDual,
         buyHedgeSellPremiumGate: pStrategyCode === "covered-options" ? false : isCoveredLikeStrategy(pStrategyCode),
         buyHedgeSellPremiumPct: pStrategyCode === "covered-options" ? "1" : "2",
@@ -4719,6 +4721,8 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
             ? normalizeBooleanValue(objUiState.autoTraderOffOnProfitClose, Boolean(objDefaults.autoTraderOffOnProfitClose))
             : false,
         blockedMarginPct: normalizeStringValue(objUiState.blockedMarginPct, String(objDefaults.blockedMarginPct)),
+        closePosPnlBelowBrokerage: normalizeBooleanValue(objUiState.closePosPnlBelowBrokerage, Boolean(objDefaults.closePosPnlBelowBrokerage)),
+        closePosPnlBelowBrokerageX: normalizeStringValue(objUiState.closePosPnlBelowBrokerageX, String(objDefaults.closePosPnlBelowBrokerageX)),
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
         buyHedgeSellPremiumGate: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? false
@@ -5126,6 +5130,8 @@ function normalizeProfileSaveInput(
             ? normalizeBooleanValue(objUiState.autoTraderOffOnProfitClose, Boolean(objDefaults.autoTraderOffOnProfitClose))
             : false,
         blockedMarginPct: normalizeStringValue(objUiState.blockedMarginPct, String(objDefaults.blockedMarginPct)),
+        closePosPnlBelowBrokerage: normalizeBooleanValue(objUiState.closePosPnlBelowBrokerage, Boolean(objDefaults.closePosPnlBelowBrokerage)),
+        closePosPnlBelowBrokerageX: normalizeStringValue(objUiState.closePosPnlBelowBrokerageX, String(objDefaults.closePosPnlBelowBrokerageX)),
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
         buyHedgeSellPremiumGate: isStrangleOptionsStrategy(pStrategyCode)
             ? false
@@ -6353,7 +6359,13 @@ function getProfitCloseRule(
         }
     }
 
-    const bBlockedMarginEnabled = Boolean(pUiState.closeBlockedMargin);
+    // The "Exit All if Net PnL is X% of Blocked Margin" control was replaced on the
+    // covered-options live page by the per-position "Close if Pos PnL < X of Pos
+    // Brokerage" rule, so stale saved profiles from before that switch must not
+    // keep firing an exit-all that no longer has a visible control there.
+    const bBlockedMarginEnabled = pStrategyCode === "covered-options"
+        ? false
+        : Boolean(pUiState.closeBlockedMargin);
     const vBlockedMarginPct = Math.max(0, Number(pUiState.blockedMarginPct || 0));
     const vBlockedMargin = isCoveredOptionsStrategy(pStrategyCode)
         ? getCoveredRequiredMarginForMultiplier(pUiState.startQty, pStrategyCode)
@@ -7935,6 +7947,20 @@ async function resetCoveredClosedPositionsSessionAfterProfitClose(
             closedFromDate: ""
         }
     });
+}
+
+function getPosPnlBelowBrokerageCloseConfig(
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pUiState: Record<string, unknown>
+): { enabled: boolean; x: number } {
+    if (!isCoveredOptionsStrategy(pStrategyCode)) {
+        return { enabled: false, x: 0 };
+    }
+    const vRawX = Number(pUiState.closePosPnlBelowBrokerageX ?? 5);
+    return {
+        enabled: normalizeBooleanValue(pUiState.closePosPnlBelowBrokerage, false),
+        x: Number.isFinite(vRawX) && vRawX > 0 ? vRawX : 0
+    };
 }
 
 function evaluateCoveredAlternatingLegRestriction(
@@ -11124,6 +11150,39 @@ async function findTriggeredTrackedOptions(
         const objRowState = getNormalizedOptionRowUiState(pUiState, objPosition.strategyCode, vRowIndex);
         const vLiveTakeProfitDelta = Number(objRowState.tpD);
         const vLiveStopLossDelta = Number(objRowState.slD);
+        // "Close if Pos PnL < X of Pos Brokerage": an individual-position SL-like
+        // exit evaluated on this position alone, using its stored (entry-side)
+        // brokerage. Only the offending position is closed; all other open
+        // positions keep running until the overall target PnL rules fire.
+        const objPosPnlCloseRule = getPosPnlBelowBrokerageCloseConfig(objPosition.strategyCode, pUiState);
+        if (objPosPnlCloseRule.enabled) {
+            const vLiveExitPrice = resolveTrackedOptionLivePrice(
+                objPosition.side,
+                objTicker,
+                Number(objPosition.markPrice || objPosition.entryPrice || 0)
+            );
+            const vOpenPnl = estimateTrackedPositionPnl(objPosition, vLiveExitPrice);
+            const vPosCharges = Math.max(0, Number(objPosition.charges || 0));
+            const vPnlThreshold = objPosPnlCloseRule.x * vPosCharges;
+            if (Number.isFinite(vOpenPnl) && vOpenPnl < vPnlThreshold) {
+                arrTriggered.push({
+                    position: objPosition,
+                    currentDelta: vCurrentDelta,
+                    currentMarkPrice: vLiveExitPrice,
+                    reason: "sl",
+                    ruleAudit: {
+                        rowIndex: vRowIndex,
+                        takeProfitDelta: Number.isFinite(vLiveTakeProfitDelta) && vLiveTakeProfitDelta > 0
+                            ? vLiveTakeProfitDelta
+                            : Number(objMetadata.takeProfitDelta || 0.25),
+                        stopLossDelta: Number.isFinite(vLiveStopLossDelta) && vLiveStopLossDelta > 0
+                            ? vLiveStopLossDelta
+                            : Number(objMetadata.stopLossDelta || 0.65)
+                    }
+                });
+                continue;
+            }
+        }
         const objDecision = shouldTriggerTrackedOption(
             objPosition.side,
             vCurrentDelta,
@@ -19157,6 +19216,157 @@ async function executeOptionsScalperWebhookPaperOrder(
         order: objPaperOpen.order
     };
 }
+async function executeCoveredOptionsWebhookLiveOrder(
+    pUserId: string,
+    pAction: "buy" | "sell",
+    pLegSide: "ce" | "pe",
+    pSymbolOverride?: "BTC" | "ETH"
+): Promise<{
+    symbol: "BTC" | "ETH";
+    contractNames: string[];
+    qty: number;
+    baseQty: number;
+    orders: Array<Record<string, unknown>>;
+    skipMessage: string;
+}> {
+    const pStrategyCode: RollingFuturesLtStrategyCode = "covered-options";
+    let objProfile = await readLiveProfile(pUserId, pStrategyCode);
+    objProfile = await refreshModeDrivenExpiryDatesInProfile(pUserId, pStrategyCode, objProfile);
+    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        throw new Error("Select an API profile before webhook requests can place live option orders.");
+    }
+
+    const objUiState = getMergedUiState(objProfile);
+    const vSymbol = pSymbolOverride && String(pSymbolOverride).trim()
+        ? normalizeSymbolValue(pSymbolOverride)
+        : normalizeSymbolValue(objUiState.symbol);
+    const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, 1);
+    const vExpiryMode = (["1", "2", "4", "5", "6", "7"].includes(String(objRowState.expiryMode || "5").trim())
+        ? String(objRowState.expiryMode || "5").trim()
+        : "5") as "1" | "2" | "4" | "5" | "6" | "7";
+    const vExpiryDate = normalizeRollingFuturesExpiryDate(vExpiryMode, objRowState.expiryDate);
+    const vBaseQty = Math.max(1, Math.floor(Number(objRowState.qty || 1)));
+    const vTargetDelta = Math.max(0, Number(objRowState.newD || 0.53));
+    if (!(vTargetDelta > 0)) {
+        throw new Error("Row New D must be greater than 0 before webhook requests can place live option orders.");
+    }
+    // Honor the "Place Opposite Trades" Manual Trader setting the same way the
+    // Renko/EMA signal paths do: flip the requested CE/PE leg when enabled.
+    const vResolvedLegSide: "ce" | "pe" = normalizeBooleanValue(objUiState.placeOppositeTrades, false)
+        ? (pLegSide === "pe" ? "ce" : "pe")
+        : pLegSide;
+
+    const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    // Honor the Manual Trader increment rules the same way an auto-trade signal does:
+    // row quantity plus X extra lots per already-active same-side/any-side position.
+    const vEffectiveQty = resolveOptionsScalperIncrementedQty(arrExisting, objUiState, {
+        symbol: vSymbol,
+        legSide: vResolvedLegSide,
+        action: pAction,
+        qty: vBaseQty
+    });
+
+    const objCheck = await performRollingFuturesLtConnectionCheck(pUserId, pStrategyCode, vSelectedApiProfileId);
+    if (objCheck.profile.connectionStatus.state !== "connected") {
+        throw new Error(objCheck.profile.connectionStatus.message || "Delta connection is not healthy.");
+    }
+
+    // Same pre-confirmation validation used by the covered-options live Renko/EMA
+    // auto-trade path: last-open-position PnL guard, alternating-leg restriction,
+    // buy-hedge sell premium gate, duplicate-contract blocking and the immediate
+    // SL/TP delta rule.
+    const arrExistingForValidation = arrExisting;
+    const objPreCheck = await validateCoveredOptionsRenkoAutoTradeInputBeforeConfirmation(
+        pUserId,
+        pStrategyCode,
+        objProfile,
+        {
+            action: pAction === "buy" ? "buy" : "sell",
+            symbol: vSymbol,
+            legSide: vResolvedLegSide,
+            expiryMode: vExpiryMode,
+            expiryDate: vExpiryDate,
+            qty: vEffectiveQty,
+            targetDelta: vTargetDelta,
+            rowIndex: 1
+        },
+        arrExistingForValidation
+    );
+    if (!objPreCheck.allowed) {
+        return {
+            symbol: vSymbol,
+            contractNames: [],
+            qty: vEffectiveQty,
+            baseQty: vBaseQty,
+            orders: [],
+            skipMessage: objPreCheck.message || "Skipped live option order by an enabled Manual Trader entry rule."
+        };
+    }
+
+    // The shared covered-options live placement executor applies every enabled
+    // entry rule the same way a confirmed Renko/EMA/manual live order does:
+    // last-open-position PnL guard, alternating-leg restriction, buy-hedge sell
+    // premium gate + target-leg resolution, duplicate-contract blocking and the
+    // immediate SL/TP delta rule.
+    const objResult = await executeStrategyPlacement(
+        pUserId,
+        pStrategyCode,
+        vSelectedApiProfileId,
+        objProfile,
+        {
+            action: pAction === "buy" ? "buy" : "sell",
+            symbol: vSymbol,
+            legSide: vResolvedLegSide,
+            expiryMode: vExpiryMode,
+            expiryDate: vExpiryDate,
+            qty: vEffectiveQty,
+            targetDelta: vTargetDelta,
+            rowIndex: 1
+        }
+    );
+
+    if (!objResult.orders.length) {
+        return {
+            symbol: vSymbol,
+            contractNames: [],
+            qty: vEffectiveQty,
+            baseQty: vBaseQty,
+            orders: [],
+            skipMessage: "Skipped live option order by an enabled Manual Trader entry rule (no order was placed)."
+        };
+    }
+    const arrContractNames = objResult.contracts
+        .map((objContract) => String((objContract as Record<string, unknown>).contractSymbol || "").trim())
+        .filter(Boolean);
+    await logFuturesEvent(
+        pUserId,
+        pStrategyCode,
+        "option_opened",
+        "success",
+        "Webhook Live Option Opened",
+        `${pAction.toUpperCase()} ${vResolvedLegSide.toUpperCase()} live option placed via webhook using Manual Trader settings${vEffectiveQty === vBaseQty ? "." : ` (qty ${vBaseQty} -> ${vEffectiveQty}).`}`,
+        {
+            symbol: vSymbol,
+            contractNames: arrContractNames,
+            qty: vEffectiveQty,
+            baseQty: vBaseQty,
+            targetDelta: vTargetDelta,
+            requestedLegSide: pLegSide,
+            resolvedLegSide: vResolvedLegSide,
+            reason: "webhook_live_option"
+        }
+    );
+    return {
+        symbol: vSymbol,
+        contractNames: arrContractNames,
+        qty: vEffectiveQty,
+        baseQty: vBaseQty,
+        orders: objResult.orders,
+        skipMessage: ""
+    };
+}
+
 export async function getCoveredOptionsImportableOpenPositions(req: Request, res: Response): Promise<void> {
     await getImportableOpenPositionsInternal(req, res, "covered-options");
 }
@@ -19198,6 +19408,96 @@ export async function getRenkoOptionsOpenPositions(req: Request, res: Response):
 }
 export async function saveStrangleOptionsOpenPositions(req: Request, res: Response): Promise<void> {
     await saveOpenPositionsInternal(req, res, "strangle-options");
+}
+export async function handleCoveredOptionsTradeWebhook(req: Request, res: Response): Promise<void> {
+    try {
+        const vExpectedSecret = String(process.env.COVERED_OPTIONS_WEBHOOK_SECRET || "").trim();
+        if (vExpectedSecret) {
+            const vProvidedSecret = String(
+                req.header("x-covered-options-webhook-secret")
+                || req.header("x-webhook-secret")
+                || ""
+            ).trim();
+            if (vProvidedSecret !== vExpectedSecret) {
+                res.status(403).json({ status: "warning", message: "Unauthorized webhook request." });
+                return;
+            }
+        }
+
+        const vOptionType = String(req.body?.optionType || "").trim().toUpperCase();
+        const vTransType = String(req.body?.transType || "").trim().toLowerCase();
+        if (vOptionType !== "C" && vOptionType !== "CE" && vOptionType !== "P" && vOptionType !== "PE") {
+            res.status(400).json({ status: "warning", message: "Invalid optionType. Expected \"C\" (Call) or \"P\" (Put)." });
+            return;
+        }
+        if (vTransType !== "buy" && vTransType !== "sell") {
+            res.status(400).json({ status: "warning", message: "Invalid transType. Expected \"buy\" or \"sell\"." });
+            return;
+        }
+
+        const vLegSide: "ce" | "pe" = (vOptionType === "P" || vOptionType === "PE") ? "pe" : "ce";
+        const vAction: "buy" | "sell" = vTransType === "buy" ? "buy" : "sell";
+        const vRequestedSymbol: "BTC" | "ETH" | null = (req.body?.symbol && String(req.body.symbol).trim())
+            ? normalizeSymbolValue(req.body.symbol)
+            : null;
+
+        // Only accounts with Auto Trader ON (running) receive live webhook trades.
+        const arrRuntimes = (await listRollingFuturesLtRuntime()).filter((objRuntime) =>
+            objRuntime.strategyCode === "covered-options"
+            && objRuntime.autoTraderEnabled
+            && String(objRuntime.status || "").trim().toLowerCase() === "running"
+        );
+        if (!arrRuntimes.length) {
+            res.json({
+                status: "success",
+                message: "No running covered-options auto trader accounts were found; no live trade was executed.",
+                data: { symbol: vRequestedSymbol, optionType: vOptionType, transType: vTransType, executed: [], failed: [] }
+            });
+            return;
+        }
+
+        const arrExecuted: Array<Record<string, unknown>> = [];
+        const arrFailed: Array<Record<string, unknown>> = [];
+        for (const objRuntime of arrRuntimes) {
+            try {
+                const objResult = await executeCoveredOptionsWebhookLiveOrder(objRuntime.userId, vAction, vLegSide, vRequestedSymbol || undefined);
+                if (objResult.skipMessage) {
+                    arrFailed.push({
+                        accountId: objRuntime.userId,
+                        symbol: objResult.symbol,
+                        qty: objResult.qty,
+                        message: objResult.skipMessage
+                    });
+                    continue;
+                }
+                arrExecuted.push({
+                    accountId: objRuntime.userId,
+                    symbol: objResult.symbol,
+                    contractNames: objResult.contractNames,
+                    qty: objResult.qty,
+                    orders: objResult.orders
+                });
+            }
+            catch (objError) {
+                arrFailed.push({
+                    accountId: objRuntime.userId,
+                    message: objError instanceof Error ? objError.message : "Unable to place the webhook live option order."
+                });
+            }
+        }
+
+        res.json({
+            status: "success",
+            message: `${vAction.toUpperCase()} ${vLegSide.toUpperCase()} live option executed for ${arrExecuted.length} running covered-options account${arrExecuted.length === 1 ? "" : "s"}${arrFailed.length ? `; ${arrFailed.length} account${arrFailed.length === 1 ? "" : "s"} skipped or failed.` : "."}`,
+            data: { symbol: vRequestedSymbol, optionType: vOptionType, transType: vTransType, executed: arrExecuted, failed: arrFailed }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: objError instanceof Error ? objError.message : "Webhook processing failed."
+        });
+    }
 }
 export async function saveRenkoOptionsOpenPositions(req: Request, res: Response): Promise<void> {
     await saveOpenPositionsInternal(req, res, "renko-options");

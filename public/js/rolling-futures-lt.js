@@ -134,6 +134,8 @@
         closeBlockedMargin: document.getElementById("chkRollingFuturesCloseBlockedMargin"),
         autoTraderOffOnProfitClose: document.getElementById("chkRollingFuturesAutoTraderOffOnProfitClose"),
         blockedMarginPct: document.getElementById("txtRollingFuturesBlockedMarginPct"),
+        closePosPnlBelowBrokerage: document.getElementById("chkRollingFuturesClosePosPnlBelowBrokerage"),
+        closePosPnlBelowBrokerageX: document.getElementById("txtRollingFuturesClosePosPnlBelowBrokerageX"),
         reEnterBlock: document.getElementById("chkRollingFuturesReEnterBlock"),
         buyHedgeSellPremiumGate: document.getElementById("chkRollingFuturesBuyHedgeSellPremiumGate"),
         buyHedgeSellPremiumPct: document.getElementById("txtRollingFuturesBuyHedgeSellPremiumPct"),
@@ -2093,6 +2095,8 @@
             closeBlockedMargin: false,
             autoTraderOffOnProfitClose: false,
             blockedMarginPct: isStrangleLikePage ? "10" : "20",
+            closePosPnlBelowBrokerage: false,
+            closePosPnlBelowBrokerageX: "5",
             reEnterBlock: false,
             buyHedgeSellPremiumGate: !isCoveredLivePageMode(),
             buyHedgeSellPremiumPct: "1",
@@ -3774,6 +3778,8 @@
             closeBlockedMargin: getCheckboxValue(ids.closeBlockedMargin, false),
             autoTraderOffOnProfitClose: isCoveredLivePageMode() ? getCheckboxValue(ids.autoTraderOffOnProfitClose, false) : false,
             blockedMarginPct: getInputValue(ids.blockedMarginPct, "20"),
+            closePosPnlBelowBrokerage: getCheckboxValue(ids.closePosPnlBelowBrokerage, false),
+            closePosPnlBelowBrokerageX: getInputValue(ids.closePosPnlBelowBrokerageX, "5"),
             reEnterBlock: false,
             buyHedgeSellPremiumGate: isStrangleLikePage ? false : getCheckboxValue(ids.buyHedgeSellPremiumGate, false),
             buyHedgeSellPremiumPct: isStrangleLikePage ? "2" : getInputValue(ids.buyHedgeSellPremiumPct, "1"),
@@ -3881,6 +3887,8 @@
             setCheckboxValue(ids.closeBlockedMargin, objUiState.closeBlockedMargin);
             setCheckboxValue(ids.autoTraderOffOnProfitClose, isCoveredLivePageMode() ? objUiState.autoTraderOffOnProfitClose : false);
             setInputValue(ids.blockedMarginPct, objUiState.blockedMarginPct);
+            setCheckboxValue(ids.closePosPnlBelowBrokerage, objUiState.closePosPnlBelowBrokerage);
+            setInputValue(ids.closePosPnlBelowBrokerageX, objUiState.closePosPnlBelowBrokerageX);
             setCheckboxValue(ids.buyHedgeSellPremiumGate, isStrangleLikePage ? false : objUiState.buyHedgeSellPremiumGate);
             setInputValue(ids.buyHedgeSellPremiumPct, isStrangleLikePage ? "2" : objUiState.buyHedgeSellPremiumPct);
             setCheckboxValue(ids.strangleDeltaDiffReplaceEnabled, objUiState.strangleDeltaDiffReplaceEnabled);
@@ -4486,7 +4494,7 @@
             return escapeHtml(normalizedSide);
         }
         const sideClass = normalizedSide.toLowerCase();
-        const directionArrow = normalizedSide === "BUY" ? "â†‘" : "â†“";
+        const directionArrow = normalizedSide === "BUY" ? "\u2191" : "\u2193";
         return `<span class="rolling-covered-side-badge ${sideClass}"><span aria-hidden="true">${directionArrow}</span>${normalizedSide}</span>`;
     }
 
@@ -4624,7 +4632,7 @@
             }).sort(function (left, right) {
                 return left - right;
             });
-            let currentPctText = "â€”";
+            let currentPctText = "\u2014";
             if (liveDeltas.length >= 2) {
                 const weakerDelta = liveDeltas[0];
                 const strongerDelta = liveDeltas[liveDeltas.length - 1];
@@ -4681,7 +4689,7 @@
             const soldPremium = Number(sellLeg?.entryPrice || 0);
             const currentPremium = Number(sellLeg?.markPrice || sellLeg?.entryPrice || 0);
             if (!(soldPremium > 0)) {
-                return `<span class="rolling-covered-hedge-chip neutral">${legSide} Min â€”</span>`;
+                return `<span class="rolling-covered-hedge-chip neutral">${legSide} Min \u2014</span>`;
             }
             const minimumPremium = soldPremium * minimumRatio;
             const toneClass = currentPremium < minimumPremium ? "success" : "danger";
@@ -5652,6 +5660,8 @@ async function loadClosedAltPositions() {
         ids.reEnterBrok,
         ids.closeBlockedMargin,
         ids.blockedMarginPct,
+        ids.closePosPnlBelowBrokerage,
+        ids.closePosPnlBelowBrokerageX,
         ids.reEnterBlock,
         ids.buyHedgeSellPremiumGate,
         ids.buyHedgeSellPremiumPct,

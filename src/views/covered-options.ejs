@@ -130,7 +130,19 @@
                     <div class="rolling-futures-help-inline-row">
                         <div class="rolling-futures-help-inline-main">
                             <div class="rolling-futures-help-inline-top">
-                                <label class="rolling-futures-neutral-mode rolling-futures-help-mode" for="chkRollingFuturesCloseBlockedMargin">
+                                <label class="rolling-futures-neutral-mode rolling-futures-help-mode" for="<%= bIsCoveredLivePage ? 'chkRollingFuturesClosePosPnlBelowBrokerage' : 'chkRollingFuturesCloseBlockedMargin' %>">
+                                    <% if (bIsCoveredLivePage) { %>
+                                    <input type="checkbox" id="chkRollingFuturesClosePosPnlBelowBrokerage" />
+                                    <span>Close if Pos PnL &lt; X of Pos Brokerage</span>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show position stop help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            Monitors every open position individually: closes ONLY that position when its live PnL drops below X &times; its own brokerage. All other positions keep running until the overall target PnL is achieved.
+                                        </span>
+                                    </span>
+                                    <% } else { %>
                                     <input type="checkbox" id="chkRollingFuturesCloseBlockedMargin" <%= bIsCoveredLivePage ? '' : 'checked' %> />
                                     <span>Exit All if Net PnL is X% of Blocked Margin</span>
                                     <span class="rolling-futures-help-icon-wrap">
@@ -141,11 +153,12 @@
                                             Monitors <code>Net PnL</code> against the configured percentage of current blocked margin before allowing a close-all.
                                         </span>
                                     </span>
+                                    <% } %>
                                 </label>
                             </div>
                             <div class="rolling-futures-help-inline-bottom">
                                 <div class="rolling-demo-field rolling-futures-help-input-field">
-                                    <input type="number" id="txtRollingFuturesBlockedMarginPct" value="<%= bIsStrangleLikePage ? '10' : '20' %>" />
+                                    <input type="number" id="<%= bIsCoveredLivePage ? 'txtRollingFuturesClosePosPnlBelowBrokerageX' : 'txtRollingFuturesBlockedMarginPct' %>" value="<%= bIsCoveredLivePage ? '5' : (bIsStrangleLikePage ? '10' : '20') %>" />
                                 </div>
                             </div>
                         </div>
