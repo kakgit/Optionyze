@@ -443,6 +443,7 @@ interface RollingFuturesLtOptionMetadata {
     resolvedExpiryDate?: string;
     importedObservationOnly?: boolean;
     importedAt?: string;
+    pnlAboveBrokerageSince?: string;
 }
 
 type CoveredLiveConfirmationKind =
@@ -3402,7 +3403,8 @@ function optionMetadataToRecord(pMetadata: RollingFuturesLtOptionMetadata): Reco
         requestedExpiryDate: normalizeIsoDateOnly(pMetadata.requestedExpiryDate),
         resolvedExpiryDate: normalizeIsoDateOnly(pMetadata.resolvedExpiryDate),
         importedObservationOnly: Boolean(pMetadata.importedObservationOnly),
-        importedAt: String(pMetadata.importedAt || "").trim()
+        importedAt: String(pMetadata.importedAt || "").trim(),
+        pnlAboveBrokerageSince: String(pMetadata.pnlAboveBrokerageSince || "").trim() || undefined
     };
 }
 
@@ -8153,14 +8155,16 @@ async function resetCoveredClosedPositionsSessionAfterProfitClose(
 function getPosPnlAboveBrokerageCloseConfig(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pUiState: Record<string, unknown>
-): { enabled: boolean; x: number } {
+): { enabled: boolean; x: number; timerSecs: number } {
     if (!isCoveredOptionsStrategy(pStrategyCode) && !isOptionsScalperStrategy(pStrategyCode)) {
-        return { enabled: false, x: 0 };
+        return { enabled: false, x: 0, timerSecs: 0 };
     }
     const vRawX = Number(pUiState.closePosPnlAboveBrokerageX ?? 5);
+    const vRawTimerSecs = Number(pUiState.profitCloseTimerSecs ?? 120);
     return {
         enabled: normalizeBooleanValue(pUiState.closePosPnlAboveBrokerage, false),
-        x: Number.isFinite(vRawX) && vRawX > 0 ? vRawX : 0
+        x: Number.isFinite(vRawX) && vRawX > 0 ? vRawX : 0,
+        timerSecs: Number.isFinite(vRawTimerSecs) && vRawTimerSecs > 0 ? Math.floor(vRawTimerSecs) : 0
     };
 }
 
@@ -11565,6 +11569,9 @@ async function findTriggeredTrackedOptions(
         // exit evaluated on this position alone, using its stored (entry-side)
         // brokerage. Only the qualifying position is closed; all other open
         // positions keep running until the overall target PnL rules fire.
+        // Uses the timer from the Open Positions header textbox: the position
+        // is only closed if PnL stays above the threshold for the specified
+        // number of seconds. If PnL drops below the threshold, the timer resets.
         const objPosPnlCloseRule = getPosPnlAboveBrokerageCloseConfig(objPosition.strategyCode, pUiState);
         if (objPosPnlCloseRule.enabled) {
             const vLiveExitPrice = resolveTrackedOptionLivePrice(
@@ -11575,23 +11582,56 @@ async function findTriggeredTrackedOptions(
             const vOpenPnl = estimateTrackedPositionPnl(objPosition, vLiveExitPrice);
             const vPosCharges = Math.max(0, Number(objPosition.charges || 0));
             const vPnlThreshold = objPosPnlCloseRule.x * vPosCharges;
+            const objMetadata = getTrackedOptionMetadata(objPosition);
+            const vTimerSecs = objPosPnlCloseRule.timerSecs;
             if (Number.isFinite(vOpenPnl) && vOpenPnl > vPnlThreshold) {
-                arrTriggered.push({
-                    position: objPosition,
-                    currentDelta: vCurrentDelta,
-                    currentMarkPrice: vLiveExitPrice,
-                    reason: "sl",
-                    ruleAudit: {
-                        rowIndex: vRowIndex,
-                        takeProfitDelta: Number.isFinite(vLiveTakeProfitDelta) && vLiveTakeProfitDelta > 0
-                            ? vLiveTakeProfitDelta
-                            : Number(objMetadata.takeProfitDelta || 0.25),
-                        stopLossDelta: Number.isFinite(vLiveStopLossDelta) && vLiveStopLossDelta > 0
-                            ? vLiveStopLossDelta
-                            : Number(objMetadata.stopLossDelta || 0.65)
-                    }
-                });
+                const vNowIso = new Date().toISOString();
+                const vSinceIso = String(objMetadata.pnlAboveBrokerageSince || "").trim();
+                if (!vSinceIso) {
+                    // First time above threshold — start the timer
+                    arrUpdatedPositions.push({
+                        ...objPosition,
+                        metadata: optionMetadataToRecord({
+                            ...objMetadata,
+                            pnlAboveBrokerageSince: vNowIso
+                        })
+                    });
+                    continue;
+                }
+                const vSinceMs = new Date(vSinceIso).getTime();
+                const vElapsedSecs = (Date.now() - vSinceMs) / 1000;
+                if (Number.isFinite(vElapsedSecs) && vElapsedSecs >= vTimerSecs) {
+                    // Timer expired — close the position
+                    arrTriggered.push({
+                        position: objPosition,
+                        currentDelta: vCurrentDelta,
+                        currentMarkPrice: vLiveExitPrice,
+                        reason: "sl",
+                        ruleAudit: {
+                            rowIndex: vRowIndex,
+                            takeProfitDelta: Number.isFinite(vLiveTakeProfitDelta) && vLiveTakeProfitDelta > 0
+                                ? vLiveTakeProfitDelta
+                                : Number(objMetadata.takeProfitDelta || 0.25),
+                            stopLossDelta: Number.isFinite(vLiveStopLossDelta) && vLiveStopLossDelta > 0
+                                ? vLiveStopLossDelta
+                                : Number(objMetadata.stopLossDelta || 0.65)
+                        }
+                    });
+                    continue;
+                }
+                // Timer still running — keep the position open
                 continue;
+            } else {
+                // PnL dropped below threshold — reset the timer
+                if (String(objMetadata.pnlAboveBrokerageSince || "").trim()) {
+                    arrUpdatedPositions.push({
+                        ...objPosition,
+                        metadata: optionMetadataToRecord({
+                            ...objMetadata,
+                            pnlAboveBrokerageSince: undefined
+                        })
+                    });
+                }
             }
         }
         const objDecision = shouldTriggerTrackedOption(
