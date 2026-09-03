@@ -134,8 +134,8 @@
         closeBlockedMargin: document.getElementById("chkRollingFuturesCloseBlockedMargin"),
         autoTraderOffOnProfitClose: document.getElementById("chkRollingFuturesAutoTraderOffOnProfitClose"),
         blockedMarginPct: document.getElementById("txtRollingFuturesBlockedMarginPct"),
-        closePosPnlBelowBrokerage: document.getElementById("chkRollingFuturesClosePosPnlBelowBrokerage"),
-        closePosPnlBelowBrokerageX: document.getElementById("txtRollingFuturesClosePosPnlBelowBrokerageX"),
+        closePosPnlAboveBrokerage: document.getElementById("chkRollingFuturesClosePosPnlBelowBrokerage"),
+        closePosPnlAboveBrokerageX: document.getElementById("txtRollingFuturesClosePosPnlBelowBrokerageX"),
         reEnterBlock: document.getElementById("chkRollingFuturesReEnterBlock"),
         buyHedgeSellPremiumGate: document.getElementById("chkRollingFuturesBuyHedgeSellPremiumGate"),
         buyHedgeSellPremiumPct: document.getElementById("txtRollingFuturesBuyHedgeSellPremiumPct"),
@@ -2099,8 +2099,8 @@
             closeBlockedMargin: false,
             autoTraderOffOnProfitClose: false,
             blockedMarginPct: isStrangleLikePage ? "10" : "20",
-            closePosPnlBelowBrokerage: false,
-            closePosPnlBelowBrokerageX: "5",
+            closePosPnlAboveBrokerage: false,
+            closePosPnlAboveBrokerageX: "5",
             reEnterBlock: false,
             buyHedgeSellPremiumGate: !isCoveredLivePageMode(),
             buyHedgeSellPremiumPct: "1",
@@ -3782,8 +3782,8 @@
             closeBlockedMargin: getCheckboxValue(ids.closeBlockedMargin, false),
             autoTraderOffOnProfitClose: isCoveredLivePageMode() ? getCheckboxValue(ids.autoTraderOffOnProfitClose, false) : false,
             blockedMarginPct: getInputValue(ids.blockedMarginPct, "20"),
-            closePosPnlBelowBrokerage: getCheckboxValue(ids.closePosPnlBelowBrokerage, false),
-            closePosPnlBelowBrokerageX: getInputValue(ids.closePosPnlBelowBrokerageX, "5"),
+            closePosPnlAboveBrokerage: getCheckboxValue(ids.closePosPnlAboveBrokerage, false),
+            closePosPnlAboveBrokerageX: getInputValue(ids.closePosPnlAboveBrokerageX, "5"),
             reEnterBlock: false,
             buyHedgeSellPremiumGate: isStrangleLikePage ? false : getCheckboxValue(ids.buyHedgeSellPremiumGate, false),
             buyHedgeSellPremiumPct: isStrangleLikePage ? "2" : getInputValue(ids.buyHedgeSellPremiumPct, "1"),
@@ -3891,8 +3891,8 @@
             setCheckboxValue(ids.closeBlockedMargin, objUiState.closeBlockedMargin);
             setCheckboxValue(ids.autoTraderOffOnProfitClose, isCoveredLivePageMode() ? objUiState.autoTraderOffOnProfitClose : false);
             setInputValue(ids.blockedMarginPct, objUiState.blockedMarginPct);
-            setCheckboxValue(ids.closePosPnlBelowBrokerage, objUiState.closePosPnlBelowBrokerage);
-            setInputValue(ids.closePosPnlBelowBrokerageX, objUiState.closePosPnlBelowBrokerageX);
+            setCheckboxValue(ids.closePosPnlBelowBrokerage, objUiState.closePosPnlAboveBrokerage);
+            setInputValue(ids.closePosPnlBelowBrokerageX, objUiState.closePosPnlAboveBrokerageX);
             setCheckboxValue(ids.buyHedgeSellPremiumGate, isStrangleLikePage ? false : objUiState.buyHedgeSellPremiumGate);
             setInputValue(ids.buyHedgeSellPremiumPct, isStrangleLikePage ? "2" : objUiState.buyHedgeSellPremiumPct);
             setCheckboxValue(ids.strangleDeltaDiffReplaceEnabled, objUiState.strangleDeltaDiffReplaceEnabled);

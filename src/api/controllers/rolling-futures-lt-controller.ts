@@ -2705,8 +2705,8 @@ function getDefaultManualTraderUiState(
         closeBlockedMargin: false,
         autoTraderOffOnProfitClose: false,
         blockedMarginPct: isStrangleOptionsStrategy(pStrategyCode) ? "10" : "20",
-        closePosPnlBelowBrokerage: false,
-        closePosPnlBelowBrokerageX: "5",
+        closePosPnlAboveBrokerage: false,
+        closePosPnlAboveBrokerageX: "5",
         reEnterBlock: bIsDual,
         buyHedgeSellPremiumGate: pStrategyCode === "covered-options" ? false : isCoveredLikeStrategy(pStrategyCode),
         buyHedgeSellPremiumPct: pStrategyCode === "covered-options" ? "1" : "2",
@@ -4838,8 +4838,8 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
             ? normalizeBooleanValue(objUiState.autoTraderOffOnProfitClose, Boolean(objDefaults.autoTraderOffOnProfitClose))
             : false,
         blockedMarginPct: normalizeStringValue(objUiState.blockedMarginPct, String(objDefaults.blockedMarginPct)),
-        closePosPnlBelowBrokerage: normalizeBooleanValue(objUiState.closePosPnlBelowBrokerage, Boolean(objDefaults.closePosPnlBelowBrokerage)),
-        closePosPnlBelowBrokerageX: normalizeStringValue(objUiState.closePosPnlBelowBrokerageX, String(objDefaults.closePosPnlBelowBrokerageX)),
+        closePosPnlAboveBrokerage: normalizeBooleanValue(objUiState.closePosPnlAboveBrokerage, Boolean(objDefaults.closePosPnlAboveBrokerage)),
+        closePosPnlAboveBrokerageX: normalizeStringValue(objUiState.closePosPnlAboveBrokerageX, String(objDefaults.closePosPnlAboveBrokerageX)),
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
         buyHedgeSellPremiumGate: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? false
@@ -5247,8 +5247,8 @@ function normalizeProfileSaveInput(
             ? normalizeBooleanValue(objUiState.autoTraderOffOnProfitClose, Boolean(objDefaults.autoTraderOffOnProfitClose))
             : false,
         blockedMarginPct: normalizeStringValue(objUiState.blockedMarginPct, String(objDefaults.blockedMarginPct)),
-        closePosPnlBelowBrokerage: normalizeBooleanValue(objUiState.closePosPnlBelowBrokerage, Boolean(objDefaults.closePosPnlBelowBrokerage)),
-        closePosPnlBelowBrokerageX: normalizeStringValue(objUiState.closePosPnlBelowBrokerageX, String(objDefaults.closePosPnlBelowBrokerageX)),
+        closePosPnlAboveBrokerage: normalizeBooleanValue(objUiState.closePosPnlAboveBrokerage, Boolean(objDefaults.closePosPnlAboveBrokerage)),
+        closePosPnlAboveBrokerageX: normalizeStringValue(objUiState.closePosPnlAboveBrokerageX, String(objDefaults.closePosPnlAboveBrokerageX)),
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
         buyHedgeSellPremiumGate: isStrangleOptionsStrategy(pStrategyCode)
             ? false
@@ -6558,7 +6558,7 @@ function getProfitCloseRule(
 
     // The "Exit All if Net PnL is X% of Blocked Margin" control was replaced on
     // the covered-options live page AND the options-demo (options-scalper) page
-    // by the per-position "Close if Pos PnL < X of Pos Brokerage" rule, so stale
+    // by the per-position "Exit Pos if its PnL is > X of Brokerage" rule, so stale
     // saved profiles from before that switch must not keep firing an exit-all
     // that no longer has a visible control on those pages.
     const bBlockedMarginEnabled = (pStrategyCode === "covered-options" || pStrategyCode === "options-scalper")
@@ -8147,19 +8147,19 @@ async function resetCoveredClosedPositionsSessionAfterProfitClose(
     });
 }
 
-// "Close if Pos PnL < X of Pos Brokerage" is available on the covered-options
+// "Exit Pos if its PnL is > X of Brokerage" is available on the covered-options
 // live page and the options-demo (options-scalper paper) page. Strangle/renko
 // pages keep their exit-all Blocked Margin control instead.
-function getPosPnlBelowBrokerageCloseConfig(
+function getPosPnlAboveBrokerageCloseConfig(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pUiState: Record<string, unknown>
 ): { enabled: boolean; x: number } {
     if (!isCoveredOptionsStrategy(pStrategyCode) && !isOptionsScalperStrategy(pStrategyCode)) {
         return { enabled: false, x: 0 };
     }
-    const vRawX = Number(pUiState.closePosPnlBelowBrokerageX ?? 5);
+    const vRawX = Number(pUiState.closePosPnlAboveBrokerageX ?? 5);
     return {
-        enabled: normalizeBooleanValue(pUiState.closePosPnlBelowBrokerage, false),
+        enabled: normalizeBooleanValue(pUiState.closePosPnlAboveBrokerage, false),
         x: Number.isFinite(vRawX) && vRawX > 0 ? vRawX : 0
     };
 }
@@ -11561,11 +11561,11 @@ async function findTriggeredTrackedOptions(
         const objRowState = getNormalizedOptionRowUiState(pUiState, objPosition.strategyCode, vRowIndex);
         const vLiveTakeProfitDelta = Number(objRowState.tpD);
         const vLiveStopLossDelta = Number(objRowState.slD);
-        // "Close if Pos PnL < X of Pos Brokerage": an individual-position SL-like
+        // "Exit Pos if its PnL is > X of Brokerage": an individual-position TP-like
         // exit evaluated on this position alone, using its stored (entry-side)
-        // brokerage. Only the offending position is closed; all other open
+        // brokerage. Only the qualifying position is closed; all other open
         // positions keep running until the overall target PnL rules fire.
-        const objPosPnlCloseRule = getPosPnlBelowBrokerageCloseConfig(objPosition.strategyCode, pUiState);
+        const objPosPnlCloseRule = getPosPnlAboveBrokerageCloseConfig(objPosition.strategyCode, pUiState);
         if (objPosPnlCloseRule.enabled) {
             const vLiveExitPrice = resolveTrackedOptionLivePrice(
                 objPosition.side,
@@ -11575,7 +11575,7 @@ async function findTriggeredTrackedOptions(
             const vOpenPnl = estimateTrackedPositionPnl(objPosition, vLiveExitPrice);
             const vPosCharges = Math.max(0, Number(objPosition.charges || 0));
             const vPnlThreshold = objPosPnlCloseRule.x * vPosCharges;
-            if (Number.isFinite(vOpenPnl) && vOpenPnl < vPnlThreshold) {
+            if (Number.isFinite(vOpenPnl) && vOpenPnl > vPnlThreshold) {
                 arrTriggered.push({
                     position: objPosition,
                     currentDelta: vCurrentDelta,
