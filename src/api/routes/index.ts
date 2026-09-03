@@ -44,54 +44,65 @@ import {
     calculateStrangleOptionsRecommendedStartQty,
     calculateOptionsScalperRecommendedStartQty,
     calculateStrangleDemoRecommendedStartQty,
+    calculateStraddleDemoRecommendedStartQty,
     checkRollingFuturesLtDualConnection,
     checkCoveredOptionsConnection,
     checkRenkoOptionsConnection,
     checkStrangleOptionsConnection,
     checkOptionsScalperConnection,
     checkStrangleDemoConnection,
+    checkStraddleDemoConnection,
     calculateRollingFuturesLtDualRecommendedStartQty,
     clearCoveredOptionsEventsController,
     clearRenkoOptionsEventsController,
     clearStrangleOptionsEventsController,
     clearOptionsScalperEventsController,
     clearStrangleDemoEventsController,
+    clearStraddleDemoEventsController,
     clearOptionsScalperClosedPositions,
     clearStrangleDemoClosedPositions,
+    clearStraddleDemoClosedPositions,
     deleteOptionsScalperClosedPosition,
     deleteStrangleDemoClosedPosition,
+    deleteStraddleDemoClosedPosition,
     updateOptionsScalperClosedPosition,
     updateStrangleDemoClosedPosition,
+    updateStraddleDemoClosedPosition,
     clearRollingFuturesLtDualEventsController,
     closeCoveredOptionsImportedOpenPosition,
     closeRenkoOptionsImportedOpenPosition,
     closeStrangleOptionsImportedOpenPosition,
     closeOptionsScalperImportedOpenPosition,
     closeStrangleDemoImportedOpenPosition,
+    closeStraddleDemoImportedOpenPosition,
     deleteRollingFuturesLtDualEventController,
     deleteCoveredOptionsEventController,
     deleteRenkoOptionsEventController,
     deleteStrangleOptionsEventController,
     deleteOptionsScalperEventController,
     deleteStrangleDemoEventController,
+    deleteStraddleDemoEventController,
     closeRollingFuturesLtDualImportedOpenPosition,
     deleteCoveredOptionsOpenPosition,
     deleteRenkoOptionsOpenPosition,
     deleteStrangleOptionsOpenPosition,
     deleteOptionsScalperOpenPosition,
     deleteStrangleDemoOpenPosition,
+    deleteStraddleDemoOpenPosition,
     deleteRollingFuturesLtDualOpenPosition,
     disableCoveredOptionsAutoTrader,
     disableRenkoOptionsAutoTrader,
     disableStrangleOptionsAutoTrader,
     disableOptionsScalperAutoTrader,
     disableStrangleDemoAutoTrader,
+    disableStraddleDemoAutoTrader,
     disableRollingFuturesLtDualAutoTrader,
     enableCoveredOptionsAutoTrader,
     enableRenkoOptionsAutoTrader,
     enableStrangleOptionsAutoTrader,
     enableOptionsScalperAutoTrader,
     enableStrangleDemoAutoTrader,
+    enableStraddleDemoAutoTrader,
     enableRollingFuturesLtDualAutoTrader,
     executeCoveredOptionsKillSwitch,
     executeRenkoOptionsKillSwitch,
@@ -111,14 +122,19 @@ import {
     executeStrangleOptionsStrategy,
     executeOptionsScalperKillSwitch,
     executeStrangleDemoKillSwitch,
+    executeStraddleDemoKillSwitch,
     confirmOptionsScalperLiveAction,
     confirmStrangleDemoLiveAction,
+    confirmStraddleDemoLiveAction,
     executeOptionsScalperManualFuture,
     executeOptionsScalperManualOption,
     executeOptionsScalperStrategy,
     executeStrangleDemoManualFuture,
     executeStrangleDemoManualOption,
     executeStrangleDemoStrategy,
+    executeStraddleDemoManualFuture,
+    executeStraddleDemoManualOption,
+    executeStraddleDemoStrategy,
     executeRollingFuturesLtDualKillSwitch,
     executeRollingFuturesLtDualManualFuture,
     executeRollingFuturesLtDualManualOption,
@@ -151,21 +167,29 @@ import {
     getStrangleOptionsRuntimeStatus,
     getOptionsScalperAccountSummary,
     getStrangleDemoAccountSummary,
+    getStraddleDemoAccountSummary,
     getOptionsScalperIndicator,
     getOptionsScalperClosedPositions,
     getStrangleDemoClosedPositions,
+    getStraddleDemoClosedPositions,
     getOptionsScalperConnectionStatus,
     getStrangleDemoConnectionStatus,
+    getStraddleDemoConnectionStatus,
     getOptionsScalperEvents,
     getStrangleDemoEvents,
+    getStraddleDemoEvents,
     getOptionsScalperImportableOpenPositions,
     getStrangleDemoImportableOpenPositions,
+    getStraddleDemoImportableOpenPositions,
     getOptionsScalperOpenPositions,
     getStrangleDemoOpenPositions,
+    getStraddleDemoOpenPositions,
     getOptionsScalperProfile,
     getStrangleDemoProfile,
+    getStraddleDemoProfile,
     getOptionsScalperRuntimeStatus,
     getStrangleDemoRuntimeStatus,
+    getStraddleDemoRuntimeStatus,
     getOptionsScalperRsiStatus,
     setOptionsScalperRenkoManualSignal,
     listCoveredOptionsVerifierRunningUsers,
@@ -187,12 +211,14 @@ import {
     recalculateStrangleOptionsRecoveryTotalPnl,
     recalculateOptionsScalperRecoveryTotalPnl,
     recalculateStrangleDemoRecoveryTotalPnl,
+    recalculateStraddleDemoRecoveryTotalPnl,
     recalculateRollingFuturesLtDualRecoveryTotalPnl,
     updateCoveredOptionsRecoveryMetrics,
     updateRenkoOptionsRecoveryMetrics,
     updateStrangleOptionsRecoveryMetrics,
     updateOptionsScalperRecoveryMetrics,
     updateStrangleDemoRecoveryMetrics,
+    updateStraddleDemoRecoveryMetrics,
     updateRollingFuturesLtDualRecoveryMetrics,
     reconcileCoveredOptionsOpenPositions,
     rejectCoveredOptionsLiveAction,
@@ -202,8 +228,10 @@ import {
     reconcileStrangleOptionsOpenPositions,
     rejectOptionsScalperLiveAction,
     rejectStrangleDemoLiveAction,
+    rejectStraddleDemoLiveAction,
     reconcileOptionsScalperOpenPositions,
     reconcileStrangleDemoOpenPositions,
+    reconcileStraddleDemoOpenPositions,
     reconcileRollingFuturesLtDualOpenPositions,
     saveCoveredOptionsOpenPositions,
     saveCoveredOptionsProfile,
@@ -214,7 +242,9 @@ import {
     saveOptionsScalperOpenPositions,
     saveOptionsScalperProfile,
     saveStrangleDemoOpenPositions,
+    saveStraddleDemoOpenPositions,
     saveStrangleDemoProfile,
+    saveStraddleDemoProfile,
     saveRollingFuturesLtDualOpenPositions,
     saveRollingFuturesLtDualProfile,
     clearCoveredOptionsOpenPositions,
@@ -222,6 +252,7 @@ import {
     clearStrangleOptionsOpenPositions,
     clearOptionsScalperOpenPositions,
     clearStrangleDemoOpenPositions,
+    clearStraddleDemoOpenPositions,
     listAdminPendingCoveredLikeLiveActions,
     confirmAdminPendingCoveredLikeLiveAction,
     rejectAdminPendingCoveredLikeLiveAction,
@@ -871,6 +902,101 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/strangle-demo/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await clearStrangleDemoEventsController(req, res);
+    });
+
+    // Straddle Demo routes (Delta Exchange only)
+    objRouter.get("/straddle-demo/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStraddleDemoProfile(req, res);
+    });
+    objRouter.post("/straddle-demo/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveStraddleDemoProfile(req, res);
+    });
+    objRouter.get("/straddle-demo/connection/status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStraddleDemoConnectionStatus(req, res);
+    });
+    objRouter.get("/straddle-demo/runtime", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStraddleDemoRuntimeStatus(req, res);
+    });
+    objRouter.post("/straddle-demo/connection/check", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await checkStraddleDemoConnection(req, res);
+    });
+    objRouter.post("/straddle-demo/auto-trader/start", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await enableStraddleDemoAutoTrader(req, res);
+    });
+    objRouter.post("/straddle-demo/auto-trader/stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await disableStraddleDemoAutoTrader(req, res);
+    });
+    objRouter.get("/straddle-demo/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStraddleDemoAccountSummary(req, res);
+    });
+    objRouter.post("/straddle-demo/start-qty/calculate", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await calculateStraddleDemoRecommendedStartQty(req, res);
+    });
+    objRouter.post("/straddle-demo/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeStraddleDemoManualFuture(req, res);
+    });
+    objRouter.post("/straddle-demo/manual/option", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeStraddleDemoManualOption(req, res);
+    });
+    objRouter.post("/straddle-demo/strategy/execute", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeStraddleDemoStrategy(req, res);
+    });
+    objRouter.post("/straddle-demo/live-action/confirm", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await confirmStraddleDemoLiveAction(req, res);
+    });
+    objRouter.post("/straddle-demo/live-action/reject", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await rejectStraddleDemoLiveAction(req, res);
+    });
+    objRouter.get("/straddle-demo/open-positions/importable", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStraddleDemoImportableOpenPositions(req, res);
+    });
+    objRouter.get("/straddle-demo/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStraddleDemoOpenPositions(req, res);
+    });
+    objRouter.post("/straddle-demo/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveStraddleDemoOpenPositions(req, res);
+    });
+    objRouter.post("/straddle-demo/open-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteStraddleDemoOpenPosition(req, res);
+    });
+    objRouter.post("/straddle-demo/open-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearStraddleDemoOpenPositions(req, res);
+    });
+    objRouter.post("/straddle-demo/open-positions/reconcile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await reconcileStraddleDemoOpenPositions(req, res);
+    });
+    objRouter.post("/straddle-demo/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await closeStraddleDemoImportedOpenPosition(req, res);
+    });
+    objRouter.post("/straddle-demo/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeStraddleDemoKillSwitch(req, res);
+    });
+    objRouter.post("/straddle-demo/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateStraddleDemoRecoveryMetrics(req, res);
+    });
+    objRouter.post("/straddle-demo/metrics/recalculate-total-pnl", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await recalculateStraddleDemoRecoveryTotalPnl(req, res);
+    });
+    objRouter.get("/straddle-demo/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStraddleDemoClosedPositions(req, res);
+    });
+    objRouter.post("/straddle-demo/closed-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearStraddleDemoClosedPositions(req, res);
+    });
+    objRouter.post("/straddle-demo/closed-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteStraddleDemoClosedPosition(req, res);
+    });
+    objRouter.post("/straddle-demo/closed-positions/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateStraddleDemoClosedPosition(req, res);
+    });
+    objRouter.get("/straddle-demo/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getStraddleDemoEvents(req, res);
+    });
+    objRouter.post("/straddle-demo/events/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteStraddleDemoEventController(req, res);
+    });
+    objRouter.post("/straddle-demo/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearStraddleDemoEventsController(req, res);
     });
 
     return objRouter;

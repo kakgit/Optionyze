@@ -674,6 +674,68 @@
                         </button>
                     </div>
                 </div>
+                <% if (bIsStrangleDemoPage) { %>
+                    <div class="rolling-demo-open-source-head">
+                        <h3>CoinSwitch Open Positions</h3>
+                        <span class="rolling-demo-open-source-count" id="rollingDualFuturesOpenCountCoinswitch">0</span>
+                    </div>
+                    <div class="rolling-demo-table-wrap">
+                        <table class="rolling-demo-table rolling-demo-table-open">
+                            <thead>
+                                <tr>
+                                    <th>Delta</th>
+                                    <th>Theta</th>
+                                    <th>Symbol</th>
+                                    <th>Side</th>
+                                    <th>Lot Sz</th>
+                                    <th>Qty</th>
+                                    <th>Buy Price</th>
+                                    <th>Sell Price</th>
+                                    <th>LTP</th>
+                                    <th>Charges</th>
+                                    <th>P &amp; L</th>
+                                    <th>Start DT</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rollingDualFuturesOpenPositionsBodyCoinswitch">
+                                <tr>
+                                    <td colspan="13" class="rolling-demo-empty">No CoinSwitch demo positions are currently shown.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="rolling-demo-open-source-head">
+                        <h3>Delta Exchange Open Positions</h3>
+                        <span class="rolling-demo-open-source-count" id="rollingDualFuturesOpenCountDelta">0</span>
+                    </div>
+                    <div class="rolling-demo-table-wrap">
+                        <table class="rolling-demo-table rolling-demo-table-open">
+                            <thead>
+                                <tr>
+                                    <th>Delta</th>
+                                    <th>Theta</th>
+                                    <th>Symbol</th>
+                                    <th>Side</th>
+                                    <th>Lot Sz</th>
+                                    <th>Qty</th>
+                                    <th>Buy Price</th>
+                                    <th>Sell Price</th>
+                                    <th>LTP</th>
+                                    <th>Charges</th>
+                                    <th>P &amp; L</th>
+                                    <th>Start DT</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rollingDualFuturesOpenPositionsBodyDelta">
+                                <tr>
+                                    <td colspan="13" class="rolling-demo-empty">No Delta Exchange demo positions are currently shown.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                <% } else { %>
                 <div class="rolling-demo-table-wrap">
                     <table class="rolling-demo-table rolling-demo-table-open">
                         <thead>
@@ -714,6 +776,7 @@
                         </svg>
                     </button>
                 </div>
+                <% } %>
             </div>
 
             <div class="app-panel rolling-demo-card">

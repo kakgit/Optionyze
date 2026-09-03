@@ -52,6 +52,16 @@ import {
     getLiveMarketSnapshot,
     getLiveOptionTicker
 } from "../../strategies/rolling-options-pt-de/market-data";
+import {
+    formatCoinSwitchExpiryLabel,
+    getCoinSwitchLotSizeForSymbol,
+    getCoinSwitchLotSizeForUnderlying,
+    listCoinSwitchOptionChainRoundedToFiveHundred,
+    listCoinSwitchOptionChainRoundedToThousand,
+    listCoinSwitchOptionsDeliveryTimes,
+    listCoinSwitchTickersBySymbol
+} from "../../services/coinswitch-options-client";
+import { listDeltaOptionChainRoundedToFiveHundred, listDeltaOptionChainRoundedToThousand } from "../../services/delta-options-client";
 import { getServerId, getStrategyLeaseDurationMs } from "../../runtime/server-runtime";
 import {
     acquireStrategyLease,
@@ -156,7 +166,8 @@ const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
     "strangle-options": "Strangle Options",
     "renko-options": "Renko Options",
     "options-scalper": "Options Demo",
-    "strangle-demo": "Strangle Demo"
+    "strangle-demo": "Strangle Demo",
+    "straddle-demo": "Straddle Demo"
 };
 const gFutureLimitRetryDelayMs = 5000;
 const gFutureLimitRetryCount = 5;
@@ -327,6 +338,7 @@ interface RollingFuturesLtEnrichedPositionRecord extends RollingFuturesLtImporte
     bestBid: number | null;
     bestAsk: number | null;
     markPriceSource: "best_bid" | "best_ask" | "mark_price" | "unavailable" | "stored_price";
+    chainSource: "coinswitch" | "delta";
     greeks: RollingFuturesLtPositionGreeks;
 }
 
@@ -371,6 +383,10 @@ interface RollingFuturesLtNeutralStatus {
 interface RollingFuturesLtOpenPositionsPayload {
     positions: RollingFuturesLtEnrichedPositionRecord[];
     totals: RollingFuturesLtOpenPositionTotals;
+    sourceTotals: {
+        coinswitch: RollingFuturesLtOpenPositionTotals;
+        delta: RollingFuturesLtOpenPositionTotals;
+    };
     neutralStatus: RollingFuturesLtNeutralStatus;
     closedFromDate: string;
     recoveryMetrics: {
@@ -412,6 +428,9 @@ interface RollingFuturesLtRecommendedStartQty {
 
 interface RollingFuturesLtOptionMetadata {
     rowIndex?: number;
+    chainSource?: "coinswitch" | "delta";
+    sourceLotSize?: number;
+    equalizedLotFactor?: number;
     baseDelta?: number;
     baseTheta?: number;
     manualTraderDelta?: number;
@@ -490,11 +509,12 @@ function isCoveredLikeStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boo
         || pStrategyCode === "strangle-options"
         || pStrategyCode === "renko-options"
         || pStrategyCode === "options-scalper"
-        || pStrategyCode === "strangle-demo";
+        || pStrategyCode === "strangle-demo"
+        || pStrategyCode === "straddle-demo";
 }
 
 function isOptionsScalperStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "options-scalper" || pStrategyCode === "strangle-demo";
+    return pStrategyCode === "options-scalper" || pStrategyCode === "strangle-demo" || pStrategyCode === "straddle-demo";
 }
 
 function usesOptionsDemoManualTraderSettings(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
@@ -510,7 +530,7 @@ function supportsRenkoSettingsStrategy(pStrategyCode: RollingFuturesLtStrategyCo
 }
 
 function isStrangleOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "strangle-options" || pStrategyCode === "strangle-demo" || pStrategyCode === "renko-options";
+    return pStrategyCode === "strangle-options" || pStrategyCode === "strangle-demo" || pStrategyCode === "renko-options" || pStrategyCode === "straddle-demo";
 }
 
 function isCoveredOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
@@ -528,6 +548,9 @@ function getCoveredLikeStrategyLabel(pStrategyCode: RollingFuturesLtStrategyCode
     if (pStrategyCode === "strangle-demo") {
         return "Strangle Demo";
     }
+    if (pStrategyCode === "straddle-demo") {
+        return "Straddle Demo";
+    }
     return pStrategyCode === "strangle-options" ? "Strangle Options" : "Covered Options";
 }
 
@@ -537,6 +560,9 @@ function getCoveredLikeLowerLabel(pStrategyCode: RollingFuturesLtStrategyCode): 
     }
     if (pStrategyCode === "strangle-demo") {
         return "strangle demo";
+    }
+    if (pStrategyCode === "straddle-demo") {
+        return "straddle demo";
     }
     return pStrategyCode === "strangle-options" ? "strangle" : "covered";
 }
@@ -548,6 +574,9 @@ function getCoveredLikeLegText(pStrategyCode: RollingFuturesLtStrategyCode): str
     if (pStrategyCode === "strangle-demo") {
         return "strangle demo leg";
     }
+    if (pStrategyCode === "straddle-demo") {
+        return "straddle demo leg";
+    }
     return pStrategyCode === "strangle-options" ? "strangle leg" : "covered leg";
 }
 
@@ -557,6 +586,9 @@ function getCoveredLikePositionText(pStrategyCode: RollingFuturesLtStrategyCode)
     }
     if (pStrategyCode === "strangle-demo") {
         return "strangle demo position";
+    }
+    if (pStrategyCode === "straddle-demo") {
+        return "straddle demo position";
     }
     return pStrategyCode === "strangle-options" ? "strangle position" : "covered position";
 }
@@ -582,7 +614,8 @@ function normalizeExecStrategyInput(
     pExpiryMode: string,
     pExpiryDate: unknown,
     pQty: unknown,
-    pTargetDelta: unknown
+    pTargetDelta: unknown,
+    pRequestedStrikes?: unknown
 ): {
     action: "buy" | "sell";
     symbol: "BTC" | "ETH";
@@ -592,6 +625,7 @@ function normalizeExecStrategyInput(
     qty: number;
     targetDelta: number;
     rowIndex?: 1 | 2;
+    requestedStrikes?: Array<{ side: "ce" | "pe"; strike: number }>;
 } {
     const vAction = String(pAction || "").trim().toLowerCase();
     const vSymbol = normalizeSymbolValue(pSymbol);
@@ -600,6 +634,19 @@ function normalizeExecStrategyInput(
     const vExpiryDate = normalizeRollingFuturesExpiryDate(vExpiryMode, pExpiryDate);
     const vQty = Math.max(1, Math.floor(Number(pQty || 1)));
     const vTargetDelta = Math.max(0, Number(pTargetDelta || 0.53));
+    const vRequestedStrikes = Array.isArray(pRequestedStrikes)
+        ? (pRequestedStrikes as Array<Record<string, unknown>>)
+            .map((objEntry) => {
+                const objItem = objEntry && typeof objEntry === "object" ? objEntry : {};
+                const vSide = String(objItem.side || "").trim().toLowerCase();
+                const vStrike = Math.round(Math.abs(Number(objItem.strike)) / 1000) * 1000;
+                if ((vSide !== "ce" && vSide !== "pe") || !(vStrike > 0)) {
+                    return null;
+                }
+                return { side: vSide as "ce" | "pe", strike: vStrike };
+            })
+            .filter((objEntry): objEntry is { side: "ce" | "pe"; strike: number } => objEntry !== null)
+        : undefined;
 
     return {
         action: vAction === "buy" ? "buy" : "sell",
@@ -608,8 +655,23 @@ function normalizeExecStrategyInput(
         expiryMode: ["1", "2", "4", "5", "6", "7"].includes(vExpiryMode) ? vExpiryMode : "5",
         expiryDate: vExpiryDate,
         qty: vQty,
-        targetDelta: vTargetDelta
+        targetDelta: vTargetDelta,
+        ...(vRequestedStrikes?.length ? { requestedStrikes: vRequestedStrikes } : {})
     };
+}
+
+function resolveRequestedStrikeForLeg(
+    pRequestedStrikes: Array<{ side: "ce" | "pe"; strike: number }> | undefined,
+    pLegSide: "ce" | "pe"
+): number | undefined {
+    if (!Array.isArray(pRequestedStrikes)) {
+        return undefined;
+    }
+    const vLeg = pLegSide === "pe" ? "pe" : "ce";
+    const objExact = pRequestedStrikes.find((objEntry) => objEntry.side === vLeg && Number(objEntry.strike) > 0);
+    const objFallback = objExact || pRequestedStrikes.find((objEntry) => Number(objEntry.strike) > 0);
+    const vStrike = Number(objFallback?.strike);
+    return Number.isFinite(vStrike) && vStrike > 0 ? Math.round(vStrike / 500) * 500 : undefined;
 }
 
 function getCoveredMultiplierMin(pStrategyCode: RollingFuturesLtStrategyCode): number {
@@ -668,6 +730,7 @@ async function runExecStrategyPlacement(
         qty: number;
         targetDelta: number;
         rowIndex?: 1 | 2;
+        requestedStrikes?: Array<{ side: "ce" | "pe"; strike: number }>;
     },
     pReason: "exec_strategy" | "admin_exec_strategy"
 ): Promise<{
@@ -698,7 +761,21 @@ async function runExecStrategyPlacement(
             pStrategyCode,
             pSelectedApiProfileId,
             pProfile,
-            pInput
+            pInput,
+            {
+                // Strangle Demo Exec Strategy: Row 1 picks its paper contract from
+                // the CoinSwitch option chain and Row 2 from the Delta Exchange
+                // option chain, matching the strike placed on Row 1. Every other
+                // strategy keeps the live Delta lookup.
+                strangleDemoChainSource: pStrategyCode === "strangle-demo"
+                    ? (normalizeOptionRowIndex(pStrategyCode, pInput.rowIndex) === 2 ? "delta" as const : "coinswitch" as const)
+                    : undefined,
+                strangleDemoRequestedStrikes: pStrategyCode === "strangle-demo"
+                    && Array.isArray(pInput.requestedStrikes)
+                    && pInput.requestedStrikes.length
+                    ? pInput.requestedStrikes
+                    : undefined
+            }
         );
 
         await logFuturesEvent(
@@ -1476,6 +1553,17 @@ function getContractNameForSymbol(pSymbol: string): string {
 
 function getLotSizeForSymbol(pSymbol: string): number {
     return String(pSymbol || "").trim().toUpperCase() === "ETH" ? 0.01 : 0.001;
+}
+
+function resolveTrackedPositionTradingLotSize(
+    pPosition: Pick<RollingFuturesLtImportedPositionRecord, "contractName"> & { metadata?: RollingFuturesLtImportedPositionRecord["metadata"] }
+): number {
+    const objMetadata = getTrackedOptionMetadata(pPosition as RollingFuturesLtImportedPositionRecord);
+    if (resolveTrackedPositionChainSource(pPosition as RollingFuturesLtImportedPositionRecord) === "coinswitch"
+        && Number(objMetadata.sourceLotSize) > 0) {
+        return Number(objMetadata.sourceLotSize);
+    }
+    return getLotSizeForSymbol(String(pPosition.contractName || "").includes("ETH") ? "ETH" : "BTC");
 }
 
 function formatIsoDateFromParts(pYear: number, pMonthIndex: number, pDay: number): string {
@@ -2747,6 +2835,32 @@ function getTrackedOptionMetadata(pPosition: RollingFuturesLtImportedPositionRec
         : {};
 }
 
+function resolveTrackedPositionChainSource(
+    pPosition: RollingFuturesLtImportedPositionRecord,
+    pStrategyCode: RollingFuturesLtStrategyCode | "" = ""
+): "coinswitch" | "delta" {
+    const objMetadata = getTrackedOptionMetadata(pPosition);
+    const vConfiguredSource = String(objMetadata.chainSource || "").trim().toLowerCase();
+    if (vConfiguredSource === "coinswitch" || vConfiguredSource === "delta") {
+        return vConfiguredSource;
+    }
+    const vStrategyCode = String(pPosition.strategyCode || pStrategyCode || "").trim().toLowerCase();
+    if (vStrategyCode === "strangle-demo") {
+        if (Number(objMetadata.rowIndex) === 1) {
+            return "coinswitch";
+        }
+        if (Number(objMetadata.rowIndex) === 2) {
+            return "delta";
+        }
+    }
+    // CoinSwitch paper contracts carry the -USDT suffix (e.g. BTC-3SEP26-76000-P-USDT);
+    // Delta Exchange contracts never do.
+    if (isOptionContractSymbol(pPosition.contractName) && /-usdt$/i.test(String(pPosition.contractName || "").trim())) {
+        return "coinswitch";
+    }
+    return "delta";
+}
+
 function buildInactiveTrackedPosition(
     pPosition: RollingFuturesLtImportedPositionRecord,
     pClosedPosition: OptionsScalperPaperClosedPositionRecord,
@@ -3274,6 +3388,9 @@ function getSignedOptionBaseDelta(pContractName: unknown, pDeltaValue: unknown):
 function optionMetadataToRecord(pMetadata: RollingFuturesLtOptionMetadata): Record<string, unknown> {
     return {
         rowIndex: pMetadata.rowIndex,
+        chainSource: pMetadata.chainSource === "coinswitch" || pMetadata.chainSource === "delta" ? pMetadata.chainSource : undefined,
+        sourceLotSize: Number(pMetadata.sourceLotSize) > 0 ? Number(pMetadata.sourceLotSize) : undefined,
+        equalizedLotFactor: Number(pMetadata.equalizedLotFactor) > 1 ? Number(pMetadata.equalizedLotFactor) : undefined,
         baseDelta: pMetadata.baseDelta,
         baseTheta: pMetadata.baseTheta,
         manualTraderDelta: pMetadata.manualTraderDelta,
@@ -5602,16 +5719,72 @@ async function enrichTrackedOpenPositions(
 ): Promise<{
     positions: RollingFuturesLtEnrichedPositionRecord[];
     totals: RollingFuturesLtOpenPositionTotals;
+    sourceTotals: {
+        coinswitch: RollingFuturesLtOpenPositionTotals;
+        delta: RollingFuturesLtOpenPositionTotals;
+    };
 }> {
     const arrPositions = Array.isArray(pPositions) ? pPositions : [];
-    const arrOptionContracts = arrPositions
+    const objChainSourceByPosition = new Map<RollingFuturesLtImportedPositionRecord, "coinswitch" | "delta">();
+    for (const objRow of arrPositions) {
+        objChainSourceByPosition.set(objRow, resolveTrackedPositionChainSource(objRow, pStrategyCode));
+    }
+    const arrDeltaOptionContracts = arrPositions
         .filter((objRow) => isOptionContractSymbol(objRow.contractName))
+        .filter((objRow) => objChainSourceByPosition.get(objRow) !== "coinswitch")
         .map((objRow) => String(objRow.contractName || "").trim())
         .filter(Boolean);
     const objTickerByContract = new Map<string, Awaited<ReturnType<typeof getLiveOptionTicker>>>();
-    await Promise.all(arrOptionContracts.map(async (pContractName) => {
+    await Promise.all(arrDeltaOptionContracts.map(async (pContractName) => {
         objTickerByContract.set(pContractName, await getLiveOptionTicker(pContractName));
     }));
+    // CoinSwitch paper positions are priced from the CoinSwitch option ticker feed
+    // (the same cached feed the CoinSwitch-Delta compare page uses). Delta Exchange
+    // contracts keep the live Delta ticker lookup.
+    const objCoinSwitchTickerByContract = new Map<string, NonNullable<Awaited<ReturnType<typeof getLiveOptionTicker>>>>();
+    const arrCoinSwitchOptionContracts = Array.from(new Set(
+        arrPositions
+            .filter((objRow) => isOptionContractSymbol(objRow.contractName))
+            .filter((objRow) => objChainSourceByPosition.get(objRow) === "coinswitch")
+            .map((objRow) => String(objRow.contractName || "").trim())
+            .filter(Boolean)
+    ));
+    if (arrCoinSwitchOptionContracts.length) {
+        try {
+            const mapCoinSwitchTickers = await listCoinSwitchTickersBySymbol();
+            for (const vContractName of arrCoinSwitchOptionContracts) {
+                const objTickerRow = mapCoinSwitchTickers.get(vContractName.toUpperCase());
+                if (!objTickerRow) {
+                    continue;
+                }
+                const vBestBid = Number(objTickerRow.bid1Price);
+                const vBestAsk = Number(objTickerRow.ask1Price);
+                const vMarkPrice = Number(objTickerRow.markPrice);
+                const vDelta = Number(objTickerRow.delta);
+                const vGamma = Number(objTickerRow.gamma);
+                const vTheta = Number(objTickerRow.theta);
+                const vVega = Number(objTickerRow.vega);
+                objCoinSwitchTickerByContract.set(vContractName.toUpperCase(), {
+                    contractSymbol: vContractName,
+                    optionSide: inferTrackedOptionLegSide(vContractName) === "pe" ? "PE" : "CE",
+                    strike: 0,
+                    markPrice: Number.isFinite(vMarkPrice) && vMarkPrice > 0 ? vMarkPrice : 0,
+                    bestBid: Number.isFinite(vBestBid) && vBestBid > 0 ? vBestBid : null,
+                    bestAsk: Number.isFinite(vBestAsk) && vBestAsk > 0 ? vBestAsk : null,
+                    delta: Number.isFinite(vDelta) ? vDelta : Number.NaN,
+                    gamma: Number.isFinite(vGamma) ? vGamma : Number.NaN,
+                    theta: Number.isFinite(vTheta) ? vTheta : Number.NaN,
+                    vega: Number.isFinite(vVega) ? vVega : Number.NaN,
+                    expiryDate: "",
+                    requestedExpiryDate: "",
+                    usedNextDayFallback: false
+                });
+            }
+        }
+        catch (_objError) {
+            // CoinSwitch ticker feed unavailable: positions fall back to stored prices.
+        }
+    }
     const arrUnderlyingSymbols = Array.from(new Set(
         arrPositions.map((objRow) => normalizeSymbolValue(String(objRow.contractName || "").includes("ETH") ? "ETH" : "BTC"))
     ));
@@ -5640,7 +5813,7 @@ async function enrichTrackedOpenPositions(
         return pMap;
     }, new Map<string, number>());
 
-    const objTotals: RollingFuturesLtOpenPositionTotals = {
+    const createEmptyOpenPositionTotals = (): RollingFuturesLtOpenPositionTotals => ({
         totalDeltaPerContract: 0,
         totalDelta: 0,
         totalDeltaDisplayPerContract: 0,
@@ -5660,6 +5833,11 @@ async function enrichTrackedOpenPositions(
         positionCount: 0,
         ceQty: 0,
         peQty: 0
+    });
+    const objTotals = createEmptyOpenPositionTotals();
+    const objSourceTotals = {
+        coinswitch: createEmptyOpenPositionTotals(),
+        delta: createEmptyOpenPositionTotals()
     };
 
     const arrEnriched = arrPositions.map((objPosition) => {
@@ -5667,7 +5845,12 @@ async function enrichTrackedOpenPositions(
         const vQty = Math.max(0, Number(objPosition.qty || 0));
         const vSideMultiplier = String(objPosition.side || "").trim().toUpperCase() === "SELL" ? -1 : 1;
         const bIsFuture = isFutureContractSymbol(vContractName);
-        const objTicker = bIsFuture ? null : (objTickerByContract.get(vContractName) || null);
+        const vChainSource = objChainSourceByPosition.get(objPosition) || "delta";
+        const objTicker = bIsFuture
+            ? null
+            : (vChainSource === "coinswitch"
+                ? (objCoinSwitchTickerByContract.get(vContractName.toUpperCase()) || null)
+                : (objTickerByContract.get(vContractName) || null));
         const objMetadata = getTrackedOptionMetadata(objPosition);
         const vTickerBestBid = Number(objTicker?.bestBid);
         const vTickerBestAsk = Number(objTicker?.bestAsk);
@@ -5697,7 +5880,9 @@ async function enrichTrackedOpenPositions(
                     ? vTickerBestBid
                     : (vLtpPriceSource === "mark_price" ? vTickerMarkPrice : Number.NaN)));
         const vPositionSymbol = normalizeSymbolValue(vContractName.includes("ETH") ? "ETH" : "BTC");
-        const vLotSize = getLotSizeForSymbol(vPositionSymbol);
+        const vLotSize = vChainSource === "coinswitch" && Number(objMetadata.sourceLotSize) > 0
+            ? Number(objMetadata.sourceLotSize)
+            : getLotSizeForSymbol(vPositionSymbol);
         const vUnderlyingPrice = Number(objUnderlyingPriceBySymbol.get(vPositionSymbol) || 0);
         const vThetaPerContractScaled = bInactivePosition
             ? 0
@@ -5764,34 +5949,38 @@ async function enrichTrackedOpenPositions(
             vegaTotal: Number(((bInactivePosition ? 0 : (vSideMultiplier * (Number.isFinite(vVegaRaw) ? vVegaRaw : 0)))).toFixed(6))
         };
 
-        objTotals.totalDeltaPerContract += objGreeks.deltaPerContract;
-        objTotals.totalDelta += objGreeks.deltaTotal;
-        objTotals.totalDeltaDisplayPerContract += objGreeks.deltaDisplayPerContract;
-        objTotals.totalDeltaDisplay += objGreeks.deltaDisplayTotal;
-        objTotals.totalGammaPerContract += objGreeks.gammaPerContract;
-        objTotals.totalGamma += objGreeks.gammaTotal;
-        objTotals.totalThetaPerContract += objGreeks.thetaPerContract;
-        objTotals.totalTheta += objGreeks.thetaTotal;
-        objTotals.totalThetaDisplay += objGreeks.thetaDisplayTotal;
-        objTotals.totalThetaBaseDisplay += objGreeks.thetaBaseDisplayTotal;
-        objTotals.totalVegaPerContract += objGreeks.vegaPerContract;
-        objTotals.totalVega += objGreeks.vegaTotal;
-        objTotals.totalCharges += vCharges;
-        objTotals.totalPnl += vPnl;
-        objTotals.totalMargin += vPositionMargin;
-        if (!bInactivePosition) {
-            objTotals.totalQty += vQty;
-        }
-        objTotals.positionCount += 1;
-        if (!bInactivePosition && !bIsFuture) {
-            const vLegSide = inferTrackedOptionLegSide(vContractName);
-            if (vLegSide === "pe") {
-                objTotals.peQty += vQty;
+        const accumulateTotals = (pTarget: RollingFuturesLtOpenPositionTotals): void => {
+            pTarget.totalDeltaPerContract += objGreeks.deltaPerContract;
+            pTarget.totalDelta += objGreeks.deltaTotal;
+            pTarget.totalDeltaDisplayPerContract += objGreeks.deltaDisplayPerContract;
+            pTarget.totalDeltaDisplay += objGreeks.deltaDisplayTotal;
+            pTarget.totalGammaPerContract += objGreeks.gammaPerContract;
+            pTarget.totalGamma += objGreeks.gammaTotal;
+            pTarget.totalThetaPerContract += objGreeks.thetaPerContract;
+            pTarget.totalTheta += objGreeks.thetaTotal;
+            pTarget.totalThetaDisplay += objGreeks.thetaDisplayTotal;
+            pTarget.totalThetaBaseDisplay += objGreeks.thetaBaseDisplayTotal;
+            pTarget.totalVegaPerContract += objGreeks.vegaPerContract;
+            pTarget.totalVega += objGreeks.vegaTotal;
+            pTarget.totalCharges += vCharges;
+            pTarget.totalPnl += vPnl;
+            pTarget.totalMargin += vPositionMargin;
+            if (!bInactivePosition) {
+                pTarget.totalQty += vQty;
             }
-            else {
-                objTotals.ceQty += vQty;
+            pTarget.positionCount += 1;
+            if (!bInactivePosition && !bIsFuture) {
+                const vLegSide = inferTrackedOptionLegSide(vContractName);
+                if (vLegSide === "pe") {
+                    pTarget.peQty += vQty;
+                }
+                else {
+                    pTarget.ceQty += vQty;
+                }
             }
-        }
+        };
+        accumulateTotals(objTotals);
+        accumulateTotals(vChainSource === "coinswitch" ? objSourceTotals.coinswitch : objSourceTotals.delta);
 
         return {
             ...objPosition,
@@ -5802,6 +5991,7 @@ async function enrichTrackedOpenPositions(
             bestBid: Number.isFinite(vTickerBestBid) && vTickerBestBid > 0 ? vTickerBestBid : null,
             bestAsk: Number.isFinite(vTickerBestAsk) && vTickerBestAsk > 0 ? vTickerBestAsk : null,
             markPriceSource: vLtpPriceSource,
+            chainSource: vChainSource,
             charges: vCharges,
             pnl: vPnl,
             margin: vPositionMargin,
@@ -5809,28 +5999,34 @@ async function enrichTrackedOpenPositions(
         } satisfies RollingFuturesLtEnrichedPositionRecord;
     });
 
-    objTotals.totalDeltaPerContract = Number(objTotals.totalDeltaPerContract.toFixed(6));
-    objTotals.totalDelta = Number(objTotals.totalDelta.toFixed(6));
-    objTotals.totalDeltaDisplayPerContract = Number(objTotals.totalDeltaDisplayPerContract.toFixed(6));
-    objTotals.totalDeltaDisplay = Number(objTotals.totalDeltaDisplay.toFixed(6));
-    objTotals.totalGammaPerContract = Number(objTotals.totalGammaPerContract.toFixed(6));
-    objTotals.totalGamma = Number(objTotals.totalGamma.toFixed(6));
-    objTotals.totalThetaPerContract = Number(objTotals.totalThetaPerContract.toFixed(6));
-    objTotals.totalTheta = Number(objTotals.totalTheta.toFixed(6));
-    objTotals.totalThetaDisplay = Number(objTotals.totalThetaDisplay.toFixed(6));
-    objTotals.totalThetaBaseDisplay = Number(objTotals.totalThetaBaseDisplay.toFixed(6));
-    objTotals.totalVegaPerContract = Number(objTotals.totalVegaPerContract.toFixed(6));
-    objTotals.totalVega = Number(objTotals.totalVega.toFixed(6));
-    objTotals.totalCharges = Number(objTotals.totalCharges.toFixed(6));
-    objTotals.totalPnl = Number(objTotals.totalPnl.toFixed(6));
-    objTotals.totalMargin = Number(objTotals.totalMargin.toFixed(6));
-    objTotals.totalQty = Number(objTotals.totalQty.toFixed(0));
-    objTotals.ceQty = Number(objTotals.ceQty.toFixed(0));
-    objTotals.peQty = Number(objTotals.peQty.toFixed(0));
+    const roundOpenPositionTotals = (pTarget: RollingFuturesLtOpenPositionTotals): void => {
+        pTarget.totalDeltaPerContract = Number(pTarget.totalDeltaPerContract.toFixed(6));
+        pTarget.totalDelta = Number(pTarget.totalDelta.toFixed(6));
+        pTarget.totalDeltaDisplayPerContract = Number(pTarget.totalDeltaDisplayPerContract.toFixed(6));
+        pTarget.totalDeltaDisplay = Number(pTarget.totalDeltaDisplay.toFixed(6));
+        pTarget.totalGammaPerContract = Number(pTarget.totalGammaPerContract.toFixed(6));
+        pTarget.totalGamma = Number(pTarget.totalGamma.toFixed(6));
+        pTarget.totalThetaPerContract = Number(pTarget.totalThetaPerContract.toFixed(6));
+        pTarget.totalTheta = Number(pTarget.totalTheta.toFixed(6));
+        pTarget.totalThetaDisplay = Number(pTarget.totalThetaDisplay.toFixed(6));
+        pTarget.totalThetaBaseDisplay = Number(pTarget.totalThetaBaseDisplay.toFixed(6));
+        pTarget.totalVegaPerContract = Number(pTarget.totalVegaPerContract.toFixed(6));
+        pTarget.totalVega = Number(pTarget.totalVega.toFixed(6));
+        pTarget.totalCharges = Number(pTarget.totalCharges.toFixed(6));
+        pTarget.totalPnl = Number(pTarget.totalPnl.toFixed(6));
+        pTarget.totalMargin = Number(pTarget.totalMargin.toFixed(6));
+        pTarget.totalQty = Number(pTarget.totalQty.toFixed(0));
+        pTarget.ceQty = Number(pTarget.ceQty.toFixed(0));
+        pTarget.peQty = Number(pTarget.peQty.toFixed(0));
+    };
+    roundOpenPositionTotals(objTotals);
+    roundOpenPositionTotals(objSourceTotals.coinswitch);
+    roundOpenPositionTotals(objSourceTotals.delta);
 
     return {
         positions: arrEnriched,
-        totals: objTotals
+        totals: objTotals,
+        sourceTotals: objSourceTotals
     };
 }
 
@@ -6077,6 +6273,7 @@ export async function buildOpenPositionsPayload(
     return {
         positions: objEnriched.positions,
         totals: objEnriched.totals,
+        sourceTotals: objEnriched.sourceTotals,
         neutralStatus: buildNeutralStatus(pStrategyCode, objUiState, objEnriched.totals, bAutoTraderActive, objRuntime),
         closedFromDate: String(objUiState.closedFromDate || "").trim(),
         recoveryMetrics: {
@@ -8279,11 +8476,14 @@ async function reconcileRemovedTrackedPositionsPnl(
 
 async function estimateTrackedPositionCharge(
     pPosition: Pick<RollingFuturesLtImportedPositionRecord, "contractName" | "qty" | "entryPrice" | "markPrice">,
-    pPriceOverride?: number
+    pPriceOverride?: number,
+    pLotSizeOverride?: number
 ): Promise<number> {
     const vContractName = String(pPosition.contractName || "").trim();
     const vSymbol = normalizeSymbolValue(vContractName.includes("ETH") ? "ETH" : "BTC");
-    const vLotSize = getLotSizeForSymbol(vSymbol);
+    const vLotSize = (Number.isFinite(Number(pLotSizeOverride)) && Number(pLotSizeOverride) > 0)
+        ? Number(pLotSizeOverride)
+        : resolveTrackedPositionTradingLotSize(pPosition as RollingFuturesLtImportedPositionRecord);
     let vUnderlyingPrice = 0;
     if (isOptionContractSymbol(vContractName)) {
         try {
@@ -8305,11 +8505,14 @@ async function estimateTrackedPositionCharge(
 
 function estimateTrackedPositionPnl(
     pPosition: Pick<RollingFuturesLtImportedPositionRecord, "contractName" | "side" | "qty" | "entryPrice" | "markPrice">,
-    pPriceOverride?: number
+    pPriceOverride?: number,
+    pLotSizeOverride?: number
 ): number {
     const vContractName = String(pPosition.contractName || "").trim();
     const vSymbol = normalizeSymbolValue(vContractName.includes("ETH") ? "ETH" : "BTC");
-    const vLotSize = getLotSizeForSymbol(vSymbol);
+    const vLotSize = (Number.isFinite(Number(pLotSizeOverride)) && Number(pLotSizeOverride) > 0)
+        ? Number(pLotSizeOverride)
+        : resolveTrackedPositionTradingLotSize(pPosition as RollingFuturesLtImportedPositionRecord);
     return calculateLivePositionPnl(
         pPosition.side,
         Number(pPosition.qty || 0),
@@ -8785,6 +8988,8 @@ async function executeStrategyPlacement(
         strategyStartedAt?: string;
         skipRecoveryReset?: boolean;
         skipNeutralityCheck?: boolean;
+        strangleDemoChainSource?: "coinswitch" | "delta";
+        strangleDemoRequestedStrikes?: Array<{ side: "ce" | "pe"; strike: number }>;
     }
 ): Promise<{
     profileLabel: string;
@@ -8850,6 +9055,8 @@ async function executeStrategyPlacement(
                     qty: pInput.qty,
                     targetDelta: pInput.targetDelta,
                     rowIndex: vRowIndex,
+                    chainSource: pOptions?.strangleDemoChainSource,
+                    requestedStrike: resolveRequestedStrikeForLeg(pOptions?.strangleDemoRequestedStrikes, vLegSide),
                     openedReason: "strategy_option_open"
                 }
             );
@@ -8859,7 +9066,7 @@ async function executeStrategyPlacement(
                 order: objPaperOpen.order,
                 request: {
                     product_symbol: objPaperOpen.position.contractName,
-                    size: pInput.qty,
+                    size: Number(objPaperOpen.position.qty || 0),
                     side: pInput.action,
                     order_type: "paper_market_order"
                 }
@@ -9297,6 +9504,147 @@ async function updateStrategyClosedFromDateAfterExec(
     });
 }
 
+function formatIsoDateAsDdMmYyyyLabel(pIsoDate: string): string {
+    const arrParts = String(pIsoDate || "").trim().split("-");
+    if (arrParts.length !== 3) {
+        return "";
+    }
+    const vYear = String(arrParts[0] || "").trim();
+    const vMonth = String(arrParts[1] || "").padStart(2, "0");
+    const vDay = String(arrParts[2] || "").padStart(2, "0");
+    if (!vYear || vMonth.length !== 2 || vDay.length !== 2) {
+        return "";
+    }
+    return `${vDay}-${vMonth}-${vYear}`;
+}
+
+async function resolveCoinSwitchDeliveryTimeForExpiry(
+    pSymbol: "BTC" | "ETH",
+    pExpiryDate: string
+): Promise<number> {
+    const vExpiryLabel = formatIsoDateAsDdMmYyyyLabel(pExpiryDate);
+    if (!vExpiryLabel) {
+        throw new Error("Select a valid expiry date before executing the Strangle Demo strategy.");
+    }
+    const arrDeliveryTimes = await listCoinSwitchOptionsDeliveryTimes(pSymbol, "USDT");
+    const vMatchedDeliveryTime = (Array.isArray(arrDeliveryTimes) ? arrDeliveryTimes : [])
+        .find((vDeliveryTime) => formatCoinSwitchExpiryLabel(vDeliveryTime) === vExpiryLabel);
+    if (!vMatchedDeliveryTime) {
+        throw new Error(`CoinSwitch has no listed option expiry for ${pSymbol} on ${vExpiryLabel}. Pick another expiry for row 1.`);
+    }
+    return vMatchedDeliveryTime;
+}
+
+interface StrangleDemoChainRowInput {
+    symbol: string;
+    strike: number;
+    delta: number | null;
+    bid: number | null;
+    ask: number | null;
+    markPrice?: number | null;
+}
+
+// Strangle Demo selection rule: contracts are chosen with an absolute delta
+// strictly greater than this threshold (closest above), on 500-rounded strikes.
+const gStrangleDemoDeltaThreshold = 0.4;
+
+function hasUsableStrangleDemoChainPrice(
+    pRow: StrangleDemoChainRowInput,
+    pAction: "buy" | "sell"
+): boolean {
+    const vSidePrice = pAction === "buy" ? Number(pRow.ask) : Number(pRow.bid);
+    const vMarkPrice = Number(pRow.markPrice);
+    return (Number.isFinite(vSidePrice) && vSidePrice > 0)
+        || (Number.isFinite(vMarkPrice) && vMarkPrice > 0);
+}
+
+function pickStrangleDemoChainRow(
+    pRows: StrangleDemoChainRowInput[],
+    pAction: "buy" | "sell",
+    pForceStrike?: number
+): StrangleDemoChainRowInput | null {
+    const vTargetMagnitude = gStrangleDemoDeltaThreshold;
+    const vForcedStrike = Number.isFinite(Number(pForceStrike)) && Number(pForceStrike) > 0
+        ? Math.round(Number(pForceStrike) / 500) * 500
+        : 0;
+    let objBestRow: StrangleDemoChainRowInput | null = null;
+    let vBestGap = Number.POSITIVE_INFINITY;
+    for (const objRow of Array.isArray(pRows) ? pRows : []) {
+        if (!objRow?.symbol) {
+            continue;
+        }
+        const vAbsoluteDelta = Math.abs(Number(objRow.delta));
+        // Strangle Demo rule: contract delta must be strictly above 0.40 (if a
+        // Row-1 strike was requested, that exact 500-rounded strike is required).
+        if (!Number.isFinite(vAbsoluteDelta) || !(vAbsoluteDelta > vTargetMagnitude)) {
+            continue;
+        }
+        if (vForcedStrike > 0 && Number(objRow.strike) !== vForcedStrike) {
+            continue;
+        }
+        if (!hasUsableStrangleDemoChainPrice(objRow, pAction)) {
+            continue;
+        }
+        const vGap = vAbsoluteDelta - vTargetMagnitude;
+        if (vGap < vBestGap) {
+            vBestGap = vGap;
+            objBestRow = objRow;
+        }
+    }
+    return objBestRow;
+}
+
+async function findStrangleDemoChainContract(
+    pInput: {
+        source: "coinswitch" | "delta";
+        symbol: "BTC" | "ETH";
+        legSide: "ce" | "pe";
+        expiryDate: string;
+        targetDelta: number;
+        action: "buy" | "sell";
+        forceStrike?: number;
+    }
+): Promise<NonNullable<Awaited<ReturnType<typeof findBestLiveOptionContract>>> | null> {
+    const vSide: "put" | "call" = pInput.legSide === "pe" ? "put" : "call";
+    const vOptionSide: "CE" | "PE" = pInput.legSide === "pe" ? "PE" : "CE";
+    let arrRows: StrangleDemoChainRowInput[] = [];
+    if (pInput.source === "coinswitch") {
+        const vDeliveryTime = await resolveCoinSwitchDeliveryTimeForExpiry(pInput.symbol, pInput.expiryDate);
+        const objChain = await listCoinSwitchOptionChainRoundedToFiveHundred(pInput.symbol, "USDT", vDeliveryTime, vSide);
+        arrRows = objChain.rows;
+    }
+    else {
+        const vExpiryLabel = formatIsoDateAsDdMmYyyyLabel(pInput.expiryDate);
+        if (!vExpiryLabel) {
+            throw new Error("Select a valid expiry date before executing the Strangle Demo strategy.");
+        }
+        const objChain = await listDeltaOptionChainRoundedToFiveHundred(pInput.symbol, vExpiryLabel, vSide);
+        arrRows = objChain.rows;
+    }
+    const objRow = pickStrangleDemoChainRow(arrRows, pInput.action, pInput.forceStrike);
+    if (!objRow) {
+        return null;
+    }
+    const vBestBid = Number(objRow.bid);
+    const vBestAsk = Number(objRow.ask);
+    const vMarkPrice = Number(objRow.markPrice);
+    return {
+        contractSymbol: String(objRow.symbol || "").trim(),
+        optionSide: vOptionSide,
+        strike: Number(objRow.strike),
+        markPrice: Number.isFinite(vMarkPrice) && vMarkPrice > 0 ? vMarkPrice : 0,
+        bestBid: Number.isFinite(vBestBid) && vBestBid > 0 ? vBestBid : null,
+        bestAsk: Number.isFinite(vBestAsk) && vBestAsk > 0 ? vBestAsk : null,
+        delta: Number(objRow.delta),
+        gamma: Number.NaN,
+        theta: Number.NaN,
+        vega: Number.NaN,
+        expiryDate: pInput.expiryDate,
+        requestedExpiryDate: pInput.expiryDate,
+        usedNextDayFallback: false
+    };
+}
+
 async function findBestLiveOptionContractWithNearestFallback(
     pConfig: Parameters<typeof findBestLiveOptionContract>[0],
     pOptionSide: "CE" | "PE",
@@ -9351,6 +9699,9 @@ async function buildOptionsScalperPaperOptionOpen(
         qty: number;
         targetDelta: number;
         rowIndex?: 1 | 2;
+        chainSource?: "coinswitch" | "delta";
+        requestedStrike?: number;
+        qtyAlreadyEqualized?: boolean;
         openedReason: RollingFuturesLtOptionMetadata["openedReason"];
         takeProfitDelta?: number;
         stopLossDelta?: number;
@@ -9392,13 +9743,22 @@ async function buildOptionsScalperPaperOptionOpen(
         renkoPriceSource: "spot_price" as const,
         loopSeconds: 8
     };
-    const objContract = await findBestLiveOptionContractWithNearestFallback(
-        objConfig,
-        pInput.legSide === "pe" ? "PE" : "CE",
-        pInput.targetDelta
-    );
+    const vOptionSide: "CE" | "PE" = pInput.legSide === "pe" ? "PE" : "CE";
+    const objContract = pInput.chainSource
+        ? await findStrangleDemoChainContract({
+            source: pInput.chainSource,
+            symbol: pInput.symbol,
+            legSide: pInput.legSide,
+            expiryDate: pInput.expiryDate,
+            targetDelta: pInput.targetDelta,
+            action: pInput.action,
+            forceStrike: pInput.requestedStrike
+        })
+        : await findBestLiveOptionContractWithNearestFallback(objConfig, vOptionSide, pInput.targetDelta);
     if (!objContract) {
-        const vMessage = `No live ${pInput.legSide.toUpperCase()} contract was found for ${pInput.symbol} near target delta ${pInput.targetDelta.toFixed(2)}.`;
+        const vMessage = pInput.chainSource
+            ? `No ${vOptionSide} contract${pInput.requestedStrike ? ` at strike ${pInput.requestedStrike}` : ""} with delta above 0.50 was found on ${pInput.chainSource === "coinswitch" ? "CoinSwitch" : "Delta Exchange"} for ${pInput.symbol} expiry ${pInput.expiryDate}.`
+            : `No live ${pInput.legSide.toUpperCase()} contract was found for ${pInput.symbol} near target delta ${pInput.targetDelta.toFixed(2)}.`;
         await logFuturesEvent(
             pUserId,
             pStrategyCode,
@@ -9411,10 +9771,50 @@ async function buildOptionsScalperPaperOptionOpen(
                 legSide: pInput.legSide,
                 rowIndex: vRowIndex,
                 targetDelta: pInput.targetDelta,
+                chainSource: pInput.chainSource || "delta_live_tickers",
                 reason: "paper_option_no_contract"
             }
         );
         throw new Error(vMessage);
+    }
+    // Lot-size equalization (Strangle Demo only): 1 CoinSwitch lot = 10 Delta lots
+    // (CoinSwitch BTC lot 0.01 vs Delta 0.001; ETH 0.1 vs 0.01). To make the two
+    // legs carry the same underlying exposure per input lot:
+    //  - CoinSwitch positions keep the user qty and trade with their own native lot
+    //    size (0.01 BTC), recorded as sourceLotSize so PnL/charge math is exact.
+    //  - Delta positions are scaled up (qty x factor) so 1 input lot = 1 CoinSwitch lot.
+    const vBaseQty = Math.max(1, Math.floor(Number(pInput.qty || 1)));
+    let vEffectiveQty = vBaseQty;
+    let vSourceLotSize = 0;
+    let vTradingLotSize = getLotSizeForSymbol(pInput.symbol);
+    let vEqualizedLotFactor = 1;
+    if (pStrategyCode === "strangle-demo" && (pInput.chainSource === "coinswitch" || pInput.chainSource === "delta")) {
+        const vDeltaLotSize = getLotSizeForSymbol(pInput.symbol);
+        let vCoinSwitchLotSize = 0;
+        if (pInput.chainSource === "coinswitch") {
+            if (isOptionContractSymbol(objContract.contractSymbol)) {
+                vCoinSwitchLotSize = await getCoinSwitchLotSizeForSymbol(String(objContract.contractSymbol || ""));
+            }
+            if (!(vCoinSwitchLotSize > 0)) {
+                vCoinSwitchLotSize = await getCoinSwitchLotSizeForUnderlying(pInput.symbol);
+            }
+        }
+        else {
+            vCoinSwitchLotSize = await getCoinSwitchLotSizeForUnderlying(pInput.symbol);
+        }
+        if (vCoinSwitchLotSize > 0 && vDeltaLotSize > 0 && Math.abs(vCoinSwitchLotSize - vDeltaLotSize) > 1e-9) {
+            vEqualizedLotFactor = vCoinSwitchLotSize / vDeltaLotSize;
+            if (pInput.chainSource === "coinswitch") {
+                // CoinSwitch leg keeps its native (larger) lot: qty stays as entered.
+                vSourceLotSize = vCoinSwitchLotSize;
+                vTradingLotSize = vCoinSwitchLotSize;
+                vEffectiveQty = vBaseQty;
+            }
+            else if (!pInput.qtyAlreadyEqualized) {
+                // Delta leg is scaled up so 1 input lot = 1 CoinSwitch lot of exposure.
+                vEffectiveQty = Math.max(1, Math.round(vBaseQty * vEqualizedLotFactor));
+            }
+        }
     }
     if (isOptionsScalperStrategy(pStrategyCode)) {
         const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
@@ -9509,10 +9909,10 @@ async function buildOptionsScalperPaperOptionOpen(
     const vEntryPrice = resolveTrackedOptionEntryPrice(pInput.action, objContract, Number(objContract.markPrice || 0));
     const vEntryCharge = await estimateTrackedPositionCharge({
         contractName: String(objContract.contractSymbol || "").trim(),
-        qty: pInput.qty,
+        qty: vEffectiveQty,
         entryPrice: vEntryPrice,
         markPrice: vEntryPrice
-    });
+    }, undefined, vTradingLotSize);
     return {
         position: {
             userId: pUserId,
@@ -9520,7 +9920,7 @@ async function buildOptionsScalperPaperOptionOpen(
             importId: crypto.randomUUID(),
             contractName: String(objContract.contractSymbol || "").trim(),
             side: pInput.action.toUpperCase(),
-            qty: pInput.qty,
+            qty: vEffectiveQty,
             entryPrice: vEntryPrice,
             markPrice: resolveTrackedOptionLivePrice(pInput.action, objContract, vEntryPrice),
             charges: Number(vEntryCharge.toFixed(4)),
@@ -9530,6 +9930,9 @@ async function buildOptionsScalperPaperOptionOpen(
             metadata: optionMetadataToRecord({
                 ...objOptionMetadata,
                 rowIndex: vRowIndex,
+                chainSource: pInput.chainSource === "coinswitch" ? "coinswitch" : "delta",
+                sourceLotSize: vSourceLotSize,
+                equalizedLotFactor: pInput.chainSource === "delta" && vEqualizedLotFactor > 1 ? vEqualizedLotFactor : undefined,
                 takeProfitDelta: vTakeProfitDelta,
                 stopLossDelta: vStopLossDelta,
                 reEntryDelta: Math.max(0, Number(pInput.reEntryDelta ?? objOptionMetadata.reEntryDelta ?? objRowState.reD ?? pInput.targetDelta)),
@@ -9557,7 +9960,7 @@ async function buildOptionsScalperPaperOptionOpen(
         order: {
             id: crypto.randomUUID(),
             product_symbol: objContract.contractSymbol,
-            size: pInput.qty,
+            size: vEffectiveQty,
             side: pInput.action,
             order_type: "paper_market_order",
             average_fill_price: Number(vEntryPrice || 0),
@@ -9803,6 +10206,10 @@ async function openTrackedOptionReEntry(
                 qty: vOptionQty,
                 targetDelta: vTargetDelta,
                 rowIndex: vRowIndex,
+                chainSource: pStrategyCode === "strangle-demo"
+                    ? resolveTrackedPositionChainSource(pClosedPosition, pStrategyCode)
+                    : undefined,
+                qtyAlreadyEqualized: pStrategyCode === "strangle-demo" ? true : undefined,
                 openedReason: pReason === "sl"
                     ? "sl_reentry"
                     : (pReason === "tp"
@@ -12408,9 +12815,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
     const arrRenkoSignals = objSync.signals.filter((vSignal) => vSignal === "R" || vSignal === "G");
     const bShouldAttemptAutoTrade = (pManualSignal === "R" || pManualSignal === "G")
         ? true
-        : (bEmaEnabled
-            ? Boolean(objSync.emaSignal)
-            : arrRenkoSignals.length > 0);
+        : arrRenkoSignals.length > 0;
     if (!bShouldAttemptAutoTrade) {
         return {
             ...objSync,
@@ -12424,16 +12829,14 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
             ...objSync,
             autoTrade: {
                 status: "warning",
-                message: `Turn Auto Trader ON before ${bEmaEnabled ? "EMA crossover" : "Renko"} signals can place paper option orders.`
+                message: "Turn Auto Trader ON before Renko signals can place paper option orders."
             }
         };
     }
 
     const vSignal = pManualSignal === "R" || pManualSignal === "G"
         ? pManualSignal
-        : (bEmaEnabled
-            ? (objSync.emaSignal === "R" || objSync.emaSignal === "G" ? objSync.emaSignal : "")
-            : (arrRenkoSignals[arrRenkoSignals.length - 1] || ""));
+        : (arrRenkoSignals[arrRenkoSignals.length - 1] || "");
     if (!vSignal) {
         return {
             ...objSync,
@@ -12441,15 +12844,41 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
         };
     }
 
+    // When EMA is enabled, only open on the first Renko box after a color flip
+    // that is also on the correct side of the EMA:
+    //   - Renko above EMA + first Green after Red → open
+    //   - Renko below EMA + first Red after Green → open
+    if (bEmaEnabled) {
+        const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
+        const objEmaValues = normalizeOptionsScalperEmaRuntimeValues(objLatestRuntime.state?.optionsScalperEmaBySymbol);
+        const vEmaValue = Number(objEmaValues[vSelectedSymbol]?.emaValue);
+        const vSourcePrice = Number(objSync.renko.lastPrice || objSync.renko.fromPrice);
+        const bPriceAboveEma = Number.isFinite(vEmaValue) && vEmaValue > 0
+            ? vSourcePrice > vEmaValue
+            : null;
+        const vPreviousColor = String(objSync.renko.lastColor || "").trim().toUpperCase() === "G"
+            ? "G"
+            : (String(objSync.renko.lastColor || "").trim().toUpperCase() === "R" ? "R" : "");
+        const bIsFirstBoxAfterFlip = vPreviousColor !== "" && vPreviousColor !== vSignal;
+        const bMeetsEmaCondition = (vSignal === "G" && bPriceAboveEma === true)
+            || (vSignal === "R" && bPriceAboveEma === false);
+        if (!bIsFirstBoxAfterFlip || !bMeetsEmaCondition) {
+            return {
+                ...objSync,
+                autoTrade: null
+            };
+        }
+    }
+
     const arrSignalsToProcess = (pManualSignal === "R" || pManualSignal === "G")
         ? [pManualSignal]
-        : (bEmaEnabled ? [vSignal as OptionsDemoRenkoSignal] : arrRenkoSignals);
+        : [vSignal as OptionsDemoRenkoSignal];
     if (!arrSignalsToProcess.length) {
         return {
             ...objSync,
             autoTrade: {
                 status: "warning",
-                message: `No ${bEmaEnabled ? "EMA crossover" : "Renko"} signal was available to process.`
+                message: "No Renko signal was available to process."
             }
         };
     }
@@ -12460,7 +12889,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
             ...objSync,
             autoTrade: {
                 status: "warning",
-                message: `A ${bEmaEnabled ? "EMA crossover" : "Renko"} paper auto trade is already being processed. Please wait for the current signal to finish.`
+                message: "A Renko paper auto trade is already being processed. Please wait for the current signal to finish."
             }
         };
     }
@@ -12548,17 +12977,17 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
                 autoTrade: {
                     status: "warning",
                     message: vLastSkippedMessage
-                        || `EMA crossover signal${arrSignalsToProcess.length === 1 ? "" : "s"} were received, but no paper option order could be placed from the current Manual Trader settings.`,
+                        || `Renko signal${arrSignalsToProcess.length === 1 ? "" : "s"} were received, but no paper option order could be placed from the current Manual Trader settings.`,
                     trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrCurrentTrackedPositions)
                 }
             };
         }
-        const vSignalSourceLabel = bEmaEnabled ? "EMA crossover" : "Renko";
+        const vSignalSourceLabel = "Renko";
         return {
             ...objSync,
             autoTrade: {
                 status: "success",
-                message: `${vSignal === "G" ? "Green" : "Red"} ${vSignalSourceLabel} opened a ${vSignal === "G" ? "GREEN" : "RED"} paper option from row ${vSignal === "G" ? 1 : 2}.`,
+                message: `${vSignal === "G" ? "Green" : "Red"} ${vSignalSourceLabel} signal opened a ${vSignal === "G" ? "GREEN" : "RED"} paper option from row ${vSignal === "G" ? 1 : 2}.`,
                 trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrCurrentTrackedPositions)
             }
         };
@@ -12568,7 +12997,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
             ...objSync,
             autoTrade: {
                 status: getErrorMessage(objError, "").includes("already active") ? "warning" : "danger",
-                message: getErrorMessage(objError, `Unable to place ${bEmaEnabled ? "EMA crossover" : "Renko"} paper auto trade.`)
+                message: getErrorMessage(objError, "Unable to place Renko paper auto trade.")
             }
         };
     }
@@ -16684,7 +17113,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
     }
 
     const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
-    if (pStrategyCode !== "strangle-demo" && (!objRuntime?.autoTraderEnabled || String(objRuntime.status || "").trim().toLowerCase() !== "running")) {
+    if (!objRuntime?.autoTraderEnabled || String(objRuntime.status || "").trim().toLowerCase() !== "running") {
         res.status(400).json({
             status: "warning",
             message: "Turn Auto Trader ON before executing the live strategy."
@@ -16773,7 +17202,8 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
         req.body?.expiryMode || "5",
         req.body?.expiryDate,
         req.body?.qty || 1,
-        req.body?.targetDelta || 0.53
+        req.body?.targetDelta || 0.53,
+        req.body?.requestedStrikes
     );
     objExecInput.rowIndex = normalizeOptionRowIndex(pStrategyCode, req.body?.rowIndex);
 
@@ -19911,5 +20341,103 @@ export async function updateStrangleDemoRecoveryMetrics(req: Request, res: Respo
 }
 export async function recalculateStrangleDemoRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "strangle-demo");
+}
+
+// ============================================================
+// Straddle Demo (Delta Exchange only)
+// ============================================================
+
+export async function getStraddleDemoProfile(req: Request, res: Response): Promise<void> {
+    await getProfileInternal(req, res, "straddle-demo");
+}
+export async function saveStraddleDemoProfile(req: Request, res: Response): Promise<void> {
+    await saveProfileInternal(req, res, "straddle-demo");
+}
+export async function getStraddleDemoConnectionStatus(req: Request, res: Response): Promise<void> {
+    await getConnectionStatusInternal(req, res, "straddle-demo");
+}
+export async function getStraddleDemoRuntimeStatus(req: Request, res: Response): Promise<void> {
+    await getRuntimeStatusInternal(req, res, "straddle-demo");
+}
+export async function checkStraddleDemoConnection(req: Request, res: Response): Promise<void> {
+    await checkConnectionInternal(req, res, "straddle-demo");
+}
+export async function enableStraddleDemoAutoTrader(req: Request, res: Response): Promise<void> {
+    await enableAutoTraderInternal(req, res, "straddle-demo");
+}
+export async function disableStraddleDemoAutoTrader(req: Request, res: Response): Promise<void> {
+    await disableAutoTraderInternal(req, res, "straddle-demo");
+}
+export async function getStraddleDemoAccountSummary(req: Request, res: Response): Promise<void> {
+    await getAccountSummaryInternal(req, res, "straddle-demo");
+}
+export async function calculateStraddleDemoRecommendedStartQty(req: Request, res: Response): Promise<void> {
+    await calculateRecommendedStartQtyInternal(req, res, "straddle-demo");
+}
+export async function executeStraddleDemoManualFuture(req: Request, res: Response): Promise<void> {
+    await executeManualFutureInternal(req, res, "straddle-demo");
+}
+export async function executeStraddleDemoManualOption(req: Request, res: Response): Promise<void> {
+    await executeManualOptionInternal(req, res, "straddle-demo");
+}
+export async function executeStraddleDemoStrategy(req: Request, res: Response): Promise<void> {
+    await executeStrategyInternal(req, res, "straddle-demo");
+}
+export async function confirmStraddleDemoLiveAction(req: Request, res: Response): Promise<void> {
+    await confirmCoveredLiveActionInternal(req, res, "straddle-demo");
+}
+export async function rejectStraddleDemoLiveAction(req: Request, res: Response): Promise<void> {
+    await rejectCoveredLiveActionInternal(req, res, "straddle-demo");
+}
+export async function getStraddleDemoImportableOpenPositions(req: Request, res: Response): Promise<void> {
+    await getImportableOpenPositionsInternal(req, res, "straddle-demo");
+}
+export async function getStraddleDemoOpenPositions(req: Request, res: Response): Promise<void> {
+    await getOpenPositionsInternal(req, res, "straddle-demo");
+}
+export async function saveStraddleDemoOpenPositions(req: Request, res: Response): Promise<void> {
+    await saveOpenPositionsInternal(req, res, "straddle-demo");
+}
+export async function deleteStraddleDemoOpenPosition(req: Request, res: Response): Promise<void> {
+    await deleteOpenPositionInternal(req, res, "straddle-demo");
+}
+export async function clearStraddleDemoOpenPositions(req: Request, res: Response): Promise<void> {
+    await clearOpenPositionsInternal(req, res, "straddle-demo");
+}
+export async function reconcileStraddleDemoOpenPositions(req: Request, res: Response): Promise<void> {
+    await reconcileOpenPositionsInternal(req, res, "straddle-demo");
+}
+export async function closeStraddleDemoImportedOpenPosition(req: Request, res: Response): Promise<void> {
+    await closeImportedOpenPositionInternal(req, res, "straddle-demo");
+}
+export async function getStraddleDemoClosedPositions(req: Request, res: Response): Promise<void> {
+    await getClosedPositionsInternal(req, res, "straddle-demo");
+}
+export async function clearStraddleDemoClosedPositions(req: Request, res: Response): Promise<void> {
+    await clearOptionsScalperClosedPositionsInternal(req, res, "straddle-demo");
+}
+export async function deleteStraddleDemoClosedPosition(req: Request, res: Response): Promise<void> {
+    await deleteOptionsScalperClosedPositionInternal(req, res, "straddle-demo");
+}
+export async function updateStraddleDemoClosedPosition(req: Request, res: Response): Promise<void> {
+    await updateOptionsScalperClosedPositionInternal(req, res, "straddle-demo");
+}
+export async function getStraddleDemoEvents(req: Request, res: Response): Promise<void> {
+    await getEventsInternal(req, res, "straddle-demo");
+}
+export async function clearStraddleDemoEventsController(req: Request, res: Response): Promise<void> {
+    await clearEventsInternal(req, res, "straddle-demo");
+}
+export async function deleteStraddleDemoEventController(req: Request, res: Response): Promise<void> {
+    await deleteEventInternal(req, res, "straddle-demo");
+}
+export async function executeStraddleDemoKillSwitch(req: Request, res: Response): Promise<void> {
+    await executeKillSwitchInternal(req, res, "straddle-demo");
+}
+export async function updateStraddleDemoRecoveryMetrics(req: Request, res: Response): Promise<void> {
+    await updateRecoveryMetricsInternal(req, res, "straddle-demo");
+}
+export async function recalculateStraddleDemoRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
+    await recalculateRecoveryTotalPnlInternal(req, res, "straddle-demo");
 }
 

@@ -35,6 +35,9 @@ interface CoinSwitchTickerRow {
     ask1Price?: string | number;
     markPrice?: string | number;
     delta?: string | number;
+    gamma?: string | number;
+    vega?: string | number;
+    theta?: string | number;
     lastPrice?: string | number;
 }
 
@@ -48,6 +51,10 @@ function toNumber(pValue: unknown): number | null {
 
 function isThousandStrike(pStrike: number): boolean {
     return Number.isFinite(pStrike) && pStrike > 0 && pStrike % 1000 === 0;
+}
+
+function isFiveHundredStrike(pStrike: number): boolean {
+    return Number.isFinite(pStrike) && pStrike > 0 && pStrike % 1000 === 500;
 }
 
 function matchesOptionSide(pContractType: unknown, pSide: "put" | "call"): boolean {
@@ -124,7 +131,7 @@ async function listCoinSwitchAssets(): Promise<CoinSwitchAssetRow[]> {
     return arrRows;
 }
 
-async function listCoinSwitchTickersBySymbol(): Promise<Map<string, CoinSwitchTickerRow>> {
+export async function listCoinSwitchTickersBySymbol(): Promise<Map<string, CoinSwitchTickerRow>> {
     const vNow = Date.now();
     if (gTickersCache && gTickersCache.expiresAtMs > vNow) {
         return gTickersCache.bySymbol;
@@ -266,6 +273,73 @@ export async function listCoinSwitchOptionChainRoundedToThousand(
     };
 }
 
+export async function listCoinSwitchOptionChainRoundedToFiveHundred(
+    pBaseCoin: string,
+    pQuoteCoin: string,
+    pDeliveryTimeMs: number,
+    pSide: "put" | "call"
+): Promise<{
+    baseCoin: string;
+    quoteCoin: string;
+    deliveryTime: number;
+    expiryLabel: string;
+    deltaChainSymbol: string;
+    side: "put" | "call";
+    rows: CoinSwitchOptionChainRow[];
+}> {
+    const vBaseCoin = String(pBaseCoin || "").trim().toUpperCase();
+    const vQuoteCoin = String(pQuoteCoin || "").trim().toUpperCase();
+    const vDeliveryTime = Math.floor(Number(pDeliveryTimeMs));
+    const vSide = pSide === "call" ? "call" : "put";
+    const [arrAssets, mapTickers] = await Promise.all([
+        listCoinSwitchAssets(),
+        listCoinSwitchTickersBySymbol()
+    ]);
+
+    const arrRows = arrAssets
+        .filter((objRow) => {
+            if (String(objRow.status || "").toUpperCase() !== "ENABLED") {
+                return false;
+            }
+            if (String(objRow.base_asset || "").trim().toUpperCase() !== vBaseCoin) {
+                return false;
+            }
+            if (String(objRow.quote_asset || "").trim().toUpperCase() !== vQuoteCoin) {
+                return false;
+            }
+            const vRowDelivery = Math.floor(Number(objRow.delivery_time || objRow.expiry_date || 0));
+            if (vRowDelivery !== vDeliveryTime) {
+                return false;
+            }
+            const vStrike = Number(objRow.strike_price);
+            return matchesOptionSide(objRow.contract_type, vSide) && isFiveHundredStrike(vStrike);
+        })
+        .map((objRow) => {
+            const vSymbol = String(objRow.symbol || "").trim().toUpperCase();
+            const objTicker = mapTickers.get(vSymbol);
+            return {
+                symbol: vSymbol,
+                strike: Number(objRow.strike_price),
+                delta: toNumber(objTicker?.delta),
+                bid: toNumber(objTicker?.bid1Price),
+                ask: toNumber(objTicker?.ask1Price),
+                markPrice: toNumber(objTicker?.markPrice)
+            };
+        })
+        .filter((objRow) => objRow.symbol && Number.isFinite(objRow.strike))
+        .sort((pLeft, pRight) => pLeft.strike - pRight.strike);
+
+    return {
+        baseCoin: vBaseCoin,
+        quoteCoin: vQuoteCoin,
+        deliveryTime: vDeliveryTime,
+        expiryLabel: formatCoinSwitchExpiryLabel(vDeliveryTime),
+        deltaChainSymbol: buildDeltaOptionsChainSymbolFromDelivery(vBaseCoin, vDeliveryTime),
+        side: vSide,
+        rows: arrRows
+    };
+}
+
 export async function listCoinSwitchLiveQuotes(
     pBaseCoin: string,
     pQuoteCoin: string,
@@ -279,4 +353,32 @@ export async function listCoinSwitchLiveQuotes(
         pSide
     );
     return objChain.rows;
+}
+
+export async function getCoinSwitchLotSizeForSymbol(pSymbol: string): Promise<number> {
+    const vSymbol = String(pSymbol || "").trim().toUpperCase();
+    if (!vSymbol) {
+        return 0;
+    }
+    const arrAssets = await listCoinSwitchAssets();
+    const objAsset = (Array.isArray(arrAssets) ? arrAssets : [])
+        .find((objRow) => String(objRow.symbol || "").trim().toUpperCase() === vSymbol);
+    const vLotSize = Number(objAsset?.lot_size);
+    return Number.isFinite(vLotSize) && vLotSize > 0 ? vLotSize : 0;
+}
+
+export async function getCoinSwitchLotSizeForUnderlying(pUnderlying: string): Promise<number> {
+    const vUnderlying = String(pUnderlying || "").trim().toUpperCase();
+    if (!vUnderlying) {
+        return 0;
+    }
+    const arrAssets = await listCoinSwitchAssets();
+    const objAsset = (Array.isArray(arrAssets) ? arrAssets : [])
+        .find((objRow) =>
+            String(objRow.base_asset || "").trim().toUpperCase() === vUnderlying
+            && String(objRow.contract_type || "").trim().toUpperCase() === "P"
+            && String(objRow.status || "").toUpperCase() === "ENABLED"
+        );
+    const vLotSize = Number(objAsset?.lot_size);
+    return Number.isFinite(vLotSize) && vLotSize > 0 ? vLotSize : 0;
 }

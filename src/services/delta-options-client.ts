@@ -6,6 +6,7 @@ export interface DeltaOptionChainRow {
     delta: number | null;
     bid: number | null;
     ask: number | null;
+    markPrice?: number | null;
 }
 
 /** @deprecated Use DeltaOptionChainRow */
@@ -20,6 +21,7 @@ interface DeltaTickerRow {
     contract_type?: string;
     best_bid?: string | number;
     best_ask?: string | number;
+    mark_price?: string | number;
     strike_price?: string | number;
     greeks?: DeltaTickerGreeks;
     quotes?: {
@@ -43,6 +45,10 @@ function toNumber(pValue: unknown): number | null {
 
 function isThousandStrike(pStrike: number): boolean {
     return Number.isFinite(pStrike) && pStrike > 0 && pStrike % 1000 === 0;
+}
+
+function isFiveHundredStrike(pStrike: number): boolean {
+    return Number.isFinite(pStrike) && pStrike > 0 && pStrike % 500 === 0;
 }
 
 function matchesOptionSide(pContractType: unknown, pSide: "put" | "call"): boolean {
@@ -130,6 +136,7 @@ export async function listDeltaOptionChainRoundedToThousand(
                 delta: toNumber(objRow.greeks?.delta),
                 bid: getTickerBestBid(objRow),
                 ask: getTickerBestAsk(objRow),
+                markPrice: toNumber(objRow.mark_price),
                 contractType: String(objRow.contract_type || "").trim()
             };
         })
@@ -145,7 +152,78 @@ export async function listDeltaOptionChainRoundedToThousand(
             strike: objRow.strike,
             delta: objRow.delta,
             bid: objRow.bid,
-            ask: objRow.ask
+            ask: objRow.ask,
+            markPrice: objRow.markPrice
+        }));
+
+    return {
+        underlying: vUnderlying,
+        expiryLabel: vExpiryLabel,
+        chainSymbol: vChainSymbol,
+        side: vSide,
+        rows: arrRows
+    };
+}
+
+export async function listDeltaOptionChainRoundedToFiveHundred(
+    pUnderlying: string,
+    pExpiryLabelDdMmYyyy: string,
+    pSide: "put" | "call"
+): Promise<{
+    underlying: string;
+    expiryLabel: string;
+    chainSymbol: string;
+    side: "put" | "call";
+    rows: DeltaOptionChainRow[];
+}> {
+    const vUnderlying = String(pUnderlying || "").trim().toUpperCase();
+    const vExpiryLabel = String(pExpiryLabelDdMmYyyy || "").trim();
+    const vSide = pSide === "call" ? "call" : "put";
+    const vChainSymbol = buildDeltaOptionsChainSymbol(vUnderlying, vExpiryLabel);
+    if (!vUnderlying || !vExpiryLabel) {
+        return {
+            underlying: vUnderlying,
+            expiryLabel: vExpiryLabel,
+            chainSymbol: vChainSymbol,
+            side: vSide,
+            rows: []
+        };
+    }
+
+    const objParams = new URLSearchParams({
+        contract_types: vSide === "call" ? "call_options" : "put_options",
+        underlying_asset_symbols: vUnderlying,
+        expiry_date: vExpiryLabel
+    });
+    const objPayload = await fetchDeltaJson<DeltaApiResponse<DeltaTickerRow[]>>("/tickers", objParams);
+    const arrRaw = Array.isArray(objPayload.result) ? objPayload.result : [];
+    const arrRows = arrRaw
+        .map((objRow) => {
+            const vStrike = Number(objRow.strike_price);
+            return {
+                symbol: String(objRow.symbol || "").trim(),
+                strike: vStrike,
+                delta: toNumber(objRow.greeks?.delta),
+                bid: getTickerBestBid(objRow),
+                ask: getTickerBestAsk(objRow),
+                markPrice: toNumber(objRow.mark_price),
+                contractType: String(objRow.contract_type || "").trim()
+            };
+        })
+        .filter((objRow) =>
+            objRow.symbol
+            && Number.isFinite(objRow.strike)
+            && isFiveHundredStrike(objRow.strike)
+            && (matchesOptionSide(objRow.contractType, vSide) || !objRow.contractType)
+        )
+        .sort((pLeft, pRight) => pLeft.strike - pRight.strike)
+        .map((objRow) => ({
+            symbol: objRow.symbol,
+            strike: objRow.strike,
+            delta: objRow.delta,
+            bid: objRow.bid,
+            ask: objRow.ask,
+            markPrice: objRow.markPrice
         }));
 
     return {

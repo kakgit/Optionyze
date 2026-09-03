@@ -202,6 +202,10 @@
         refreshOpenPositionsButton: document.getElementById(`btn${idPrefix}RefreshOpenPositions`),
         killSwitchButton: document.getElementById(`btn${idPrefix}KillSwitch`),
         openPositionsBody: document.getElementById(`${prefix}OpenPositionsBody`),
+        openPositionsBodyCoinswitch: document.getElementById(`${prefix}OpenPositionsBodyCoinswitch`),
+        openPositionsBodyDelta: document.getElementById(`${prefix}OpenPositionsBodyDelta`),
+        openCountCoinswitch: document.getElementById(`${prefix}OpenCountCoinswitch`),
+        openCountDelta: document.getElementById(`${prefix}OpenCountDelta`),
         openPrevPageButton: document.getElementById(`btn${idPrefix}OpenPrevPage`),
         openNextPageButton: document.getElementById(`btn${idPrefix}OpenNextPage`),
         openPageInfo: document.getElementById(`${prefix}OpenPositionsPageInfo`),
@@ -4384,6 +4388,127 @@
         }
     }
 
+    async function postStrangleDemoExecRow(rowIndex, vSymbol, extraFields) {
+        const rowNodes = getOptionRowNodes(rowIndex);
+        const vAction = String(rowNodes.action?.value || "").trim().toLowerCase();
+        const vLegSide = String(rowNodes.legs?.value || "").trim().toLowerCase();
+        const vExpiryMode = String(rowNodes.expiryMode?.value || "5").trim();
+        const vExpiryDate = String(rowNodes.expiryDate?.value || "").trim();
+        const vBaseQty = Math.max(1, Math.floor(Number(rowNodes.qty?.value || 1)));
+        const vTargetDelta = Math.max(0, Number(rowNodes.newD?.value || 0.53));
+        const vQty = resolveCoveredTradeQty(vAction, vLegSide, vBaseQty, vSymbol);
+        const objExtra = extraFields && typeof extraFields === "object" ? extraFields : {};
+        return await postJson(`${endpointBase}/strategy/execute`, Object.assign({}, {
+            selectedApiProfileId: String(ids.apiProfile?.value || selectedApiProfileId || "").trim(),
+            uiState: getUiState(),
+            rowIndex: rowIndex,
+            action: vAction,
+            symbol: vSymbol,
+            legSide: vLegSide,
+            expiryMode: vExpiryMode,
+            expiryDate: vExpiryDate,
+            qty: vQty,
+            targetDelta: vTargetDelta
+        }, objExtra));
+    }
+
+    async function executeStrangleDemoStrategy() {
+        if (execStrategyInFlight) {
+            throw new Error("Exec Strategy is already running. Please wait for it to finish.");
+        }
+        if (!canUseExecStrategy()) {
+            throw new Error("Not Authorised to Execute, Please Contact Admin");
+        }
+
+        await checkConnection();
+        if (!canUseLiveActions()) {
+            throw new Error("Delta connection is not healthy enough to execute the paper strategy.");
+        }
+        if (!autoTraderEnabled) {
+            throw new Error("Turn Auto Trader ON before executing the paper strategy.");
+        }
+
+        await saveProfile();
+
+        const vSymbol = String(ids.symbol?.value || "BTC").trim().toUpperCase();
+        const arrRowErrors = [];
+        const arrPlacedRows = [];
+        let vPlacedOrders = 0;
+        let lastTrackedPayload = null;
+        let requestedStrikes = null;
+
+        execStrategyInFlight = true;
+        setButtonsEnabled();
+        try {
+            for (const rowIndex of getSupportedOptionRowIndexes()) {
+                const rowNodes = getOptionRowNodes(rowIndex);
+                const vAction = String(rowNodes.action?.value || "").trim().toLowerCase();
+                if (vAction !== "buy" && vAction !== "sell") {
+                    continue;
+                }
+                if (!String(rowNodes.expiryDate?.value || "").trim()) {
+                    arrRowErrors.push(`Row ${rowIndex}: select an expiry date before executing the paper strategy.`);
+                    continue;
+                }
+                try {
+                    // Row 1 paper contracts are picked from the CoinSwitch option
+                    // chain and Row 2 from the Delta Exchange option chain. The
+                    // server routes the contract lookup by rowIndex. When Row 1
+                    // (CoinSwitch) was placed first, Row 2 (Delta) reuses the same
+                    // strike via requestedStrikes, on the row's own "Select Expiry".
+                    const objExtra = requestedStrikes ? { requestedStrikes: requestedStrikes } : {};
+                    const objResult = await postStrangleDemoExecRow(rowIndex, vSymbol, objExtra);
+                    const arrOrders = Array.isArray(objResult?.data?.orders) ? objResult.data.orders : [];
+                    vPlacedOrders += arrOrders.length;
+                    if (objResult?.data?.trackedOpenPositions) {
+                        lastTrackedPayload = objResult.data.trackedOpenPositions;
+                    }
+                    arrPlacedRows.push(rowIndex);
+                    if (!requestedStrikes && rowIndex === 1) {
+                        const arrContracts = Array.isArray(objResult?.data?.contracts) ? objResult.data.contracts : [];
+                        const arrStrikes = arrContracts
+                            .map(function (objContract) {
+                                const vSide = String(objContract?.optionSide || "").trim().toUpperCase() === "PE" ? "pe" : "ce";
+                                const vStrike = Number(objContract?.strike);
+                                // Row 2 (Delta) offset: CE = CS strike - 500, PE = CS strike + 500
+                                const vOffset = vSide === "pe" ? 500 : -500;
+                                return {
+                                    side: vSide,
+                                    strike: Number.isFinite(vStrike) && vStrike > 0 ? vStrike + vOffset : vStrike
+                                };
+                            })
+                            .filter(function (objStrike) {
+                                return Number.isFinite(objStrike.strike) && objStrike.strike > 0;
+                            });
+                        if (arrStrikes.length) {
+                            requestedStrikes = arrStrikes;
+                        }
+                    }
+                }
+                catch (error) {
+                    arrRowErrors.push(`Row ${rowIndex}: ${error instanceof Error ? error.message : "unable to execute the paper strategy."}`);
+                }
+            }
+            if (!arrPlacedRows.length && !arrRowErrors.length) {
+                throw new Error("Select Buy or Sell in Action for at least one row before executing the paper strategy.");
+            }
+            if (lastTrackedPayload) {
+                renderOpenPositions(lastTrackedPayload);
+            }
+            return {
+                placedOrders: vPlacedOrders,
+                placedRows: arrPlacedRows,
+                errors: arrRowErrors,
+                trackedOpenPositions: lastTrackedPayload,
+                matchedStrike: Boolean(requestedStrikes)
+            };
+        }
+        finally {
+            execStrategyInFlight = false;
+            setButtonsEnabled();
+        }
+    }
+
     async function placeManualOption(action, legSide, rowIndex, openedReason) {
         const optionRowIndex = normalizeOptionRowIndex(rowIndex);
         const rowNodes = getOptionRowNodes(optionRowIndex);
@@ -4762,6 +4887,14 @@
         updateNeutralBadges(lastNeutralStatus);
         syncLocalProfitClosePendingFromOpenPositions();
         restartProfitCloseCountdown();
+        if (isStrangleDemoPage) {
+            renderStrangleDemoOpenPositionSections(objPayload, arrRows);
+            if (ids.openCount) {
+                ids.openCount.textContent = String(arrRows.length);
+            }
+            setButtonsEnabled();
+            return;
+        }
         if (!ids.openPositionsBody) {
             return;
         }
@@ -4788,6 +4921,27 @@
         const pageRows = arrRows.slice(startIndex, startIndex + openPositionsPageSize);
         const nextLtps = new Map();
         const openRowsHtml = pageRows.map(function (row) {
+            return buildOpenPositionRowHtml(row, nextLtps);
+        }).join("");
+        ids.openPositionsBody.innerHTML = `${openRowsHtml}${buildOpenPositionTotalsRowHtml(objTotals)}`;
+        previousOpenPositionLtps = nextLtps;
+        if (ids.openCount) {
+            ids.openCount.textContent = String(arrRows.length);
+        }
+        if (ids.openPageInfo) {
+            ids.openPageInfo.textContent = `Page ${openPositionsPage} of ${totalPages} | ${arrRows.length} records`;
+        }
+        if (ids.openPageNumbers) {
+            const pageNumbers = [];
+            for (let page = 1; page <= totalPages; page += 1) {
+                pageNumbers.push(`<button class="rolling-demo-icon-btn ${page === openPositionsPage ? "primary" : "warn"} rolling-live-open-page-btn" type="button" data-page="${page}">${page}</button>`);
+            }
+            ids.openPageNumbers.innerHTML = pageNumbers.join("");
+        }
+        setButtonsEnabled();
+    }
+
+    function buildOpenPositionRowHtml(row, nextLtps) {
             const side = String(row.side || "-").trim().toUpperCase();
             const contractName = String(row.contractName || "-");
             const lotSize = contractName.includes("ETH") ? 0.01 : 0.001;
@@ -4831,7 +4985,7 @@
                     <td>${escapeHtml(contractName)}</td>
                     <td>${renderPositionSide(side)}</td>
                     <td>${escapeHtml(fmt(row.lotSize || lotSize, 3))}</td>
-                    <td>${escapeHtml(fmt(row.qty, 0))}</td>
+                    <td>${escapeHtml(fmt(row.qty, 0))}${buildOpenPositionSourceLotHintHtml(row)}</td>
                     <td>${side === "BUY" ? escapeHtml(fmt(row.entryPrice, 2)) : "-"}</td>
                     <td>${side === "SELL" ? escapeHtml(fmt(row.entryPrice, 2)) : "-"}</td>
                     <td class="${escapeHtml(ltpBlinkClass)}">${escapeHtml(fmt(row.ltpPrice, 2))}</td>
@@ -4858,8 +5012,22 @@
                     </td>
                 </tr>
             `;
-        }).join("");
-        ids.openPositionsBody.innerHTML = `${openRowsHtml}
+    }
+
+    function buildOpenPositionSourceLotHintHtml(row) {
+        const objMetadata = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+        const vFactor = Number(objMetadata.equalizedLotFactor);
+        if (!Number.isFinite(vFactor) || !(vFactor > 1)) {
+            return "";
+        }
+        const vSymbol = String(row?.contractName || "").includes("ETH") ? "ETH" : "BTC";
+        const vSourceLot = vSymbol === "ETH" ? "0.1 ETH" : "0.01 BTC";
+        const vDeltaLot = vSymbol === "ETH" ? "0.01 ETH" : "0.001 BTC";
+        return `<span class="rolling-demo-equalized-lot-hint" title="Lot sizes equalized: 1 ${vSymbol} CoinSwitch lot (${vSourceLot}) = ${escapeHtml(fmt(vFactor, 3))} Delta Exchange lots (${vDeltaLot}). This Delta position qty was scaled by ${escapeHtml(fmt(vFactor, 0))}× so both legs carry the same underlying exposure.">≈${escapeHtml(fmt(vFactor, 0))}×</span>`;
+    }
+
+    function buildOpenPositionTotalsRowHtml(objTotals) {
+        return `
             <tr class="rolling-demo-total-row">
                 <td>${renderGreekCell(
                     isCoveredMode ? objTotals.totalDeltaPerContract : objTotals.totalDelta,
@@ -4889,21 +5057,105 @@
                 <td>-</td>
             </tr>
         `;
-        previousOpenPositionLtps = nextLtps;
-        if (ids.openCount) {
-            ids.openCount.textContent = String(arrRows.length);
+    }
+
+    function resolveOpenPositionSourceKey(row) {
+        const vExplicit = String(row?.chainSource || "").trim().toLowerCase();
+        if (vExplicit === "coinswitch" || vExplicit === "delta") {
+            return vExplicit;
         }
-        if (ids.openPageInfo) {
-            ids.openPageInfo.textContent = `Page ${openPositionsPage} of ${totalPages} | ${arrRows.length} records`;
+        const objMetadata = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+        if (Number(objMetadata.rowIndex) === 1) {
+            return "coinswitch";
         }
-        if (ids.openPageNumbers) {
-            const pageNumbers = [];
-            for (let page = 1; page <= totalPages; page += 1) {
-                pageNumbers.push(`<button class="rolling-demo-icon-btn ${page === openPositionsPage ? "primary" : "warn"} rolling-live-open-page-btn" type="button" data-page="${page}">${page}</button>`);
+        if (Number(objMetadata.rowIndex) === 2) {
+            return "delta";
+        }
+        return String(row?.contractName || "").trim().toUpperCase().endsWith("-USDT") ? "coinswitch" : "delta";
+    }
+
+    function buildFallbackOpenPositionSourceTotals(arrRows) {
+        const objTotals = {
+            totalDeltaPerContract: 0,
+            totalDelta: 0,
+            totalDeltaDisplayPerContract: 0,
+            totalDeltaDisplay: 0,
+            totalGammaPerContract: 0,
+            totalGamma: 0,
+            totalThetaPerContract: 0,
+            totalTheta: 0,
+            totalThetaDisplay: 0,
+            totalThetaBaseDisplay: 0,
+            totalVegaPerContract: 0,
+            totalVega: 0,
+            totalCharges: 0,
+            totalPnl: 0,
+            totalMargin: 0,
+            totalQty: 0,
+            positionCount: 0,
+            ceQty: 0,
+            peQty: 0
+        };
+        (Array.isArray(arrRows) ? arrRows : []).forEach(function (row) {
+            const greeks = row?.greeks || {};
+            objTotals.totalDeltaPerContract += Number(greeks.deltaPerContract || 0);
+            objTotals.totalDelta += Number(greeks.deltaTotal || 0);
+            objTotals.totalDeltaDisplayPerContract += Number(greeks.deltaDisplayPerContract || 0);
+            objTotals.totalDeltaDisplay += Number(greeks.deltaDisplayTotal || 0);
+            objTotals.totalThetaDisplay += Number(greeks.thetaDisplayTotal || 0);
+            objTotals.totalThetaBaseDisplay += Number(greeks.thetaBaseDisplayTotal || 0);
+            objTotals.totalCharges += Number(row?.charges || 0);
+            objTotals.totalPnl += Number(row?.pnl || 0);
+            objTotals.totalMargin += Number(row?.margin || 0);
+            objTotals.totalQty += Number(row?.qty || 0);
+            objTotals.positionCount += 1;
+        });
+        return objTotals;
+    }
+
+    function renderStrangleDemoOpenPositionSections(objPayload, arrRows) {
+        const objSourceTotals = objPayload?.sourceTotals && typeof objPayload.sourceTotals === "object"
+            ? objPayload.sourceTotals
+            : null;
+        const nextLtps = new Map();
+        const arrGroups = [
+            {
+                key: "coinswitch",
+                body: ids.openPositionsBodyCoinswitch,
+                countNode: ids.openCountCoinswitch,
+                emptyText: "No CoinSwitch demo positions are currently shown."
+            },
+            {
+                key: "delta",
+                body: ids.openPositionsBodyDelta,
+                countNode: ids.openCountDelta,
+                emptyText: "No Delta Exchange demo positions are currently shown."
             }
-            ids.openPageNumbers.innerHTML = pageNumbers.join("");
-        }
-        setButtonsEnabled();
+        ];
+        arrGroups.forEach(function (objGroup) {
+            if (!(objGroup.body instanceof HTMLElement)) {
+                return;
+            }
+            const arrGroupRows = arrRows.filter(function (row) {
+                return resolveOpenPositionSourceKey(row) === objGroup.key;
+            });
+            const objGroupTotals = objSourceTotals && objSourceTotals[objGroup.key]
+                ? objSourceTotals[objGroup.key]
+                : buildFallbackOpenPositionSourceTotals(arrGroupRows);
+            if (!arrGroupRows.length) {
+                objGroup.body.innerHTML = `<tr><td colspan="13" class="rolling-demo-empty">${escapeHtml(objGroup.emptyText)}</td></tr>`;
+            }
+            else {
+                const rowsHtml = arrGroupRows.map(function (row) {
+                    return buildOpenPositionRowHtml(row, nextLtps);
+                }).join("");
+                objGroup.body.innerHTML = `${rowsHtml}${buildOpenPositionTotalsRowHtml(objGroupTotals)}`;
+            }
+            if (objGroup.countNode) {
+                objGroup.countNode.textContent = String(arrGroupRows.length);
+            }
+        });
+        previousOpenPositionLtps = nextLtps;
     }
 
     function getOpenPositionsRenderSignature(payload) {
@@ -6151,7 +6403,31 @@ ids.closedAltFromDate?.addEventListener("change", function () {
             setStatus(ids.pageStatus, "Exec Strategy is disabled on Options Demo for now.", "warning");
             return;
         }
-        void (isStrangleDemoPage ? executeStrategy(1) : executeStrategy(1)).then(function (objResult) {
+        if (isStrangleDemoPage) {
+            void executeStrangleDemoStrategy().then(function (objSummary) {
+                const vPlacedOrders = Number(objSummary?.placedOrders || 0);
+                const arrErrors = Array.isArray(objSummary?.errors) ? objSummary.errors : [];
+                let vMessage = vPlacedOrders > 0
+                    ? `Exec Strategy placed ${vPlacedOrders} paper option order${vPlacedOrders === 1 ? "" : "s"} (Row 1 from CoinSwitch with delta above 0.40, Row 2 from Delta Exchange with CE -500 / PE +500 offset).`
+                    : "Exec Strategy placed no paper option orders.";
+                if (arrErrors.length) {
+                    vMessage += ` ${arrErrors.join(" ")}`;
+                }
+                setStatus(ids.pageStatus, vMessage, arrErrors.length ? (vPlacedOrders > 0 ? "warning" : "danger") : "success");
+                return Promise.all([
+                    loadProfile()
+                        .then(function () { return loadClosedPositions(); })
+                        .catch(function () { return undefined; }),
+                    loadAccountSummary(),
+                    loadConnectionStatus(),
+                    loadEvents().catch(function () { return undefined; })
+                ]);
+            }).catch(function (error) {
+                setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to execute the paper strategy.", "danger");
+            });
+            return;
+        }
+        void executeStrategy(1).then(function (objResult) {
             const trackedPayload = objResult?.data?.trackedOpenPositions || null;
             const objNeutralCheck = objResult?.data?.neutralCheck || {};
             const bHedgePlaced = Boolean(objNeutralCheck?.hedgePlaced);
@@ -6693,7 +6969,7 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to clear imported open positions.", "danger");
         });
     });
-    ids.openPositionsBody?.addEventListener("click", function (event) {
+    const handleOpenPositionsBodyClick = function (event) {
         const target = event.target instanceof Element ? event.target : null;
         const swapButton = target ? target.closest(".rolling-live-swap-open-position") : null;
         if (swapButton instanceof HTMLButtonElement) {
@@ -6793,7 +7069,10 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
                 setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to remove imported open position.", "danger");
             });
         }
-    });
+    };
+    ids.openPositionsBody?.addEventListener("click", handleOpenPositionsBodyClick);
+    ids.openPositionsBodyCoinswitch?.addEventListener("click", handleOpenPositionsBodyClick);
+    ids.openPositionsBodyDelta?.addEventListener("click", handleOpenPositionsBodyClick);
     ids.closedPositionsBody?.addEventListener("click", function (event) {
         const target = event.target instanceof Element ? event.target : null;
         const editButton = target ? target.closest(".rolling-live-edit-closed-position") : null;

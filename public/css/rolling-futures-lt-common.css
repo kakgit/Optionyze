@@ -2101,3 +2101,48 @@ body[data-rolling-futures-live="covered"] .rolling-covered-pnl-value.total {
     letter-spacing: .01em;
     white-space: nowrap;
 }
+
+.rolling-demo-open-source-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 18px 0 8px;
+}
+
+.rolling-demo-open-source-head:first-of-type {
+    margin-top: 4px;
+}
+
+.rolling-demo-open-source-head h3 {
+    margin: 0;
+    font-size: .95rem;
+    font-weight: 700;
+    letter-spacing: .01em;
+}
+
+.rolling-demo-open-source-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(88, 166, 255, 0.16);
+    color: #9ecbff;
+    font-size: .72rem;
+    font-weight: 700;
+}
+
+.rolling-demo-equalized-lot-hint {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: rgba(255, 159, 10, 0.16);
+    color: #ffb254;
+    font-size: .66rem;
+    font-weight: 700;
+    line-height: 1.2;
+    cursor: help;
+    vertical-align: middle;
+}
