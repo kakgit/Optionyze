@@ -134,8 +134,8 @@
         closeBlockedMargin: document.getElementById("chkRollingFuturesCloseBlockedMargin"),
         autoTraderOffOnProfitClose: document.getElementById("chkRollingFuturesAutoTraderOffOnProfitClose"),
         blockedMarginPct: document.getElementById("txtRollingFuturesBlockedMarginPct"),
-        closePosPnlAboveBrokerage: document.getElementById("chkRollingFuturesClosePosPnlBelowBrokerage"),
-        closePosPnlAboveBrokerageX: document.getElementById("txtRollingFuturesClosePosPnlBelowBrokerageX"),
+        closePosPnlAboveBrokerage: document.getElementById("chkRollingFuturesClosePosPnlAboveBrokerage"),
+        closePosPnlAboveBrokerageX: document.getElementById("txtRollingFuturesClosePosPnlAboveBrokerageX"),
         reEnterBlock: document.getElementById("chkRollingFuturesReEnterBlock"),
         buyHedgeSellPremiumGate: document.getElementById("chkRollingFuturesBuyHedgeSellPremiumGate"),
         buyHedgeSellPremiumPct: document.getElementById("txtRollingFuturesBuyHedgeSellPremiumPct"),
@@ -3891,8 +3891,8 @@
             setCheckboxValue(ids.closeBlockedMargin, objUiState.closeBlockedMargin);
             setCheckboxValue(ids.autoTraderOffOnProfitClose, isCoveredLivePageMode() ? objUiState.autoTraderOffOnProfitClose : false);
             setInputValue(ids.blockedMarginPct, objUiState.blockedMarginPct);
-            setCheckboxValue(ids.closePosPnlBelowBrokerage, objUiState.closePosPnlAboveBrokerage);
-            setInputValue(ids.closePosPnlBelowBrokerageX, objUiState.closePosPnlAboveBrokerageX);
+            setCheckboxValue(ids.closePosPnlAboveBrokerage, objUiState.closePosPnlAboveBrokerage);
+            setInputValue(ids.closePosPnlAboveBrokerageX, objUiState.closePosPnlAboveBrokerageX);
             setCheckboxValue(ids.buyHedgeSellPremiumGate, isStrangleLikePage ? false : objUiState.buyHedgeSellPremiumGate);
             setInputValue(ids.buyHedgeSellPremiumPct, isStrangleLikePage ? "2" : objUiState.buyHedgeSellPremiumPct);
             setCheckboxValue(ids.strangleDeltaDiffReplaceEnabled, objUiState.strangleDeltaDiffReplaceEnabled);
@@ -5912,8 +5912,8 @@ async function loadClosedAltPositions() {
         ids.reEnterBrok,
         ids.closeBlockedMargin,
         ids.blockedMarginPct,
-        ids.closePosPnlBelowBrokerage,
-        ids.closePosPnlBelowBrokerageX,
+        ids.closePosPnlAboveBrokerage,
+        ids.closePosPnlAboveBrokerageX,
         ids.reEnterBlock,
         ids.buyHedgeSellPremiumGate,
         ids.buyHedgeSellPremiumPct,

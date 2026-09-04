@@ -131,16 +131,16 @@
                     <div class="rolling-futures-help-inline-row">
                         <div class="rolling-futures-help-inline-main">
                             <div class="rolling-futures-help-inline-top">
-                                <label class="rolling-futures-neutral-mode rolling-futures-help-mode" for="<%= vShowPosPnlCloseRule ? 'chkRollingFuturesClosePosPnlBelowBrokerage' : 'chkRollingFuturesCloseBlockedMargin' %>">
+                                <label class="rolling-futures-neutral-mode rolling-futures-help-mode" for="<%= vShowPosPnlCloseRule ? 'chkRollingFuturesClosePosPnlAboveBrokerage' : 'chkRollingFuturesCloseBlockedMargin' %>">
                                     <% if (vShowPosPnlCloseRule) { %>
-                                    <input type="checkbox" id="chkRollingFuturesClosePosPnlBelowBrokerage" />
-                                    <span>Close if Pos PnL &lt; X of Pos Brokerage</span>
+                                    <input type="checkbox" id="chkRollingFuturesClosePosPnlAboveBrokerage" />
+                                    <span>Close if Pos PnL &gt; X of Pos Brokerage</span>
                                     <span class="rolling-futures-help-icon-wrap">
                                         <button type="button" class="rolling-futures-help-trigger" aria-label="Show position stop help">
                                             ?
                                         </button>
                                         <span class="rolling-futures-help-popout floating">
-                                            Monitors every open position individually: closes ONLY that position when its live PnL drops below X &times; its own brokerage. All other positions keep running until the overall target PnL is achieved.
+                                            Monitors every open position individually: closes ONLY that position when its live PnL exceeds X &times; its own brokerage. All other positions keep running until the overall target PnL is achieved.
                                         </span>
                                     </span>
                                     <% } else { %>
@@ -159,7 +159,7 @@
                             </div>
                             <div class="rolling-futures-help-inline-bottom">
                                 <div class="rolling-demo-field rolling-futures-help-input-field">
-                                    <input type="number" id="<%= vShowPosPnlCloseRule ? 'txtRollingFuturesClosePosPnlBelowBrokerageX' : 'txtRollingFuturesBlockedMarginPct' %>" value="<%= vShowPosPnlCloseRule ? '5' : (bIsStrangleLikePage ? '10' : '20') %>" />
+                                    <input type="number" id="<%= vShowPosPnlCloseRule ? 'txtRollingFuturesClosePosPnlAboveBrokerageX' : 'txtRollingFuturesBlockedMarginPct' %>" value="<%= vShowPosPnlCloseRule ? '5' : (bIsStrangleLikePage ? '10' : '20') %>" />
                                 </div>
                             </div>
                         </div>

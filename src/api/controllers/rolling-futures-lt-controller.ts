@@ -11510,17 +11510,20 @@ async function applyTriggeredOptionRule(
 async function findTriggeredTrackedOptions(
     pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
     pUiState: Record<string, unknown>
-): Promise<Array<{
-    position: RollingFuturesLtImportedPositionRecord;
-    currentDelta: number;
-    currentMarkPrice: number | null;
-    reason: "sl" | "tp" | "expiry_cutoff";
-    ruleAudit?: {
-        rowIndex: 1 | 2;
-        takeProfitDelta: number;
-        stopLossDelta: number;
-    };
-}>> {
+): Promise<{
+    triggered: Array<{
+        position: RollingFuturesLtImportedPositionRecord;
+        currentDelta: number;
+        currentMarkPrice: number | null;
+        reason: "sl" | "tp" | "expiry_cutoff";
+        ruleAudit?: {
+            rowIndex: 1 | 2;
+            takeProfitDelta: number;
+            stopLossDelta: number;
+        };
+    }>;
+    updated: RollingFuturesLtImportedPositionRecord[];
+}> {
     const arrTriggered: Array<{
         position: RollingFuturesLtImportedPositionRecord;
         currentDelta: number;
@@ -11532,6 +11535,11 @@ async function findTriggeredTrackedOptions(
             stopLossDelta: number;
         };
     }> = [];
+    // Tracks positions whose pnlAboveBrokerageSince timer metadata changed in this
+    // cycle so the caller can persist it. Without this, the "Exit Pos if its PnL
+    // is > X of Brokerage" timer would never persist across auto-trader cycles and
+    // the position would never close.
+    const arrUpdatedPositions: RollingFuturesLtImportedPositionRecord[] = [];
     const objCurrentDeltaTime = getCurrentDeltaUiDateTimeParts();
     for (const objPosition of pTrackedPositions) {
         if (!isOptionContractSymbol(objPosition.contractName)) {
@@ -11677,11 +11685,14 @@ async function findTriggeredTrackedOptions(
             });
         }
     }
-    return arrTriggered.sort((pLeft, pRight) => {
-        const vLeftPriority = pLeft.reason === "expiry_cutoff" ? 0 : (pLeft.reason === "sl" ? 1 : 2);
-        const vRightPriority = pRight.reason === "expiry_cutoff" ? 0 : (pRight.reason === "sl" ? 1 : 2);
-        return vLeftPriority - vRightPriority;
-    });
+    return {
+        triggered: arrTriggered.sort((pLeft, pRight) => {
+            const vLeftPriority = pLeft.reason === "expiry_cutoff" ? 0 : (pLeft.reason === "sl" ? 1 : 2);
+            const vRightPriority = pRight.reason === "expiry_cutoff" ? 0 : (pRight.reason === "sl" ? 1 : 2);
+            return vLeftPriority - vRightPriority;
+        }),
+        updated: arrUpdatedPositions
+    };
 }
 
 function getStrangleReEntryOpenMessage(
@@ -11918,7 +11929,13 @@ async function processCoveredLiveActionDecision(
                 await logFuturesEvent(pUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", `${vContractName} is no longer in open positions. No order was placed.`, { reason: "covered_confirmation_position_missing" });
                 return { status: "warning", message: "The position is no longer open. No order was placed." };
             }
-            const arrTriggered = await findTriggeredTrackedOptions([objPosition], getMergedUiState(objProfile));
+            const objTriggerScan = await findTriggeredTrackedOptions([objPosition], getMergedUiState(objProfile));
+            const arrTriggered = objTriggerScan.triggered;
+            if (objTriggerScan.updated.length) {
+                const mapUpdatedById = new Map(objTriggerScan.updated.map((objRow) => [String(objRow.importId), objRow]));
+                const arrMergedSaved = arrSavedPositions.map((objRow) => mapUpdatedById.get(String(objRow.importId)) || objRow);
+                await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrMergedSaved);
+            }
             const objTriggered = arrTriggered.find((objEntry) => objEntry.reason === vReason);
             if (!objTriggered) {
                 await logFuturesEvent(pUserId, pStrategyCode, "manual_action", "warning", "Live Confirmation Invalidated", `The trigger for ${objPosition.contractName} no longer holds. No order was placed.`, { contractName: objPosition.contractName, reason: "covered_confirmation_trigger_cleared" });
@@ -14368,7 +14385,13 @@ async function runDualSurvivalOnlyCycle(
         strategyCode: pStrategyCode,
         positionCount: arrPositions.length
     });
-    const arrTriggeredOptions = await findTriggeredTrackedOptions(arrPositions, objOwnedSurvival.uiState || {});
+    const objTriggerScan = await findTriggeredTrackedOptions(arrPositions, objOwnedSurvival.uiState || {});
+    const arrTriggeredOptions = objTriggerScan.triggered;
+    if (objTriggerScan.updated.length) {
+        const mapUpdatedById = new Map(objTriggerScan.updated.map((objRow) => [String(objRow.importId), objRow]));
+        arrPositions = arrPositions.map((objRow) => mapUpdatedById.get(String(objRow.importId)) || objRow);
+        await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrPositions);
+    }
     logDualSurvivalDebug("cycle_trigger_scan_complete", {
         userId: pUserId,
         strategyCode: pStrategyCode,
@@ -14768,10 +14791,27 @@ async function runAutoTraderCycle(
             }
         }
 
-        const arrTriggeredOptions = bRestartCloseProtectionActive
-            ? []
+        const objTriggerScan = bRestartCloseProtectionActive
+            ? { triggered: [] as Array<{
+                position: RollingFuturesLtImportedPositionRecord;
+                currentDelta: number;
+                currentMarkPrice: number | null;
+                reason: "sl" | "tp" | "expiry_cutoff";
+                ruleAudit?: {
+                    rowIndex: 1 | 2;
+                    takeProfitDelta: number;
+                    stopLossDelta: number;
+                };
+            }>, updated: [] as RollingFuturesLtImportedPositionRecord[] }
             : await findTriggeredTrackedOptions(arrSavedPositions, objUiState);
-        for (const objTriggeredOption of arrTriggeredOptions) {
+        // Persist any PnL>Brokerage timer metadata changes BEFORE processing triggered
+        // positions so the timer survives across auto-trader cycles.
+        if (objTriggerScan.updated.length) {
+            const mapUpdatedById = new Map(objTriggerScan.updated.map((objRow) => [String(objRow.importId), objRow]));
+            arrSavedPositions = arrSavedPositions.map((objRow) => mapUpdatedById.get(String(objRow.importId)) || objRow);
+            await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrSavedPositions);
+        }
+        for (const objTriggeredOption of objTriggerScan.triggered) {
             const objCurrentTrackedPosition = arrSavedPositions.find((objRow) => objRow.importId === objTriggeredOption.position.importId);
             if (!objCurrentTrackedPosition) {
                 continue;
