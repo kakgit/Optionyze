@@ -5731,8 +5731,9 @@ async function enrichTrackedOpenPositions(
     for (const objRow of arrPositions) {
         objChainSourceByPosition.set(objRow, resolveTrackedPositionChainSource(objRow, pStrategyCode));
     }
+    // Delta-priced contracts include futures (BTCUSD/ETHUSD) plus Delta options;
+    // CoinSwitch paper positions are priced separately from the CoinSwitch feed.
     const arrDeltaOptionContracts = arrPositions
-        .filter((objRow) => isOptionContractSymbol(objRow.contractName))
         .filter((objRow) => objChainSourceByPosition.get(objRow) !== "coinswitch")
         .map((objRow) => String(objRow.contractName || "").trim())
         .filter(Boolean);
@@ -5849,7 +5850,7 @@ async function enrichTrackedOpenPositions(
         const bIsFuture = isFutureContractSymbol(vContractName);
         const vChainSource = objChainSourceByPosition.get(objPosition) || "delta";
         const objTicker = bIsFuture
-            ? null
+            ? (objTickerByContract.get(vContractName) || null)
             : (vChainSource === "coinswitch"
                 ? (objCoinSwitchTickerByContract.get(vContractName.toUpperCase()) || null)
                 : (objTickerByContract.get(vContractName) || null));
@@ -9975,6 +9976,103 @@ async function buildOptionsScalperPaperOptionOpen(
     };
 }
 
+async function buildOptionsScalperPaperFutureOpen(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pInput: {
+        action: "buy" | "sell";
+        symbol: "BTC" | "ETH";
+        qty: number;
+        orderType: "market_order" | "limit_order";
+        limitPrice?: number;
+        entryPriceOverride?: number;
+    }
+): Promise<{
+    position: RollingFuturesLtImportedPositionRecord;
+    contract: Record<string, unknown>;
+    order: Record<string, unknown>;
+}> {
+    const vContractName = getContractNameForSymbol(pInput.symbol);
+    const vLotSize = getLotSizeForSymbol(pInput.symbol);
+    const vEntryPriceOverride = Number.isFinite(Number(pInput.entryPriceOverride)) && Number(pInput.entryPriceOverride) > 0
+        ? Number(pInput.entryPriceOverride)
+        : 0;
+    const objTicker = vEntryPriceOverride > 0 ? null : await getLiveOptionTicker(vContractName);
+    const vTickerPrices = {
+        bestBid: Number(objTicker?.bestBid || 0),
+        bestAsk: Number(objTicker?.bestAsk || 0),
+        markPrice: Number(objTicker?.markPrice || 0)
+    };
+    const vLimitPrice = pInput.orderType === "limit_order"
+        && Number.isFinite(Number(pInput.limitPrice))
+        && Number(pInput.limitPrice) > 0
+        ? Number(pInput.limitPrice)
+        : 0;
+    if (pInput.orderType === "limit_order" && !(vLimitPrice > 0) && !(vEntryPriceOverride > 0)) {
+        throw new Error("Enter a valid Limit Price before placing a paper limit futures order.");
+    }
+    const vEntryPrice = vLimitPrice > 0
+        ? vLimitPrice
+        : (vEntryPriceOverride > 0
+            ? vEntryPriceOverride
+            : resolveTrackedOptionEntryPrice(pInput.action, vTickerPrices, vTickerPrices.markPrice));
+    if (!(vEntryPrice > 0)) {
+        throw new Error(`Unable to fetch a live ${vContractName} price from Delta Exchange. Please try again.`);
+    }
+    const vQty = Math.max(1, Math.floor(Number(pInput.qty || 1)));
+    const vOpenedAtIso = new Date().toISOString();
+    const vEntryCharge = await estimateTrackedPositionCharge({
+        contractName: vContractName,
+        qty: vQty,
+        entryPrice: vEntryPrice,
+        markPrice: vEntryPrice
+    }, undefined, vLotSize);
+    return {
+        position: {
+            userId: pUserId,
+            strategyCode: pStrategyCode,
+            importId: crypto.randomUUID(),
+            contractName: vContractName,
+            side: pInput.action.toUpperCase(),
+            qty: vQty,
+            entryPrice: vEntryPrice,
+            markPrice: vEntryPrice,
+            charges: Number(vEntryCharge.toFixed(4)),
+            pnl: 0,
+            margin: 0,
+            liquidationPrice: 0,
+            metadata: {
+                openedReason: "manual_future_open",
+                symbol: pInput.symbol,
+                lotSize: vLotSize,
+                orderType: pInput.orderType,
+                ...(vLimitPrice > 0 ? { limitPrice: vLimitPrice } : {}),
+                paperFuture: true
+            },
+            openedAt: vOpenedAtIso,
+            updatedAt: vOpenedAtIso
+        },
+        contract: {
+            contractSymbol: vContractName,
+            lotSize: vLotSize,
+            markPrice: vTickerPrices.markPrice,
+            bestBid: vTickerPrices.bestBid,
+            bestAsk: vTickerPrices.bestAsk
+        },
+        order: {
+            id: crypto.randomUUID(),
+            product_symbol: vContractName,
+            size: vQty,
+            side: pInput.action,
+            order_type: pInput.orderType === "limit_order" ? "paper_limit_order" : "paper_market_order",
+            average_fill_price: Number(vEntryPrice || 0),
+            status: "filled",
+            isPaperTrade: true,
+            filled_at: vOpenedAtIso
+        }
+    };
+}
+
 async function syncCoveredRecoveryMetricsFromClosedHistory(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -12489,6 +12587,254 @@ function resolveOptionsScalperRenkoAutoTradeInput(
     };
 }
 
+async function closeFuturesScalperOpenTrade(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pSymbol: "BTC" | "ETH",
+    pOpenTrade: FuturesScalperOpenTradeState,
+    pExitPrice: number,
+    pTracked: RollingFuturesLtImportedPositionRecord[]
+): Promise<{ tracked: RollingFuturesLtImportedPositionRecord[]; closed: OptionsScalperPaperClosedPositionRecord | null }> {
+    const objPosition = pTracked.find((objRow) => String(objRow.importId || "").trim() === pOpenTrade.importId) || null;
+    if (!objPosition) {
+        return { tracked: pTracked, closed: null };
+    }
+    const vIsStopLoss = Math.abs(pExitPrice - pOpenTrade.stopLossPrice) <= Math.abs(pExitPrice - pOpenTrade.takeProfitPrice);
+    const objClosed = await closeOptionsScalperPaperPosition(pUserId, "options-scalper", objPosition, pExitPrice, new Date().toISOString());
+    const arrRemaining = pTracked.filter((objRow) => String(objRow.importId || "").trim() !== pOpenTrade.importId);
+    const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, "options-scalper", arrRemaining);
+    await appendOptionsScalperPaperClosedPositions(pUserId, "options-scalper", [objClosed]);
+    await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(pUserId, pProfile).catch(() => undefined);
+    await logFuturesEvent(
+        pUserId,
+        "options-scalper",
+        vIsStopLoss ? "sl_triggered" : "tp_triggered",
+        vIsStopLoss ? "error" : "success",
+        vIsStopLoss ? "Paper Future SL Hit" : "Paper Future TP Hit",
+        `${pOpenTrade.contractName} paper short ${vIsStopLoss ? "stop-loss" : "take-profit"} hit at ${pExitPrice.toFixed(2)} (entry ${pOpenTrade.entryPrice.toFixed(2)}). PnL ${objClosed.pnl.toFixed(4)}.`,
+        {
+            symbol: pSymbol,
+            contractName: pOpenTrade.contractName,
+            entryPrice: pOpenTrade.entryPrice,
+            exitPrice: pExitPrice,
+            qty: pOpenTrade.qty,
+            pnl: objClosed.pnl,
+            reason: vIsStopLoss ? "futures_scalper_sl" : "futures_scalper_tp"
+        }
+    );
+    return { tracked: arrSaved, closed: objClosed };
+}
+
+async function fillFuturesScalperPendingOrder(
+    pUserId: string,
+    pSymbol: "BTC" | "ETH",
+    pPending: FuturesScalperPendingOrderState,
+    pTracked: RollingFuturesLtImportedPositionRecord[]
+): Promise<{ tracked: RollingFuturesLtImportedPositionRecord[]; openTrade: FuturesScalperOpenTradeState }> {
+    const objPaperOpen = await buildOptionsScalperPaperFutureOpen(pUserId, "options-scalper", {
+        action: "sell",
+        symbol: pSymbol,
+        qty: pPending.qty,
+        orderType: "market_order",
+        entryPriceOverride: pPending.orderPrice
+    });
+    const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, "options-scalper", [
+        ...pTracked,
+        objPaperOpen.position
+    ]);
+    const objOpenTrade: FuturesScalperOpenTradeState = {
+        importId: objPaperOpen.position.importId,
+        contractName: objPaperOpen.position.contractName,
+        entryPrice: objPaperOpen.position.entryPrice,
+        stopLossPrice: Number((objPaperOpen.position.entryPrice + gFuturesScalperStopLossPoints).toFixed(2)),
+        takeProfitPrice: Number((objPaperOpen.position.entryPrice - gFuturesScalperTakeProfitPoints).toFixed(2)),
+        qty: objPaperOpen.position.qty,
+        openedAt: objPaperOpen.position.openedAt
+    };
+    await logFuturesEvent(
+        pUserId,
+        "options-scalper",
+        "future_opened",
+        "success",
+        "Paper Future Trigger Filled",
+        `${objOpenTrade.contractName} SELL ${objOpenTrade.qty} lot(s) filled at ${objOpenTrade.entryPrice.toFixed(2)} (trigger ${pPending.triggerLevel.toFixed(2)}). SL ${objOpenTrade.stopLossPrice.toFixed(2)} / TP ${objOpenTrade.takeProfitPrice.toFixed(2)} armed.`,
+        {
+            symbol: pSymbol,
+            contractName: objOpenTrade.contractName,
+            triggerLevel: pPending.triggerLevel,
+            entryPrice: objOpenTrade.entryPrice,
+            stopLossPrice: objOpenTrade.stopLossPrice,
+            takeProfitPrice: objOpenTrade.takeProfitPrice,
+            qty: objOpenTrade.qty,
+            reason: "futures_scalper_trigger_filled"
+        }
+    );
+    return { tracked: arrSaved, openTrade: objOpenTrade };
+}
+
+async function runFuturesScalperTriggerEngine(
+    pUserId: string,
+    pSync: {
+        runtime: RollingFuturesLtRuntimeRecord | null;
+        profile: RollingFuturesLtProfileRecord;
+        renko: OptionsDemoRenkoRuntimeState;
+        signals: OptionsDemoRenkoSignal[];
+        emaSignal: OptionsDemoRenkoSignal | "";
+    },
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null
+): Promise<FuturesScalperEngineSyncResult> {
+    const objUiState = getMergedUiState(pSync.profile);
+    const vSymbol = normalizeSymbolValue(objUiState.symbol);
+    const vPrice = Number(pSnapshot?.futuresPrice);
+    if (!Number.isFinite(vPrice) || !(vPrice > 0)) {
+        return { ...pSync, autoTrade: null };
+    }
+    const vBoxLevel = Number(pSync.renko.anchor || 0);
+    const vBoxColor = String(pSync.renko.lastColor || "").trim().toUpperCase();
+    const objEngineMap = getFuturesScalperEngineStateMap(pSync.runtime?.state || {});
+    const objEngine: FuturesScalperSymbolEngineState = objEngineMap[vSymbol] || { pendingOrder: null, openTrade: null };
+    let bStateChanged = false;
+    let objAutoTrade: FuturesScalperEngineSyncResult["autoTrade"] = null;
+    let arrTracked = await listRollingFuturesLtImportedPositions(pUserId, "options-scalper");
+
+    // 1) Drop the open-trade link when the position was closed manually.
+    if (objEngine.openTrade) {
+        const vImportId = objEngine.openTrade.importId;
+        if (!arrTracked.some((objRow) => String(objRow.importId || "").trim() === vImportId)) {
+            objEngine.openTrade = null;
+            bStateChanged = true;
+        }
+    }
+
+    // 2) Manage SL / TP on the open paper short using the live futures price.
+    if (objEngine.openTrade) {
+        const objOpenTrade = objEngine.openTrade;
+        const vExitPrice = vPrice >= objOpenTrade.stopLossPrice
+            ? objOpenTrade.stopLossPrice
+            : (vPrice <= objOpenTrade.takeProfitPrice ? objOpenTrade.takeProfitPrice : 0);
+        if (vExitPrice > 0) {
+            const objExit = await closeFuturesScalperOpenTrade(pUserId, pSync.profile, vSymbol, objOpenTrade, vExitPrice, arrTracked);
+            arrTracked = objExit.tracked;
+            objEngine.openTrade = null;
+            bStateChanged = true;
+            if (objExit.closed) {
+                const vIsStopLoss = vExitPrice === objOpenTrade.stopLossPrice;
+                objAutoTrade = {
+                    status: vIsStopLoss ? "warning" : "success",
+                    message: `${objOpenTrade.contractName} ${vIsStopLoss ? "SL" : "TP"} hit at ${vExitPrice.toFixed(2)}. PnL ${objExit.closed.pnl.toFixed(4)}.`,
+                    trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrTracked)
+                };
+            }
+        }
+    }
+
+    // 3) Pending order: cancel on a green box at/above trigger+50, fill on a dip to the order level.
+    if (!objEngine.openTrade && objEngine.pendingOrder) {
+        const objPending = objEngine.pendingOrder;
+        if (vBoxColor === "G" && vBoxLevel >= objPending.triggerLevel + gFuturesScalperCancelOffsetPoints) {
+            objEngine.pendingOrder = null;
+            bStateChanged = true;
+            await logFuturesEvent(
+                pUserId,
+                "options-scalper",
+                "trigger_order_cancelled",
+                "warning",
+                "Paper Future Trigger Order Cancelled",
+                `Green box printed at ${vBoxLevel.toFixed(2)} (trigger ${objPending.triggerLevel.toFixed(2)}). The sell order at ${objPending.orderPrice.toFixed(2)} was cancelled. Waiting for the next trigger.`,
+                {
+                    symbol: vSymbol,
+                    triggerLevel: objPending.triggerLevel,
+                    orderPrice: objPending.orderPrice,
+                    boxLevel: vBoxLevel,
+                    reason: "futures_scalper_trigger_cancelled"
+                }
+            );
+            objAutoTrade = {
+                status: "warning",
+                message: `Green box at ${vBoxLevel.toFixed(2)} — sell order at ${objPending.orderPrice.toFixed(2)} cancelled. Waiting for the next trigger.`
+            };
+        }
+        else if (vPrice <= objPending.orderPrice) {
+            const objFill = await fillFuturesScalperPendingOrder(pUserId, vSymbol, objPending, arrTracked);
+            arrTracked = objFill.tracked;
+            objEngine.openTrade = objFill.openTrade;
+            objEngine.pendingOrder = null;
+            bStateChanged = true;
+            objAutoTrade = {
+                status: "success",
+                message: `SELL ${objFill.openTrade.contractName} triggered at ${objFill.openTrade.entryPrice.toFixed(2)}. SL ${objFill.openTrade.stopLossPrice.toFixed(2)} / TP ${objFill.openTrade.takeProfitPrice.toFixed(2)}.`,
+                trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrTracked)
+            };
+        }
+    }
+
+    // 4) Arm a new trigger sell order on a green box that just reached a ladder level.
+    if (!objEngine.openTrade && !objEngine.pendingOrder && vBoxColor === "G" && vBoxLevel > 0) {
+        const vTriggerLevel = getFuturesScalperTriggerLevelForPrice(vBoxLevel);
+        if (vTriggerLevel > 0 && vBoxLevel >= vTriggerLevel && vBoxLevel < vTriggerLevel + gFuturesScalperCancelOffsetPoints) {
+            const vOrderPrice = Number((vTriggerLevel - gFuturesScalperOrderOffsetPoints).toFixed(2));
+            if (vOrderPrice > 0) {
+                objEngine.pendingOrder = {
+                    triggerLevel: vTriggerLevel,
+                    orderPrice: vOrderPrice,
+                    qty: Math.max(1, Math.floor(Number(objUiState.bsFutQty || 1))),
+                    createdAt: new Date().toISOString()
+                };
+                bStateChanged = true;
+                await logFuturesEvent(
+                    pUserId,
+                    "options-scalper",
+                    "trigger_order_placed",
+                    "success",
+                    "Paper Future Trigger Order Placed",
+                    `Green box at ${vBoxLevel.toFixed(2)} hit trigger ${vTriggerLevel.toFixed(2)}. Sell order armed at ${vOrderPrice.toFixed(2)} (100 points below). Cancels if the green box reaches ${(vTriggerLevel + gFuturesScalperCancelOffsetPoints).toFixed(2)}.`,
+                    {
+                        symbol: vSymbol,
+                        triggerLevel: vTriggerLevel,
+                        orderPrice: vOrderPrice,
+                        boxLevel: vBoxLevel,
+                        qty: objEngine.pendingOrder.qty,
+                        reason: "futures_scalper_trigger_placed"
+                    }
+                );
+                objAutoTrade = {
+                    status: "success",
+                    message: `Green box at ${vBoxLevel.toFixed(2)} — sell order armed at ${vOrderPrice.toFixed(2)}. Cancels above ${(vTriggerLevel + gFuturesScalperCancelOffsetPoints).toFixed(2)}.`
+                };
+            }
+        }
+    }
+
+    if (bStateChanged) {
+        const objSavedRuntime = await saveRollingFuturesLtRuntime({
+            ...(pSync.runtime || getDefaultRollingFuturesLtRuntime(pUserId, "options-scalper")),
+            userId: pUserId,
+            strategyCode: "options-scalper",
+            state: {
+                ...((pSync.runtime?.state || {}) as Record<string, unknown>),
+                futuresScalperEngine: {
+                    ...objEngineMap,
+                    [vSymbol]: objEngine
+                }
+            }
+        });
+        return {
+            runtime: objSavedRuntime,
+            profile: pSync.profile,
+            renko: pSync.renko,
+            signals: pSync.signals,
+            emaSignal: pSync.emaSignal,
+            autoTrade: objAutoTrade
+        };
+    }
+    return { ...pSync, autoTrade: objAutoTrade };
+}
+
 function resolveCoveredOptionsRenkoAutoTradeInput(
     pProfile: RollingFuturesLtProfileRecord,
     pSignal: OptionsDemoRenkoSignal,
@@ -12836,6 +13182,173 @@ function evaluateOptionsDemoPnlEntryGuards(
     };
 }
 
+// ---------------------------------------------------------------------------
+// Futures Scalper trigger engine (paper futures, SELL only, Renko Feed driven).
+//
+// Ladder: trigger levels every 200 points on the ...50 grid (78850, 79050, ...).
+//  - Green Renko box reaches a trigger level T  -> arm a SELL order at T - 100.
+//  - Green box prints at T + 50 or above        -> cancel the armed order and
+//    wait for the next ladder level.
+//  - Price dips to the order level              -> short fills at that exact
+//    level; SL = entry + 100 and TP = entry - 150 are armed immediately.
+//  - SL / TP are paper-managed on every tick using the live futures price.
+// ---------------------------------------------------------------------------
+const gFuturesScalperTriggerStepPoints = 200;
+const gFuturesScalperGridOffsetPoints = 50;
+const gFuturesScalperOrderOffsetPoints = 100;
+const gFuturesScalperCancelOffsetPoints = 50;
+const gFuturesScalperStopLossPoints = 100;
+const gFuturesScalperTakeProfitPoints = 150;
+
+type FuturesScalperPendingOrderState = {
+    triggerLevel: number;
+    orderPrice: number;
+    qty: number;
+    createdAt: string;
+};
+
+type FuturesScalperOpenTradeState = {
+    importId: string;
+    contractName: string;
+    entryPrice: number;
+    stopLossPrice: number;
+    takeProfitPrice: number;
+    qty: number;
+    openedAt: string;
+};
+
+type FuturesScalperSymbolEngineState = {
+    pendingOrder: FuturesScalperPendingOrderState | null;
+    openTrade: FuturesScalperOpenTradeState | null;
+};
+
+type FuturesScalperEngineSyncResult = {
+    runtime: RollingFuturesLtRuntimeRecord | null;
+    profile: RollingFuturesLtProfileRecord;
+    renko: OptionsDemoRenkoRuntimeState;
+    signals: OptionsDemoRenkoSignal[];
+    emaSignal: OptionsDemoRenkoSignal | "";
+    autoTrade: null | {
+        status: "success" | "warning" | "danger";
+        message: string;
+        trackedOpenPositions?: Awaited<ReturnType<typeof buildOpenPositionsPayload>>;
+    };
+};
+
+function getFuturesScalperTriggerLevelForPrice(pPrice: number): number {
+    return Math.floor((pPrice - gFuturesScalperGridOffsetPoints) / gFuturesScalperTriggerStepPoints)
+        * gFuturesScalperTriggerStepPoints + gFuturesScalperGridOffsetPoints;
+}
+
+function normalizeFuturesScalperSymbolEngineState(pValue: unknown): FuturesScalperSymbolEngineState {
+    const objValue = pValue && typeof pValue === "object" ? pValue as Record<string, unknown> : {};
+    const objPending = objValue.pendingOrder && typeof objValue.pendingOrder === "object"
+        ? objValue.pendingOrder as Record<string, unknown>
+        : null;
+    const objOpenTrade = objValue.openTrade && typeof objValue.openTrade === "object"
+        ? objValue.openTrade as Record<string, unknown>
+        : null;
+    const vTriggerLevel = Number(objPending?.triggerLevel);
+    const vOrderPrice = Number(objPending?.orderPrice);
+    const vPendingQty = Number(objPending?.qty);
+    const vEntryPrice = Number(objOpenTrade?.entryPrice);
+    const vStopLossPrice = Number(objOpenTrade?.stopLossPrice);
+    const vTakeProfitPrice = Number(objOpenTrade?.takeProfitPrice);
+    const vOpenQty = Number(objOpenTrade?.qty);
+    return {
+        pendingOrder: objPending
+            && Number.isFinite(vTriggerLevel) && vTriggerLevel > 0
+            && Number.isFinite(vOrderPrice) && vOrderPrice > 0
+            && Number.isFinite(vPendingQty) && vPendingQty > 0
+            ? {
+                triggerLevel: vTriggerLevel,
+                orderPrice: vOrderPrice,
+                qty: Math.max(1, Math.floor(vPendingQty)),
+                createdAt: String(objPending.createdAt || "").trim() || new Date().toISOString()
+            }
+            : null,
+        openTrade: objOpenTrade
+            && String(objOpenTrade.importId || "").trim()
+            && Number.isFinite(vEntryPrice) && vEntryPrice > 0
+            && Number.isFinite(vStopLossPrice) && vStopLossPrice > 0
+            && Number.isFinite(vTakeProfitPrice) && vTakeProfitPrice > 0
+            && Number.isFinite(vOpenQty) && vOpenQty > 0
+            ? {
+                importId: String(objOpenTrade.importId || "").trim(),
+                contractName: String(objOpenTrade.contractName || "").trim(),
+                entryPrice: vEntryPrice,
+                stopLossPrice: vStopLossPrice,
+                takeProfitPrice: vTakeProfitPrice,
+                qty: Math.max(1, Math.floor(vOpenQty)),
+                openedAt: String(objOpenTrade.openedAt || "").trim() || new Date().toISOString()
+            }
+            : null
+    };
+}
+
+function getFuturesScalperEngineStateMap(pRuntimeState: unknown): Record<string, FuturesScalperSymbolEngineState> {
+    const objValue = pRuntimeState && typeof pRuntimeState === "object"
+        ? (pRuntimeState as Record<string, unknown>).futuresScalperEngine
+        : null;
+    const objMap = objValue && typeof objValue === "object" ? objValue as Record<string, unknown> : {};
+    const objResult: Record<string, FuturesScalperSymbolEngineState> = {};
+    for (const [vKey, vValue] of Object.entries(objMap)) {
+        objResult[normalizeSymbolValue(vKey)] = normalizeFuturesScalperSymbolEngineState(vValue);
+    }
+    return objResult;
+}
+
+function clearFuturesScalperEngineState(pState: Record<string, unknown>): Record<string, unknown> {
+    const objNext = { ...pState };
+    delete objNext.futuresScalperEngine;
+    return objNext;
+}
+
+function hasFuturesScalperPendingTrigger(pState: unknown): boolean {
+    return Object.values(getFuturesScalperEngineStateMap(pState)).some((objEngine) => Boolean(objEngine.pendingOrder));
+}
+
+async function syncFuturesScalperEngineTick(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null,
+    pManualSignal: OptionsDemoRenkoSignal | ""
+): Promise<FuturesScalperEngineSyncResult> {
+    const objSync = await syncOptionsDemoRenkoRuntimeState(pUserId, "options-scalper", pProfile, pRuntime, pSnapshot, pManualSignal);
+    const objLatestRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
+    const bAutoTraderActive = Boolean(objLatestRuntime?.autoTraderEnabled)
+        && String(objLatestRuntime?.status || "").trim().toLowerCase() === "running";
+    if (!bAutoTraderActive) {
+        return { ...objSync, autoTrade: null };
+    }
+    const vLockKey = getOptionsScalperRenkoAutoTradeLockKey(pUserId);
+    if (gOptionsScalperRenkoAutoTradeLocks.has(vLockKey)) {
+        return { ...objSync, autoTrade: null };
+    }
+    gOptionsScalperRenkoAutoTradeLocks.add(vLockKey);
+    try {
+        return await runFuturesScalperTriggerEngine(pUserId, objSync, pSnapshot);
+    }
+    catch (objError) {
+        return {
+            ...objSync,
+            autoTrade: {
+                status: "danger",
+                message: getErrorMessage(objError, "Futures Scalper trigger engine failed.")
+            }
+        };
+    }
+    finally {
+        gOptionsScalperRenkoAutoTradeLocks.delete(vLockKey);
+    }
+}
+
 export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
     pUserId: string,
     pSnapshot: {
@@ -12859,6 +13372,9 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
 }> {
     const objProfile = await readLiveProfile(pUserId, "options-scalper");
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
+    if (String((objRuntime?.state || {}).engineMode || "") === "futures") {
+        return syncFuturesScalperEngineTick(pUserId, objProfile, objRuntime, pSnapshot, pManualSignal);
+    }
     const objSync = await syncOptionsDemoRenkoRuntimeState(
         pUserId,
         "options-scalper",
@@ -15430,7 +15946,10 @@ async function enableAutoTraderInternal(req: Request, res: Response, pStrategyCo
         selectedApiProfileId: vSelectedApiProfileId,
         currentSymbol: String(getMergedUiState(objProfile).symbol || ""),
         lastError: "",
-        state: buildRuntimeStateWithRestartCloseProtection(objExistingRuntime || null, "")
+        state: {
+            ...buildRuntimeStateWithRestartCloseProtection(objExistingRuntime || null, ""),
+            engineMode: String(req.body?.engineMode || "").trim().toLowerCase() === "futures" ? "futures" : "options"
+        }
     });
 
     await logFuturesEvent(
@@ -16147,7 +16666,7 @@ async function closeImportedOpenPositionInternal(req: Request, res: Response, pS
         await logFuturesEvent(
             vUserId,
             pStrategyCode,
-            "option_closed",
+            isFutureContractSymbol(objPosition.contractName) ? "future_closed" : "option_closed",
             "success",
             "Paper Position Closed",
             `${objPosition.contractName} was moved from paper open positions to paper closed positions using live Delta exit price.`,
@@ -17882,15 +18401,29 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
             const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
             const arrPositions = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
             if (!arrPositions.length) {
+                const bHadPendingTrigger = hasFuturesScalperPendingTrigger(objRuntime?.state);
                 await saveRollingFuturesLtRuntime({
                     ...(objRuntime || getDefaultRollingFuturesLtRuntime(vUserId, pStrategyCode)),
                     userId: vUserId,
                     strategyCode: pStrategyCode,
-                    state: buildRuntimeStateWithProfitClosePending(objRuntime, "", 0, "")
+                    state: clearFuturesScalperEngineState(buildRuntimeStateWithProfitClosePending(objRuntime, "", 0, ""))
                 });
+                if (bHadPendingTrigger) {
+                    await logFuturesEvent(
+                        vUserId,
+                        pStrategyCode,
+                        "trigger_order_cancelled",
+                        "warning",
+                        "Paper Future Trigger Order Cancelled",
+                        "Kill switch cleared the armed Futures Scalper trigger order.",
+                        { reason: "futures_scalper_kill_switch" }
+                    );
+                }
                 res.json({
                     status: "success",
-                    message: "No saved paper positions were open.",
+                    message: bHadPendingTrigger
+                        ? "No saved paper positions were open. The armed trigger order was cancelled."
+                        : "No saved paper positions were open.",
                     data: {
                         closedPositions: [],
                         trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, [])
@@ -17898,14 +18431,26 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
                 });
                 return;
             }
+            const bHadPendingTriggerBeforeClose = hasFuturesScalperPendingTrigger(objRuntime?.state);
             const objClosed = await closeTrackedPositionsOnDelta(vUserId, pStrategyCode, "", arrPositions);
             await saveRollingFuturesLtRuntime({
                 ...(objRuntime || getDefaultRollingFuturesLtRuntime(vUserId, pStrategyCode)),
                 userId: vUserId,
                 strategyCode: pStrategyCode,
                 lastCycleAt: new Date().toISOString(),
-                state: buildRuntimeStateWithProfitClosePending(objRuntime, "", 0, "")
+                state: clearFuturesScalperEngineState(buildRuntimeStateWithProfitClosePending(objRuntime, "", 0, ""))
             });
+            if (bHadPendingTriggerBeforeClose) {
+                await logFuturesEvent(
+                    vUserId,
+                    pStrategyCode,
+                    "trigger_order_cancelled",
+                    "warning",
+                    "Paper Future Trigger Order Cancelled",
+                    "Kill switch cleared the armed Futures Scalper trigger order.",
+                    { reason: "futures_scalper_kill_switch" }
+                );
+            }
             await logFuturesEvent(
                 vUserId,
                 pStrategyCode,
@@ -20250,8 +20795,121 @@ export async function setOptionsScalperRenkoManualSignal(req: Request, res: Resp
 export async function calculateOptionsScalperRecommendedStartQty(req: Request, res: Response): Promise<void> {
     await calculateRecommendedStartQtyInternal(req, res, "options-scalper");
 }
+async function executeOptionsScalperPaperManualFutureInternal(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const objProfile = await readLiveProfile(vUserId, "options-scalper");
+    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        res.status(400).json({ status: "warning", message: "Select an API profile before placing paper futures orders." });
+        return;
+    }
+
+    const objCheck = await performRollingFuturesLtConnectionCheck(vUserId, "options-scalper", vSelectedApiProfileId);
+    if (objCheck.profile.connectionStatus.state !== "connected") {
+        res.status(400).json({
+            status: "warning",
+            message: objCheck.profile.connectionStatus.message || "Delta connection is not healthy.",
+            data: objCheck.profile
+        });
+        return;
+    }
+
+    const vAction = String(req.body?.action || "").trim().toUpperCase() === "BUY" ? "buy" : (
+        String(req.body?.action || "").trim().toUpperCase() === "SELL" ? "sell" : ""
+    );
+    const vSymbol = normalizeSymbolValue(req.body?.symbol || getMergedUiState(objProfile).symbol);
+    const vQty = Math.max(1, Math.floor(Number(req.body?.qty || 0)));
+    const vOrderType = String(req.body?.orderType || "market_order").trim() === "limit_order"
+        ? "limit_order"
+        : "market_order";
+    const vLimitPrice = Number(req.body?.limitPrice);
+
+    if (vAction !== "buy" && vAction !== "sell") {
+        res.status(400).json({ status: "warning", message: "Select a valid future action before placing a paper futures order." });
+        return;
+    }
+    if (!(vQty > 0)) {
+        res.status(400).json({ status: "warning", message: "Enter a valid future quantity before placing a paper futures order." });
+        return;
+    }
+
+    const vContractName = getContractNameForSymbol(vSymbol);
+    const vLockKey = getManualFutureOrderLockKey(vUserId, "options-scalper");
+    if (gManualFutureOrderLocks.has(vLockKey)) {
+        res.status(409).json({
+            status: "warning",
+            message: "A futures order is already being processed. Please wait for it to finish before placing another one."
+        });
+        return;
+    }
+
+    gManualFutureOrderLocks.add(vLockKey);
+    try {
+        const objPaperOpen = await buildOptionsScalperPaperFutureOpen(vUserId, "options-scalper", {
+            action: vAction,
+            symbol: vSymbol,
+            qty: vQty,
+            orderType: vOrderType,
+            limitPrice: vLimitPrice
+        });
+        const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, "options-scalper");
+        const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, "options-scalper", [
+            ...arrExisting,
+            objPaperOpen.position
+        ]);
+        await logFuturesEvent(
+            vUserId,
+            "options-scalper",
+            "future_opened",
+            "success",
+            "Manual Paper Future Opened",
+            `${vAction.toUpperCase()} ${objPaperOpen.position.contractName} paper future opened using the live Delta price feed.`,
+            {
+                symbol: vSymbol,
+                contractName: objPaperOpen.position.contractName,
+                qty: objPaperOpen.position.qty,
+                entryPrice: objPaperOpen.position.entryPrice,
+                orderType: vOrderType,
+                reason: "manual_paper_future"
+            }
+        );
+        res.json({
+            status: "success",
+            message: `${vAction.toUpperCase()} ${objPaperOpen.position.contractName} paper future opened.`,
+            data: {
+                action: vAction,
+                symbol: vSymbol,
+                qty: objPaperOpen.position.qty,
+                orderType: vOrderType,
+                order: objPaperOpen.order,
+                contract: objPaperOpen.contract,
+                trackedOpenPositions: await buildOpenPositionsPayload(vUserId, "options-scalper", arrSaved)
+            }
+        });
+    }
+    catch (objError) {
+        const vMessage = getErrorMessage(objError, "Unable to open the paper futures position.");
+        await logFuturesEvent(
+            vUserId,
+            "options-scalper",
+            "engine_error",
+            "warning",
+            "Paper Future Order Skipped",
+            vMessage,
+            {
+                contractName: vContractName,
+                reason: "paper_future_open_failed"
+            }
+        );
+        res.status(400).json({ status: "warning", message: vMessage });
+    }
+    finally {
+        gManualFutureOrderLocks.delete(vLockKey);
+    }
+}
+
 export async function executeOptionsScalperManualFuture(req: Request, res: Response): Promise<void> {
-    await respondOptionsScalperPaperActionNotReady(req, res, "Options Demo paper future entries are not wired yet.");
+    await executeOptionsScalperPaperManualFutureInternal(req, res);
 }
 export async function executeOptionsScalperManualOption(req: Request, res: Response): Promise<void> {
     await executeManualOptionInternal(req, res, "options-scalper");

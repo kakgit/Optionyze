@@ -6,8 +6,10 @@
     const isStrangleDemoPage = pageVariant === "strangle-demo";
     const isPaperDemoVariant = isDemoVariant || isStrangleDemoPage;
     const isRenkoPage = pageVariant === "renko";
+    const isFuturesScalperPage = String(document.body?.dataset?.futuresScalper || "").trim().toLowerCase() === "true";
     const endpointBaseOverride = String(document.body?.dataset?.rollingFuturesEndpointBase || "").trim();
     const strategyLabel = String(document.body?.dataset?.rollingFuturesStrategyLabel || "").trim() || "Covered Options";
+    const manualTraderLabel = String(document.body?.dataset?.manualTraderLabel || "").trim() || "Manual Trader";
     const mode = rawMode === "short" || rawMode === "covered" ? rawMode : "long";
     const isCoveredMode = mode === "covered";
     const supportsRenkoFeed = isDemoVariant || isRenkoPage || isCoveredMode;
@@ -83,6 +85,7 @@
         symbol: document.getElementById("ddlRollingFuturesSymbol"),
         lotSize: document.getElementById("txtRollingFuturesLotSize"),
         futureOrderType: document.getElementById("ddlRollingFuturesOrderType"),
+        futuresLimitPrice: document.getElementById("txtRollingFuturesFutLimitPrice"),
         sellFutureButton: document.getElementById("btnRollingFuturesSellFuture"),
         buyFutureButton: document.getElementById("btnRollingFuturesBuyFuture"),
         sellPeButton: document.getElementById("btnRollingFuturesSellPe"),
@@ -2538,7 +2541,7 @@
             ids.execStrategyButton.title = isStrangleDemoPage
                 ? "Execute the paper strategy"
                 : (isDemoVariant
-                    ? "Exec Strategy is disabled on Options Demo for now."
+                    ? `Exec Strategy is disabled on ${strategyLabel} for now.`
                     : (canUseExecStrategy()
                         ? "Execute the live strategy"
                         : "Not Authorised to Execute, Please Contact Admin"));
@@ -4286,7 +4289,7 @@
         const url = autoTraderEnabled
             ? `${endpointBase}/auto-trader/stop`
             : `${endpointBase}/auto-trader/start`;
-        const objResult = await postJson(url, {});
+        const objResult = await postJson(url, autoTraderEnabled ? {} : { engineMode: isFuturesScalperPage ? "futures" : "options" });
         applyRuntimeStatus(objResult?.data || {});
         return objResult;
     }
@@ -4309,6 +4312,8 @@
         const vOrderType = String(ids.futureOrderType?.value || "market_order").trim() === "limit_order"
             ? "limit_order"
             : "market_order";
+        const vLimitPriceRaw = Number(ids.futuresLimitPrice?.value);
+        const vLimitPrice = Number.isFinite(vLimitPriceRaw) && vLimitPriceRaw > 0 ? vLimitPriceRaw : null;
         const vSymbol = String(ids.symbol?.value || "BTC").trim().toUpperCase();
 
         manualFutureOrderInFlight = true;
@@ -4318,7 +4323,8 @@
                 action: vAction,
                 symbol: vSymbol,
                 qty: vQty,
-                orderType: vOrderType
+                orderType: vOrderType,
+                limitPrice: vOrderType === "limit_order" ? vLimitPrice : null
             });
         }
         finally {
@@ -5846,16 +5852,16 @@ async function loadClosedAltPositions() {
     });
     ids.resetDefaultsButton?.addEventListener("click", function () {
         void resetManualTraderDefaults().then(function () {
-            setStatus(ids.pageStatus, "Manual trader defaults restored for this user.", "success");
+            setStatus(ids.pageStatus, `${manualTraderLabel} defaults restored for this user.`, "success");
         }).catch(function (error) {
-            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to reset manual trader defaults.", "danger");
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : `Unable to reset ${manualTraderLabel} defaults.`, "danger");
         });
     });
     ids.showSavedProfileButton?.addEventListener("click", function () {
         void showSavedManualTraderProfile().then(function () {
-            setStatus(ids.pageStatus, "Saved Manual Trader values loaded from DB.", "success");
+            setStatus(ids.pageStatus, `Saved ${manualTraderLabel} values loaded from DB.`, "success");
         }).catch(function (error) {
-            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to load saved Manual Trader values.", "danger");
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : `Unable to load saved ${manualTraderLabel} values.`, "danger");
         });
     });
     ids.startQty?.addEventListener("blur", function () {
@@ -6400,7 +6406,7 @@ ids.closedAltFromDate?.addEventListener("change", function () {
             return;
         }
         if (isDemoVariant) {
-            setStatus(ids.pageStatus, "Exec Strategy is disabled on Options Demo for now.", "warning");
+            setStatus(ids.pageStatus, `Exec Strategy is disabled on ${strategyLabel} for now.`, "warning");
             return;
         }
         if (isStrangleDemoPage) {

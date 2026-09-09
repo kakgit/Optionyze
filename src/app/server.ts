@@ -19,7 +19,8 @@ import {
     renderRenkoOptionsPage,
     renderStrangleDemoPage,
     renderStrangleOptionsPage,
-    renderOptionsDemoPage
+    renderOptionsDemoPage,
+    renderFuturesScalperPage
 } from "../api/controllers/strategyfo-paper-controller";
 import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
 import { loadRollingFuturesLtRuntime } from "../storage/rolling-futures-lt-runtime-store";
@@ -144,6 +145,7 @@ async function bootstrap(): Promise<void> {
     app.get("/strangle-options", requireAuthPage, requireFreshPasswordPage, renderStrangleOptionsPage);
     app.get("/renko-options", requireAuthPage, requireFreshPasswordPage, renderRenkoOptionsPage);
     app.get("/options-demo", requireAuthPage, requireFreshPasswordPage, renderOptionsDemoPage);
+    app.get("/futures-scalper", requireAuthPage, requireFreshPasswordPage, renderFuturesScalperPage);
     app.get("/strangle-demo", requireAuthPage, requireFreshPasswordPage, renderStrangleDemoPage);
     app.get("/mngusers", requireAuthPage, requireFreshPasswordPage, requireAdminPage, renderMngUsersPage);
     app.get("/account/profile", requireAuthPage, renderMyProfilePage);

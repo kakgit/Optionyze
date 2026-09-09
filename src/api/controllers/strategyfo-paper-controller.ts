@@ -63,3 +63,12 @@ export function renderOptionsDemoPage(req: Request, res: Response): void {
         defaultUserId: req.authAccount?.accountId || "demo-paper"
     });
 }
+
+export function renderFuturesScalperPage(req: Request, res: Response): void {
+    res.render("futures-scalper", {
+        pageTitle: "Futures Scalper | Optionyze",
+        pageVariant: "demo",
+        currentAccount: req.authAccount,
+        defaultUserId: req.authAccount?.accountId || "demo-paper"
+    });
+}

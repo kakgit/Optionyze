@@ -32,8 +32,8 @@
     const bShowConfirmationSection = !bIsDemoPage && !bIsStrangleDemoPage && (bShowLiveSupportSections || bIsCoveredLivePage);
     const bShowTelegramAlertsSection = false;
     const bShowImportPositionsUi = !bIsPaperDemoPage;
-    const vStrategyLabel = bIsDemoPage ? "Options Demo" : (bIsRenkoPage ? "Options-Scalper" : ((bIsStranglePage || bIsStrangleDemoPage) ? "Strangle Options" : "Covered Options"));
-    const vPageHeading = bIsDemoPage ? "Options Demo" : (bIsStrangleDemoPage ? "Strangle Demo" : `${vStrategyLabel} - Live`);
+    const vStrategyLabel = "Futures Scalper";
+    const vPageHeading = "Futures Scalper";
     const vEndpointBase = bIsDemoPage ? "/api/options-demo" : (bIsStrangleDemoPage ? "/api/strangle-demo" : (bIsRenkoPage ? "/api/renko-options" : (bIsStranglePage ? "/api/strangle-options" : "/api/covered-options")));
     const vOpenPositionsEmpty = bIsPaperDemoPage
         ? "No demo positions are currently shown."
@@ -56,7 +56,8 @@
         data-rolling-futures-variant="<%= vPageVariant %>"
         data-rolling-futures-endpoint-base="<%= vEndpointBase %>"
         data-rolling-futures-strategy-label="<%= vStrategyLabel %>"
-        data-manual-trader-label="Manual Trader"
+        data-manual-trader-label="Futures Controls"
+        data-futures-scalper="true"
         data-exec-strategy-enabled="<%= currentAccount?.execStrategy ? 'true' : 'false' %>"
         data-current-account-id="<%= currentAccount?.accountId || '' %>"
         data-current-account-admin="<%= currentAccount?.isAdmin ? 'true' : 'false' %>"
@@ -267,202 +268,99 @@
             <div class="app-panel rolling-demo-card">
                 <div class="rolling-demo-card-head">
                     <div class="rolling-futures-inline-tools">
-                        <span class="rolling-demo-manual-title">Manual Trader</span>
-                        <div class="rolling-futures-three-way" role="group" aria-label="Manual Trader strategy">
-                            <input type="radio" id="rollingFuturesThreeWayCe" name="rollingFuturesThreeWaySwitch" value="ce" />
-                            <label for="rollingFuturesThreeWayCe">CE</label>
-                            <input type="radio" id="rollingFuturesThreeWayBoth" name="rollingFuturesThreeWaySwitch" value="both" checked />
-                            <label for="rollingFuturesThreeWayBoth">Both</label>
-                            <input type="radio" id="rollingFuturesThreeWayPe" name="rollingFuturesThreeWaySwitch" value="pe" />
-                            <label for="rollingFuturesThreeWayPe">PE</label>
-                        </div>
+                        <span class="rolling-demo-manual-title">Futures Controls</span>
                     </div>
                     <div class="rolling-demo-card-tools rolling-futures-manual-tools">
-                        <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingFuturesShowSavedProfile" title="Show saved manual trader values from DB" aria-label="Show saved manual trader values from DB">
+                        <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingFuturesShowSavedProfile" title="Show saved Futures Controls values from DB" aria-label="Show saved Futures Controls values from DB">
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <ellipse cx="12" cy="6" rx="7" ry="3" />
                                 <path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" />
                                 <path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
                             </svg>
                         </button>
-                        <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingFuturesResetDefaults" title="Reset manual trader defaults" aria-label="Reset manual trader defaults">
+                        <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingFuturesResetDefaults" title="Reset Futures Controls defaults" aria-label="Reset Futures Controls defaults">
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M3 12a9 9 0 1 0 3-6.7" />
                                 <path d="M3 3v6h6" />
                             </svg>
                         </button>
-                        <button class="rolling-demo-btn primary rolling-futures-exec-strategy-btn" type="button" id="btnRollingFuturesExecAllLegs" title="Open paper trades using the Manual Trader settings" aria-label="Open paper trades using the Manual Trader settings">
+                        <button class="rolling-demo-btn primary rolling-futures-exec-strategy-btn" type="button" id="btnRollingFuturesExecAllLegs" title="Open paper trades using the Futures Controls settings" aria-label="Open paper trades using the Futures Controls settings">
                             Exec Strategy
                         </button>
                     </div>
                 </div>
-                <div class="rolling-futures-demo-grid row">
+                <div class="rolling-futures-hidden" style="display:none;" aria-hidden="true">
+                    <select id="ddlRollingFuturesAction1" style="display:none;">
+                        <option value="none">None</option>
+                        <option value="buy">Buy</option>
+                        <option value="sell" selected>Sell</option>
+                    </select>
+                    <select id="ddlRollingFuturesLegs1" style="display:none;">
+                        <option value="both" selected>Both</option>
+                        <option value="ce">CE</option>
+                        <option value="pe">PE</option>
+                    </select>
+                    <select id="ddlRollingFuturesExpiryType1" style="display:none;">
+                        <option value="1">DAILY T+1</option>
+                        <option value="2">DAILY T+2</option>
+                        <option value="4">WEEKLY</option>
+                        <option value="5">BI-WEEKLY</option>
+                        <option value="6" selected>MONTHLY</option>
+                        <option value="7">BI-MONTHLY</option>
+                    </select>
+                    <input type="date" id="txtRollingFuturesExpiry1" style="display:none;" />
+                    <input type="number" min="1" id="txtRollingFuturesQty1" value="1" style="display:none;" />
+                    <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD1" value="0.33" style="display:none;" />
+                    <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD1" value="0.10" style="display:none;" />
+                    <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD1" value="0.50" style="display:none;" />
+                    <input type="checkbox" id="chkRollingFuturesReEnter1" checked style="display:none;" />
+                    <select id="ddlRollingFuturesAction2" style="display:none;">
+                        <option value="none">None</option>
+                        <option value="buy" selected>Buy</option>
+                        <option value="sell">Sell</option>
+                    </select>
+                    <select id="ddlRollingFuturesLegs2" style="display:none;">
+                        <option value="both" selected>Both</option>
+                        <option value="ce">CE</option>
+                        <option value="pe">PE</option>
+                    </select>
+                    <select id="ddlRollingFuturesExpiryType2" style="display:none;">
+                        <option value="1" selected>DAILY T+1</option>
+                        <option value="2">DAILY T+2</option>
+                        <option value="4">WEEKLY</option>
+                        <option value="5">BI-WEEKLY</option>
+                        <option value="6">MONTHLY</option>
+                        <option value="7">BI-MONTHLY</option>
+                    </select>
+                    <input type="date" id="txtRollingFuturesExpiry2" style="display:none;" />
+                    <input type="number" min="1" id="txtRollingFuturesQty2" value="1" style="display:none;" />
+                    <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD2" value="0.13" style="display:none;" />
+                    <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD2" value="1.00" style="display:none;" />
+                    <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD2" value="0.05" style="display:none;" />
+                    <input type="checkbox" id="chkRollingFuturesReEnter2" checked style="display:none;" />
+                </div>
+                <div class="rolling-futures-demo-grid row futures-scalper-controls-grid">
                     <div class="rolling-demo-field">
-                        <label for="ddlRollingFuturesAction1"><%= (bIsDemoPage || bIsCoveredLivePage) ? 'Green Action' : 'Action' %></label>
-                        <select id="ddlRollingFuturesAction1">
-                            <option value="none">None</option>
-                            <option value="buy">Buy</option>
-                            <option value="sell" selected>Sell</option>
+                        <label for="ddlRollingFuturesOrderType">Order Type</label>
+                        <select id="ddlRollingFuturesOrderType">
+                            <option value="market_order" selected>Market</option>
+                            <option value="limit_order">Limit</option>
                         </select>
                     </div>
                     <div class="rolling-demo-field">
-                        <label for="ddlRollingFuturesLegs1">Legs</label>
-                        <select id="ddlRollingFuturesLegs1">
-                            <option value="both" <%= (!bIsStrangleLikePage && !bIsCoveredLivePage) ? 'selected' : '' %>>Both</option>
-                            <option value="ce" <%= bIsStrangleLikePage ? 'selected' : '' %>>CE</option>
-                            <option value="pe" <%= bIsCoveredLivePage ? 'selected' : '' %>>PE</option>
-                        </select>
+                        <label for="txtRollingFuturesFutLimitPrice">Limit Price</label>
+                        <input type="number" min="0" step="0.01" id="txtRollingFuturesFutLimitPrice" placeholder="Used for Limit orders" />
                     </div>
                     <div class="rolling-demo-field">
-                        <label for="ddlRollingFuturesExpiryType1">Expiry Type</label>
-                        <select id="ddlRollingFuturesExpiryType1">
-                            <option value="1">DAILY T+1</option>
-                            <option value="2">DAILY T+2</option>
-                            <option value="4">WEEKLY</option>
-                            <option value="5">BI-WEEKLY</option>
-                            <option value="6" selected>MONTHLY</option>
-                            <option value="7">BI-MONTHLY</option>
-                        </select>
+                        <label for="txtRollingFuturesBsQty">Qty (Lots)</label>
+                        <input type="number" min="1" step="1" id="txtRollingFuturesBsQty" value="1" />
                     </div>
                     <div class="rolling-demo-field">
-                        <label for="txtRollingFuturesExpiry1">Select Expiry</label>
-                        <input type="date" id="txtRollingFuturesExpiry1" />
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="txtRollingFuturesQty1">Qty</label>
-                        <input type="number" min="1" id="txtRollingFuturesQty1" value="1" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-inline-action rolling-covered-row1-inline-action-buyce">
                         <label>&nbsp;</label>
-                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesBuyCe">BUY CE</button>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-inline-action rolling-covered-row1-inline-action-buype">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesBuyPe">BUY PE</button>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-newd">
-                        <label for="txtRollingFuturesNewD1">New D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD1" value="<%= bIsCoveredLivePage ? '0.27' : '0.33' %>" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-tpd">
-                        <label for="txtRollingFuturesTpD1">TP D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD1" value="<%= bIsCoveredLivePage ? '0.14' : '0.10' %>" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-sld">
-                        <label for="txtRollingFuturesSlD1">SL D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD1" value="<%= bIsCoveredLivePage ? '0.54' : (bIsStrangleLikePage ? '0.55' : '0.50') %>" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-reenter">
-                        <label for="chkRollingFuturesReEnter1">
-                            Re-Enter
-                            <span class="rolling-futures-help-icon-wrap">
-                                <button type="button" class="rolling-futures-help-trigger" aria-label="Show row 1 re-enter help">
-                                    ?
-                                </button>
-                                <span class="rolling-futures-help-popout floating">
-                                    When enabled, if this row closes because of <code>SL</code> or <code>TP</code>, it reopens from the same row using the same action, leg, quantity, and <code>New D</code>. This re-entry does not use or increase the fresh-trade lot increment.
-                                </span>
-                            </span>
-                        </label>
-                        <div class="rolling-futures-help-inline-top">
-                            <label class="rolling-futures-help-check compact" for="chkRollingFuturesReEnter1">
-                                <input type="checkbox" id="chkRollingFuturesReEnter1" checked />
-                            </label>
-                        </div>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-break-action rolling-covered-row1-break-action-sellpe">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesSellPe">SELL PE</button>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-break-action rolling-covered-row1-break-action-sellce">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesSellCe">SELL CE</button>
+                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesSellFuture">SELL FUT</button>
                     </div>
                 </div>
-
-                <div class="rolling-futures-demo-grid row">
-                    <div class="rolling-demo-field">
-                        <label for="ddlRollingFuturesAction2"><%= (bIsDemoPage || bIsCoveredLivePage) ? 'Red Action' : 'Action' %></label>
-                        <select id="ddlRollingFuturesAction2">
-                            <option value="none">None</option>
-                            <option value="buy" <%= (!bIsStrangleLikePage && !bIsCoveredLivePage) ? 'selected' : '' %>>Buy</option>
-                            <option value="sell" <%= (bIsStrangleLikePage || bIsCoveredLivePage) ? 'selected' : '' %>>Sell</option>
-                        </select>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="ddlRollingFuturesLegs2">Legs</label>
-                        <select id="ddlRollingFuturesLegs2">
-                            <option value="both" <%= (!bIsStrangleLikePage && !bIsCoveredLivePage) ? 'selected' : '' %>>Both</option>
-                            <option value="ce" <%= bIsCoveredLivePage ? 'selected' : '' %>>CE</option>
-                            <option value="pe" <%= bIsStrangleLikePage ? 'selected' : '' %>>PE</option>
-                        </select>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="ddlRollingFuturesExpiryType2">Expiry Type</label>
-                        <select id="ddlRollingFuturesExpiryType2">
-                            <option value="1" <%= (!bIsStrangleLikePage && !bIsCoveredLivePage) ? 'selected' : '' %>>DAILY T+1</option>
-                            <option value="2">DAILY T+2</option>
-                            <option value="4">WEEKLY</option>
-                            <option value="5">BI-WEEKLY</option>
-                            <option value="6" <%= (bIsStrangleLikePage || bIsCoveredLivePage) ? 'selected' : '' %>>MONTHLY</option>
-                            <option value="7">BI-MONTHLY</option>
-                        </select>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="txtRollingFuturesExpiry2">Select Expiry</label>
-                        <input type="date" id="txtRollingFuturesExpiry2" />
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="txtRollingFuturesQty2">Qty</label>
-                        <input type="number" min="1" id="txtRollingFuturesQty2" value="1" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-inline-action rolling-covered-row2-inline-action-buyce">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesBuyCe2">BUY CE</button>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-inline-action rolling-covered-row2-inline-action-buype">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesBuyPe2">BUY PE</button>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-newd">
-                        <label for="txtRollingFuturesNewD2">New D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD2" value="<%= bIsCoveredLivePage ? '0.27' : (bIsStrangleLikePage ? '0.33' : '0.13') %>" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-tpd">
-                        <label for="txtRollingFuturesTpD2">TP D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD2" value="<%= bIsCoveredLivePage ? '0.14' : (bIsStrangleLikePage ? '0.10' : '1.00') %>" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-sld">
-                        <label for="txtRollingFuturesSlD2">SL D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD2" value="<%= bIsCoveredLivePage ? '0.54' : (bIsStrangleLikePage ? '0.55' : '0.05') %>" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-reenter">
-                        <label for="chkRollingFuturesReEnter2">
-                            Re-Enter
-                            <span class="rolling-futures-help-icon-wrap">
-                                <button type="button" class="rolling-futures-help-trigger" aria-label="Show row 2 re-enter help">
-                                    ?
-                                </button>
-                                <span class="rolling-futures-help-popout floating">
-                                    When enabled, if this row closes because of <code>SL</code> or <code>TP</code>, it reopens from the same row using the same action, leg, quantity, and <code>New D</code>. This re-entry does not use or increase the fresh-trade lot increment.
-                                </span>
-                            </span>
-                        </label>
-                        <div class="rolling-futures-help-inline-top">
-                            <label class="rolling-futures-help-check compact" for="chkRollingFuturesReEnter2">
-                                <input type="checkbox" id="chkRollingFuturesReEnter2" checked />
-                            </label>
-                        </div>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-break-action rolling-covered-row2-break-action-sellpe">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesSellPe2">SELL PE</button>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-break-action rolling-covered-row2-break-action-sellce">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesSellCe2">SELL CE</button>
-                    </div>
-                </div>
+                <div class="rolling-demo-notice">Sell-only paper futures. Symbol comes from the Symbols List above (BTCUSD / ETHUSD). Connect an API profile to enable SELL FUT; with Auto Trader ON the Renko trigger engine sells at the ladder levels automatically.</div>
 
                 <% if (!bIsStrangleDemoPage) { %>
                 <div class="rolling-futures-demo-grid actions-row rolling-futures-actions-row-with-gate">
@@ -500,7 +398,7 @@
                                             ?
                                         </button>
                                         <span class="rolling-futures-help-popout floating">
-                                            When enabled, each new CE or PE trade uses the Manual Trader row quantity plus <code>X</code> extra lots for every already-active open position on the same side. CE and PE are tracked separately.
+                                            When enabled, each new CE or PE trade uses the Futures Controls row quantity plus <code>X</code> extra lots for every already-active open position on the same side. CE and PE are tracked separately.
                                         </span>
                                     </span>
                                 </div>
@@ -621,7 +519,7 @@
 
                 <div class="rolling-futures-saved-profile-panel" id="rollingFuturesSavedProfilePanel" style="display:none;">
                     <div class="rolling-futures-saved-profile-head">
-                        <strong>Saved Manual Trader Values (DB)</strong>
+                        <strong>Saved Futures Controls Values (DB)</strong>
                     </div>
                     <div class="rolling-futures-saved-profile-body" id="rollingFuturesSavedProfileBody"></div>
                 </div>
