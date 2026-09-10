@@ -517,7 +517,7 @@ function isCoveredLikeStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boo
 }
 
 function isOptionsScalperStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "options-scalper" || pStrategyCode === "strangle-demo" || pStrategyCode === "straddle-demo";
+    return pStrategyCode === "options-scalper" || pStrategyCode === "strangle-demo" || pStrategyCode === "straddle-demo" || pStrategyCode === "futures-scalper";
 }
 
 function isFuturesScalperStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
@@ -533,7 +533,7 @@ function usesOptionsDemoManualTraderSettings(pStrategyCode: RollingFuturesLtStra
 }
 
 function supportsRenkoFeedStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "renko-options" || pStrategyCode === "options-scalper";
+    return pStrategyCode === "renko-options" || pStrategyCode === "options-scalper" || pStrategyCode === "futures-scalper";
 }
 
 function supportsRenkoSettingsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
@@ -4913,7 +4913,7 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
             ? objRenkoBaseValues
             : { BTC: "", ETH: "" },
         renkoFeedEnabled: supportsRenkoSettingsStrategy(pProfile.strategyCode)
-            ? normalizeBooleanValue(objUiState.renkoFeedEnabled ?? objUiState.renkoEnabled, Boolean(objUiState.renkoFeedEnabled ?? objDefaults.renkoFeedEnabled))
+            ? normalizeBooleanValue(objUiState.renkoFeedEnabled ?? objUiState.renkoEnabled, Boolean(objUiState.renkoFeedEnabled ?? objDefaults.renkoFeedEnabled ?? (supportsRenkoSettingsStrategy(pProfile.strategyCode) ? true : false)))
             : false,
         renkoFeedPts: supportsRenkoSettingsStrategy(pProfile.strategyCode)
             ? normalizeRenkoFeedPointSizeString(objUiState.renkoFeedPts ?? objUiState.renkoStepPoints ?? objDefaults.renkoFeedPts)
@@ -5322,7 +5322,7 @@ function normalizeProfileSaveInput(
             ? objRenkoBaseValues
             : { BTC: "", ETH: "" },
         renkoFeedEnabled: supportsRenkoSettingsStrategy(pStrategyCode)
-            ? normalizeBooleanValue(objUiState.renkoFeedEnabled ?? objUiState.renkoEnabled, Boolean(objUiState.renkoFeedEnabled ?? objDefaults.renkoFeedEnabled))
+            ? normalizeBooleanValue(objUiState.renkoFeedEnabled ?? objUiState.renkoEnabled, Boolean(objUiState.renkoFeedEnabled ?? objDefaults.renkoFeedEnabled ?? (supportsRenkoSettingsStrategy(pStrategyCode) ? true : false)))
             : false,
         renkoFeedPts: supportsRenkoSettingsStrategy(pStrategyCode)
             ? normalizeRenkoFeedPointSizeString(objUiState.renkoFeedPts ?? objUiState.renkoStepPoints ?? objDefaults.renkoFeedPts)
