@@ -3625,6 +3625,7 @@ async function applyImportedOptionBaseGreeks(
 }
 
 const gFutureBrokeragePct = 0.05;
+const gFutureMakerBrokeragePct = 0.02;
 const gOptionBrokeragePct = 0.01;
 const gOptionPremiumCapPct = 3.5;
 const gBrokerageGstMultiplier = 1.18;
@@ -3634,7 +3635,8 @@ function estimateLivePositionCharges(
     pQty: number,
     pLotSize: number,
     pEntryPrice: number,
-    pUnderlyingPrice = 0
+    pUnderlyingPrice = 0,
+    pOrderType?: "market_order" | "limit_order"
 ): number {
     const vLotSize = Math.max(0, Number(pLotSize || 0));
     const vQty = Math.max(0, Number(pQty || 0));
@@ -3654,7 +3656,8 @@ function estimateLivePositionCharges(
         return Number((vEffectiveFee * gBrokerageGstMultiplier).toFixed(4));
     }
     const vNotional = vQty * vLotSize * vEntryPrice;
-    return Number((((vNotional * gFutureBrokeragePct) / 100) * gBrokerageGstMultiplier).toFixed(4));
+    const vFeePct = pOrderType === "limit_order" ? gFutureMakerBrokeragePct : gFutureBrokeragePct;
+    return Number((((vNotional * vFeePct) / 100) * gBrokerageGstMultiplier).toFixed(4));
 }
 
 function calculateLivePositionPnl(
@@ -4197,7 +4200,8 @@ async function closeOptionsScalperPaperPosition(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pPosition: RollingFuturesLtImportedPositionRecord,
     pExitPrice?: number,
-    pClosedAtIso?: string
+    pClosedAtIso?: string,
+    pOrderType?: "market_order" | "limit_order"
 ): Promise<OptionsScalperPaperClosedPositionRecord> {
     const vClosedAtIso = String(pClosedAtIso || "").trim() || new Date().toISOString();
     const vExitPrice = Number.isFinite(Number(pExitPrice))
@@ -4207,7 +4211,7 @@ async function closeOptionsScalperPaperPosition(
             await getLiveOptionTicker(pPosition.contractName),
             Number(pPosition.markPrice || pPosition.entryPrice || 0)
         );
-    const vCloseCharge = await estimateTrackedPositionCharge(pPosition, vExitPrice);
+    const vCloseCharge = await estimateTrackedPositionCharge(pPosition, vExitPrice, undefined, pOrderType);
     const vPnl = Number(estimateTrackedPositionPnl(pPosition, vExitPrice).toFixed(4));
     const vTotalCharges = Number((Number(pPosition.charges || 0) + vCloseCharge).toFixed(4));
     const vSide = String(pPosition.side || "").trim().toUpperCase();
@@ -8482,7 +8486,8 @@ async function reconcileRemovedTrackedPositionsPnl(
 async function estimateTrackedPositionCharge(
     pPosition: Pick<RollingFuturesLtImportedPositionRecord, "contractName" | "qty" | "entryPrice" | "markPrice">,
     pPriceOverride?: number,
-    pLotSizeOverride?: number
+    pLotSizeOverride?: number,
+    pOrderType?: "market_order" | "limit_order"
 ): Promise<number> {
     const vContractName = String(pPosition.contractName || "").trim();
     const vSymbol = normalizeSymbolValue(vContractName.includes("ETH") ? "ETH" : "BTC");
@@ -8504,7 +8509,8 @@ async function estimateTrackedPositionCharge(
         Number(pPosition.qty || 0),
         vLotSize,
         Number.isFinite(Number(pPriceOverride)) ? Number(pPriceOverride) : Number(pPosition.entryPrice || pPosition.markPrice || 0),
-        vUnderlyingPrice
+        vUnderlyingPrice,
+        pOrderType
     );
 }
 
@@ -10026,7 +10032,7 @@ async function buildOptionsScalperPaperFutureOpen(
         qty: vQty,
         entryPrice: vEntryPrice,
         markPrice: vEntryPrice
-    }, undefined, vLotSize);
+    }, undefined, vLotSize, pInput.orderType);
     return {
         position: {
             userId: pUserId,
@@ -12600,7 +12606,7 @@ async function closeFuturesScalperOpenTrade(
         return { tracked: pTracked, closed: null };
     }
     const vIsStopLoss = Math.abs(pExitPrice - pOpenTrade.stopLossPrice) <= Math.abs(pExitPrice - pOpenTrade.takeProfitPrice);
-    const objClosed = await closeOptionsScalperPaperPosition(pUserId, "options-scalper", objPosition, pExitPrice, new Date().toISOString());
+    const objClosed = await closeOptionsScalperPaperPosition(pUserId, "options-scalper", objPosition, pExitPrice, new Date().toISOString(), "limit_order");
     const arrRemaining = pTracked.filter((objRow) => String(objRow.importId || "").trim() !== pOpenTrade.importId);
     const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, "options-scalper", arrRemaining);
     await appendOptionsScalperPaperClosedPositions(pUserId, "options-scalper", [objClosed]);
