@@ -11821,7 +11821,7 @@ async function closeTrackedPositionsOnDelta(
 }> {
     if (isOptionsScalperStrategy(pStrategyCode)) {
         const arrClosedRows = await Promise.all((Array.isArray(pPositions) ? pPositions : []).map((objPosition) => {
-            return closeOptionsScalperPaperPosition(pUserId, pStrategyCode, objPosition);
+            return closeOptionsScalperPaperPosition(pUserId, pStrategyCode, objPosition, undefined, undefined, "limit_order");
         }));
         await appendOptionsScalperPaperClosedPositions(pUserId, pStrategyCode, arrClosedRows);
         await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, []);
@@ -16658,7 +16658,7 @@ async function closeImportedOpenPositionInternal(req: Request, res: Response, pS
             });
             return;
         }
-        const objClosed = await closeOptionsScalperPaperPosition(vUserId, pStrategyCode, objPosition);
+        const objClosed = await closeOptionsScalperPaperPosition(vUserId, pStrategyCode, objPosition, undefined, undefined, "limit_order");
         const arrRemaining = arrSaved.filter((objRow) => String(objRow.importId || "").trim() !== vImportId);
         await appendOptionsScalperPaperClosedPositions(vUserId, pStrategyCode, [objClosed]);
         await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, arrRemaining);
