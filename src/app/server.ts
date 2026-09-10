@@ -22,7 +22,7 @@ import {
     renderOptionsDemoPage,
     renderFuturesScalperPage
 } from "../api/controllers/strategyfo-paper-controller";
-import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
+import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade, syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
 import { loadRollingFuturesLtRuntime } from "../storage/rolling-futures-lt-runtime-store";
 import { ensureLiveTickerSymbols, getLiveMarketSnapshot } from "../strategies/rolling-options-pt-de/market-data";
 import type { RollingOptionsPtDeConfig } from "../strategies/rolling-options-pt-de/types";
@@ -168,7 +168,7 @@ async function bootstrap(): Promise<void> {
     server.on("upgrade", async (req, socket, head) => {
         try {
             const objUrl = new URL(String(req.url || ""), "http://localhost");
-            if (objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/covered-options/renko" && objUrl.pathname !== "/ws/strangle-demo/open-positions") {
+            if (objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/covered-options/renko" && objUrl.pathname !== "/ws/futures-scalper/renko" && objUrl.pathname !== "/ws/strangle-demo/open-positions") {
                 socket.destroy();
                 return;
             }
@@ -270,7 +270,8 @@ async function bootstrap(): Promise<void> {
         const contractName = getDemoRenkoContractName(symbol);
         const lotSize = getDemoRenkoLotSize(symbol);
         const bCoveredRenkoSocket = objUrl.pathname === "/ws/covered-options/renko";
-        const vRenkoStrategyCode = bCoveredRenkoSocket ? "covered-options" : "options-scalper";
+        const bFuturesScalperSocket = objUrl.pathname === "/ws/futures-scalper/renko";
+        const vRenkoStrategyCode = bCoveredRenkoSocket ? "covered-options" : (bFuturesScalperSocket ? "futures-scalper" : "options-scalper");
         let closed = false;
         let timerRef: NodeJS.Timeout | null = null;
         let tickInFlight = false;
@@ -314,12 +315,19 @@ async function bootstrap(): Promise<void> {
                         bestBidPrice: objSnapshot.bestBidPrice,
                         bestAskPrice: objSnapshot.bestAskPrice
                     })
-                    : await syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(userId, {
-                        spotPrice: objSnapshot.spotPrice,
-                        futuresPrice: objSnapshot.futuresPrice,
-                        bestBidPrice: objSnapshot.bestBidPrice,
-                        bestAskPrice: objSnapshot.bestAskPrice
-                    });
+                    : (bFuturesScalperSocket
+                        ? await syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade(userId, {
+                            spotPrice: objSnapshot.spotPrice,
+                            futuresPrice: objSnapshot.futuresPrice,
+                            bestBidPrice: objSnapshot.bestBidPrice,
+                            bestAskPrice: objSnapshot.bestAskPrice
+                        })
+                        : await syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(userId, {
+                            spotPrice: objSnapshot.spotPrice,
+                            futuresPrice: objSnapshot.futuresPrice,
+                            bestBidPrice: objSnapshot.bestBidPrice,
+                            bestAskPrice: objSnapshot.bestAskPrice
+                        }));
                 const objTrackedOpenPositions = await buildOpenPositionsPayload(userId, vRenkoStrategyCode);
                 const objLatestRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(userId, vRenkoStrategyCode);
                 const objPendingConfirmation = objLatestRuntime?.state

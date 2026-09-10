@@ -1219,7 +1219,7 @@
         }
         disconnectRenkoFeedSocket();
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const socketPath = isDemoRenkoFeedMode() ? "/ws/options-demo/renko" : "/ws/covered-options/renko";
+        const socketPath = isFuturesScalperPage ? "/ws/futures-scalper/renko" : (isDemoRenkoFeedMode() ? "/ws/options-demo/renko" : "/ws/covered-options/renko");
         const url = `${protocol}//${window.location.host}${socketPath}?symbol=${encodeURIComponent(symbol)}`;
         const socket = new WebSocket(url);
         renkoFeedSocket = socket;

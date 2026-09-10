@@ -192,6 +192,35 @@ import {
     getStraddleDemoRuntimeStatus,
     getOptionsScalperRsiStatus,
     setOptionsScalperRenkoManualSignal,
+    executeFuturesScalperManualFuture,
+    getFuturesScalperAccountSummary,
+    getFuturesScalperClosedPositions,
+    getFuturesScalperConnectionStatus,
+    getFuturesScalperEvents,
+    getFuturesScalperImportableOpenPositions,
+    getFuturesScalperIndicator,
+    getFuturesScalperOpenPositions,
+    getFuturesScalperProfile,
+    getFuturesScalperRuntimeStatus,
+    setFuturesScalperRenkoManualSignal,
+    checkFuturesScalperConnection,
+    enableFuturesScalperAutoTrader,
+    disableFuturesScalperAutoTrader,
+    executeFuturesScalperKillSwitch,
+    calculateFuturesScalperRecommendedStartQty,
+    clearFuturesScalperOpenPositions,
+    clearFuturesScalperClosedPositions,
+    deleteFuturesScalperOpenPosition,
+    deleteFuturesScalperClosedPosition,
+    reconcileFuturesScalperOpenPositions,
+    closeFuturesScalperImportedOpenPosition,
+    updateFuturesScalperClosedPosition,
+    saveFuturesScalperOpenPositions,
+    saveFuturesScalperProfile,
+    updateFuturesScalperRecoveryMetrics,
+    recalculateFuturesScalperRecoveryTotalPnl,
+    clearFuturesScalperEventsController,
+    deleteFuturesScalperEventController,
     listCoveredOptionsVerifierRunningUsers,
     listRenkoOptionsVerifierRunningUsers,
     listStrangleOptionsVerifierRunningUsers,
@@ -808,6 +837,94 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/options-demo/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await clearOptionsScalperEventsController(req, res);
+    });
+
+    objRouter.get("/futures-scalper/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getFuturesScalperProfile(req, res);
+    });
+    objRouter.post("/futures-scalper/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveFuturesScalperProfile(req, res);
+    });
+    objRouter.get("/futures-scalper/connection/status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getFuturesScalperConnectionStatus(req, res);
+    });
+    objRouter.get("/futures-scalper/runtime", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getFuturesScalperRuntimeStatus(req, res);
+    });
+    objRouter.post("/futures-scalper/connection/check", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await checkFuturesScalperConnection(req, res);
+    });
+    objRouter.post("/futures-scalper/auto-trader/start", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await enableFuturesScalperAutoTrader(req, res);
+    });
+    objRouter.post("/futures-scalper/auto-trader/stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await disableFuturesScalperAutoTrader(req, res);
+    });
+    objRouter.get("/futures-scalper/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getFuturesScalperAccountSummary(req, res);
+    });
+    objRouter.get("/futures-scalper/indicator", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getFuturesScalperIndicator(req, res);
+    });
+    objRouter.post("/futures-scalper/renko/manual-signal", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await setFuturesScalperRenkoManualSignal(req, res);
+    });
+    objRouter.post("/futures-scalper/start-qty/calculate", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await calculateFuturesScalperRecommendedStartQty(req, res);
+    });
+    objRouter.post("/futures-scalper/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeFuturesScalperManualFuture(req, res);
+    });
+    objRouter.get("/futures-scalper/open-positions/importable", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getFuturesScalperImportableOpenPositions(req, res);
+    });
+    objRouter.get("/futures-scalper/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getFuturesScalperOpenPositions(req, res);
+    });
+    objRouter.post("/futures-scalper/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveFuturesScalperOpenPositions(req, res);
+    });
+    objRouter.post("/futures-scalper/open-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteFuturesScalperOpenPosition(req, res);
+    });
+    objRouter.post("/futures-scalper/open-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearFuturesScalperOpenPositions(req, res);
+    });
+    objRouter.post("/futures-scalper/open-positions/reconcile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await reconcileFuturesScalperOpenPositions(req, res);
+    });
+    objRouter.post("/futures-scalper/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await closeFuturesScalperImportedOpenPosition(req, res);
+    });
+    objRouter.post("/futures-scalper/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeFuturesScalperKillSwitch(req, res);
+    });
+    objRouter.post("/futures-scalper/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateFuturesScalperRecoveryMetrics(req, res);
+    });
+    objRouter.post("/futures-scalper/metrics/recalculate-total-pnl", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await recalculateFuturesScalperRecoveryTotalPnl(req, res);
+    });
+    objRouter.get("/futures-scalper/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getFuturesScalperClosedPositions(req, res);
+    });
+    objRouter.post("/futures-scalper/closed-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearFuturesScalperClosedPositions(req, res);
+    });
+    objRouter.post("/futures-scalper/closed-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteFuturesScalperClosedPosition(req, res);
+    });
+    objRouter.post("/futures-scalper/closed-positions/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateFuturesScalperClosedPosition(req, res);
+    });
+    objRouter.get("/futures-scalper/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getFuturesScalperEvents(req, res);
+    });
+    objRouter.post("/futures-scalper/events/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteFuturesScalperEventController(req, res);
+    });
+    objRouter.post("/futures-scalper/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearFuturesScalperEventsController(req, res);
     });
 
     objRouter.get("/strangle-demo/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {

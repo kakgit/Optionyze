@@ -34,7 +34,7 @@
     const bShowImportPositionsUi = !bIsPaperDemoPage;
     const vStrategyLabel = "Futures Scalper";
     const vPageHeading = "Futures Scalper";
-    const vEndpointBase = bIsDemoPage ? "/api/options-demo" : (bIsStrangleDemoPage ? "/api/strangle-demo" : (bIsRenkoPage ? "/api/renko-options" : (bIsStranglePage ? "/api/strangle-options" : "/api/covered-options")));
+    const vEndpointBase = "/api/futures-scalper";
     const vOpenPositionsEmpty = bIsPaperDemoPage
         ? "No demo positions are currently shown."
         : `Select an API profile and load live ${bIsRenkoPage ? "options-scalper" : ((bIsStranglePage || bIsStrangleDemoPage) ? "strangle-option" : "covered-option")} positions from Delta Exchange.`;

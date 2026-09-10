@@ -167,7 +167,8 @@ const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
     "renko-options": "Renko Options",
     "options-scalper": "Options Demo",
     "strangle-demo": "Strangle Demo",
-    "straddle-demo": "Straddle Demo"
+    "straddle-demo": "Straddle Demo",
+    "futures-scalper": "Futures Scalper"
 };
 const gFutureLimitRetryDelayMs = 5000;
 const gFutureLimitRetryCount = 5;
@@ -511,11 +512,20 @@ function isCoveredLikeStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boo
         || pStrategyCode === "renko-options"
         || pStrategyCode === "options-scalper"
         || pStrategyCode === "strangle-demo"
-        || pStrategyCode === "straddle-demo";
+        || pStrategyCode === "straddle-demo"
+        || pStrategyCode === "futures-scalper";
 }
 
 function isOptionsScalperStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
     return pStrategyCode === "options-scalper" || pStrategyCode === "strangle-demo" || pStrategyCode === "straddle-demo";
+}
+
+function isFuturesScalperStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
+    return pStrategyCode === "futures-scalper";
+}
+
+function isPaperDemoStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
+    return isOptionsScalperStrategy(pStrategyCode) || isFuturesScalperStrategy(pStrategyCode);
 }
 
 function usesOptionsDemoManualTraderSettings(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
@@ -551,6 +561,9 @@ function getCoveredLikeStrategyLabel(pStrategyCode: RollingFuturesLtStrategyCode
     }
     if (pStrategyCode === "straddle-demo") {
         return "Straddle Demo";
+    }
+    if (pStrategyCode === "futures-scalper") {
+        return "Futures Scalper";
     }
     return pStrategyCode === "strangle-options" ? "Strangle Options" : "Covered Options";
 }
@@ -4115,8 +4128,9 @@ async function calculateOptionsScalperPaperClosedPositionEditTotals(
     const vExitPrice = String(pRow.side || "").trim().toUpperCase() === "BUY"
         ? vSellPrice
         : vBuyPrice;
-    const vEntryCharge = estimateLivePositionCharges(vContractName, vQty, vLotSize, vEntryPrice, vUnderlyingPrice);
-    const vExitCharge = estimateLivePositionCharges(vContractName, vQty, vLotSize, vExitPrice, vUnderlyingPrice);
+    const vIsFuture = isFutureContractSymbol(vContractName);
+    const vEntryCharge = estimateLivePositionCharges(vContractName, vQty, vLotSize, vEntryPrice, vUnderlyingPrice, vIsFuture ? "limit_order" : undefined);
+    const vExitCharge = estimateLivePositionCharges(vContractName, vQty, vLotSize, vExitPrice, vUnderlyingPrice, vIsFuture ? "limit_order" : undefined);
     return {
         charges: Number((vEntryCharge + vExitCharge).toFixed(4)),
         pnl: vPnl
@@ -11819,7 +11833,7 @@ async function closeTrackedPositionsOnDelta(
     closedPositions: Array<Record<string, unknown>>;
     profileLabel: string;
 }> {
-    if (isOptionsScalperStrategy(pStrategyCode)) {
+    if (isPaperDemoStrategy(pStrategyCode)) {
         const arrClosedRows = await Promise.all((Array.isArray(pPositions) ? pPositions : []).map((objPosition) => {
             return closeOptionsScalperPaperPosition(pUserId, pStrategyCode, objPosition, undefined, undefined, "limit_order");
         }));
@@ -12403,7 +12417,7 @@ async function syncOptionsDemoRenkoRuntimeState(
     signals: OptionsDemoRenkoSignal[];
     emaSignal: OptionsDemoRenkoSignal | "";
 }> {
-    if (!isOptionsScalperStrategy(pStrategyCode) && pStrategyCode !== "covered-options") {
+    if (!isOptionsScalperStrategy(pStrategyCode) && pStrategyCode !== "covered-options" && !isFuturesScalperStrategy(pStrategyCode)) {
         return {
             runtime: pRuntime,
             profile: pProfile,
@@ -12532,6 +12546,10 @@ function getOptionsScalperRenkoAutoTradeLockKey(pUserId: string): string {
     return `${getManualFutureOrderLockKey(pUserId, "options-scalper")}::delta-renko-auto-trade`;
 }
 
+function getFuturesScalperRenkoAutoTradeLockKey(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): string {
+    return `${getManualFutureOrderLockKey(pUserId, pStrategyCode)}::delta-renko-futures-auto-trade`;
+}
+
 function getCoveredOptionsRenkoAutoTradeLockKey(pUserId: string): string {
     return `${getManualFutureOrderLockKey(pUserId, "covered-options")}::delta-renko-live-auto-trade`;
 }
@@ -12595,6 +12613,7 @@ function resolveOptionsScalperRenkoAutoTradeInput(
 
 async function closeFuturesScalperOpenTrade(
     pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
     pProfile: RollingFuturesLtProfileRecord,
     pSymbol: "BTC" | "ETH",
     pOpenTrade: FuturesScalperOpenTradeState,
@@ -12606,14 +12625,14 @@ async function closeFuturesScalperOpenTrade(
         return { tracked: pTracked, closed: null };
     }
     const vIsStopLoss = Math.abs(pExitPrice - pOpenTrade.stopLossPrice) <= Math.abs(pExitPrice - pOpenTrade.takeProfitPrice);
-    const objClosed = await closeOptionsScalperPaperPosition(pUserId, "options-scalper", objPosition, pExitPrice, new Date().toISOString(), "limit_order");
+    const objClosed = await closeOptionsScalperPaperPosition(pUserId, pStrategyCode, objPosition, pExitPrice, new Date().toISOString(), "limit_order");
     const arrRemaining = pTracked.filter((objRow) => String(objRow.importId || "").trim() !== pOpenTrade.importId);
-    const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, "options-scalper", arrRemaining);
-    await appendOptionsScalperPaperClosedPositions(pUserId, "options-scalper", [objClosed]);
+    const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrRemaining);
+    await appendOptionsScalperPaperClosedPositions(pUserId, pStrategyCode, [objClosed]);
     await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(pUserId, pProfile).catch(() => undefined);
     await logFuturesEvent(
         pUserId,
-        "options-scalper",
+        pStrategyCode,
         vIsStopLoss ? "sl_triggered" : "tp_triggered",
         vIsStopLoss ? "error" : "success",
         vIsStopLoss ? "Paper Future SL Hit" : "Paper Future TP Hit",
@@ -12633,18 +12652,19 @@ async function closeFuturesScalperOpenTrade(
 
 async function fillFuturesScalperPendingOrder(
     pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
     pSymbol: "BTC" | "ETH",
     pPending: FuturesScalperPendingOrderState,
     pTracked: RollingFuturesLtImportedPositionRecord[]
 ): Promise<{ tracked: RollingFuturesLtImportedPositionRecord[]; openTrade: FuturesScalperOpenTradeState }> {
-    const objPaperOpen = await buildOptionsScalperPaperFutureOpen(pUserId, "options-scalper", {
+    const objPaperOpen = await buildOptionsScalperPaperFutureOpen(pUserId, pStrategyCode, {
         action: "sell",
         symbol: pSymbol,
         qty: pPending.qty,
         orderType: "market_order",
         entryPriceOverride: pPending.orderPrice
     });
-    const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, "options-scalper", [
+    const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, [
         ...pTracked,
         objPaperOpen.position
     ]);
@@ -12659,7 +12679,7 @@ async function fillFuturesScalperPendingOrder(
     };
     await logFuturesEvent(
         pUserId,
-        "options-scalper",
+        pStrategyCode,
         "future_opened",
         "success",
         "Paper Future Trigger Filled",
@@ -12680,6 +12700,7 @@ async function fillFuturesScalperPendingOrder(
 
 async function runFuturesScalperTriggerEngine(
     pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
     pSync: {
         runtime: RollingFuturesLtRuntimeRecord | null;
         profile: RollingFuturesLtProfileRecord;
@@ -12706,7 +12727,7 @@ async function runFuturesScalperTriggerEngine(
     const objEngine: FuturesScalperSymbolEngineState = objEngineMap[vSymbol] || { pendingOrder: null, openTrade: null };
     let bStateChanged = false;
     let objAutoTrade: FuturesScalperEngineSyncResult["autoTrade"] = null;
-    let arrTracked = await listRollingFuturesLtImportedPositions(pUserId, "options-scalper");
+    let arrTracked = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
 
     // 1) Drop the open-trade link when the position was closed manually.
     if (objEngine.openTrade) {
@@ -12724,7 +12745,7 @@ async function runFuturesScalperTriggerEngine(
             ? objOpenTrade.stopLossPrice
             : (vPrice <= objOpenTrade.takeProfitPrice ? objOpenTrade.takeProfitPrice : 0);
         if (vExitPrice > 0) {
-            const objExit = await closeFuturesScalperOpenTrade(pUserId, pSync.profile, vSymbol, objOpenTrade, vExitPrice, arrTracked);
+            const objExit = await closeFuturesScalperOpenTrade(pUserId, pStrategyCode, pSync.profile, vSymbol, objOpenTrade, vExitPrice, arrTracked);
             arrTracked = objExit.tracked;
             objEngine.openTrade = null;
             bStateChanged = true;
@@ -12733,7 +12754,7 @@ async function runFuturesScalperTriggerEngine(
                 objAutoTrade = {
                     status: vIsStopLoss ? "warning" : "success",
                     message: `${objOpenTrade.contractName} ${vIsStopLoss ? "SL" : "TP"} hit at ${vExitPrice.toFixed(2)}. PnL ${objExit.closed.pnl.toFixed(4)}.`,
-                    trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrTracked)
+                    trackedOpenPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode, arrTracked)
                 };
             }
         }
@@ -12747,7 +12768,7 @@ async function runFuturesScalperTriggerEngine(
             bStateChanged = true;
             await logFuturesEvent(
                 pUserId,
-                "options-scalper",
+                pStrategyCode,
                 "trigger_order_cancelled",
                 "warning",
                 "Paper Future Trigger Order Cancelled",
@@ -12766,7 +12787,7 @@ async function runFuturesScalperTriggerEngine(
             };
         }
         else if (vPrice <= objPending.orderPrice) {
-            const objFill = await fillFuturesScalperPendingOrder(pUserId, vSymbol, objPending, arrTracked);
+            const objFill = await fillFuturesScalperPendingOrder(pUserId, pStrategyCode, vSymbol, objPending, arrTracked);
             arrTracked = objFill.tracked;
             objEngine.openTrade = objFill.openTrade;
             objEngine.pendingOrder = null;
@@ -12774,7 +12795,7 @@ async function runFuturesScalperTriggerEngine(
             objAutoTrade = {
                 status: "success",
                 message: `SELL ${objFill.openTrade.contractName} triggered at ${objFill.openTrade.entryPrice.toFixed(2)}. SL ${objFill.openTrade.stopLossPrice.toFixed(2)} / TP ${objFill.openTrade.takeProfitPrice.toFixed(2)}.`,
-                trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrTracked)
+                trackedOpenPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode, arrTracked)
             };
         }
     }
@@ -12794,7 +12815,7 @@ async function runFuturesScalperTriggerEngine(
                 bStateChanged = true;
                 await logFuturesEvent(
                     pUserId,
-                    "options-scalper",
+                    pStrategyCode,
                     "trigger_order_placed",
                     "success",
                     "Paper Future Trigger Order Placed",
@@ -12818,9 +12839,9 @@ async function runFuturesScalperTriggerEngine(
 
     if (bStateChanged) {
         const objSavedRuntime = await saveRollingFuturesLtRuntime({
-            ...(pSync.runtime || getDefaultRollingFuturesLtRuntime(pUserId, "options-scalper")),
+            ...(pSync.runtime || getDefaultRollingFuturesLtRuntime(pUserId, pStrategyCode)),
             userId: pUserId,
-            strategyCode: "options-scalper",
+            strategyCode: pStrategyCode,
             state: {
                 ...((pSync.runtime?.state || {}) as Record<string, unknown>),
                 futuresScalperEngine: {
@@ -13316,6 +13337,7 @@ function hasFuturesScalperPendingTrigger(pState: unknown): boolean {
 
 async function syncFuturesScalperEngineTick(
     pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
     pProfile: RollingFuturesLtProfileRecord,
     pRuntime: RollingFuturesLtRuntimeRecord | null,
     pSnapshot: {
@@ -13326,20 +13348,20 @@ async function syncFuturesScalperEngineTick(
     } | null,
     pManualSignal: OptionsDemoRenkoSignal | ""
 ): Promise<FuturesScalperEngineSyncResult> {
-    const objSync = await syncOptionsDemoRenkoRuntimeState(pUserId, "options-scalper", pProfile, pRuntime, pSnapshot, pManualSignal);
-    const objLatestRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
+    const objSync = await syncOptionsDemoRenkoRuntimeState(pUserId, pStrategyCode, pProfile, pRuntime, pSnapshot, pManualSignal);
+    const objLatestRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const bAutoTraderActive = Boolean(objLatestRuntime?.autoTraderEnabled)
         && String(objLatestRuntime?.status || "").trim().toLowerCase() === "running";
     if (!bAutoTraderActive) {
         return { ...objSync, autoTrade: null };
     }
-    const vLockKey = getOptionsScalperRenkoAutoTradeLockKey(pUserId);
+    const vLockKey = getFuturesScalperRenkoAutoTradeLockKey(pUserId, pStrategyCode);
     if (gOptionsScalperRenkoAutoTradeLocks.has(vLockKey)) {
         return { ...objSync, autoTrade: null };
     }
     gOptionsScalperRenkoAutoTradeLocks.add(vLockKey);
     try {
-        return await runFuturesScalperTriggerEngine(pUserId, objSync, pSnapshot);
+        return await runFuturesScalperTriggerEngine(pUserId, pStrategyCode, objSync, pSnapshot);
     }
     catch (objError) {
         return {
@@ -13353,6 +13375,22 @@ async function syncFuturesScalperEngineTick(
     finally {
         gOptionsScalperRenkoAutoTradeLocks.delete(vLockKey);
     }
+}
+
+export async function syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade(
+    pUserId: string,
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null,
+    pManualSignal: OptionsDemoRenkoSignal | "" = ""
+): Promise<FuturesScalperEngineSyncResult> {
+    const pStrategyCode: RollingFuturesLtStrategyCode = "futures-scalper";
+    const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    return syncFuturesScalperEngineTick(pUserId, pStrategyCode, objProfile, objRuntime, pSnapshot, pManualSignal);
 }
 
 export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
@@ -13378,9 +13416,6 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
 }> {
     const objProfile = await readLiveProfile(pUserId, "options-scalper");
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
-    if (String((objRuntime?.state || {}).engineMode || "") === "futures") {
-        return syncFuturesScalperEngineTick(pUserId, objProfile, objRuntime, pSnapshot, pManualSignal);
-    }
     const objSync = await syncOptionsDemoRenkoRuntimeState(
         pUserId,
         "options-scalper",
@@ -15083,7 +15118,7 @@ async function runAutoTraderCycle(
         }
 
         let arrSavedPositions: RollingFuturesLtImportedPositionRecord[] = [];
-        if (pStrategyCode === "covered-options" || isOptionsScalperStrategy(pStrategyCode)) {
+        if (pStrategyCode === "covered-options" || isPaperDemoStrategy(pStrategyCode)) {
             const vLotSize = getLotSizeForSymbol(vSymbol);
             const objMarketSnapshot = await getLiveMarketSnapshot({
                 symbol: vSymbol,
@@ -15118,11 +15153,14 @@ async function runAutoTraderCycle(
             if (pStrategyCode === "covered-options") {
                 await syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(pUserId, objRenkoSnapshot);
             }
+            else if (isFuturesScalperStrategy(pStrategyCode)) {
+                await syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade(pUserId, objRenkoSnapshot);
+            }
             else {
                 await syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(pUserId, objRenkoSnapshot);
             }
         }
-        if (isOptionsScalperStrategy(pStrategyCode)) {
+        if (isPaperDemoStrategy(pStrategyCode)) {
             arrSavedPositions = await replaceRollingFuturesLtImportedPositions(
                 pUserId,
                 pStrategyCode,
@@ -15883,6 +15921,7 @@ export async function recoverRollingFuturesLtAutoTraderCycles(): Promise<void> {
                 || vStrategyCode === "covered-options"
                 || isDualRollingFuturesStrategy(vStrategyCode)
                 || isOptionsScalperStrategy(vStrategyCode)
+                || isFuturesScalperStrategy(vStrategyCode)
             );
 
         if (!bShouldResume) {
@@ -16546,7 +16585,7 @@ async function clearOpenPositionsInternal(req: Request, res: Response, pStrategy
 
 async function reconcileOpenPositionsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
-    if (isOptionsScalperStrategy(pStrategyCode)) {
+    if (isPaperDemoStrategy(pStrategyCode)) {
         try {
             const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
             const arrRefreshed = await refreshOptionsScalperPaperOpenPositions(arrExisting);
@@ -16647,7 +16686,7 @@ async function reconcileOpenPositionsInternal(req: Request, res: Response, pStra
 
 async function closeImportedOpenPositionInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
-    if (isOptionsScalperStrategy(pStrategyCode)) {
+    if (isPaperDemoStrategy(pStrategyCode)) {
         const vImportId = String(req.body?.importId || "").trim();
         const arrSaved = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
         const objPosition = arrSaved.find((objRow) => String(objRow.importId || "").trim() === vImportId);
@@ -17942,7 +17981,7 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
 }
 
 async function getClosedPositionsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
-    if (isOptionsScalperStrategy(pStrategyCode)) {
+    if (isPaperDemoStrategy(pStrategyCode)) {
         const vUserId = getAccountId(req);
         const objProfile = await readLiveProfile(vUserId, pStrategyCode);
         const objUiState = getMergedUiState(objProfile);
@@ -18068,10 +18107,10 @@ async function clearOptionsScalperClosedPositionsInternal(req: Request, res: Res
         });
         return;
     }
-    if (!isOptionsScalperStrategy(pStrategyCode)) {
+    if (!isPaperDemoStrategy(pStrategyCode)) {
         res.status(400).json({
             status: "warning",
-            message: "Closed-position clearing is only supported on Options Demo."
+            message: "Closed-position clearing is only supported on demo pages."
         });
         return;
     }
@@ -18106,10 +18145,10 @@ async function deleteOptionsScalperClosedPositionInternal(req: Request, res: Res
         });
         return;
     }
-    if (!isOptionsScalperStrategy(pStrategyCode)) {
+    if (!isPaperDemoStrategy(pStrategyCode)) {
         res.status(400).json({
             status: "warning",
-            message: "Closed-position deletion is only supported on Options Demo."
+            message: "Closed-position deletion is only supported on demo pages."
         });
         return;
     }
@@ -18159,7 +18198,7 @@ async function updateOptionsScalperClosedPositionInternal(req: Request, res: Res
         });
         return;
     }
-    if (!isOptionsScalperStrategy(pStrategyCode)) {
+    if (!isPaperDemoStrategy(pStrategyCode)) {
         res.status(400).json({
             status: "warning",
             message: "Closed-position editing is only supported on demo pages."
@@ -18402,7 +18441,7 @@ async function executeKillSwitchInternal(req: Request, res: Response, pStrategyC
         return;
     }
     gKillSwitchLocks.add(vKillSwitchKey);
-    if (isOptionsScalperStrategy(pStrategyCode)) {
+    if (isPaperDemoStrategy(pStrategyCode)) {
         try {
             const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
             const arrPositions = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
@@ -20801,16 +20840,16 @@ export async function setOptionsScalperRenkoManualSignal(req: Request, res: Resp
 export async function calculateOptionsScalperRecommendedStartQty(req: Request, res: Response): Promise<void> {
     await calculateRecommendedStartQtyInternal(req, res, "options-scalper");
 }
-async function executeOptionsScalperPaperManualFutureInternal(req: Request, res: Response): Promise<void> {
+async function executeOptionsScalperPaperManualFutureInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
-    const objProfile = await readLiveProfile(vUserId, "options-scalper");
+    const objProfile = await readLiveProfile(vUserId, pStrategyCode);
     const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
     if (!vSelectedApiProfileId) {
         res.status(400).json({ status: "warning", message: "Select an API profile before placing paper futures orders." });
         return;
     }
 
-    const objCheck = await performRollingFuturesLtConnectionCheck(vUserId, "options-scalper", vSelectedApiProfileId);
+    const objCheck = await performRollingFuturesLtConnectionCheck(vUserId, pStrategyCode, vSelectedApiProfileId);
     if (objCheck.profile.connectionStatus.state !== "connected") {
         res.status(400).json({
             status: "warning",
@@ -20840,7 +20879,7 @@ async function executeOptionsScalperPaperManualFutureInternal(req: Request, res:
     }
 
     const vContractName = getContractNameForSymbol(vSymbol);
-    const vLockKey = getManualFutureOrderLockKey(vUserId, "options-scalper");
+    const vLockKey = getManualFutureOrderLockKey(vUserId, pStrategyCode);
     if (gManualFutureOrderLocks.has(vLockKey)) {
         res.status(409).json({
             status: "warning",
@@ -20851,21 +20890,21 @@ async function executeOptionsScalperPaperManualFutureInternal(req: Request, res:
 
     gManualFutureOrderLocks.add(vLockKey);
     try {
-        const objPaperOpen = await buildOptionsScalperPaperFutureOpen(vUserId, "options-scalper", {
+        const objPaperOpen = await buildOptionsScalperPaperFutureOpen(vUserId, pStrategyCode, {
             action: vAction,
             symbol: vSymbol,
             qty: vQty,
             orderType: vOrderType,
             limitPrice: vLimitPrice
         });
-        const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, "options-scalper");
-        const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, "options-scalper", [
+        const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
+        const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, [
             ...arrExisting,
             objPaperOpen.position
         ]);
         await logFuturesEvent(
             vUserId,
-            "options-scalper",
+            pStrategyCode,
             "future_opened",
             "success",
             "Manual Paper Future Opened",
@@ -20889,7 +20928,7 @@ async function executeOptionsScalperPaperManualFutureInternal(req: Request, res:
                 orderType: vOrderType,
                 order: objPaperOpen.order,
                 contract: objPaperOpen.contract,
-                trackedOpenPositions: await buildOpenPositionsPayload(vUserId, "options-scalper", arrSaved)
+                trackedOpenPositions: await buildOpenPositionsPayload(vUserId, pStrategyCode, arrSaved)
             }
         });
     }
@@ -20897,7 +20936,7 @@ async function executeOptionsScalperPaperManualFutureInternal(req: Request, res:
         const vMessage = getErrorMessage(objError, "Unable to open the paper futures position.");
         await logFuturesEvent(
             vUserId,
-            "options-scalper",
+            pStrategyCode,
             "engine_error",
             "warning",
             "Paper Future Order Skipped",
@@ -20915,7 +20954,10 @@ async function executeOptionsScalperPaperManualFutureInternal(req: Request, res:
 }
 
 export async function executeOptionsScalperManualFuture(req: Request, res: Response): Promise<void> {
-    await executeOptionsScalperPaperManualFutureInternal(req, res);
+    await executeOptionsScalperPaperManualFutureInternal(req, res, "options-scalper");
+}
+export async function executeFuturesScalperManualFuture(req: Request, res: Response): Promise<void> {
+    await executeOptionsScalperPaperManualFutureInternal(req, res, "futures-scalper");
 }
 export async function executeOptionsScalperManualOption(req: Request, res: Response): Promise<void> {
     await executeManualOptionInternal(req, res, "options-scalper");
@@ -20985,6 +21027,165 @@ export async function updateOptionsScalperRecoveryMetrics(req: Request, res: Res
 }
 export async function recalculateOptionsScalperRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "options-scalper");
+}
+
+// ---------------------------------------------------------------------------
+// Futures Scalper (paper futures) strategy exports — separate from options-demo.
+// ---------------------------------------------------------------------------
+export async function getFuturesScalperProfile(req: Request, res: Response): Promise<void> {
+    await getProfileInternal(req, res, "futures-scalper");
+}
+export async function saveFuturesScalperProfile(req: Request, res: Response): Promise<void> {
+    await saveProfileInternal(req, res, "futures-scalper");
+}
+export async function getFuturesScalperConnectionStatus(req: Request, res: Response): Promise<void> {
+    await getConnectionStatusInternal(req, res, "futures-scalper");
+}
+export async function getFuturesScalperRuntimeStatus(req: Request, res: Response): Promise<void> {
+    await getRuntimeStatusInternal(req, res, "futures-scalper");
+}
+export async function checkFuturesScalperConnection(req: Request, res: Response): Promise<void> {
+    await checkConnectionInternal(req, res, "futures-scalper");
+}
+export async function enableFuturesScalperAutoTrader(req: Request, res: Response): Promise<void> {
+    await enableAutoTraderInternal(req, res, "futures-scalper");
+}
+export async function disableFuturesScalperAutoTrader(req: Request, res: Response): Promise<void> {
+    await disableAutoTraderInternal(req, res, "futures-scalper");
+}
+export async function getFuturesScalperAccountSummary(req: Request, res: Response): Promise<void> {
+    await getAccountSummaryInternal(req, res, "futures-scalper");
+}
+export async function calculateFuturesScalperRecommendedStartQty(req: Request, res: Response): Promise<void> {
+    await calculateRecommendedStartQtyInternal(req, res, "futures-scalper");
+}
+
+export async function getFuturesScalperIndicator(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const objProfile = await readLiveProfile(vUserId, "futures-scalper");
+        const objUiState = getMergedUiState(objProfile);
+        const vSelectedSymbol = normalizeSymbolValue(req.query?.symbol || req.body?.symbol || objUiState.symbol);
+        const objIndicator = await getOptionsDemoOiIndicatorSummary(vSelectedSymbol);
+        res.json({
+            status: "success",
+            data: objIndicator
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to fetch futures scalper indicator.")
+        });
+    }
+}
+export async function setFuturesScalperRenkoManualSignal(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const objProfile = await readLiveProfile(vUserId, "futures-scalper");
+        const objUiState = getMergedUiState(objProfile);
+        const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
+        const vSignal = String(req.body?.signal || req.body?.color || "").trim().toUpperCase() === "G" ? "G"
+            : (String(req.body?.signal || req.body?.color || "").trim().toUpperCase() === "R" ? "R" : "");
+        if (!vSignal) {
+            res.status(400).json({
+                status: "warning",
+                message: "Select R or G for the manual Renko signal."
+            });
+            return;
+        }
+        const objSnapshot = await getLiveMarketSnapshot({
+            symbol: vSelectedSymbol,
+            contractName: getContractNameForSymbol(vSelectedSymbol),
+            lotSize: getLotSizeForSymbol(vSelectedSymbol),
+            futureQty: 1,
+            futureOrderType: "market_order",
+            action: "buy",
+            legSide: "ce",
+            expiryMode: "1",
+            expiryDate: "",
+            optionQty: 1,
+            redOptionQtyPct: 100,
+            greenOptionQtyPct: 100,
+            newDelta: 0.53,
+            reDelta: 0.53,
+            deltaTakeProfit: 0.15,
+            deltaStopLoss: 0.85,
+            reEnter: false,
+            addOneLotFuture: false,
+            renkoEnabled: Boolean(objUiState.renkoFeedEnabled ?? objUiState.renkoEnabled),
+            renkoStepPoints: Math.max(1, Math.floor(Number(objUiState.renkoFeedPts || objUiState.renkoStepPoints || 10) || 10)),
+            renkoPriceSource: normalizeRenkoFeedPriceSourceValue(objUiState.renkoFeedPriceSrc || "spot_price"),
+            loopSeconds: 8
+        });
+        const objSync = await syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade(vUserId, objSnapshot, vSignal);
+        res.json({
+            status: "success",
+            message: `Manual Renko signal set to ${vSignal}.`,
+            data: {
+                renko: objSync.renko,
+                renkoHistoryBySymbol: getMergedUiState(objSync.profile).renkoHistoryBySymbol,
+                autoTrade: objSync.autoTrade || null
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to set the manual Renko signal.")
+        });
+    }
+}
+export async function getFuturesScalperImportableOpenPositions(req: Request, res: Response): Promise<void> {
+    await getImportableOpenPositionsInternal(req, res, "futures-scalper");
+}
+export async function getFuturesScalperOpenPositions(req: Request, res: Response): Promise<void> {
+    await getOpenPositionsInternal(req, res, "futures-scalper");
+}
+export async function saveFuturesScalperOpenPositions(req: Request, res: Response): Promise<void> {
+    await saveOpenPositionsInternal(req, res, "futures-scalper");
+}
+export async function deleteFuturesScalperOpenPosition(req: Request, res: Response): Promise<void> {
+    await deleteOpenPositionInternal(req, res, "futures-scalper");
+}
+export async function clearFuturesScalperOpenPositions(req: Request, res: Response): Promise<void> {
+    await clearOpenPositionsInternal(req, res, "futures-scalper");
+}
+export async function reconcileFuturesScalperOpenPositions(req: Request, res: Response): Promise<void> {
+    await reconcileOpenPositionsInternal(req, res, "futures-scalper");
+}
+export async function closeFuturesScalperImportedOpenPosition(req: Request, res: Response): Promise<void> {
+    await closeImportedOpenPositionInternal(req, res, "futures-scalper");
+}
+export async function getFuturesScalperClosedPositions(req: Request, res: Response): Promise<void> {
+    await getClosedPositionsInternal(req, res, "futures-scalper");
+}
+export async function clearFuturesScalperClosedPositions(req: Request, res: Response): Promise<void> {
+    await clearOptionsScalperClosedPositionsInternal(req, res, "futures-scalper");
+}
+export async function deleteFuturesScalperClosedPosition(req: Request, res: Response): Promise<void> {
+    await deleteOptionsScalperClosedPositionInternal(req, res, "futures-scalper");
+}
+export async function updateFuturesScalperClosedPosition(req: Request, res: Response): Promise<void> {
+    await updateOptionsScalperClosedPositionInternal(req, res, "futures-scalper");
+}
+export async function getFuturesScalperEvents(req: Request, res: Response): Promise<void> {
+    await getEventsInternal(req, res, "futures-scalper");
+}
+export async function clearFuturesScalperEventsController(req: Request, res: Response): Promise<void> {
+    await clearEventsInternal(req, res, "futures-scalper");
+}
+export async function deleteFuturesScalperEventController(req: Request, res: Response): Promise<void> {
+    await deleteEventInternal(req, res, "futures-scalper");
+}
+export async function executeFuturesScalperKillSwitch(req: Request, res: Response): Promise<void> {
+    await executeKillSwitchInternal(req, res, "futures-scalper");
+}
+export async function updateFuturesScalperRecoveryMetrics(req: Request, res: Response): Promise<void> {
+    await updateRecoveryMetricsInternal(req, res, "futures-scalper");
+}
+export async function recalculateFuturesScalperRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
+    await recalculateRecoveryTotalPnlInternal(req, res, "futures-scalper");
 }
 
 export async function getStrangleDemoProfile(req: Request, res: Response): Promise<void> {
