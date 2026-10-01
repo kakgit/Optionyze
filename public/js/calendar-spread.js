@@ -1762,7 +1762,9 @@
         if (!isCoveredMode) {
             return;
         }
-        if (isStrangleDemoPage) {
+        // Calendar Spread is paper-only: Exec Strategy opens simulated positions,
+        // so the live margin check is not applicable. Strangle Demo does the same.
+        if (isStrangleDemoPage || isCalendarSpreadPage) {
             return;
         }
         const vAvailableBalance = Number(lastAccountSummary?.availableBalance);
