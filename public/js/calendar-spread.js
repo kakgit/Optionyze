@@ -4547,6 +4547,41 @@
         }
     }
 
+    // Places one Manual Trader row through the same paper execution endpoint
+    // the single-row path uses, reusing that path's validation rules.
+    async function postCalendarSpreadExecRow(rowIndex) {
+        const vOptionRowIndex = normalizeOptionRowIndex(rowIndex);
+        const rowNodes = getOptionRowNodes(vOptionRowIndex);
+        const vAction = String(rowNodes.action?.value || "").trim().toLowerCase();
+        const vLegSide = String(rowNodes.legs?.value || "").trim().toLowerCase();
+        const vExpiryMode = String(rowNodes.expiryMode?.value || "5").trim();
+        const vExpiryDate = String(rowNodes.expiryDate?.value || "").trim();
+        const vBaseQty = Math.max(1, Math.floor(Number(rowNodes.qty?.value || 1)));
+        const vTargetDelta = Math.max(0, Number(rowNodes.newD?.value || 0.53));
+        const vSymbol = String(ids.symbol?.value || "BTC").trim().toUpperCase();
+        const vQty = resolveCoveredTradeQty(vAction, vLegSide, vBaseQty, vSymbol);
+
+        if (vAction !== "buy" && vAction !== "sell") {
+            throw new Error("Select Buy or Sell in Action before executing the strategy.");
+        }
+        if (!vExpiryDate) {
+            throw new Error("Select an expiry date before executing the strategy.");
+        }
+
+        return await postJson(`${endpointBase}/strategy/execute`, {
+            selectedApiProfileId: String(ids.apiProfile?.value || selectedApiProfileId || "").trim(),
+            uiState: getUiState(),
+            rowIndex: vOptionRowIndex,
+            action: vAction,
+            symbol: vSymbol,
+            legSide: vLegSide,
+            expiryMode: vExpiryMode,
+            expiryDate: vExpiryDate,
+            qty: vQty,
+            targetDelta: vTargetDelta
+        });
+    }
+
     async function postStrangleDemoExecRow(rowIndex, vSymbol, extraFields) {
         const rowNodes = getOptionRowNodes(rowIndex);
         const vAction = String(rowNodes.action?.value || "").trim().toLowerCase();
@@ -4569,6 +4604,77 @@
             qty: vQty,
             targetDelta: vTargetDelta
         }, objExtra));
+    }
+
+    // Exec Strategy runs every supported Manual Trader row so both Row 1 and
+    // Row 2 are placed from their own settings. Rows are independent: a row that
+    // is not configured (or fails) is reported without blocking the others.
+    async function executeCalendarSpreadStrategy() {
+        if (execStrategyInFlight) {
+            throw new Error("Exec Strategy is already running. Please wait for it to finish.");
+        }
+        if (!canUseExecStrategy()) {
+            throw new Error("Not Authorised to Execute, Please Contact Admin");
+        }
+
+        await checkConnection();
+        if (!canUseLiveActions()) {
+            throw new Error("Delta connection is not healthy enough to execute the strategy.");
+        }
+        if (!autoTraderEnabled) {
+            throw new Error("Turn Auto Trader ON before executing the strategy.");
+        }
+
+        await saveProfile();
+
+        const arrRowErrors = [];
+        const arrPlacedRows = [];
+        let vPlacedOrders = 0;
+        let lastTrackedPayload = null;
+
+        execStrategyInFlight = true;
+        setButtonsEnabled();
+        try {
+            for (const rowIndex of getSupportedOptionRowIndexes()) {
+                const rowNodes = getOptionRowNodes(rowIndex);
+                const vAction = String(rowNodes.action?.value || "").trim().toLowerCase();
+                if (vAction !== "buy" && vAction !== "sell") {
+                    continue;
+                }
+                if (!String(rowNodes.expiryDate?.value || "").trim()) {
+                    arrRowErrors.push(`Row ${rowIndex}: select an expiry date before executing the strategy.`);
+                    continue;
+                }
+                try {
+                    const objResult = await postCalendarSpreadExecRow(rowIndex);
+                    const arrOrders = Array.isArray(objResult?.data?.orders) ? objResult.data.orders : [];
+                    vPlacedOrders += arrOrders.length;
+                    if (objResult?.data?.trackedOpenPositions) {
+                        lastTrackedPayload = objResult.data.trackedOpenPositions;
+                    }
+                    arrPlacedRows.push(rowIndex);
+                }
+                catch (error) {
+                    arrRowErrors.push(`Row ${rowIndex}: ${error instanceof Error ? error.message : "unable to execute the strategy."}`);
+                }
+            }
+            if (!arrPlacedRows.length && !arrRowErrors.length) {
+                throw new Error("Select Buy or Sell in Action for at least one row before executing the strategy.");
+            }
+            if (lastTrackedPayload) {
+                renderOpenPositions(lastTrackedPayload);
+            }
+            return {
+                placedOrders: vPlacedOrders,
+                placedRows: arrPlacedRows,
+                errors: arrRowErrors,
+                trackedOpenPositions: lastTrackedPayload
+            };
+        }
+        finally {
+            execStrategyInFlight = false;
+            setButtonsEnabled();
+        }
     }
 
     async function executeStrangleDemoStrategy() {
@@ -6568,15 +6674,22 @@ ids.closedAltFromDate?.addEventListener("change", function () {
     ids.execStrategyButton?.addEventListener("click", function () {
         if (isCalendarSpreadPage) {
             // Exec Strategy places the paper positions described by the Manual
-            // Trader settings, then the open-positions WebSocket keeps the grid
-            // in sync from the calendar-spread partition.
-            void executeStrategy(1).then(function (objResult) {
-                const trackedPayload = objResult?.data?.trackedOpenPositions || null;
-                if (trackedPayload) {
-                    renderOpenPositions(trackedPayload);
+            // Trader settings (both rows), then the open-positions WebSocket
+            // keeps the grid in sync from the calendar-spread partition.
+            void executeCalendarSpreadStrategy().then(function (objSummary) {
+                const vPlacedOrders = Number(objSummary?.placedOrders || 0);
+                const arrPlacedRows = Array.isArray(objSummary?.placedRows) ? objSummary.placedRows : [];
+                const arrErrors = Array.isArray(objSummary?.errors) ? objSummary.errors : [];
+                const vRowsLabel = arrPlacedRows.length
+                    ? ` (${arrPlacedRows.map(function (vRow) { return `Row ${vRow}`; }).join(", ")})`
+                    : "";
+                let vMessage = vPlacedOrders > 0
+                    ? `Exec Strategy placed ${vPlacedOrders} paper option order${vPlacedOrders === 1 ? "" : "s"}${vRowsLabel}.`
+                    : "Exec Strategy placed no paper option orders.";
+                if (arrErrors.length) {
+                    vMessage += ` ${arrErrors.join(" ")}`;
                 }
-                const vMessage = String(objResult?.message || "Exec Strategy placed paper option order(s).").trim();
-                setStatus(ids.pageStatus, vMessage, "success");
+                setStatus(ids.pageStatus, vMessage, arrErrors.length ? (vPlacedOrders > 0 ? "warning" : "danger") : "success");
                 return Promise.all([
                     loadProfile()
                         .then(function () { return loadClosedPositions(); })
