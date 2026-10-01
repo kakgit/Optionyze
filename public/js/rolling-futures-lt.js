@@ -5948,6 +5948,12 @@ async function loadClosedAltPositions() {
     });
     [
         ids.bsFutQty,
+        ids.futuresLadderStepPoints,
+        ids.futuresLadderGridOffsetPoints,
+        ids.futuresLadderOrderOffsetPoints,
+        ids.futuresLadderCancelOffsetPoints,
+        ids.futuresLadderStopLossPoints,
+        ids.futuresLadderTakeProfitPoints,
         ids.minusDelta,
         ids.plusDelta,
         ids.closeNetProfitBrokerage,
