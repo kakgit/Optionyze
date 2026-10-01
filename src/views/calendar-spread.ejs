@@ -1,0 +1,1292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= pageTitle %></title>
+    <%- include('partials/brand-head') %>
+    <link rel="stylesheet" href="/css/app-shell.css" />
+    <link rel="stylesheet" href="/css/account-menu.css" />
+    <link rel="stylesheet" href="/css/calendar-spread-support.css" />
+    <link rel="stylesheet" href="/css/calendar-spread.css" />
+    <link rel="stylesheet" href="/css/calendar-spread-dual.css" />
+</head>
+  <%
+    // Calendar Spread is a standalone page. These values are intentionally
+    // hard-coded instead of being derived from a shared pageVariant switch,
+    // so the Calendar Spread layout can be changed without any risk of
+    // affecting Options Demo or any other page.
+    const vPageVariant = "demo";
+    const bIsDemoPage = true;
+    const bIsStranglePage = false;
+    const bIsStrangleDemoPage = false;
+    const bIsRenkoPage = false;
+    const bIsPaperDemoPage = true;
+    const bIsCoveredLivePage = false;
+    const bShowRenkoSection = true;
+    const bIsStrangleLikePage = false;
+    const bShowLiveSupportSections = false;
+    const bShowConfirmationSection = false;
+    const bShowTelegramAlertsSection = false;
+    const bShowImportPositionsUi = false;
+    const vStrategyLabel = "Calendar Spread";
+    const vPageHeading = "Calendar Spread";
+    const vEndpointBase = "/api/calendar-spread";
+    const vOpenPositionsEmpty = "No calendar spread positions are currently shown.";
+    const vClosedPositionsEmpty = "No calendar spread trade history found for the selected date range.";
+    const vConfirmationHeading = "Confirmation";
+    const vConfirmationAutoText = "Auto-confirm all calendar spread live actions";
+    const vConfirmationEmpty = "No live action is waiting for confirmation.";
+    const vActivityEmpty = "No calendar spread activity has been logged yet.";
+    const vClearOpenPositionsTitle = "Clear all calendar spread open positions locally";
+    const vRefreshOpenPositionsTitle = "Refresh calendar spread positions";
+    const vKillSwitchTitle = "Kill switch to close calendar spread option legs";
+    const vClearClosedPositionsTitle = "Clear all calendar spread closed positions locally";
+    const vRefreshClosedTitle = "Refresh closed calendar spread positions";
+  %>
+  <body class="app-page"
+        data-rolling-futures-live="covered"
+        data-rolling-futures-variant="<%= vPageVariant %>"
+        data-rolling-futures-endpoint-base="<%= vEndpointBase %>"
+        data-rolling-futures-strategy-label="<%= vStrategyLabel %>"
+        data-manual-trader-label="Manual Trader"
+        data-exec-strategy-enabled="<%= currentAccount?.execStrategy ? 'true' : 'false' %>"
+        data-current-account-id="<%= currentAccount?.accountId || '' %>"
+        data-current-account-admin="<%= currentAccount?.isAdmin ? 'true' : 'false' %>"
+        data-current-account-verifier="<%= currentAccount?.isVerifier ? 'true' : 'false' %>"
+        data-current-account-full-name="<%= currentAccount?.fullName || '' %>"
+        data-current-account-email="<%= currentAccount?.email || '' %>"
+        data-current-account-telegram-chat-id="<%= currentAccount?.telegramChatId || '' %>">
+    <div class="app-layout rolling-demo-layout">
+        <%- include('partials/app-header', { currentAccount }) %>
+
+        <section class="rolling-demo-hero">
+            <div class="app-panel rolling-demo-card">
+                <h1 class="rolling-demo-title"><%= vPageHeading %></h1>
+                <div class="rolling-futures-hero-badges">
+                    <div class="rolling-futures-hero-badge">
+                        <label for="ddlRollingFuturesSymbol">Symbols List</label>
+                        <select id="ddlRollingFuturesSymbol">
+                            <option value="">Select Symbol</option>
+                            <option value="BTC" selected>BTCUSD</option>
+                            <option value="ETH">ETHUSD</option>
+                        </select>
+                    </div>
+                    <div class="rolling-futures-hero-badge">
+                        <div class="rolling-futures-start-qty-label-row">
+                            <label for="txtRollingFuturesStartQty">Multiplier</label>
+                            <% if (!bIsCoveredLivePage) { %>
+                                <button class="rolling-futures-start-qty-calc-btn" type="button" id="btnRollingFuturesCalcStartQty" title="Calculate Multiplier from Available Balance" aria-label="Calculate Multiplier from Available Balance">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <rect x="4" y="3" width="16" height="18" rx="2" />
+                                        <path d="M8 7h8" />
+                                        <path d="M8 12h2" />
+                                        <path d="M14 12h2" />
+                                        <path d="M8 16h2" />
+                                        <path d="M14 16h2" />
+                                    </svg>
+                                </button>
+                            <% } %>
+                        </div>
+                        <div class="rolling-futures-start-qty-row">
+                            <input class="rolling-futures-start-qty" type="number" min="<%= (bIsDemoPage || bIsStrangleLikePage || bIsCoveredLivePage) ? '1' : '2' %>" max="1000" step="1" id="txtRollingFuturesStartQty" value="<%= (bIsDemoPage || bIsStrangleLikePage || bIsCoveredLivePage) ? '1' : '2' %>" />
+                        </div>
+                    </div>
+                    <div class="rolling-futures-hero-badge action">
+                        <button class="rolling-demo-btn warn" type="button" id="btnRollingFuturesDemoAutoTrader">Auto Trader - OFF</button>
+                    </div>
+                </div>
+                <% if (!bIsStrangleDemoPage) { %>
+                <div class="rolling-futures-help-sample-inline rolling-futures-hero-rules">
+                    <div class="rolling-futures-help-inline-row">
+                        <div class="rolling-futures-help-inline-main">
+                            <div class="rolling-futures-help-inline-top">
+                                <label class="rolling-futures-neutral-mode rolling-futures-help-mode" for="chkRollingFuturesCloseNetProfitBrokerage">
+                                    <input type="checkbox" id="chkRollingFuturesCloseNetProfitBrokerage" checked />
+                                    <span>Exit All if Net PnL is &gt; X of Brokerage</span>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show brokerage help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            Monitors <code>Net PnL</code> against <code>Total Brokerage to Recvr x multiplier</code>. When the rule stays valid long enough, it can close all positions.
+                                        </span>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="rolling-futures-help-inline-bottom">
+                                <div class="rolling-demo-field rolling-futures-help-input-field">
+                                    <input type="number" id="txtRollingFuturesBrokerageMultiplier" value="<%= bIsCoveredLivePage ? '7' : (bIsStrangleLikePage ? '5' : '10') %>" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <% const vShowPosPnlCloseRule = bIsCoveredLivePage || bIsDemoPage; %>
+                    <div class="rolling-futures-help-inline-row">
+                        <div class="rolling-futures-help-inline-main">
+                            <div class="rolling-futures-help-inline-top">
+                                <label class="rolling-futures-neutral-mode rolling-futures-help-mode" for="<%= vShowPosPnlCloseRule ? 'chkRollingFuturesClosePosPnlAboveBrokerage' : 'chkRollingFuturesCloseBlockedMargin' %>">
+                                    <% if (vShowPosPnlCloseRule) { %>
+                                    <input type="checkbox" id="chkRollingFuturesClosePosPnlAboveBrokerage" />
+                                    <span>Close if Pos PnL &gt; X of Pos Brokerage</span>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show position stop help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            Monitors every open position individually: closes ONLY that position when its live PnL exceeds X &times; its own brokerage. All other positions keep running until the overall target PnL is achieved.
+                                        </span>
+                                    </span>
+                                    <% } else { %>
+                                    <input type="checkbox" id="chkRollingFuturesCloseBlockedMargin" <%= bIsCoveredLivePage ? '' : 'checked' %> />
+                                    <span>Exit All if Net PnL is X% of Blocked Margin</span>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show blocked margin help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            Monitors <code>Net PnL</code> against the configured percentage of current blocked margin before allowing a close-all.
+                                        </span>
+                                    </span>
+                                    <% } %>
+                                </label>
+                            </div>
+                            <div class="rolling-futures-help-inline-bottom">
+                                <div class="rolling-demo-field rolling-futures-help-input-field">
+                                    <input type="number" id="<%= vShowPosPnlCloseRule ? 'txtRollingFuturesClosePosPnlAboveBrokerageX' : 'txtRollingFuturesBlockedMarginPct' %>" value="<%= vShowPosPnlCloseRule ? '5' : (bIsStrangleLikePage ? '10' : '20') %>" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <% } %>
+                <div class="rolling-futures-hero-metrics rolling-futures-help-sample-inline">
+                    <div class="rolling-futures-hero-metric">
+                        <label for="txtRollingFuturesBrok2Rec">Total Brokerage</label>
+                        <input class="rolling-demo-metric-input" type="number" id="txtRollingFuturesBrok2Rec" value="0" />
+                    </div>
+                    <div class="rolling-futures-hero-metric">
+                        <label for="txtRollingFuturesYet2Recover">Total PnL</label>
+                        <input class="rolling-demo-metric-input" type="number" id="txtRollingFuturesYet2Recover" value="0" />
+                    </div>
+                    <div class="rolling-futures-hero-metric">
+                        <label for="divRollingFuturesNetPl">Net PnL</label>
+                        <div class="rolling-demo-metric-value rolling-futures-hero-metric-value" id="divRollingFuturesNetPl">0.00</div>
+                    </div>
+                </div>
+            </div>
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <h2>Exchange Connection</h2>
+                    <div class="rolling-demo-card-tools">
+                        <% if (currentAccount?.isVerifier) { %>
+                            <div class="rolling-live-admin-target-head">
+                                <div class="rolling-demo-field rolling-live-admin-target-field">
+                                    <select id="ddlRollingDualAdminTargetUser">
+                                        <option value="">Loading running users...</option>
+                                    </select>
+                                </div>
+                                <div class="rolling-live-admin-target-meta" id="rollingDualAdminTargetMeta">Select a running <%= vStrategyLabel %> user to load settings and positions.</div>
+                            </div>
+                        <% } %>
+                        <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesCheckConnection" title="Check Delta connection" aria-label="Check Delta connection">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                <path d="M21 3v6h-6" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="rolling-live-connection-grid">
+                    <div class="rolling-demo-field">
+                        <label for="ddlRollingDualFuturesApiProfile">API Name</label>
+                        <select id="ddlRollingDualFuturesApiProfile">
+                            <option value="">Select API profile</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-metric">
+                        <div class="rolling-demo-metric-label">Connection Status</div>
+                        <div class="rolling-demo-metric-value" id="rollingDualFuturesConnectionStateValue">Not Selected</div>
+                    </div>
+                    <div class="rolling-demo-metric">
+                        <div class="rolling-demo-metric-label rolling-live-ip-label">
+                            <span>Whitelist IP</span>
+                            <button class="rolling-live-copy-ip-btn" type="button" id="btnRollingDualFuturesCopyWhitelistIp" title="Copy this server IP for Delta Exchange whitelist" aria-label="Copy this server IP for Delta Exchange whitelist">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M9 9h10v12H9z" />
+                                    <path d="M5 15V5h10" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="rolling-live-ip-row">
+                            <div class="rolling-demo-metric-value" id="rollingDualFuturesWhitelistIpValue">-</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="rolling-demo-summary rolling-live-summary">
+                    <div class="app-stat rolling-demo-stat">
+                        <div class="rolling-demo-stat-label">Engine Status</div>
+                        <div class="rolling-demo-stat-value" id="rollingDualFuturesEngineStatus">Idle</div>
+                    </div>
+                    <div class="app-stat rolling-demo-stat">
+                        <div class="rolling-demo-stat-label">Last Checked</div>
+                        <div class="rolling-demo-stat-value" id="rollingDualFuturesLastCheckedValue">-</div>
+                    </div>
+                    <div class="app-stat rolling-demo-stat">
+                        <div class="rolling-demo-stat-label">Open Positions</div>
+                        <div class="rolling-demo-stat-value" id="rollingDualFuturesOpenCount">0</div>
+                    </div>
+                </div>
+                <div class="rolling-demo-grid metrics rolling-demo-section rolling-live-balance-metrics">
+                    <div class="rolling-demo-metric">
+                        <div class="rolling-demo-metric-label">Total Balance</div>
+                        <div class="rolling-demo-metric-value" id="rollingDualFuturesTotalBalanceValue">-</div>
+                    </div>
+                    <div class="rolling-demo-metric">
+                        <div class="rolling-demo-metric-label">Blocked Margin</div>
+                        <div class="rolling-demo-metric-value" id="rollingDualFuturesBlockedMarginValue">-</div>
+                    </div>
+                    <div class="rolling-demo-metric">
+                        <div class="rolling-demo-metric-label">Available Balance</div>
+                        <div class="rolling-demo-metric-value" id="rollingDualFuturesAvailableBalanceValue">-</div>
+                    </div>
+                </div>
+                <div class="rolling-live-status" id="rollingDualFuturesConnectionStatus"></div>
+                <div class="rolling-live-status" id="rollingDualFuturesPageStatus"></div>
+            </div>
+        </section>
+
+        <section class="rolling-demo-section rolling-futures-card-stack">
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <div class="rolling-futures-inline-tools">
+                        <span class="rolling-demo-manual-title">Manual Trader</span>
+                        <div class="rolling-futures-three-way" role="group" aria-label="Manual Trader strategy">
+                            <input type="radio" id="rollingFuturesThreeWayCe" name="rollingFuturesThreeWaySwitch" value="ce" />
+                            <label for="rollingFuturesThreeWayCe">CE</label>
+                            <input type="radio" id="rollingFuturesThreeWayBoth" name="rollingFuturesThreeWaySwitch" value="both" checked />
+                            <label for="rollingFuturesThreeWayBoth">Both</label>
+                            <input type="radio" id="rollingFuturesThreeWayPe" name="rollingFuturesThreeWaySwitch" value="pe" />
+                            <label for="rollingFuturesThreeWayPe">PE</label>
+                        </div>
+                    </div>
+                    <div class="rolling-demo-card-tools rolling-futures-manual-tools">
+                        <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingFuturesShowSavedProfile" title="Show saved manual trader values from DB" aria-label="Show saved manual trader values from DB">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <ellipse cx="12" cy="6" rx="7" ry="3" />
+                                <path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" />
+                                <path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+                            </svg>
+                        </button>
+                        <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingFuturesResetDefaults" title="Reset manual trader defaults" aria-label="Reset manual trader defaults">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M3 12a9 9 0 1 0 3-6.7" />
+                                <path d="M3 3v6h6" />
+                            </svg>
+                        </button>
+                        <button class="rolling-demo-btn primary rolling-futures-exec-strategy-btn" type="button" id="btnRollingFuturesExecAllLegs" title="Open paper trades using the Manual Trader settings" aria-label="Open paper trades using the Manual Trader settings">
+                            Exec Strategy
+                        </button>
+                    </div>
+                </div>
+                <div class="rolling-futures-demo-grid row">
+                    <div class="rolling-demo-field">
+                        <label for="ddlRollingFuturesAction1"><%= (bIsDemoPage || bIsCoveredLivePage) ? 'Green Action' : 'Action' %></label>
+                        <select id="ddlRollingFuturesAction1">
+                            <option value="none">None</option>
+                            <option value="buy">Buy</option>
+                            <option value="sell" selected>Sell</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="ddlRollingFuturesLegs1">Legs</label>
+                        <select id="ddlRollingFuturesLegs1">
+                            <option value="both" <%= (!bIsStrangleLikePage && !bIsCoveredLivePage) ? 'selected' : '' %>>Both</option>
+                            <option value="ce" <%= bIsStrangleLikePage ? 'selected' : '' %>>CE</option>
+                            <option value="pe" <%= bIsCoveredLivePage ? 'selected' : '' %>>PE</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="ddlRollingFuturesExpiryType1">Expiry Type</label>
+                        <select id="ddlRollingFuturesExpiryType1">
+                            <option value="1">DAILY T+1</option>
+                            <option value="2">DAILY T+2</option>
+                            <option value="4">WEEKLY</option>
+                            <option value="5">BI-WEEKLY</option>
+                            <option value="6" selected>MONTHLY</option>
+                            <option value="7">BI-MONTHLY</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesExpiry1">Select Expiry</label>
+                        <input type="date" id="txtRollingFuturesExpiry1" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesQty1">Qty</label>
+                        <input type="number" min="1" id="txtRollingFuturesQty1" value="1" />
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row1-inline-action rolling-covered-row1-inline-action-buyce">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesBuyCe">BUY CE</button>
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row1-inline-action rolling-covered-row1-inline-action-buype">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesBuyPe">BUY PE</button>
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-newd">
+                        <label for="txtRollingFuturesNewD1">New D</label>
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD1" value="<%= bIsCoveredLivePage ? '0.27' : '0.33' %>" />
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-tpd">
+                        <label for="txtRollingFuturesTpD1">TP D</label>
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD1" value="<%= bIsCoveredLivePage ? '0.14' : '0.10' %>" />
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-sld">
+                        <label for="txtRollingFuturesSlD1">SL D</label>
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD1" value="<%= bIsCoveredLivePage ? '0.54' : (bIsStrangleLikePage ? '0.55' : '0.50') %>" />
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-reenter">
+                        <label for="chkRollingFuturesReEnter1">
+                            Re-Enter
+                            <span class="rolling-futures-help-icon-wrap">
+                                <button type="button" class="rolling-futures-help-trigger" aria-label="Show row 1 re-enter help">
+                                    ?
+                                </button>
+                                <span class="rolling-futures-help-popout floating">
+                                    When enabled, if this row closes because of <code>SL</code> or <code>TP</code>, it reopens from the same row using the same action, leg, quantity, and <code>New D</code>. This re-entry does not use or increase the fresh-trade lot increment.
+                                </span>
+                            </span>
+                        </label>
+                        <div class="rolling-futures-help-inline-top">
+                            <label class="rolling-futures-help-check compact" for="chkRollingFuturesReEnter1">
+                                <input type="checkbox" id="chkRollingFuturesReEnter1" checked />
+                            </label>
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row1-break-action rolling-covered-row1-break-action-sellpe">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesSellPe">SELL PE</button>
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row1-break-action rolling-covered-row1-break-action-sellce">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesSellCe">SELL CE</button>
+                    </div>
+                </div>
+
+                <div class="rolling-futures-demo-grid row">
+                    <div class="rolling-demo-field">
+                        <label for="ddlRollingFuturesAction2"><%= (bIsDemoPage || bIsCoveredLivePage) ? 'Red Action' : 'Action' %></label>
+                        <select id="ddlRollingFuturesAction2">
+                            <option value="none">None</option>
+                            <option value="buy" <%= (!bIsStrangleLikePage && !bIsCoveredLivePage) ? 'selected' : '' %>>Buy</option>
+                            <option value="sell" <%= (bIsStrangleLikePage || bIsCoveredLivePage) ? 'selected' : '' %>>Sell</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="ddlRollingFuturesLegs2">Legs</label>
+                        <select id="ddlRollingFuturesLegs2">
+                            <option value="both" <%= (!bIsStrangleLikePage && !bIsCoveredLivePage) ? 'selected' : '' %>>Both</option>
+                            <option value="ce" <%= bIsCoveredLivePage ? 'selected' : '' %>>CE</option>
+                            <option value="pe" <%= bIsStrangleLikePage ? 'selected' : '' %>>PE</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="ddlRollingFuturesExpiryType2">Expiry Type</label>
+                        <select id="ddlRollingFuturesExpiryType2">
+                            <option value="1" <%= (!bIsStrangleLikePage && !bIsCoveredLivePage) ? 'selected' : '' %>>DAILY T+1</option>
+                            <option value="2">DAILY T+2</option>
+                            <option value="4">WEEKLY</option>
+                            <option value="5">BI-WEEKLY</option>
+                            <option value="6" <%= (bIsStrangleLikePage || bIsCoveredLivePage) ? 'selected' : '' %>>MONTHLY</option>
+                            <option value="7">BI-MONTHLY</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesExpiry2">Select Expiry</label>
+                        <input type="date" id="txtRollingFuturesExpiry2" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesQty2">Qty</label>
+                        <input type="number" min="1" id="txtRollingFuturesQty2" value="1" />
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row2-inline-action rolling-covered-row2-inline-action-buyce">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesBuyCe2">BUY CE</button>
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row2-inline-action rolling-covered-row2-inline-action-buype">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesBuyPe2">BUY PE</button>
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-newd">
+                        <label for="txtRollingFuturesNewD2">New D</label>
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD2" value="<%= bIsCoveredLivePage ? '0.27' : (bIsStrangleLikePage ? '0.33' : '0.13') %>" />
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-tpd">
+                        <label for="txtRollingFuturesTpD2">TP D</label>
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD2" value="<%= bIsCoveredLivePage ? '0.14' : (bIsStrangleLikePage ? '0.10' : '1.00') %>" />
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-sld">
+                        <label for="txtRollingFuturesSlD2">SL D</label>
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD2" value="<%= bIsCoveredLivePage ? '0.54' : (bIsStrangleLikePage ? '0.55' : '0.05') %>" />
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-reenter">
+                        <label for="chkRollingFuturesReEnter2">
+                            Re-Enter
+                            <span class="rolling-futures-help-icon-wrap">
+                                <button type="button" class="rolling-futures-help-trigger" aria-label="Show row 2 re-enter help">
+                                    ?
+                                </button>
+                                <span class="rolling-futures-help-popout floating">
+                                    When enabled, if this row closes because of <code>SL</code> or <code>TP</code>, it reopens from the same row using the same action, leg, quantity, and <code>New D</code>. This re-entry does not use or increase the fresh-trade lot increment.
+                                </span>
+                            </span>
+                        </label>
+                        <div class="rolling-futures-help-inline-top">
+                            <label class="rolling-futures-help-check compact" for="chkRollingFuturesReEnter2">
+                                <input type="checkbox" id="chkRollingFuturesReEnter2" checked />
+                            </label>
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row2-break-action rolling-covered-row2-break-action-sellpe">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesSellPe2">SELL PE</button>
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row2-break-action rolling-covered-row2-break-action-sellce">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesSellCe2">SELL CE</button>
+                    </div>
+                </div>
+
+                <% if (!bIsStrangleDemoPage) { %>
+                <div class="rolling-futures-demo-grid actions-row rolling-futures-actions-row-with-gate">
+                    <div class="rolling-demo-field rolling-futures-buy-gate-field">
+                        <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
+                            <% if (bIsStrangleLikePage) { %>
+                                <div class="rolling-futures-buy-gate-row">
+                                    <div class="rolling-futures-buy-gate-text">Replace weaker leg when delta gap exceeds X% of total live delta</div>
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesStrangleDeltaDiffReplaceEnabled">
+                                        <input type="checkbox" id="chkRollingFuturesStrangleDeltaDiffReplaceEnabled" checked />
+                                    </label>
+                                    <div class="rolling-demo-field rolling-futures-help-input-field">
+                                        <input type="number" id="txtRollingFuturesStrangleDeltaDiffReplacePct" min="0" max="100" step="1" value="40" />
+                                    </div>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show <%= vStrategyLabel %> delta gap replacement help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, if the weaker live sell leg delta falls behind the stronger live sell leg by more than the configured percentage of the total live delta, the weaker leg will be closed and reopened using the stronger leg's current live delta.
+                                        </span>
+                                    </span>
+                                </div>
+                            <% } else { %>
+                                <div class="rolling-futures-buy-gate-row">
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesBuyHedgeSellPremiumGate">
+                                        <input type="checkbox" id="chkRollingFuturesBuyHedgeSellPremiumGate" <%= bIsCoveredLivePage ? '' : 'checked' %> />
+                                    </label>
+                                    <div class="rolling-futures-buy-gate-text">Increment by X no of lots on every new Trade</div>
+                                    <div class="rolling-demo-field rolling-futures-help-input-field">
+                                        <input type="number" id="txtRollingFuturesBuyHedgeSellPremiumPct" min="0" step="1" value="1" />
+                                    </div>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show trade lot increment help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, each new CE or PE trade uses the Manual Trader row quantity plus <code>X</code> extra lots for every already-active open position on the same side. CE and PE are tracked separately.
+                                        </span>
+                                    </span>
+                                </div>
+                            <% } %>
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field rolling-futures-buy-gate-field">
+                        <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
+                            <% if (bIsStrangleLikePage) { %>
+                                <div class="rolling-futures-buy-gate-row">
+                                    <div class="rolling-futures-buy-gate-text">Reopen leg at New D value</div>
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesStrangleReopenAtNewD">
+                                        <input type="checkbox" id="chkRollingFuturesStrangleReopenAtNewD" />
+                                    </label>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show <%= vStrategyLabel %> reopen help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, a triggered leg reopens using that row's <code>New D</code>. When disabled, re-entry uses the current live delta of the other still-open leg.
+                                        </span>
+                                    </span>
+                                </div>
+                            <% } else { %>
+                                <div class="rolling-futures-buy-gate-row">
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesSameSideLegIncrementEnabled">
+                                        <input type="checkbox" id="chkRollingFuturesSameSideLegIncrementEnabled" <%= bIsCoveredLivePage ? '' : 'checked' %> />
+                                    </label>
+                                    <div class="rolling-futures-buy-gate-text">Increment by same-side Legs</div>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show same-side increment help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, each new trade increments only against already-active open positions on the same side. When disabled, every new Renko side change increments from the full active Renko sequence across both CE and PE.
+                                        </span>
+                                    </span>
+                                </div>
+                            <% } %>
+                        </div>
+                    </div>
+                    <% if (!bIsStrangleLikePage) { %>
+                        <div class="rolling-demo-field rolling-futures-buy-gate-field">
+                            <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
+                                <div class="rolling-futures-buy-gate-row">
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesAllowDuplicateContracts">
+                                        <input type="checkbox" id="chkRollingFuturesAllowDuplicateContracts" />
+                                    </label>
+                                    <div class="rolling-futures-buy-gate-text">Allow Duplicate Contracts</div>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show duplicate-contract help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, Delta Renko paper auto trades may stack the exact same option contract again in Open Positions. When disabled, the same active contract is skipped to avoid overtrading.
+                                        </span>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="rolling-demo-field rolling-futures-buy-gate-field">
+                            <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
+                                <div class="rolling-futures-buy-gate-row">
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesPlaceOppositeTrades">
+                                        <input type="checkbox" id="chkRollingFuturesPlaceOppositeTrades" />
+                                    </label>
+                                    <div class="rolling-futures-buy-gate-text">Place Opposite Trades</div>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show opposite-trade help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, Renko opens only the opposite CE/PE leg while keeping the same Buy or Sell action. Example: if Renko selects <code>CE BUY</code>, it will place only <code>PE BUY</code>.
+                                        </span>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="rolling-demo-field rolling-futures-buy-gate-field">
+                            <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
+                                <div class="rolling-futures-buy-gate-row">
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesAlternatingLegRestrictionEnabled">
+                                        <input type="checkbox" id="chkRollingFuturesAlternatingLegRestrictionEnabled" checked />
+                                    </label>
+                                    <div class="rolling-futures-buy-gate-text">Automatic alternating-leg restriction</div>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show alternating-leg restriction help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, Renko paper auto trades skip if the latest active option is already on the same CE/PE side. The next trade must alternate to the opposite leg.
+                                        </span>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="rolling-demo-field rolling-futures-buy-gate-field">
+                            <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
+                                <div class="rolling-futures-buy-gate-row">
+                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesOpenIfLastPnlNegative">
+                                        <input type="checkbox" id="chkRollingFuturesOpenIfLastPnlNegative" <%= bIsCoveredLivePage ? 'checked' : '' %> />
+                                    </label>
+                                    <div class="rolling-futures-buy-gate-text">Open Position if Last Open Positions is &lt; 0</div>
+                                    <span class="rolling-futures-help-icon-wrap">
+                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show last open position PnL entry help">
+                                            ?
+                                        </button>
+                                        <span class="rolling-futures-help-popout floating">
+                                            When enabled, Renko/EMA live auto trades open only when the latest Open Position has negative live PnL. If no option is open, the last closed position PnL must be below 0.
+                                        </span>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    <% } %>
+                </div>
+                <% } %>
+
+                <div class="rolling-futures-saved-profile-panel" id="rollingFuturesSavedProfilePanel" style="display:none;">
+                    <div class="rolling-futures-saved-profile-head">
+                        <strong>Saved Manual Trader Values (DB)</strong>
+                    </div>
+                    <div class="rolling-futures-saved-profile-body" id="rollingFuturesSavedProfileBody"></div>
+                </div>
+            </div>
+
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head rolling-live-open-head">
+                    <div class="rolling-live-open-title-group">
+                        <h2>Open Positions</h2>
+                        <% if (bIsPaperDemoPage || bIsCoveredLivePage) { %>
+                            <input type="number" min="1" step="1" value="120" id="txtRollingDualFuturesProfitCloseTimerSecs" class="rolling-live-open-timer-input" title="Close timer in seconds" aria-label="Close timer in seconds" />
+                        <% } %>
+                    </div>
+                    <div class="rolling-covered-hedge-summary" id="rollingDualFuturesHedgeGateSummary" aria-live="polite">
+                        <span class="rolling-covered-hedge-chip off">Gate Off</span>
+                    </div>
+                    <div class="rolling-live-open-signal rolling-live-profit-close-timer" id="rollingDualFuturesProfitCloseTimer" hidden></div>
+                    <div class="rolling-demo-card-tools">
+                        <% if (bIsCoveredLivePage) { %>
+                            <label class="rolling-futures-neutral-mode rolling-live-auto-trader-off" for="chkRollingFuturesAutoTraderOffOnProfitClose" title="Stop Auto Trader when Exit All profit rules close all positions">
+                                <input type="checkbox" id="chkRollingFuturesAutoTraderOffOnProfitClose" />
+                                <span>Auto Trader-Off</span>
+                            </label>
+                        <% } %>
+                        <% if (bShowImportPositionsUi) { %>
+                            <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesImportPositions" title="Import existing live positions" aria-label="Import existing live positions">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M12 3v12" />
+                                    <path d="m7 10 5 5 5-5" />
+                                    <path d="M5 21h14" />
+                                </svg>
+                            </button>
+                        <% } %>
+                        <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClearOpenPositions" title="<%= vClearOpenPositionsTitle %>" aria-label="<%= vClearOpenPositionsTitle %>">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M18 6 6 18" />
+                                <path d="m6 6 12 12" />
+                            </svg>
+                        </button>
+                        <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesRefreshOpenPositions" title="<%= vRefreshOpenPositionsTitle %>" aria-label="<%= vRefreshOpenPositionsTitle %>">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                <path d="M21 3v6h-6" />
+                            </svg>
+                        </button>
+                        <button class="rolling-demo-icon-btn sell" type="button" id="btnRollingDualFuturesKillSwitch" title="<%= vKillSwitchTitle %>" aria-label="<%= vKillSwitchTitle %>">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M12 2v10" />
+                                <path d="M6.2 6.2a8 8 0 1 0 11.3 0" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <% if (bIsStrangleDemoPage) { %>
+                    <div class="rolling-demo-open-source-head">
+                        <h3>CoinSwitch Open Positions</h3>
+                        <span class="rolling-demo-open-source-count" id="rollingDualFuturesOpenCountCoinswitch">0</span>
+                    </div>
+                    <div class="rolling-demo-table-wrap">
+                        <table class="rolling-demo-table rolling-demo-table-open">
+                            <thead>
+                                <tr>
+                                    <th>Delta</th>
+                                    <th>Theta</th>
+                                    <th>Symbol</th>
+                                    <th>Side</th>
+                                    <th>Lot Sz</th>
+                                    <th>Qty</th>
+                                    <th>Buy Price</th>
+                                    <th>Sell Price</th>
+                                    <th>LTP</th>
+                                    <th>Charges</th>
+                                    <th>P &amp; L</th>
+                                    <th>Start DT</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rollingDualFuturesOpenPositionsBodyCoinswitch">
+                                <tr>
+                                    <td colspan="13" class="rolling-demo-empty">No CoinSwitch demo positions are currently shown.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="rolling-demo-open-source-head">
+                        <h3>Delta Exchange Open Positions</h3>
+                        <span class="rolling-demo-open-source-count" id="rollingDualFuturesOpenCountDelta">0</span>
+                    </div>
+                    <div class="rolling-demo-table-wrap">
+                        <table class="rolling-demo-table rolling-demo-table-open">
+                            <thead>
+                                <tr>
+                                    <th>Delta</th>
+                                    <th>Theta</th>
+                                    <th>Symbol</th>
+                                    <th>Side</th>
+                                    <th>Lot Sz</th>
+                                    <th>Qty</th>
+                                    <th>Buy Price</th>
+                                    <th>Sell Price</th>
+                                    <th>LTP</th>
+                                    <th>Charges</th>
+                                    <th>P &amp; L</th>
+                                    <th>Start DT</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rollingDualFuturesOpenPositionsBodyDelta">
+                                <tr>
+                                    <td colspan="13" class="rolling-demo-empty">No Delta Exchange demo positions are currently shown.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                <% } else { %>
+                <div class="rolling-demo-table-wrap">
+                    <table class="rolling-demo-table rolling-demo-table-open">
+                        <thead>
+                            <tr>
+                                <th>Delta</th>
+                                <th>Theta</th>
+                                <th>Symbol</th>
+                                <th>Side</th>
+                                <th>Lot Sz</th>
+                                <th>Qty</th>
+                                <th>Buy Price</th>
+                                <th>Sell Price</th>
+                                <th>LTP</th>
+                                <th>Charges</th>
+                                <th>P &amp; L</th>
+                                <th>Start DT</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rollingDualFuturesOpenPositionsBody">
+                            <tr>
+                                <td colspan="13" class="rolling-demo-empty"><%= vOpenPositionsEmpty %></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="rolling-demo-card-tools rolling-live-pagination">
+                    <div class="rolling-live-open-signal" id="rollingDualFuturesOpenPositionsPageInfo">Page 0 of 0</div>
+                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesOpenPrevPage" title="Previous open-positions page" aria-label="Previous open-positions page">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m15 18-6-6 6-6" />
+                        </svg>
+                    </button>
+                    <div class="rolling-live-page-numbers" id="rollingDualFuturesOpenPageNumbers"></div>
+                    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesOpenNextPage" title="Next open-positions page" aria-label="Next open-positions page">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m9 6 6 6-6 6" />
+                        </svg>
+                    </button>
+                </div>
+                <% } %>
+            </div>
+
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <h2>Temp Closed Positions</h2>
+                    <div class="rolling-demo-card-tools">
+                        <div class="rolling-demo-filters rolling-live-filters rolling-demo-filters-closed">
+                            <div class="rolling-demo-field">
+                                <input type="datetime-local" id="txtRollingDualFuturesClosedFromDate" title="Filter closed positions from this date and time" aria-label="Filter closed positions from this date and time" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <input type="datetime-local" id="txtRollingDualFuturesClosedToDate" title="Filter closed positions up to this date and time" aria-label="Filter closed positions up to this date and time" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <div class="rolling-demo-check-wrap">
+                                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClearClosedFilters" title="Clear closed-position date filters" aria-label="Clear closed-position date filters">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M18 6 6 18" />
+                                            <path d="m6 6 12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="rolling-demo-field">
+                                <div class="rolling-demo-check-wrap rolling-demo-check-wrap-compact">
+                                    <label class="rolling-futures-neutral-mode" for="chkRollingDualFuturesUpdateRecoveryTotals">
+                                        <input type="checkbox" id="chkRollingDualFuturesUpdateRecoveryTotals" />
+                                        <span>Update Total Charges and PnL</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="rolling-demo-field">
+                                <div class="rolling-demo-check-wrap">
+                                    <% if (bIsPaperDemoPage) { %>
+                                        <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClearClosedPositions" title="<%= vClearClosedPositionsTitle %>" aria-label="<%= vClearClosedPositionsTitle %>">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                                <path d="M18 6 6 18" />
+                                                <path d="m6 6 12 12" />
+                                            </svg>
+                                        </button>
+                                    <% } %>
+                                    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesRefreshClosedPositions" title="<%= vRefreshClosedTitle %>" aria-label="<%= vRefreshClosedTitle %>">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                            <path d="M21 3v6h-6" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="rolling-demo-table-wrap">
+                    <table class="rolling-demo-table rolling-demo-table-closed">
+                        <thead>
+                            <tr>
+                                <th>Executed DT</th>
+                                <th>Symbol</th>
+                                <th>Side</th>
+                                <th>Lot Sz</th>
+                                <th>Qty</th>
+                                <th>Buy Price</th>
+                                <th>Sell Price</th>
+                                <th>Charges</th>
+                                <th>P &amp; L</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rollingDualFuturesClosedPositionsBody">
+                            <tr>
+                                <td colspan="10" class="rolling-demo-empty"><%= vClosedPositionsEmpty %></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="rolling-demo-card-tools rolling-live-pagination">
+                    <div class="rolling-live-open-signal" id="rollingDualFuturesClosedPositionsPageInfo">Page 0 of 0</div>
+                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClosedPrevPage" title="Previous closed-positions page" aria-label="Previous closed-positions page">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m15 18-6-6 6-6" />
+                        </svg>
+                    </button>
+                    <div class="rolling-live-page-numbers" id="rollingDualFuturesClosedPageNumbers"></div>
+                    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesClosedNextPage" title="Next closed-positions page" aria-label="Next closed-positions page">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m9 6 6 6-6 6" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <h2>Closed Positions</h2>
+                    <div class="rolling-demo-card-tools">
+                        <div class="rolling-demo-filters rolling-live-filters rolling-demo-filters-closed">
+                            <div class="rolling-demo-field">
+                                <input type="datetime-local" id="txtRollingDualFuturesClosedAltFromDate" title="Filter closed positions from this date and time" aria-label="Filter closed positions from this date and time" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <input type="datetime-local" id="txtRollingDualFuturesClosedAltToDate" title="Filter closed positions up to this date and time" aria-label="Filter closed positions up to this date and time" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <div class="rolling-demo-check-wrap">
+                                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClosedAltClearFilters" title="Clear closed-position date filters" aria-label="Clear closed-position date filters">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M18 6 6 18" />
+                                            <path d="m6 6 12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="rolling-demo-field">
+                                <div class="rolling-demo-check-wrap">
+                                    <% if (bIsPaperDemoPage) { %>
+                                        <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClosedAltClear" title="<%= vClearClosedPositionsTitle %>" aria-label="<%= vClearClosedPositionsTitle %>">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                                <path d="M18 6 6 18" />
+                                                <path d="m6 6 12 12" />
+                                            </svg>
+                                        </button>
+                                    <% } %>
+                                    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesClosedAltRefresh" title="<%= vRefreshClosedTitle %>" aria-label="<%= vRefreshClosedTitle %>">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                            <path d="M21 3v6h-6" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="rolling-demo-table-wrap">
+                    <table class="rolling-demo-table rolling-demo-table-closed">
+                        <thead>
+                            <tr>
+                                <th>Executed DT</th>
+                                <th>Symbol</th>
+                                <th>Side</th>
+                                <th>Lot Sz</th>
+                                <th>Qty</th>
+                                <th>Buy Price</th>
+                                <th>Sell Price</th>
+                                <th>Charges</th>
+                                <th>P &amp; L</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rollingDualFuturesClosedAltClosedPositionsBody">
+                            <tr>
+                                <td colspan="10" class="rolling-demo-empty"><%= vClosedPositionsEmpty %></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="rolling-demo-card-tools rolling-live-pagination">
+                    <div class="rolling-live-open-signal" id="rollingDualFuturesClosedAltClosedPositionsPageInfo">Page 0 of 0</div>
+                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClosedAltPrevPage" title="Previous closed-positions page" aria-label="Previous closed-positions page">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m15 18-6-6 6-6" />
+                        </svg>
+                    </button>
+                    <div class="rolling-live-page-numbers" id="rollingDualFuturesClosedAltClosedPageNumbers"></div>
+                    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesClosedAltNextPage" title="Next closed-positions page" aria-label="Next closed-positions page">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m9 6 6 6-6 6" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <% if (!bIsPaperDemoPage && !bIsCoveredLivePage) { %>
+            <div class="app-panel rolling-demo-card rolling-futures-hidden rolling-futures-indicator-card" id="cardRollingFuturesDeltaDirec">
+                <div class="rolling-demo-card-head rolling-futures-indicator-head-row">
+                    <h2>Delta Direction</h2>
+                </div>
+                <div class="rolling-demo-table-wrap">
+                    <table class="rolling-demo-table">
+                        <thead>
+                            <tr>
+                                <th>Dated</th>
+                                <th>Daily Call</th>
+                                <th>Daily Put</th>
+                                <th>Direc</th>
+                                <th>Weekly Call</th>
+                                <th>Weekly Put</th>
+                                <th>Direc</th>
+                                <th>Monthly Call</th>
+                                <th>Monthly Put</th>
+                                <th>Direc</th>
+                                <th>OA Direc</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tBodyRollingFuturesDeltas">
+                            <tr class="rolling-futures-empty-body">
+                                <td colspan="11">No delta direction data yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <% } %>
+
+            <div class="rolling-demo-log-grid">
+                <% if (bShowRenkoSection) { %>
+                    <div class="app-panel rolling-demo-card rolling-renko-feed-card">
+                        <div class="rolling-demo-card-head">
+                            <div class="rolling-futures-indicator-head-row">
+                                <h2><%= (bIsDemoPage || bIsCoveredLivePage) ? "Delta Renko-Style Feed" : "Renko Feed" %></h2>
+                                <div class="rolling-renko-feed-header-badges">
+                                    <span class="rolling-renko-feed-status-badge off" id="rollingRenkoFeedStatus">OFF</span>
+                                    <span class="rolling-renko-feed-color-badge neutral" id="rollingRenkoCurrentBoxColor">-</span>
+                                </div>
+                            </div>
+                            <div class="rolling-demo-card-tools">
+                                <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingRenkoRefresh" title="<%= (bIsDemoPage || bIsCoveredLivePage) ? "Refresh Delta Renko feed" : "Refresh Renko feed" %>" aria-label="<%= (bIsDemoPage || bIsCoveredLivePage) ? "Refresh Delta Renko feed" : "Refresh Renko feed" %>">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                        <path d="M21 3v6h-6" />
+                                    </svg>
+                                </button>
+                                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingRenkoClear" title="<%= (bIsDemoPage || bIsCoveredLivePage) ? "Clear Delta Renko feed" : "Clear Renko feed" %>" aria-label="<%= (bIsDemoPage || bIsCoveredLivePage) ? "Clear Delta Renko feed" : "Clear Renko feed" %>">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M18 6 6 18" />
+                                        <path d="m6 6 12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="rolling-renko-feed-stack">
+                            <% if (bIsDemoPage || bIsCoveredLivePage) { %>
+                            <div class="rolling-renko-feed-grid rolling-renko-feed-grid-demo">
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="chkRollingFuturesRenkoFeedEnabled">Delta Renko Feed</label>
+                                    <div class="rolling-renko-feed-value-row">
+                                        <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoFeedEnabled">
+                                            <input type="checkbox" id="chkRollingFuturesRenkoFeedEnabled" <%= bIsCoveredLivePage ? 'checked' : '' %> />
+                                            <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
+                                            <span class="rolling-renko-feed-switch-text">Feed</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="txtRollingFuturesRenkoFeedPts">Point Size</label>
+                                    <input type="number" id="txtRollingFuturesRenkoFeedPts" min="1" step="1" value="<%= bIsCoveredLivePage ? '50' : '10' %>" />
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>From</label>
+                                    <div class="rolling-renko-feed-value-row">
+                                        <span class="rolling-renko-feed-value-badge" id="rollingRenkoFromPrice">--</span>
+                                    </div>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>Anchor</label>
+                                    <div class="rolling-renko-feed-value-row">
+                                        <span class="rolling-renko-feed-value-badge" id="rollingRenkoAnchorPrice">--</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="rolling-renko-feed-grid rolling-renko-feed-grid-demo-bottom">
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="ddlRollingFuturesRenkoFeedTimeframe">Timeframe</label>
+                                    <select id="ddlRollingFuturesRenkoFeedTimeframe">
+                                        <option value="5s" <%= bIsCoveredLivePage ? 'selected' : '' %>>5s</option>
+                                        <option value="1m">1m</option>
+                                        <option value="3m">3m</option>
+                                        <option value="5m" <%= bIsCoveredLivePage ? '' : 'selected' %>>5m</option>
+                                        <option value="15m">15m</option>
+                                        <option value="30m">30m</option>
+                                        <option value="1h">1h</option>
+                                    </select>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="ddlRollingFuturesRenkoFeedPriceSrc">Price Source</label>
+                                    <select id="ddlRollingFuturesRenkoFeedPriceSrc">
+                                        <option value="spot_price" <%= bIsCoveredLivePage ? '' : 'selected' %>>Spot Price</option>
+                                        <option value="mark_price" <%= bIsCoveredLivePage ? 'selected' : '' %>>Mark Price</option>
+                                        <option value="best_bid">Best Bid</option>
+                                        <option value="best_ask">Best Ask</option>
+                                    </select>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="txtRollingFuturesRenkoFeedManualPrice">Manual Anchor</label>
+                                    <input type="number" id="txtRollingFuturesRenkoFeedManualPrice" min="0" step="0.01" placeholder="Optional" />
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>&nbsp;</label>
+                                    <div class="rolling-renko-feed-action-row">
+                                        <button class="rolling-demo-btn warn" type="button" id="btnRollingRenkoManualRed">R</button>
+                                        <button class="rolling-demo-btn primary" type="button" id="btnRollingRenkoManualGreen">G</button>
+                                    </div>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>&nbsp;</label>
+                                    <button class="rolling-demo-btn success" type="button" id="btnRollingRenkoUpdate">Update</button>
+                                </div>
+                            </div>
+                            <% } else { %>
+                            <div class="rolling-renko-feed-grid">
+                                <div class="rolling-demo-field rolling-renko-feed-field switch-only">
+                                    <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoEnabled">
+                                        <input type="checkbox" id="chkRollingFuturesRenkoEnabled" />
+                                        <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
+                                        <span class="rolling-renko-feed-switch-text">Feed</span>
+                                    </label>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="txtRollingFuturesRenkoBoxSize">Renko Box Size</label>
+                                    <input type="number" id="txtRollingFuturesRenkoBoxSize" min="1" step="1" value="100" />
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="txtRollingFuturesRenkoBaseValue">Base Value</label>
+                                    <input type="number" id="txtRollingFuturesRenkoBaseValue" min="0" step="0.01" placeholder="Enter base value" />
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>Spot Price</label>
+                                    <div class="rolling-renko-feed-value-row">
+                                        <span class="rolling-renko-feed-value-badge" id="rollingRenkoSpotPrice">--</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <% } %>
+                        </div>
+                        <div class="rolling-renko-feed-meta" id="rollingRenkoFeedMeta"><%= (bIsDemoPage || bIsCoveredLivePage) ? "Delta Renko feed is OFF. Save settings to begin tracking current signal changes." : "Turn the Renko feed ON to begin tracking live box color." %></div>
+                        <div class="rolling-demo-event-log" id="rollingRenkoHistoryLog">
+                            <div class="rolling-demo-event-empty"><%= (bIsDemoPage || bIsCoveredLivePage) ? "No Renko signals yet." : "No Renko color changes yet." %></div>
+                        </div>
+                    </div>
+                <% } %>
+
+                <% if (bShowTelegramAlertsSection) { %>
+                    <div class="app-panel rolling-demo-card">
+                        <div class="rolling-demo-card-head">
+                            <h2>Telegram Alerts</h2>
+                        </div>
+                        <p class="app-copy">Alert preferences can follow the same strategy-level model as the paper page while live execution wiring is added server-side.</p>
+                        <div class="rolling-demo-notice" id="rollingDualFuturesTelegramNotice">
+                            <% if (currentAccount?.telegramChatId) { %>
+                                Telegram Chat ID configured: <strong><%= currentAccount.telegramChatId %></strong>
+                            <% } else { %>
+                                Telegram Chat ID is not set on your profile yet. Add it in <a href="/account/profile">My Profile</a> to receive alerts.
+                            <% } %>
+                        </div>
+                        <div class="rolling-demo-event-prefs">
+                            <% for (const eventType of rollingTelegramEventTypes || []) { %>
+                                <label class="rolling-demo-check rolling-demo-check-wide" for="dual-live-pref-<%= eventType %>">
+                                    <input type="checkbox" class="rolling-demo-telegram-event" id="dual-live-pref-<%= eventType %>" value="<%= eventType %>" />
+                                    <span><%= String(eventType || '').split('_').join(' ') %></span>
+                                </label>
+                            <% } %>
+                        </div>
+                    </div>
+                <% } %>
+
+                <% if (bIsDemoPage || bIsCoveredLivePage) { %>
+                    <div class="app-panel rolling-demo-card rolling-rsi-feed-card">
+                        <div class="rolling-demo-card-head">
+                            <div class="rolling-futures-indicator-head-row">
+                                <h2>EMA Trigger</h2>
+                                <div class="rolling-renko-feed-header-badges">
+                                    <span class="rolling-renko-feed-status-badge off" id="rollingEmaFeedStatus">OFF</span>
+                                    <span class="rolling-renko-feed-color-badge neutral" id="rollingEmaCurrentValue">--</span>
+                                    <span class="rolling-renko-feed-color-badge neutral" id="rollingEmaSignalState">-</span>
+                                </div>
+                            </div>
+                            <div class="rolling-demo-card-tools">
+                                <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingEmaRefresh" title="Refresh EMA data" aria-label="Refresh EMA data">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                        <path d="M21 3v6h-6" />
+                                    </svg>
+                                </button>
+                                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingEmaClear" title="Clear EMA history" aria-label="Clear EMA history">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M18 6 6 18" />
+                                        <path d="m6 6 12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="rolling-renko-feed-grid rolling-renko-feed-grid-ema">
+                            <div class="rolling-demo-field rolling-renko-feed-field switch-only">
+                                <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoEmaEnabled">
+                                    <input type="checkbox" id="chkRollingFuturesRenkoEmaEnabled" />
+                                    <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
+                                    <span class="rolling-renko-feed-switch-text">EMA</span>
+                                </label>
+                            </div>
+                            <div class="rolling-demo-field rolling-renko-feed-field">
+                                <label for="txtRollingFuturesRenkoEmaLength">EMA Length</label>
+                                <input type="number" id="txtRollingFuturesRenkoEmaLength" min="1" step="1" value="<%= bIsCoveredLivePage ? '5' : '20' %>" />
+                            </div>
+                            <div class="rolling-demo-field rolling-renko-feed-field">
+                                <label>Current EMA</label>
+                                <div class="rolling-renko-feed-value-row">
+                                    <span class="rolling-renko-feed-value-badge" id="rollingRenkoEmaValue">--</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="rolling-renko-feed-meta" id="rollingEmaFeedMeta">EMA companion is linked to the Renko EMA settings above.</div>
+                        <div class="rolling-demo-event-log" id="rollingEmaHistoryLog">
+                            <div class="rolling-demo-event-empty">No EMA crossovers yet.</div>
+                        </div>
+                    </div>
+                <% } %>
+
+                <% if (bShowConfirmationSection) { %>
+                <div class="app-panel rolling-demo-card">
+                    <div class="rolling-demo-card-head">
+                        <h2><%= vConfirmationHeading %></h2>
+                        <label class="rolling-confirmation-beep-toggle" for="chkRollingFuturesConfirmationSound">
+                            <span>Beep</span>
+                            <input type="checkbox" role="switch" id="chkRollingFuturesConfirmationSound" checked />
+                            <span class="rolling-confirmation-beep-track" aria-hidden="true"></span>
+                        </label>
+                    </div>
+                    <label class="rolling-demo-check rolling-demo-check-wide" for="chkRollingFuturesAutoConfirmLiveActions" style="margin-bottom:12px;">
+                        <input type="checkbox" id="chkRollingFuturesAutoConfirmLiveActions" checked />
+                        <span><%= vConfirmationAutoText %></span>
+                    </label>
+                    <div class="rolling-demo-notice" id="rollingDualFuturesConfirmationEmpty">
+                        <%= vConfirmationEmpty %>
+                    </div>
+                    <div id="rollingDualFuturesConfirmationPanel" style="display:none;">
+                        <div class="rolling-demo-event-card">
+                            <div class="rolling-demo-event-header">
+                                <strong id="rollingDualFuturesConfirmationTitle">Pending Confirmation</strong>
+                                <span id="rollingDualFuturesConfirmationTime" class="rolling-demo-event-time"></span>
+                            </div>
+                            <div id="rollingDualFuturesConfirmationMessage" class="rolling-demo-event-message"></div>
+                        </div>
+                        <div class="rolling-live-modal-actions" style="justify-content:flex-start; margin-top:12px;">
+                            <button class="rolling-demo-btn primary" type="button" id="btnRollingDualFuturesConfirmAction">Confirm</button>
+                            <button class="rolling-demo-btn warn" type="button" id="btnRollingDualFuturesRejectAction">Reject</button>
+                        </div>
+                    </div>
+                </div>
+                <% } %>
+
+                <div class="app-panel rolling-demo-card">
+                    <div class="rolling-demo-card-head">
+                        <h2>Activity Log</h2>
+                        <div class="rolling-demo-card-tools">
+                            <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesRefreshEvents" title="Refresh activity log" aria-label="Refresh activity log">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                    <path d="M21 3v6h-6" />
+                                </svg>
+                            </button>
+                            <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClearEvents" title="Clear activity log" aria-label="Clear activity log">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M3 6h18" />
+                                    <path d="M8 6V4h8v2" />
+                                    <path d="M19 6l-1 14H6L5 6" />
+                                    <path d="M10 11v6" />
+                                    <path d="M14 11v6" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="rolling-demo-event-log" id="rollingDualFuturesEventLog">
+                        <div class="rolling-demo-event-empty"><%= vActivityEmpty %></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+    <% if (bShowImportPositionsUi) { %>
+        <div class="rolling-live-overlay" id="rollingDualFuturesImportOverlay"></div>
+        <section class="app-panel rolling-live-modal" id="rollingDualFuturesImportModal" aria-hidden="true">
+            <div class="rolling-live-modal-head">
+                <div>
+                    <h2 class="rolling-live-modal-title">Import Existing Positions</h2>
+                    <p class="app-copy">Pick one or more open Delta Exchange option positions to mirror in the live grid.</p>
+                </div>
+                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesCloseImportModal" title="Close import dialog" aria-label="Close import dialog">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="rolling-live-status" id="rollingDualFuturesImportStatus"></div>
+            <div class="rolling-live-import-list" id="rollingDualFuturesImportList">
+                <div class="rolling-demo-event-empty">Select an API profile to load open live option positions.</div>
+            </div>
+            <div class="rolling-live-modal-actions">
+                <button class="rolling-demo-btn primary" type="button" id="btnRollingDualFuturesApplyImportedPositions">Import Selected</button>
+            </div>
+        </section>
+    <% } %>
+    <% if (bIsPaperDemoPage) { %>
+        <div class="rolling-live-overlay" id="rollingDualFuturesClosedEditOverlay"></div>
+        <section class="app-panel rolling-live-modal" id="rollingDualFuturesClosedEditModal" aria-hidden="true">
+            <div class="rolling-live-modal-head">
+                <div>
+                    <h2 class="rolling-live-modal-title">Edit Closed Position Qty</h2>
+                    <p class="app-copy" id="rollingDualFuturesClosedEditSymbol">Update the demo closed-position quantity only.</p>
+                </div>
+                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesCloseClosedEditModal" title="Close edit dialog" aria-label="Close edit dialog">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="rolling-live-status" id="rollingDualFuturesClosedEditStatus"></div>
+            <div class="rolling-demo-field">
+                <label for="txtRollingDualFuturesClosedEditQty">Qty</label>
+                <input type="number" min="1" step="1" id="txtRollingDualFuturesClosedEditQty" />
+            </div>
+            <div class="rolling-live-modal-actions">
+                <button class="rolling-demo-btn primary" type="button" id="btnRollingDualFuturesSaveClosedEdit">Save Qty</button>
+            </div>
+        </section>
+    <% } %>
+    <script src="/js/calendar-spread.js"></script>
+</body>
+</html>

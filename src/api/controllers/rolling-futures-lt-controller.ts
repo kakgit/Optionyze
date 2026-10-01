@@ -168,7 +168,8 @@ const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
     "options-scalper": "Options Demo",
     "strangle-demo": "Strangle Demo",
     "straddle-demo": "Straddle Demo",
-    "futures-scalper": "Futures Scalper"
+    "futures-scalper": "Futures Scalper",
+    "calendar-spread": "Calendar Spread"
 };
 const gFutureLimitRetryDelayMs = 5000;
 const gFutureLimitRetryCount = 5;
@@ -513,11 +514,12 @@ function isCoveredLikeStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boo
         || pStrategyCode === "options-scalper"
         || pStrategyCode === "strangle-demo"
         || pStrategyCode === "straddle-demo"
+        || pStrategyCode === "calendar-spread"
         || pStrategyCode === "futures-scalper";
 }
 
 function isOptionsScalperStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "options-scalper" || pStrategyCode === "strangle-demo" || pStrategyCode === "straddle-demo" || pStrategyCode === "futures-scalper";
+    return pStrategyCode === "options-scalper" || pStrategyCode === "strangle-demo" || pStrategyCode === "straddle-demo" || pStrategyCode === "calendar-spread" || pStrategyCode === "futures-scalper";
 }
 
 function isFuturesScalperStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
@@ -529,11 +531,11 @@ function isPaperDemoStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boole
 }
 
 function usesOptionsDemoManualTraderSettings(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "covered-options" || pStrategyCode === "options-scalper";
+    return pStrategyCode === "covered-options" || pStrategyCode === "options-scalper" || pStrategyCode === "calendar-spread";
 }
 
 function supportsRenkoFeedStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "renko-options" || pStrategyCode === "options-scalper" || pStrategyCode === "futures-scalper";
+    return pStrategyCode === "renko-options" || pStrategyCode === "options-scalper" || pStrategyCode === "futures-scalper" || pStrategyCode === "calendar-spread";
 }
 
 function supportsRenkoSettingsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
@@ -565,6 +567,9 @@ function getCoveredLikeStrategyLabel(pStrategyCode: RollingFuturesLtStrategyCode
     if (pStrategyCode === "futures-scalper") {
         return "Futures Scalper";
     }
+    if (pStrategyCode === "calendar-spread") {
+        return "Calendar Spread";
+    }
     return pStrategyCode === "strangle-options" ? "Strangle Options" : "Covered Options";
 }
 
@@ -591,6 +596,9 @@ function getCoveredLikeLegText(pStrategyCode: RollingFuturesLtStrategyCode): str
     if (pStrategyCode === "straddle-demo") {
         return "straddle demo leg";
     }
+    if (pStrategyCode === "calendar-spread") {
+        return "calendar spread leg";
+    }
     return pStrategyCode === "strangle-options" ? "strangle leg" : "covered leg";
 }
 
@@ -603,6 +611,9 @@ function getCoveredLikePositionText(pStrategyCode: RollingFuturesLtStrategyCode)
     }
     if (pStrategyCode === "straddle-demo") {
         return "straddle demo position";
+    }
+    if (pStrategyCode === "calendar-spread") {
+        return "calendar spread position";
     }
     return pStrategyCode === "strangle-options" ? "strangle position" : "covered position";
 }
@@ -12612,8 +12623,8 @@ export async function syncOptionsScalperRenkoRuntimeState(
     return syncOptionsDemoRenkoRuntimeState(pUserId, "options-scalper", objProfile, objRuntime, pSnapshot, pManualSignal);
 }
 
-function getOptionsScalperRenkoAutoTradeLockKey(pUserId: string): string {
-    return `${getManualFutureOrderLockKey(pUserId, "options-scalper")}::delta-renko-auto-trade`;
+function getOptionsScalperRenkoAutoTradeLockKey(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode = "options-scalper"): string {
+    return `${getManualFutureOrderLockKey(pUserId, pStrategyCode)}::delta-renko-auto-trade`;
 }
 
 function getFuturesScalperRenkoAutoTradeLockKey(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): string {
@@ -12627,7 +12638,8 @@ function getCoveredOptionsRenkoAutoTradeLockKey(pUserId: string): string {
 function resolveOptionsScalperRenkoAutoTradeInput(
     pProfile: RollingFuturesLtProfileRecord,
     pSignal: OptionsDemoRenkoSignal,
-    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pStrategyCode: RollingFuturesLtStrategyCode = "options-scalper"
 ): {
     rowIndex: 1 | 2;
     action: "buy" | "sell";
@@ -12643,7 +12655,7 @@ function resolveOptionsScalperRenkoAutoTradeInput(
     const objUiState = getMergedUiState(pProfile);
     const vSymbol = normalizeSymbolValue(objUiState.symbol);
     const vRowIndex = pSignal === "G" ? 1 : 2;
-    const objRowState = getNormalizedOptionRowUiState(objUiState, "options-scalper", vRowIndex);
+    const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
     if (objRowState.legs === "both") {
         return null;
     }
@@ -13664,8 +13676,9 @@ export async function syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade(
     return syncFuturesScalperEngineTick(pUserId, pStrategyCode, objProfile, objRuntime, pSnapshot, pManualSignal);
 }
 
-export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
+async function syncRenkoPaperRuntimeAndMaybeAutoTradeInternal(
     pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
     pSnapshot: {
         spotPrice?: number | null;
         futuresPrice?: number | null;
@@ -13685,11 +13698,11 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
         trackedOpenPositions?: Awaited<ReturnType<typeof buildOpenPositionsPayload>>;
     };
 }> {
-    const objProfile = await readLiveProfile(pUserId, "options-scalper");
-    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
+    const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
     const objSync = await syncOptionsDemoRenkoRuntimeState(
         pUserId,
-        "options-scalper",
+        pStrategyCode,
         objProfile,
         objRuntime,
         pSnapshot,
@@ -13708,7 +13721,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
         };
     }
 
-    const objLatestRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
+    const objLatestRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
     if (!objLatestRuntime?.autoTraderEnabled || String(objLatestRuntime.status || "").trim().toLowerCase() !== "running") {
         return {
             ...objSync,
@@ -13768,7 +13781,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
         };
     }
 
-    const vLockKey = getOptionsScalperRenkoAutoTradeLockKey(pUserId);
+    const vLockKey = getOptionsScalperRenkoAutoTradeLockKey(pUserId, pStrategyCode);
     if (gOptionsScalperRenkoAutoTradeLocks.has(vLockKey)) {
         return {
             ...objSync,
@@ -13782,10 +13795,10 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
     gOptionsScalperRenkoAutoTradeLocks.add(vLockKey);
     try {
         let arrCurrentTrackedPositions = await refreshOptionsScalperPaperOpenPositions(
-            await listRollingFuturesLtImportedPositions(pUserId, "options-scalper")
+            await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode)
         );
         if (arrCurrentTrackedPositions.length) {
-            arrCurrentTrackedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, "options-scalper", arrCurrentTrackedPositions);
+            arrCurrentTrackedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrCurrentTrackedPositions);
         }
         let vOpenedCount = 0;
         let vLastSkippedMessage = "";
@@ -13795,7 +13808,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
                 vLastSkippedMessage = objPnlGuard.message;
                 await logFuturesEvent(
                     pUserId,
-                    "options-scalper",
+                    pStrategyCode,
                     "engine_error",
                     "warning",
                     "Paper Option Order Skipped",
@@ -13810,13 +13823,13 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
                 );
                 continue;
             }
-            const objTradeInput = resolveOptionsScalperRenkoAutoTradeInput(objSync.profile, vCurrentSignal, arrCurrentTrackedPositions);
+            const objTradeInput = resolveOptionsScalperRenkoAutoTradeInput(objSync.profile, vCurrentSignal, arrCurrentTrackedPositions, pStrategyCode);
             if (!objTradeInput) {
                 continue;
             }
             const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
                 pUserId,
-                "options-scalper",
+                pStrategyCode,
                 objSync.profile,
                 {
                     action: objTradeInput.action,
@@ -13833,14 +13846,14 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
                     reEnterEnabled: false
                 }
             );
-            arrCurrentTrackedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, "options-scalper", [
+            arrCurrentTrackedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, [
                 ...arrCurrentTrackedPositions,
                 objPaperOpen.position
             ]);
             vOpenedCount += 1;
             await logFuturesEvent(
                 pUserId,
-                "options-scalper",
+                pStrategyCode,
                 "option_opened",
                 "success",
                 "Paper Option Auto Opened",
@@ -13863,7 +13876,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
                     status: "warning",
                     message: vLastSkippedMessage
                         || `Renko signal${arrSignalsToProcess.length === 1 ? "" : "s"} were received, but no paper option order could be placed from the current Manual Trader settings.`,
-                    trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrCurrentTrackedPositions)
+                    trackedOpenPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode, arrCurrentTrackedPositions)
                 }
             };
         }
@@ -13873,7 +13886,7 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
             autoTrade: {
                 status: "success",
                 message: `${vSignal === "G" ? "Green" : "Red"} ${vSignalSourceLabel} signal opened a ${vSignal === "G" ? "GREEN" : "RED"} paper option from row ${vSignal === "G" ? 1 : 2}.`,
-                trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrCurrentTrackedPositions)
+                trackedOpenPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode, arrCurrentTrackedPositions)
             }
         };
     }
@@ -13889,6 +13902,37 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
     finally {
         gOptionsScalperRenkoAutoTradeLocks.delete(vLockKey);
     }
+}
+
+export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
+    pUserId: string,
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null,
+    pManualSignal: OptionsDemoRenkoSignal | "" = ""
+): ReturnType<typeof syncRenkoPaperRuntimeAndMaybeAutoTradeInternal> {
+    return syncRenkoPaperRuntimeAndMaybeAutoTradeInternal(pUserId, "options-scalper", pSnapshot, pManualSignal);
+}
+
+// Calendar Spread runs the same proven Renko paper engine as Options Demo, but
+// against its own "calendar-spread" strategy code. Every profile, runtime,
+// tracked position, closed position and event row is partitioned by
+// (userId, strategyCode), and the auto-trade lock is strategy-scoped, so the
+// Calendar Spread page can never read, mutate or block Options Demo state.
+export async function syncCalendarSpreadRenkoRuntimeAndMaybeAutoTrade(
+    pUserId: string,
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null,
+    pManualSignal: OptionsDemoRenkoSignal | "" = ""
+): ReturnType<typeof syncRenkoPaperRuntimeAndMaybeAutoTradeInternal> {
+    return syncRenkoPaperRuntimeAndMaybeAutoTradeInternal(pUserId, "calendar-spread", pSnapshot, pManualSignal);
 }
 
 export async function syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(
@@ -14183,8 +14227,8 @@ export async function syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(
     }
 }
 
-function getOptionsScalperRsiAutoTradeLockKey(pUserId: string): string {
-    return `${getManualFutureOrderLockKey(pUserId, "options-scalper")}::delta-rsi-auto-trade`;
+function getOptionsScalperRsiAutoTradeLockKey(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode = "options-scalper"): string {
+    return `${getManualFutureOrderLockKey(pUserId, pStrategyCode)}::delta-rsi-auto-trade`;
 }
 
 function appendOptionsDemoRsiHistoryEntry(
@@ -14217,7 +14261,8 @@ function appendOptionsDemoRsiHistoryEntry(
 function resolveOptionsScalperRsiAutoTradeInput(
     pProfile: RollingFuturesLtProfileRecord,
     pSignal: OptionsDemoRsiSignal,
-    pTrackedPositions: RollingFuturesLtImportedPositionRecord[]
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pStrategyCode: RollingFuturesLtStrategyCode = "options-scalper"
 ): {
     rowIndex: 1 | 2;
     action: "buy" | "sell";
@@ -14233,7 +14278,7 @@ function resolveOptionsScalperRsiAutoTradeInput(
     const objUiState = getMergedUiState(pProfile);
     const vSymbol = normalizeSymbolValue(objUiState.symbol);
     const vRowIndex = pSignal === "upper" ? 1 : 2;
-    const objRowState = getNormalizedOptionRowUiState(objUiState, "options-scalper", vRowIndex);
+    const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
     if (objRowState.legs === "both") {
         return null;
     }
@@ -14465,21 +14510,15 @@ export async function syncOptionsScalperRsiRuntimeState(
         bestBidPrice?: number | null;
         bestAskPrice?: number | null;
     } | null
-): Promise<{
-    runtime: RollingFuturesLtRuntimeRecord | null;
-    profile: RollingFuturesLtProfileRecord;
-    rsi: OptionsDemoRsiRuntimeState;
-    signals: OptionsDemoRsiSignal[];
-    sourcePrice: number | null;
-    isEnabled: boolean;
-}> {
+): ReturnType<typeof syncOptionsDemoRsiRuntimeState> {
     const objProfile = await readLiveProfile(pUserId, "options-scalper");
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
     return syncOptionsDemoRsiRuntimeState(pUserId, "options-scalper", objProfile, objRuntime, pSnapshot);
 }
 
-export async function syncOptionsScalperRsiRuntimeAndMaybeAutoTrade(
+async function syncRsiPaperRuntimeAndMaybeAutoTradeInternal(
     pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
     pSnapshot: {
         spotPrice?: number | null;
         futuresPrice?: number | null;
@@ -14498,9 +14537,9 @@ export async function syncOptionsScalperRsiRuntimeAndMaybeAutoTrade(
         trackedOpenPositions?: Awaited<ReturnType<typeof buildOpenPositionsPayload>>;
     };
 }> {
-    const objProfile = await readLiveProfile(pUserId, "options-scalper");
-    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
-    const objSync = await syncOptionsDemoRsiRuntimeState(pUserId, "options-scalper", objProfile, objRuntime, pSnapshot);
+    const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+    const objSync = await syncOptionsDemoRsiRuntimeState(pUserId, pStrategyCode, objProfile, objRuntime, pSnapshot);
     const bShouldAttemptAutoTrade = Boolean(objSync.signals.length);
     if (!bShouldAttemptAutoTrade) {
         return {
@@ -14509,7 +14548,7 @@ export async function syncOptionsScalperRsiRuntimeAndMaybeAutoTrade(
         };
     }
 
-    const objLatestRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(pUserId, "options-scalper");
+    const objLatestRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
     if (!objLatestRuntime?.autoTraderEnabled || String(objLatestRuntime.status || "").trim().toLowerCase() !== "running") {
         return {
             ...objSync,
@@ -14520,7 +14559,7 @@ export async function syncOptionsScalperRsiRuntimeAndMaybeAutoTrade(
         };
     }
 
-    const vLockKey = getOptionsScalperRsiAutoTradeLockKey(pUserId);
+    const vLockKey = getOptionsScalperRsiAutoTradeLockKey(pUserId, pStrategyCode);
     if (gOptionsScalperRenkoAutoTradeLocks.has(vLockKey)) {
         return {
             ...objSync,
@@ -14533,16 +14572,16 @@ export async function syncOptionsScalperRsiRuntimeAndMaybeAutoTrade(
 
     gOptionsScalperRenkoAutoTradeLocks.add(vLockKey);
     try {
-        let arrCurrentTrackedPositions = await listRollingFuturesLtImportedPositions(pUserId, "options-scalper");
+        let arrCurrentTrackedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
         let vOpenedCount = 0;
         for (const vSignal of objSync.signals) {
-            const objTradeInput = resolveOptionsScalperRsiAutoTradeInput(objSync.profile, vSignal, arrCurrentTrackedPositions);
+            const objTradeInput = resolveOptionsScalperRsiAutoTradeInput(objSync.profile, vSignal, arrCurrentTrackedPositions, pStrategyCode);
             if (!objTradeInput) {
                 continue;
             }
             const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
                 pUserId,
-                "options-scalper",
+                pStrategyCode,
                 objSync.profile,
                 {
                     action: objTradeInput.action,
@@ -14559,14 +14598,14 @@ export async function syncOptionsScalperRsiRuntimeAndMaybeAutoTrade(
                     reEnterEnabled: false
                 }
             );
-            arrCurrentTrackedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, "options-scalper", [
+            arrCurrentTrackedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, [
                 ...arrCurrentTrackedPositions,
                 objPaperOpen.position
             ]);
             vOpenedCount += 1;
             await logFuturesEvent(
                 pUserId,
-                "options-scalper",
+                pStrategyCode,
                 "option_opened",
                 "success",
                 "Paper Option Auto Opened",
@@ -14596,7 +14635,7 @@ export async function syncOptionsScalperRsiRuntimeAndMaybeAutoTrade(
             autoTrade: {
                 status: "success",
                 message: `RSI placed ${vOpenedCount} paper option order${vOpenedCount === 1 ? "" : "s"} from the latest band cross.`,
-                trackedOpenPositions: await buildOpenPositionsPayload(pUserId, "options-scalper", arrCurrentTrackedPositions)
+                trackedOpenPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode, arrCurrentTrackedPositions)
             }
         };
     }
@@ -14612,6 +14651,33 @@ export async function syncOptionsScalperRsiRuntimeAndMaybeAutoTrade(
     finally {
         gOptionsScalperRenkoAutoTradeLocks.delete(vLockKey);
     }
+}
+
+export async function syncOptionsScalperRsiRuntimeAndMaybeAutoTrade(
+    pUserId: string,
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null
+): ReturnType<typeof syncRsiPaperRuntimeAndMaybeAutoTradeInternal> {
+    return syncRsiPaperRuntimeAndMaybeAutoTradeInternal(pUserId, "options-scalper", pSnapshot);
+}
+
+// Calendar Spread RSI engine: same logic, isolated "calendar-spread" state and
+// its own strategy-scoped auto-trade lock, so it cannot interfere with
+// Options Demo RSI state or block its in-flight auto trades.
+export async function syncCalendarSpreadRsiRuntimeAndMaybeAutoTrade(
+    pUserId: string,
+    pSnapshot: {
+        spotPrice?: number | null;
+        futuresPrice?: number | null;
+        bestBidPrice?: number | null;
+        bestAskPrice?: number | null;
+    } | null
+): ReturnType<typeof syncRsiPaperRuntimeAndMaybeAutoTradeInternal> {
+    return syncRsiPaperRuntimeAndMaybeAutoTradeInternal(pUserId, "calendar-spread", pSnapshot);
 }
 
 async function checkConnectionInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
@@ -15426,6 +15492,9 @@ async function runAutoTraderCycle(
             }
             else if (isFuturesScalperStrategy(pStrategyCode)) {
                 await syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade(pUserId, objRenkoSnapshot);
+            }
+            else if (pStrategyCode === "calendar-spread") {
+                await syncCalendarSpreadRenkoRuntimeAndMaybeAutoTrade(pUserId, objRenkoSnapshot);
             }
             else {
                 await syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(pUserId, objRenkoSnapshot);
@@ -21298,6 +21367,237 @@ export async function updateOptionsScalperRecoveryMetrics(req: Request, res: Res
 }
 export async function recalculateOptionsScalperRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "options-scalper");
+}
+
+// ---------------------------------------------------------------------------
+// Calendar Spread (paper) strategy exports — fully independent of Options Demo.
+//
+// Every function below is bound to the "calendar-spread" strategy code. Because
+// profiles, runtime, tracked positions, closed positions and events are all
+// partitioned by (userId, strategyCode), Calendar Spread reads and writes a
+// completely separate data set from Options Demo. The page also ships its own
+// view, client script, stylesheets, API namespace, WebSocket path and
+// localStorage namespace, so nothing here can leak into another page.
+// ---------------------------------------------------------------------------
+export async function getCalendarSpreadProfile(req: Request, res: Response): Promise<void> {
+    await getProfileInternal(req, res, "calendar-spread");
+}
+export async function saveCalendarSpreadProfile(req: Request, res: Response): Promise<void> {
+    await saveProfileInternal(req, res, "calendar-spread");
+}
+export async function getCalendarSpreadConnectionStatus(req: Request, res: Response): Promise<void> {
+    await getConnectionStatusInternal(req, res, "calendar-spread");
+}
+export async function getCalendarSpreadRuntimeStatus(req: Request, res: Response): Promise<void> {
+    await getRuntimeStatusInternal(req, res, "calendar-spread");
+}
+export async function checkCalendarSpreadConnection(req: Request, res: Response): Promise<void> {
+    await checkConnectionInternal(req, res, "calendar-spread");
+}
+export async function enableCalendarSpreadAutoTrader(req: Request, res: Response): Promise<void> {
+    await enableAutoTraderInternal(req, res, "calendar-spread");
+}
+export async function disableCalendarSpreadAutoTrader(req: Request, res: Response): Promise<void> {
+    await disableAutoTraderInternal(req, res, "calendar-spread");
+}
+export async function getCalendarSpreadAccountSummary(req: Request, res: Response): Promise<void> {
+    await getAccountSummaryInternal(req, res, "calendar-spread");
+}
+export async function calculateCalendarSpreadRecommendedStartQty(req: Request, res: Response): Promise<void> {
+    await calculateRecommendedStartQtyInternal(req, res, "calendar-spread");
+}
+export async function getCalendarSpreadIndicator(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const objProfile = await readLiveProfile(vUserId, "calendar-spread");
+        const objUiState = getMergedUiState(objProfile);
+        const vSelectedSymbol = normalizeSymbolValue(req.query?.symbol || req.body?.symbol || objUiState.symbol);
+        const objIndicator = await getOptionsDemoOiIndicatorSummary(vSelectedSymbol);
+        res.json({
+            status: "success",
+            data: objIndicator
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to fetch calendar spread indicator.")
+        });
+    }
+}
+export async function getCalendarSpreadRsiStatus(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const objProfile = await readLiveProfile(vUserId, "calendar-spread");
+        const objUiState = getMergedUiState(objProfile);
+        const vSelectedSymbol = normalizeSymbolValue(req.query?.symbol || req.body?.symbol || objUiState.symbol);
+        const objSnapshot = await getLiveMarketSnapshot(buildLiveMarketSnapshotConfig(vSelectedSymbol));
+        const objSync = await syncCalendarSpreadRsiRuntimeAndMaybeAutoTrade(vUserId, objSnapshot);
+        const objRsiHistoryBySymbol = normalizeRsiHistoryValues(objSync.profile.uiState?.rsiHistoryBySymbol || {});
+        const vSymbolHistory = Array.isArray(objRsiHistoryBySymbol[vSelectedSymbol]) ? objRsiHistoryBySymbol[vSelectedSymbol] : [];
+        const objCurrentUiState = getMergedUiState(objSync.profile);
+        res.json({
+            status: "success",
+            data: {
+                symbol: vSelectedSymbol,
+                rsi: objSync.rsi,
+                sourcePrice: objSync.sourcePrice,
+                timeframe: String(objCurrentUiState.rsiTimeframe || "5m"),
+                length: String(objCurrentUiState.rsiLength || "14"),
+                upperBand: String(objCurrentUiState.rsiUpperBand || "70"),
+                upperCrossMode: String(objCurrentUiState.rsiUpperCrossMode || "cross_above"),
+                upperLegSide: String(objCurrentUiState.rsiUpperLegSide || "ce"),
+                lowerBand: String(objCurrentUiState.rsiLowerBand || "30"),
+                lowerCrossMode: String(objCurrentUiState.rsiLowerCrossMode || "cross_below"),
+                lowerLegSide: String(objCurrentUiState.rsiLowerLegSide || "pe"),
+                enabled: Boolean(objCurrentUiState.rsiEnabled),
+                historyBySymbol: objRsiHistoryBySymbol,
+                history: vSymbolHistory,
+                autoTrade: objSync.autoTrade || null
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to fetch calendar spread RSI.")
+        });
+    }
+}
+export async function setCalendarSpreadRenkoManualSignal(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const objProfile = await readLiveProfile(vUserId, "calendar-spread");
+        const objRuntime = await loadRollingFuturesLtRuntime(vUserId, "calendar-spread");
+        const objUiState = getMergedUiState(objProfile);
+        const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
+        const vSignal = String(req.body?.signal || req.body?.color || "").trim().toUpperCase() === "G" ? "G"
+            : (String(req.body?.signal || req.body?.color || "").trim().toUpperCase() === "R" ? "R" : "");
+        if (!vSignal) {
+            res.status(400).json({
+                status: "warning",
+                message: "Select R or G for the manual Renko signal."
+            });
+            return;
+        }
+        const objSnapshot = await getLiveMarketSnapshot({
+            symbol: vSelectedSymbol,
+            contractName: getContractNameForSymbol(vSelectedSymbol),
+            lotSize: getLotSizeForSymbol(vSelectedSymbol),
+            futureQty: 1,
+            futureOrderType: "market_order",
+            action: "buy",
+            legSide: "ce",
+            expiryMode: "1",
+            expiryDate: "",
+            optionQty: 1,
+            redOptionQtyPct: 100,
+            greenOptionQtyPct: 100,
+            newDelta: 0.53,
+            reDelta: 0.53,
+            deltaTakeProfit: 0.15,
+            deltaStopLoss: 0.85,
+            reEnter: false,
+            addOneLotFuture: false,
+            renkoEnabled: Boolean(objUiState.renkoFeedEnabled ?? objUiState.renkoEnabled),
+            renkoStepPoints: Math.max(1, Math.floor(Number(objUiState.renkoFeedPts || objUiState.renkoStepPoints || 10) || 10)),
+            renkoPriceSource: normalizeRenkoFeedPriceSourceValue(objUiState.renkoFeedPriceSrc || "spot_price"),
+            loopSeconds: 8
+        });
+        const objSync = await syncCalendarSpreadRenkoRuntimeAndMaybeAutoTrade(vUserId, objSnapshot, vSignal);
+        res.json({
+            status: "success",
+            message: `Manual Renko signal set to ${vSignal}.`,
+            data: {
+                renko: objSync.renko,
+                renkoHistoryBySymbol: getMergedUiState(objSync.profile).renkoHistoryBySymbol,
+                autoTrade: objSync.autoTrade || null
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to set the manual Renko signal.")
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Calendar Spread: remaining execution, position, closed-position and event
+// exports. All bound to the isolated "calendar-spread" strategy code.
+// ---------------------------------------------------------------------------
+export async function executeCalendarSpreadManualFuture(req: Request, res: Response): Promise<void> {
+    await executeOptionsScalperPaperManualFutureInternal(req, res, "calendar-spread");
+}
+export async function executeCalendarSpreadManualOption(req: Request, res: Response): Promise<void> {
+    await executeManualOptionInternal(req, res, "calendar-spread");
+}
+export async function executeCalendarSpreadStrategy(req: Request, res: Response): Promise<void> {
+    await executeStrategyInternal(req, res, "calendar-spread");
+}
+export async function confirmCalendarSpreadLiveAction(req: Request, res: Response): Promise<void> {
+    res.status(400).json({
+        status: "warning",
+        message: "Paper actions do not need confirmation on Calendar Spread."
+    });
+}
+export async function rejectCalendarSpreadLiveAction(req: Request, res: Response): Promise<void> {
+    res.status(400).json({
+        status: "warning",
+        message: "Paper actions do not need confirmation on Calendar Spread."
+    });
+}
+export async function getCalendarSpreadImportableOpenPositions(req: Request, res: Response): Promise<void> {
+    await getImportableOpenPositionsInternal(req, res, "calendar-spread");
+}
+export async function getCalendarSpreadOpenPositions(req: Request, res: Response): Promise<void> {
+    await getOpenPositionsInternal(req, res, "calendar-spread");
+}
+export async function saveCalendarSpreadOpenPositions(req: Request, res: Response): Promise<void> {
+    await saveOpenPositionsInternal(req, res, "calendar-spread");
+}
+export async function deleteCalendarSpreadOpenPosition(req: Request, res: Response): Promise<void> {
+    await deleteOpenPositionInternal(req, res, "calendar-spread");
+}
+export async function clearCalendarSpreadOpenPositions(req: Request, res: Response): Promise<void> {
+    await clearOpenPositionsInternal(req, res, "calendar-spread");
+}
+export async function reconcileCalendarSpreadOpenPositions(req: Request, res: Response): Promise<void> {
+    await reconcileOpenPositionsInternal(req, res, "calendar-spread");
+}
+export async function closeCalendarSpreadImportedOpenPosition(req: Request, res: Response): Promise<void> {
+    await closeImportedOpenPositionInternal(req, res, "calendar-spread");
+}
+export async function getCalendarSpreadClosedPositions(req: Request, res: Response): Promise<void> {
+    await getClosedPositionsInternal(req, res, "calendar-spread");
+}
+export async function clearCalendarSpreadClosedPositions(req: Request, res: Response): Promise<void> {
+    await clearOptionsScalperClosedPositionsInternal(req, res, "calendar-spread");
+}
+export async function deleteCalendarSpreadClosedPosition(req: Request, res: Response): Promise<void> {
+    await deleteOptionsScalperClosedPositionInternal(req, res, "calendar-spread");
+}
+export async function updateCalendarSpreadClosedPosition(req: Request, res: Response): Promise<void> {
+    await updateOptionsScalperClosedPositionInternal(req, res, "calendar-spread");
+}
+export async function getCalendarSpreadEvents(req: Request, res: Response): Promise<void> {
+    await getEventsInternal(req, res, "calendar-spread");
+}
+export async function clearCalendarSpreadEventsController(req: Request, res: Response): Promise<void> {
+    await clearEventsInternal(req, res, "calendar-spread");
+}
+export async function deleteCalendarSpreadEventController(req: Request, res: Response): Promise<void> {
+    await deleteEventInternal(req, res, "calendar-spread");
+}
+export async function executeCalendarSpreadKillSwitch(req: Request, res: Response): Promise<void> {
+    await executeKillSwitchInternal(req, res, "calendar-spread");
+}
+export async function updateCalendarSpreadRecoveryMetrics(req: Request, res: Response): Promise<void> {
+    await updateRecoveryMetricsInternal(req, res, "calendar-spread");
+}
+export async function recalculateCalendarSpreadRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
+    await recalculateRecoveryTotalPnlInternal(req, res, "calendar-spread");
 }
 
 // ---------------------------------------------------------------------------

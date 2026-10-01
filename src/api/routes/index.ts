@@ -192,6 +192,40 @@ import {
     getStraddleDemoRuntimeStatus,
     getOptionsScalperRsiStatus,
     setOptionsScalperRenkoManualSignal,
+    calculateCalendarSpreadRecommendedStartQty,
+    checkCalendarSpreadConnection,
+    clearCalendarSpreadClosedPositions,
+    clearCalendarSpreadEventsController,
+    clearCalendarSpreadOpenPositions,
+    closeCalendarSpreadImportedOpenPosition,
+    confirmCalendarSpreadLiveAction,
+    deleteCalendarSpreadClosedPosition,
+    deleteCalendarSpreadEventController,
+    deleteCalendarSpreadOpenPosition,
+    disableCalendarSpreadAutoTrader,
+    enableCalendarSpreadAutoTrader,
+    executeCalendarSpreadKillSwitch,
+    executeCalendarSpreadManualFuture,
+    executeCalendarSpreadManualOption,
+    executeCalendarSpreadStrategy,
+    getCalendarSpreadAccountSummary,
+    getCalendarSpreadClosedPositions,
+    getCalendarSpreadConnectionStatus,
+    getCalendarSpreadEvents,
+    getCalendarSpreadImportableOpenPositions,
+    getCalendarSpreadIndicator,
+    getCalendarSpreadOpenPositions,
+    getCalendarSpreadProfile,
+    getCalendarSpreadRsiStatus,
+    getCalendarSpreadRuntimeStatus,
+    rejectCalendarSpreadLiveAction,
+    recalculateCalendarSpreadRecoveryTotalPnl,
+    reconcileCalendarSpreadOpenPositions,
+    saveCalendarSpreadOpenPositions,
+    saveCalendarSpreadProfile,
+    setCalendarSpreadRenkoManualSignal,
+    updateCalendarSpreadClosedPosition,
+    updateCalendarSpreadRecoveryMetrics,
     executeFuturesScalperManualFuture,
     getFuturesScalperAccountSummary,
     getFuturesScalperClosedPositions,
@@ -925,6 +959,114 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/futures-scalper/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await clearFuturesScalperEventsController(req, res);
+    });
+
+    // -----------------------------------------------------------------------
+    // Calendar Spread — own API namespace, bound to the "calendar-spread"
+    // strategy code so it never reads or writes Options Demo state.
+    // -----------------------------------------------------------------------
+    objRouter.get("/calendar-spread/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCalendarSpreadProfile(req, res);
+    });
+    objRouter.post("/calendar-spread/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveCalendarSpreadProfile(req, res);
+    });
+    objRouter.get("/calendar-spread/connection/status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCalendarSpreadConnectionStatus(req, res);
+    });
+    objRouter.get("/calendar-spread/runtime", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCalendarSpreadRuntimeStatus(req, res);
+    });
+    objRouter.post("/calendar-spread/connection/check", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await checkCalendarSpreadConnection(req, res);
+    });
+    objRouter.post("/calendar-spread/auto-trader/start", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await enableCalendarSpreadAutoTrader(req, res);
+    });
+    objRouter.post("/calendar-spread/auto-trader/stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await disableCalendarSpreadAutoTrader(req, res);
+    });
+    objRouter.get("/calendar-spread/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCalendarSpreadAccountSummary(req, res);
+    });
+    objRouter.get("/calendar-spread/indicator", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCalendarSpreadIndicator(req, res);
+    });
+    objRouter.get("/calendar-spread/rsi", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCalendarSpreadRsiStatus(req, res);
+    });
+    objRouter.post("/calendar-spread/renko/manual-signal", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await setCalendarSpreadRenkoManualSignal(req, res);
+    });
+    objRouter.post("/calendar-spread/start-qty/calculate", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await calculateCalendarSpreadRecommendedStartQty(req, res);
+    });
+    objRouter.post("/calendar-spread/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeCalendarSpreadManualFuture(req, res);
+    });
+    objRouter.post("/calendar-spread/manual/option", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeCalendarSpreadManualOption(req, res);
+    });
+    objRouter.post("/calendar-spread/strategy/execute", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeCalendarSpreadStrategy(req, res);
+    });
+    objRouter.post("/calendar-spread/live-action/confirm", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await confirmCalendarSpreadLiveAction(req, res);
+    });
+    objRouter.post("/calendar-spread/live-action/reject", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await rejectCalendarSpreadLiveAction(req, res);
+    });
+
+    objRouter.get("/calendar-spread/open-positions/importable", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCalendarSpreadImportableOpenPositions(req, res);
+    });
+    objRouter.get("/calendar-spread/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCalendarSpreadOpenPositions(req, res);
+    });
+    objRouter.post("/calendar-spread/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveCalendarSpreadOpenPositions(req, res);
+    });
+    objRouter.post("/calendar-spread/open-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteCalendarSpreadOpenPosition(req, res);
+    });
+    objRouter.post("/calendar-spread/open-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearCalendarSpreadOpenPositions(req, res);
+    });
+    objRouter.post("/calendar-spread/open-positions/reconcile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await reconcileCalendarSpreadOpenPositions(req, res);
+    });
+    objRouter.post("/calendar-spread/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await closeCalendarSpreadImportedOpenPosition(req, res);
+    });
+    objRouter.post("/calendar-spread/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeCalendarSpreadKillSwitch(req, res);
+    });
+    objRouter.post("/calendar-spread/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateCalendarSpreadRecoveryMetrics(req, res);
+    });
+    objRouter.post("/calendar-spread/metrics/recalculate-total-pnl", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await recalculateCalendarSpreadRecoveryTotalPnl(req, res);
+    });
+    objRouter.get("/calendar-spread/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCalendarSpreadClosedPositions(req, res);
+    });
+    objRouter.post("/calendar-spread/closed-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearCalendarSpreadClosedPositions(req, res);
+    });
+    objRouter.post("/calendar-spread/closed-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteCalendarSpreadClosedPosition(req, res);
+    });
+    objRouter.post("/calendar-spread/closed-positions/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateCalendarSpreadClosedPosition(req, res);
+    });
+    objRouter.get("/calendar-spread/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCalendarSpreadEvents(req, res);
+    });
+    objRouter.post("/calendar-spread/events/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteCalendarSpreadEventController(req, res);
+    });
+    objRouter.post("/calendar-spread/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearCalendarSpreadEventsController(req, res);
     });
 
     objRouter.get("/strangle-demo/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {

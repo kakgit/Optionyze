@@ -20,9 +20,10 @@ import {
     renderStrangleDemoPage,
     renderStrangleOptionsPage,
     renderOptionsDemoPage,
-    renderFuturesScalperPage
+    renderFuturesScalperPage,
+    renderCalendarSpreadPage
 } from "../api/controllers/strategyfo-paper-controller";
-import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade, syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
+import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade, syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade, syncCalendarSpreadRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
 import { loadRollingFuturesLtRuntime } from "../storage/rolling-futures-lt-runtime-store";
 import { ensureLiveTickerSymbols, getLiveMarketSnapshot } from "../strategies/rolling-options-pt-de/market-data";
 import type { RollingOptionsPtDeConfig } from "../strategies/rolling-options-pt-de/types";
@@ -146,6 +147,7 @@ async function bootstrap(): Promise<void> {
     app.get("/renko-options", requireAuthPage, requireFreshPasswordPage, renderRenkoOptionsPage);
     app.get("/options-demo", requireAuthPage, requireFreshPasswordPage, renderOptionsDemoPage);
     app.get("/futures-scalper", requireAuthPage, requireFreshPasswordPage, renderFuturesScalperPage);
+    app.get("/calendar-spread", requireAuthPage, requireFreshPasswordPage, renderCalendarSpreadPage);
     app.get("/strangle-demo", requireAuthPage, requireFreshPasswordPage, renderStrangleDemoPage);
     app.get("/mngusers", requireAuthPage, requireFreshPasswordPage, requireAdminPage, renderMngUsersPage);
     app.get("/account/profile", requireAuthPage, renderMyProfilePage);
@@ -168,7 +170,7 @@ async function bootstrap(): Promise<void> {
     server.on("upgrade", async (req, socket, head) => {
         try {
             const objUrl = new URL(String(req.url || ""), "http://localhost");
-            if (objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/covered-options/renko" && objUrl.pathname !== "/ws/futures-scalper/renko" && objUrl.pathname !== "/ws/strangle-demo/open-positions") {
+            if (objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/covered-options/renko" && objUrl.pathname !== "/ws/futures-scalper/renko" && objUrl.pathname !== "/ws/calendar-spread/renko" && objUrl.pathname !== "/ws/strangle-demo/open-positions") {
                 socket.destroy();
                 return;
             }
@@ -271,7 +273,12 @@ async function bootstrap(): Promise<void> {
         const lotSize = getDemoRenkoLotSize(symbol);
         const bCoveredRenkoSocket = objUrl.pathname === "/ws/covered-options/renko";
         const bFuturesScalperSocket = objUrl.pathname === "/ws/futures-scalper/renko";
-        const vRenkoStrategyCode = bCoveredRenkoSocket ? "covered-options" : (bFuturesScalperSocket ? "futures-scalper" : "options-scalper");
+        const bCalendarSpreadSocket = objUrl.pathname === "/ws/calendar-spread/renko";
+        const vRenkoStrategyCode = bCoveredRenkoSocket
+            ? "covered-options"
+            : (bFuturesScalperSocket
+                ? "futures-scalper"
+                : (bCalendarSpreadSocket ? "calendar-spread" : "options-scalper"));
         let closed = false;
         let timerRef: NodeJS.Timeout | null = null;
         let tickInFlight = false;
@@ -322,12 +329,19 @@ async function bootstrap(): Promise<void> {
                             bestBidPrice: objSnapshot.bestBidPrice,
                             bestAskPrice: objSnapshot.bestAskPrice
                         })
-                        : await syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(userId, {
-                            spotPrice: objSnapshot.spotPrice,
-                            futuresPrice: objSnapshot.futuresPrice,
-                            bestBidPrice: objSnapshot.bestBidPrice,
-                            bestAskPrice: objSnapshot.bestAskPrice
-                        }));
+                        : (bCalendarSpreadSocket
+                            ? await syncCalendarSpreadRenkoRuntimeAndMaybeAutoTrade(userId, {
+                                spotPrice: objSnapshot.spotPrice,
+                                futuresPrice: objSnapshot.futuresPrice,
+                                bestBidPrice: objSnapshot.bestBidPrice,
+                                bestAskPrice: objSnapshot.bestAskPrice
+                            })
+                            : await syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(userId, {
+                                spotPrice: objSnapshot.spotPrice,
+                                futuresPrice: objSnapshot.futuresPrice,
+                                bestBidPrice: objSnapshot.bestBidPrice,
+                                bestAskPrice: objSnapshot.bestAskPrice
+                            })));
                 const objTrackedOpenPositions = await buildOpenPositionsPayload(userId, vRenkoStrategyCode);
                 const objLatestRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(userId, vRenkoStrategyCode);
                 const objPendingConfirmation = objLatestRuntime?.state

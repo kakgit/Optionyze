@@ -72,3 +72,15 @@ export function renderFuturesScalperPage(req: Request, res: Response): void {
         defaultUserId: req.authAccount?.accountId || "demo-paper"
     });
 }
+
+// Calendar Spread renders its own dedicated view (src/views/calendar-spread.ejs)
+// rather than the shared covered-options template, so the Calendar Spread markup
+// is fully independent from every other page.
+export function renderCalendarSpreadPage(req: Request, res: Response): void {
+    res.render("calendar-spread", {
+        pageTitle: "Calendar Spread | Optionyze",
+        pageVariant: "demo",
+        currentAccount: req.authAccount,
+        defaultUserId: req.authAccount?.accountId || "demo-paper"
+    });
+}
