@@ -9,6 +9,10 @@
     const isDemoVariant = true;
     const isStranglePage = false;
     const isStrangleDemoPage = false;
+    // This script is only ever served by the Calendar Spread page, so the flag is
+    // pinned to true. It keeps the Calendar Spread branches below explicit and
+    // makes it obvious that they are page-local.
+    const isCalendarSpreadPage = true;
     const isPaperDemoVariant = true;
     const isRenkoPage = false;
     const isFuturesScalperPage = false;
@@ -349,6 +353,9 @@
     let renkoFeedSocketSymbol = "";
     let strangleDemoOpenPositionsSocket = null;
     let strangleDemoOpenPositionsSocketReconnectTimer = null;
+    // Calendar Spread open-positions push stream (its own WebSocket).
+    let calendarSpreadOpenPositionsSocket = null;
+    let calendarSpreadOpenPositionsSocketReconnectTimer = null;
     let renkoBaseValuesBySymbol = { BTC: "", ETH: "" };
     let renkoEmaValuesBySymbol = { BTC: "", ETH: "" };
     let emaStateBySymbol = {
@@ -1383,6 +1390,82 @@
         };
         socket.onerror = function () {
             scheduleStrangleDemoOpenPositionsSocketReconnect();
+        };
+    }
+
+    function disconnectCalendarSpreadOpenPositionsSocket() {
+        if (calendarSpreadOpenPositionsSocketReconnectTimer) {
+            clearTimeout(calendarSpreadOpenPositionsSocketReconnectTimer);
+            calendarSpreadOpenPositionsSocketReconnectTimer = null;
+        }
+        if (calendarSpreadOpenPositionsSocket) {
+            try {
+                calendarSpreadOpenPositionsSocket.onopen = null;
+                calendarSpreadOpenPositionsSocket.onmessage = null;
+                calendarSpreadOpenPositionsSocket.onclose = null;
+                calendarSpreadOpenPositionsSocket.onerror = null;
+                calendarSpreadOpenPositionsSocket.close();
+            }
+            catch (_error) {
+            }
+        }
+        calendarSpreadOpenPositionsSocket = null;
+    }
+
+    function scheduleCalendarSpreadOpenPositionsSocketReconnect() {
+        if (calendarSpreadOpenPositionsSocketReconnectTimer || !isCalendarSpreadPage) {
+            return;
+        }
+        calendarSpreadOpenPositionsSocketReconnectTimer = setTimeout(function () {
+            calendarSpreadOpenPositionsSocketReconnectTimer = null;
+            connectCalendarSpreadOpenPositionsSocket();
+        }, 3000);
+    }
+
+    // Streams the calendar-spread open positions so the grid stays in sync with
+    // whatever the server-side engine and manual actions have tracked. The
+    // server binds this path to the "calendar-spread" strategy code only.
+    function connectCalendarSpreadOpenPositionsSocket() {
+        if (!isCalendarSpreadPage) {
+            disconnectCalendarSpreadOpenPositionsSocket();
+            return;
+        }
+        if (calendarSpreadOpenPositionsSocket && (calendarSpreadOpenPositionsSocket.readyState === WebSocket.OPEN || calendarSpreadOpenPositionsSocket.readyState === WebSocket.CONNECTING)) {
+            return;
+        }
+        disconnectCalendarSpreadOpenPositionsSocket();
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const url = `${protocol}//${window.location.host}/ws/calendar-spread/open-positions`;
+        const socket = new WebSocket(url);
+        calendarSpreadOpenPositionsSocket = socket;
+
+        socket.onopen = function () {
+            if (calendarSpreadOpenPositionsSocket !== socket) {
+                return;
+            }
+        };
+        socket.onmessage = function (event) {
+            try {
+                const payload = JSON.parse(String(event.data || ""));
+                if (payload && payload.type === "calendar_spread_open_positions_state" && payload.trackedOpenPositions) {
+                    scheduleOpenPositionsRender(payload.trackedOpenPositions);
+                    return;
+                }
+                if (payload && payload.type === "calendar_spread_open_positions_error") {
+                    setStatus(ids.pageStatus, String(payload.message || "Unable to load calendar spread open positions."), "danger");
+                }
+            }
+            catch (_error) {
+            }
+        };
+        socket.onclose = function () {
+            if (calendarSpreadOpenPositionsSocket === socket) {
+                calendarSpreadOpenPositionsSocket = null;
+                scheduleCalendarSpreadOpenPositionsSocketReconnect();
+            }
+        };
+        socket.onerror = function () {
+            scheduleCalendarSpreadOpenPositionsSocketReconnect();
         };
     }
 
@@ -2531,6 +2614,9 @@
         if (isStrangleDemoPage) {
             return true;
         }
+        if (isCalendarSpreadPage) {
+            return true;
+        }
         if (isCoveredMode) {
             return false;
         }
@@ -2570,15 +2656,20 @@
             });
         });
         if (ids.execStrategyButton instanceof HTMLButtonElement) {
-            const canRunExec = isStrangleDemoPage ? canUseLiveActions() : false;
-            ids.execStrategyButton.disabled = !canRunExec;
+            // Calendar Spread runs Exec Strategy from the Manual Trader settings.
+            const canRunExec = isStrangleDemoPage || isCalendarSpreadPage
+                ? canUseLiveActions()
+                : false;
+            ids.execStrategyButton.disabled = !canRunExec || execStrategyInFlight;
             ids.execStrategyButton.title = isStrangleDemoPage
                 ? "Execute the paper strategy"
-                : (isDemoVariant
-                    ? `Exec Strategy is disabled on ${strategyLabel} for now.`
-                    : (canUseExecStrategy()
-                        ? "Execute the live strategy"
-                        : "Not Authorised to Execute, Please Contact Admin"));
+                : (isCalendarSpreadPage
+                    ? "Open paper trades using the Manual Trader settings"
+                    : (isDemoVariant
+                        ? `Exec Strategy is disabled on ${strategyLabel} for now.`
+                        : (canUseExecStrategy()
+                            ? "Execute the live strategy"
+                            : "Not Authorised to Execute, Please Contact Admin")));
         }
     }
 
@@ -4405,6 +4496,8 @@
         if (!canUseLiveActions()) {
             throw new Error("Delta connection is not healthy enough to execute the live strategy.");
         }
+        // Exec Strategy is a server-side action gated on the Auto Trader being
+        // running, so the client mirrors that requirement before calling it.
         if (!isStrangleDemoPage && !autoTraderEnabled) {
             throw new Error("Turn Auto Trader ON before executing the live strategy.");
         }
@@ -5863,6 +5956,7 @@ async function loadClosedAltPositions() {
     setButtonsEnabled();
     connectRenkoFeedSocket();
     connectStrangleDemoOpenPositionsSocket();
+    connectCalendarSpreadOpenPositionsSocket();
 
     ids.symbol?.addEventListener("change", function () {
         captureRenkoBaseValueForCurrentSymbol();
@@ -5873,6 +5967,7 @@ async function loadClosedAltPositions() {
         queueProfileSave();
         connectRenkoFeedSocket();
         connectStrangleDemoOpenPositionsSocket();
+        connectCalendarSpreadOpenPositionsSocket();
         const refreshTasks = [
             loadAccountSummary().catch(function () { return undefined; }),
             loadClosedPositions().catch(function () { return undefined; })
@@ -6469,6 +6564,30 @@ ids.closedAltFromDate?.addEventListener("change", function () {
         });
     });
     ids.execStrategyButton?.addEventListener("click", function () {
+        if (isCalendarSpreadPage) {
+            // Exec Strategy places the paper positions described by the Manual
+            // Trader settings, then the open-positions WebSocket keeps the grid
+            // in sync from the calendar-spread partition.
+            void executeStrategy(1).then(function (objResult) {
+                const trackedPayload = objResult?.data?.trackedOpenPositions || null;
+                if (trackedPayload) {
+                    renderOpenPositions(trackedPayload);
+                }
+                const vMessage = String(objResult?.message || "Exec Strategy placed paper option order(s).").trim();
+                setStatus(ids.pageStatus, vMessage, "success");
+                return Promise.all([
+                    loadProfile()
+                        .then(function () { return loadClosedPositions(); })
+                        .catch(function () { return undefined; }),
+                    loadAccountSummary(),
+                    loadConnectionStatus(),
+                    loadEvents().catch(function () { return undefined; })
+                ]);
+            }).catch(function (error) {
+                setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to execute the strategy.", "danger");
+            });
+            return;
+        }
         if (isCoveredMode && !isStrangleDemoPage) {
             setStatus(ids.pageStatus, "Covered live trades run only through Delta Renko-Style Feed or EMA Trigger while Auto Trader is ON.", "warning");
             return;

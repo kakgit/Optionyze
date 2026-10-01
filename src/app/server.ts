@@ -78,6 +78,18 @@ function getDemoRenkoLotSize(symbol: "BTC" | "ETH"): number {
     return symbol === "ETH" ? 0.01 : 0.001;
 }
 
+// Maps an open-positions WebSocket path to the strategy code it is allowed to
+// stream. Returning "" means the path is not an open-positions stream.
+function resolveOpenPositionsStreamStrategyCode(pathname: string): "" | "strangle-demo" | "calendar-spread" {
+    if (pathname === "/ws/strangle-demo/open-positions") {
+        return "strangle-demo";
+    }
+    if (pathname === "/ws/calendar-spread/open-positions") {
+        return "calendar-spread";
+    }
+    return "";
+}
+
 function readCookieValue(headerValue: string | undefined, cookieName: string): string {
     const source = String(headerValue || "");
     if (!source) {
@@ -170,7 +182,7 @@ async function bootstrap(): Promise<void> {
     server.on("upgrade", async (req, socket, head) => {
         try {
             const objUrl = new URL(String(req.url || ""), "http://localhost");
-            if (objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/covered-options/renko" && objUrl.pathname !== "/ws/futures-scalper/renko" && objUrl.pathname !== "/ws/calendar-spread/renko" && objUrl.pathname !== "/ws/strangle-demo/open-positions") {
+            if (objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/covered-options/renko" && objUrl.pathname !== "/ws/futures-scalper/renko" && objUrl.pathname !== "/ws/calendar-spread/renko" && objUrl.pathname !== "/ws/calendar-spread/open-positions" && objUrl.pathname !== "/ws/strangle-demo/open-positions") {
                 socket.destroy();
                 return;
             }
@@ -201,23 +213,29 @@ async function bootstrap(): Promise<void> {
 
     websocketServer.on("connection", (ws: WebSocket, req: IncomingMessage, userId: string) => {
         const objUrl = new URL(String(req.url || ""), "http://localhost");
-        if (objUrl.pathname === "/ws/strangle-demo/open-positions") {
+        // Dedicated open-positions push streams. Each path is bound to its own
+        // strategy code, so the positions streamed to Calendar Spread are read
+        // from the calendar-spread partition only and cannot surface another
+        // page's positions.
+        const vOpenPositionsStrategyCode = resolveOpenPositionsStreamStrategyCode(objUrl.pathname);
+        if (vOpenPositionsStrategyCode) {
             let closed = false;
             let timerRef: NodeJS.Timeout | null = null;
             let tickInFlight = false;
             let tickPending = false;
+            const vStreamPrefix = vOpenPositionsStrategyCode === "calendar-spread" ? "calendar_spread" : "strangle";
 
             const sendTick = async (): Promise<void> => {
                 if (closed || ws.readyState !== WebSocket.OPEN) {
                     return;
                 }
                 try {
-                    const objTrackedOpenPositions = await buildOpenPositionsPayload(userId, "strangle-demo");
+                    const objTrackedOpenPositions = await buildOpenPositionsPayload(userId, vOpenPositionsStrategyCode);
                     if (closed || ws.readyState !== WebSocket.OPEN) {
                         return;
                     }
                     ws.send(JSON.stringify({
-                        type: "strangle_open_positions_state",
+                        type: `${vStreamPrefix}_open_positions_state`,
                         userId,
                         trackedOpenPositions: objTrackedOpenPositions
                     }));
@@ -225,7 +243,7 @@ async function bootstrap(): Promise<void> {
                 catch (objError) {
                     if (!closed && ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({
-                            type: "strangle_open_positions_error",
+                            type: `${vStreamPrefix}_open_positions_error`,
                             userId,
                             message: objError instanceof Error ? objError.message : "Unable to load demo open positions."
                         }));
