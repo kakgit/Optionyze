@@ -93,6 +93,9 @@
         futuresLadderCancelOffsetPoints: document.getElementById("txtRollingFuturesLadderCancelOffsetPoints"),
         futuresLadderStopLossPoints: document.getElementById("txtRollingFuturesLadderStopLossPoints"),
         futuresLadderTakeProfitPoints: document.getElementById("txtRollingFuturesLadderTakeProfitPoints"),
+        futuresLadderTrailingEnabled: document.getElementById("chkRollingFuturesLadderTrailingEnabled"),
+        futuresLadderTrailingStopPoints: document.getElementById("txtRollingFuturesLadderTrailingStopPoints"),
+        futuresLadderTrailingActivatePoints: document.getElementById("txtRollingFuturesLadderTrailingActivatePoints"),
         sellFutureButton: document.getElementById("btnRollingFuturesSellFuture"),
         buyFutureButton: document.getElementById("btnRollingFuturesBuyFuture"),
         sellPeButton: document.getElementById("btnRollingFuturesSellPe"),
@@ -2124,6 +2127,9 @@
             futuresLadderCancelOffsetPoints: "50",
             futuresLadderStopLossPoints: "100",
             futuresLadderTakeProfitPoints: "150",
+            futuresLadderTrailingEnabled: false,
+            futuresLadderTrailingStopPoints: "50",
+            futuresLadderTrailingActivatePoints: "50",
             futuresTradeSide: "both",
             minusDelta: isDualLikeMode ? "-25" : "-15",
             plusDelta: isDualLikeMode ? "25" : "20",
@@ -3814,6 +3820,9 @@
             futuresLadderCancelOffsetPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderCancelOffsetPoints, 50, 1),
             futuresLadderStopLossPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderStopLossPoints, 100, 0),
             futuresLadderTakeProfitPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderTakeProfitPoints, 150, 0),
+            futuresLadderTrailingEnabled: getCheckboxValue(ids.futuresLadderTrailingEnabled, false),
+            futuresLadderTrailingStopPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderTrailingStopPoints, 50, 1),
+            futuresLadderTrailingActivatePoints: normalizeFuturesScalperLadderInput(ids.futuresLadderTrailingActivatePoints, 50, 0),
             futuresTradeSide: normalizeFuturesScalperTradeSideInput(ids.futuresTradeSide),
             minusDelta: getInputValue(ids.minusDelta, "-25"),
             plusDelta: getInputValue(ids.plusDelta, "25"),
@@ -3932,6 +3941,9 @@
                 setInputValue(ids.futuresLadderCancelOffsetPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderCancelOffsetPoints, 50, 1));
                 setInputValue(ids.futuresLadderStopLossPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderStopLossPoints, 100, 0));
                 setInputValue(ids.futuresLadderTakeProfitPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderTakeProfitPoints, 150, 0));
+                setCheckboxValue(ids.futuresLadderTrailingEnabled, Boolean(objUiState.futuresLadderTrailingEnabled));
+                setInputValue(ids.futuresLadderTrailingStopPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderTrailingStopPoints, 50, 1));
+                setInputValue(ids.futuresLadderTrailingActivatePoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderTrailingActivatePoints, 50, 0));
             }
             setInputValue(ids.minusDelta, objUiState.minusDelta);
             setInputValue(ids.plusDelta, objUiState.plusDelta);
@@ -5970,6 +5982,9 @@ async function loadClosedAltPositions() {
         ids.futuresLadderCancelOffsetPoints,
         ids.futuresLadderStopLossPoints,
         ids.futuresLadderTakeProfitPoints,
+        ids.futuresLadderTrailingEnabled,
+        ids.futuresLadderTrailingStopPoints,
+        ids.futuresLadderTrailingActivatePoints,
         ids.minusDelta,
         ids.plusDelta,
         ids.closeNetProfitBrokerage,

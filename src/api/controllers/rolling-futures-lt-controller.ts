@@ -2713,6 +2713,9 @@ function getDefaultManualTraderUiState(
         futuresLadderCancelOffsetPoints: String(gFuturesScalperCancelOffsetPoints),
         futuresLadderStopLossPoints: String(gFuturesScalperStopLossPoints),
         futuresLadderTakeProfitPoints: String(gFuturesScalperTakeProfitPoints),
+        futuresLadderTrailingEnabled: false,
+        futuresLadderTrailingStopPoints: String(gFuturesScalperTrailingStopPoints),
+        futuresLadderTrailingActivatePoints: String(gFuturesScalperTrailingActivatePoints),
         futuresTradeSide: "both",
         minusDelta: bIsDual ? "-10" : "-25",
         plusDelta: bIsDual ? "10" : "25",
@@ -4867,6 +4870,15 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         futuresLadderTakeProfitPoints: isFuturesScalperStrategy(pProfile.strategyCode)
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTakeProfitPoints, gFuturesScalperTakeProfitPoints, 0, 1000000)
             : String(gFuturesScalperTakeProfitPoints),
+        futuresLadderTrailingEnabled: isFuturesScalperStrategy(pProfile.strategyCode)
+            ? normalizeBooleanValue(objUiState.futuresLadderTrailingEnabled, false)
+            : false,
+        futuresLadderTrailingStopPoints: isFuturesScalperStrategy(pProfile.strategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTrailingStopPoints, gFuturesScalperTrailingStopPoints, 1, 1000000)
+            : String(gFuturesScalperTrailingStopPoints),
+        futuresLadderTrailingActivatePoints: isFuturesScalperStrategy(pProfile.strategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTrailingActivatePoints, gFuturesScalperTrailingActivatePoints, 0, 1000000)
+            : String(gFuturesScalperTrailingActivatePoints),
         futuresTradeSide: isFuturesScalperStrategy(pProfile.strategyCode)
             ? normalizeFuturesScalperTradeSideMode(objUiState.futuresTradeSide)
             : "both",
@@ -5297,6 +5309,15 @@ function normalizeProfileSaveInput(
         futuresLadderTakeProfitPoints: isFuturesScalperStrategy(pStrategyCode)
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTakeProfitPoints, gFuturesScalperTakeProfitPoints, 0, 1000000)
             : String(gFuturesScalperTakeProfitPoints),
+        futuresLadderTrailingEnabled: isFuturesScalperStrategy(pStrategyCode)
+            ? normalizeBooleanValue(objUiState.futuresLadderTrailingEnabled, false)
+            : false,
+        futuresLadderTrailingStopPoints: isFuturesScalperStrategy(pStrategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTrailingStopPoints, gFuturesScalperTrailingStopPoints, 1, 1000000)
+            : String(gFuturesScalperTrailingStopPoints),
+        futuresLadderTrailingActivatePoints: isFuturesScalperStrategy(pStrategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTrailingActivatePoints, gFuturesScalperTrailingActivatePoints, 0, 1000000)
+            : String(gFuturesScalperTrailingActivatePoints),
         futuresTradeSide: isFuturesScalperStrategy(pStrategyCode)
             ? normalizeFuturesScalperTradeSideMode(objUiState.futuresTradeSide)
             : "both",
@@ -12795,10 +12816,48 @@ async function runFuturesScalperTriggerEngine(
         }
     }
 
-    // 2) Manage SL / TP on the open paper trade using the live futures price.
+    // 2) Manage trailing SL, then SL / TP on the open paper trade using the live futures price.
     if (objEngine.openTrade) {
         const objOpenTrade = objEngine.openTrade;
         const vIsLongTrade = objOpenTrade.side === "buy";
+
+        // 2a) Trailing SL: once the trade is in profit by at least the activation
+        //     distance, ratchet the stop toward the live price. It never loosens.
+        if (objLadder.trailingEnabled && objLadder.trailingStopPoints > 0) {
+            const vProfitPoints = vIsLongTrade
+                ? (vPrice - objOpenTrade.entryPrice)
+                : (objOpenTrade.entryPrice - vPrice);
+            if (vProfitPoints >= objLadder.trailingActivatePoints) {
+                const vTrailingStopPrice = Number((vIsLongTrade
+                    ? vPrice - objLadder.trailingStopPoints
+                    : vPrice + objLadder.trailingStopPoints).toFixed(2));
+                const bTightens = vIsLongTrade
+                    ? (vTrailingStopPrice > objOpenTrade.stopLossPrice)
+                    : (vTrailingStopPrice < objOpenTrade.stopLossPrice);
+                if (bTightens && vTrailingStopPrice > 0) {
+                    objOpenTrade.stopLossPrice = vTrailingStopPrice;
+                    bStateChanged = true;
+                    await logFuturesEvent(
+                        pUserId,
+                        pStrategyCode,
+                        "trailing_sl_moved",
+                        "success",
+                        "Paper Future Trailing SL Moved",
+                        `${objOpenTrade.contractName} ${vIsLongTrade ? "long" : "short"} trailing SL moved to ${vTrailingStopPrice.toFixed(2)} (price ${vPrice.toFixed(2)}, trail ${objLadder.trailingStopPoints} points).`,
+                        {
+                            symbol: vSymbol,
+                            side: objOpenTrade.side,
+                            contractName: objOpenTrade.contractName,
+                            stopLossPrice: vTrailingStopPrice,
+                            price: vPrice,
+                            profitPoints: vProfitPoints,
+                            reason: "futures_scalper_trailing_sl"
+                        }
+                    );
+                }
+            }
+        }
+
         const vExitPrice = vIsLongTrade
             ? (vPrice <= objOpenTrade.stopLossPrice
                 ? objOpenTrade.stopLossPrice
@@ -13309,6 +13368,8 @@ const gFuturesScalperOrderOffsetPoints = 100;
 const gFuturesScalperCancelOffsetPoints = 50;
 const gFuturesScalperStopLossPoints = 100;
 const gFuturesScalperTakeProfitPoints = 150;
+const gFuturesScalperTrailingStopPoints = 50;
+const gFuturesScalperTrailingActivatePoints = 50;
 
 // UI-configurable ladder settings (Futures Controls section). Values are read
 // from the saved profile uiState; the constants above remain the defaults so
@@ -13320,6 +13381,9 @@ type FuturesScalperLadderConfig = {
     cancelOffsetPoints: number;
     stopLossPoints: number;
     takeProfitPoints: number;
+    trailingEnabled: boolean;
+    trailingStopPoints: number;
+    trailingActivatePoints: number;
 };
 
 function normalizeFuturesScalperPointsString(
@@ -13379,6 +13443,19 @@ function getFuturesScalperLadderConfig(pUiState: Record<string, unknown>): Futur
         takeProfitPoints: normalizeFuturesScalperPointsValue(
             pUiState.futuresLadderTakeProfitPoints,
             gFuturesScalperTakeProfitPoints,
+            0,
+            1000000
+        ),
+        trailingEnabled: normalizeBooleanValue(pUiState.futuresLadderTrailingEnabled, false),
+        trailingStopPoints: normalizeFuturesScalperPointsValue(
+            pUiState.futuresLadderTrailingStopPoints,
+            gFuturesScalperTrailingStopPoints,
+            1,
+            1000000
+        ),
+        trailingActivatePoints: normalizeFuturesScalperPointsValue(
+            pUiState.futuresLadderTrailingActivatePoints,
+            gFuturesScalperTrailingActivatePoints,
             0,
             1000000
         )

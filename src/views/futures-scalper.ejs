@@ -396,6 +396,27 @@
                         <input type="number" min="0" step="1" id="txtRollingFuturesLadderTakeProfitPoints" value="150" title="Take profit is placed this many points below the entry" />
                     </div>
                 </div>
+                <div class="rolling-futures-demo-grid row futures-scalper-controls-grid futures-scalper-ladder-grid">
+                    <div class="rolling-demo-field">
+                        <label for="chkRollingFuturesLadderTrailingEnabled">Trailing SL</label>
+                        <div class="rolling-renko-feed-value-row">
+                            <label class="rolling-renko-feed-switch" for="chkRollingFuturesLadderTrailingEnabled">
+                                <input type="checkbox" id="chkRollingFuturesLadderTrailingEnabled" />
+                                <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
+                                <span class="rolling-renko-feed-switch-text">Trail</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesLadderTrailingStopPoints">Trail Distance (Pts)</label>
+                        <input type="number" min="1" step="1" id="txtRollingFuturesLadderTrailingStopPoints" value="50" title="Once trailing is active the stop is kept this many points behind the live price" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesLadderTrailingActivatePoints">Activate After (Pts)</label>
+                        <input type="number" min="0" step="1" id="txtRollingFuturesLadderTrailingActivatePoints" value="50" title="Trailing starts only once the trade is in profit by at least this many points" />
+                    </div>
+                </div>
+                <div class="rolling-demo-notice">Trailing SL (optional): once a trade is in profit by at least <em>Activate After</em> points, the stop is ratcheted to keep <em>Trail Distance</em> points behind the live price. The stop only ever tightens, never widens.</div>
                 <div class="rolling-demo-notice">Paper futures, buy and sell. Symbol comes from the Symbols List above (BTCUSD / ETHUSD). Connect an API profile to enable BUY FUT / SELL FUT; with Auto Trader ON the Renko trigger engine places orders at the ladder levels automatically.</div>
                 <div class="rolling-demo-notice">Trigger engine: a <strong>green</strong> box at a ladder level arms a SELL that many Order Offset points <strong>below</strong> it (cancelled if green prints Cancel Offset higher); a <strong>red</strong> box arms a BUY Order Offset points <strong>above</strong> it (cancelled if red prints Cancel Offset lower). Fill arms SL/TP from the Stop Loss / Take Profit settings. Trade Side chooses which sides the engine may trade.</div>
                 <div class="rolling-demo-notice">Ladder settings drive the Renko trigger engine. Defaults: levels every 200 points on the ...50 grid, sell order 100 points below the trigger, cancelled if a green box reaches trigger + 50, SL 100 points above entry, TP 150 points below.</div>
