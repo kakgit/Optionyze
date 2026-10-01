@@ -1,4 +1,4 @@
-import type { Request, Response } from "express";
+﻿import type { Request, Response } from "express";
 import crypto from "node:crypto";
 const DeltaRestClient = require("delta-rest-client");
 import { getAccountById, getAccountByTelegramChatId } from "../../storage/accounts-store";
@@ -2713,6 +2713,7 @@ function getDefaultManualTraderUiState(
         futuresLadderCancelOffsetPoints: String(gFuturesScalperCancelOffsetPoints),
         futuresLadderStopLossPoints: String(gFuturesScalperStopLossPoints),
         futuresLadderTakeProfitPoints: String(gFuturesScalperTakeProfitPoints),
+        futuresTradeSide: "both",
         minusDelta: bIsDual ? "-10" : "-25",
         plusDelta: bIsDual ? "10" : "25",
         onlyDeltaNeutral: false,
@@ -4866,6 +4867,9 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         futuresLadderTakeProfitPoints: isFuturesScalperStrategy(pProfile.strategyCode)
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTakeProfitPoints, gFuturesScalperTakeProfitPoints, 0, 1000000)
             : String(gFuturesScalperTakeProfitPoints),
+        futuresTradeSide: isFuturesScalperStrategy(pProfile.strategyCode)
+            ? normalizeFuturesScalperTradeSideMode(objUiState.futuresTradeSide)
+            : "both",
         minusDelta: normalizeStringValue(objUiState.minusDelta, String(objDefaults.minusDelta)),
         plusDelta: normalizeStringValue(objUiState.plusDelta, String(objDefaults.plusDelta)),
         onlyDeltaNeutral: normalizeBooleanValue(objUiState.onlyDeltaNeutral, Boolean(objDefaults.onlyDeltaNeutral)),
@@ -5293,6 +5297,9 @@ function normalizeProfileSaveInput(
         futuresLadderTakeProfitPoints: isFuturesScalperStrategy(pStrategyCode)
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTakeProfitPoints, gFuturesScalperTakeProfitPoints, 0, 1000000)
             : String(gFuturesScalperTakeProfitPoints),
+        futuresTradeSide: isFuturesScalperStrategy(pStrategyCode)
+            ? normalizeFuturesScalperTradeSideMode(objUiState.futuresTradeSide)
+            : "both",
         minusDelta: normalizeStringValue(objUiState.minusDelta, String(objDefaults.minusDelta)),
         plusDelta: normalizeStringValue(objUiState.plusDelta, String(objDefaults.plusDelta)),
         onlyDeltaNeutral: normalizeBooleanValue(objUiState.onlyDeltaNeutral, Boolean(objDefaults.onlyDeltaNeutral)),
@@ -11756,7 +11763,7 @@ async function findTriggeredTrackedOptions(
                 const vNowIso = new Date().toISOString();
                 const vSinceIso = String(objMetadata.pnlAboveBrokerageSince || "").trim();
                 if (!vSinceIso) {
-                    // First time above threshold — start the timer
+                    // First time above threshold â€” start the timer
                     arrUpdatedPositions.push({
                         ...objPosition,
                         metadata: optionMetadataToRecord({
@@ -11769,7 +11776,7 @@ async function findTriggeredTrackedOptions(
                 const vSinceMs = new Date(vSinceIso).getTime();
                 const vElapsedSecs = (Date.now() - vSinceMs) / 1000;
                 if (Number.isFinite(vElapsedSecs) && vElapsedSecs >= vTimerSecs) {
-                    // Timer expired — close the position
+                    // Timer expired â€” close the position
                     arrTriggered.push({
                         position: objPosition,
                         currentDelta: vCurrentDelta,
@@ -11787,10 +11794,10 @@ async function findTriggeredTrackedOptions(
                     });
                     continue;
                 }
-                // Timer still running — keep the position open
+                // Timer still running â€” keep the position open
                 continue;
             } else {
-                // PnL dropped below threshold — reset the timer
+                // PnL dropped below threshold â€” reset the timer
                 if (String(objMetadata.pnlAboveBrokerageSince || "").trim()) {
                     arrUpdatedPositions.push({
                         ...objPosition,
@@ -12666,6 +12673,7 @@ async function closeFuturesScalperOpenTrade(
     if (!objPosition) {
         return { tracked: pTracked, closed: null };
     }
+    const vIsBuy = pOpenTrade.side === "buy";
     const vIsStopLoss = Math.abs(pExitPrice - pOpenTrade.stopLossPrice) <= Math.abs(pExitPrice - pOpenTrade.takeProfitPrice);
     const objClosed = await closeOptionsScalperPaperPosition(pUserId, pStrategyCode, objPosition, pExitPrice, new Date().toISOString(), "limit_order");
     const arrRemaining = pTracked.filter((objRow) => String(objRow.importId || "").trim() !== pOpenTrade.importId);
@@ -12678,10 +12686,11 @@ async function closeFuturesScalperOpenTrade(
         vIsStopLoss ? "sl_triggered" : "tp_triggered",
         vIsStopLoss ? "error" : "success",
         vIsStopLoss ? "Paper Future SL Hit" : "Paper Future TP Hit",
-        `${pOpenTrade.contractName} paper short ${vIsStopLoss ? "stop-loss" : "take-profit"} hit at ${pExitPrice.toFixed(2)} (entry ${pOpenTrade.entryPrice.toFixed(2)}). PnL ${objClosed.pnl.toFixed(4)}.`,
+        `${pOpenTrade.contractName} paper ${vIsBuy ? "long" : "short"} ${vIsStopLoss ? "stop-loss" : "take-profit"} hit at ${pExitPrice.toFixed(2)} (entry ${pOpenTrade.entryPrice.toFixed(2)}). PnL ${objClosed.pnl.toFixed(4)}.`,
         {
             symbol: pSymbol,
             contractName: pOpenTrade.contractName,
+            side: pOpenTrade.side,
             entryPrice: pOpenTrade.entryPrice,
             exitPrice: pExitPrice,
             qty: pOpenTrade.qty,
@@ -12700,8 +12709,9 @@ async function fillFuturesScalperPendingOrder(
     pTracked: RollingFuturesLtImportedPositionRecord[],
     pLadder: FuturesScalperLadderConfig
 ): Promise<{ tracked: RollingFuturesLtImportedPositionRecord[]; openTrade: FuturesScalperOpenTradeState }> {
+    const vIsBuy = pPending.side === "buy";
     const objPaperOpen = await buildOptionsScalperPaperFutureOpen(pUserId, pStrategyCode, {
-        action: "sell",
+        action: vIsBuy ? "buy" : "sell",
         symbol: pSymbol,
         qty: pPending.qty,
         orderType: "market_order",
@@ -12715,9 +12725,10 @@ async function fillFuturesScalperPendingOrder(
         importId: objPaperOpen.position.importId,
         contractName: objPaperOpen.position.contractName,
         entryPrice: objPaperOpen.position.entryPrice,
-        stopLossPrice: Number((objPaperOpen.position.entryPrice + pLadder.stopLossPoints).toFixed(2)),
-        takeProfitPrice: Number((objPaperOpen.position.entryPrice - pLadder.takeProfitPoints).toFixed(2)),
+        stopLossPrice: Number((objPaperOpen.position.entryPrice + (vIsBuy ? -pLadder.stopLossPoints : pLadder.stopLossPoints)).toFixed(2)),
+        takeProfitPrice: Number((objPaperOpen.position.entryPrice + (vIsBuy ? pLadder.takeProfitPoints : -pLadder.takeProfitPoints)).toFixed(2)),
         qty: objPaperOpen.position.qty,
+        side: vIsBuy ? "buy" : "sell",
         openedAt: objPaperOpen.position.openedAt
     };
     await logFuturesEvent(
@@ -12726,10 +12737,11 @@ async function fillFuturesScalperPendingOrder(
         "future_opened",
         "success",
         "Paper Future Trigger Filled",
-        `${objOpenTrade.contractName} SELL ${objOpenTrade.qty} lot(s) filled at ${objOpenTrade.entryPrice.toFixed(2)} (trigger ${pPending.triggerLevel.toFixed(2)}). SL ${objOpenTrade.stopLossPrice.toFixed(2)} / TP ${objOpenTrade.takeProfitPrice.toFixed(2)} armed.`,
+        `${objOpenTrade.side === "buy" ? "BUY" : "SELL"} ${objOpenTrade.contractName} ${objOpenTrade.qty} lot(s) filled at ${objOpenTrade.entryPrice.toFixed(2)} (trigger ${pPending.triggerLevel.toFixed(2)}). SL ${objOpenTrade.stopLossPrice.toFixed(2)} / TP ${objOpenTrade.takeProfitPrice.toFixed(2)} armed.`,
         {
             symbol: pSymbol,
             contractName: objOpenTrade.contractName,
+            side: objOpenTrade.side,
             triggerLevel: pPending.triggerLevel,
             entryPrice: objOpenTrade.entryPrice,
             stopLossPrice: objOpenTrade.stopLossPrice,
@@ -12761,6 +12773,7 @@ async function runFuturesScalperTriggerEngine(
     const objUiState = getMergedUiState(pSync.profile);
     const vSymbol = normalizeSymbolValue(objUiState.symbol);
     const objLadder = getFuturesScalperLadderConfig(objUiState);
+    const vSideMode = normalizeFuturesScalperTradeSideMode(objUiState.futuresTradeSide);
     const vPrice = Number(pSnapshot?.futuresPrice);
     if (!Number.isFinite(vPrice) || !(vPrice > 0)) {
         return { ...pSync, autoTrade: null };
@@ -12782,12 +12795,17 @@ async function runFuturesScalperTriggerEngine(
         }
     }
 
-    // 2) Manage SL / TP on the open paper short using the live futures price.
+    // 2) Manage SL / TP on the open paper trade using the live futures price.
     if (objEngine.openTrade) {
         const objOpenTrade = objEngine.openTrade;
-        const vExitPrice = vPrice >= objOpenTrade.stopLossPrice
-            ? objOpenTrade.stopLossPrice
-            : (vPrice <= objOpenTrade.takeProfitPrice ? objOpenTrade.takeProfitPrice : 0);
+        const vIsLongTrade = objOpenTrade.side === "buy";
+        const vExitPrice = vIsLongTrade
+            ? (vPrice <= objOpenTrade.stopLossPrice
+                ? objOpenTrade.stopLossPrice
+                : (vPrice >= objOpenTrade.takeProfitPrice ? objOpenTrade.takeProfitPrice : 0))
+            : (vPrice >= objOpenTrade.stopLossPrice
+                ? objOpenTrade.stopLossPrice
+                : (vPrice <= objOpenTrade.takeProfitPrice ? objOpenTrade.takeProfitPrice : 0));
         if (vExitPrice > 0) {
             const objExit = await closeFuturesScalperOpenTrade(pUserId, pStrategyCode, pSync.profile, vSymbol, objOpenTrade, vExitPrice, arrTracked);
             arrTracked = objExit.tracked;
@@ -12804,10 +12822,15 @@ async function runFuturesScalperTriggerEngine(
         }
     }
 
-    // 3) Pending order: cancel on a green box at/above trigger+50, fill on a dip to the order level.
+    // 3) Pending order: cancel when price runs past the cancel offset against us,
+//    fill when price reaches the order level.
     if (!objEngine.openTrade && objEngine.pendingOrder) {
         const objPending = objEngine.pendingOrder;
-        if (vBoxColor === "G" && vBoxLevel >= objPending.triggerLevel + objLadder.cancelOffsetPoints) {
+        const vIsPendingBuy = objPending.side === "buy";
+        const bCancelHit = vIsPendingBuy
+            ? (vBoxColor === "R" && vBoxLevel > 0 && vBoxLevel <= objPending.triggerLevel - objLadder.cancelOffsetPoints)
+            : (vBoxColor === "G" && vBoxLevel >= objPending.triggerLevel + objLadder.cancelOffsetPoints);
+        if (bCancelHit) {
             objEngine.pendingOrder = null;
             bStateChanged = true;
             await logFuturesEvent(
@@ -12816,9 +12839,10 @@ async function runFuturesScalperTriggerEngine(
                 "trigger_order_cancelled",
                 "warning",
                 "Paper Future Trigger Order Cancelled",
-                `Green box printed at ${vBoxLevel.toFixed(2)} (trigger ${objPending.triggerLevel.toFixed(2)}). The sell order at ${objPending.orderPrice.toFixed(2)} was cancelled. Waiting for the next trigger.`,
+                `${vIsPendingBuy ? "Red" : "Green"} box printed at ${vBoxLevel.toFixed(2)} (trigger ${objPending.triggerLevel.toFixed(2)}). The ${vIsPendingBuy ? "buy" : "sell"} order at ${objPending.orderPrice.toFixed(2)} was cancelled. Waiting for the next trigger.`,
                 {
                     symbol: vSymbol,
+                    side: objPending.side,
                     triggerLevel: objPending.triggerLevel,
                     orderPrice: objPending.orderPrice,
                     boxLevel: vBoxLevel,
@@ -12827,10 +12851,10 @@ async function runFuturesScalperTriggerEngine(
             );
             objAutoTrade = {
                 status: "warning",
-                message: `Green box at ${vBoxLevel.toFixed(2)} — sell order at ${objPending.orderPrice.toFixed(2)} cancelled. Waiting for the next trigger.`
+                message: `${vIsPendingBuy ? "Red" : "Green"} box at ${vBoxLevel.toFixed(2)} â€” ${vIsPendingBuy ? "buy" : "sell"} order at ${objPending.orderPrice.toFixed(2)} cancelled. Waiting for the next trigger.`
             };
         }
-        else if (vPrice <= objPending.orderPrice) {
+        else if (vIsPendingBuy ? (vPrice >= objPending.orderPrice) : (vPrice <= objPending.orderPrice)) {
             const objFill = await fillFuturesScalperPendingOrder(pUserId, pStrategyCode, vSymbol, objPending, arrTracked, objLadder);
             arrTracked = objFill.tracked;
             objEngine.openTrade = objFill.openTrade;
@@ -12838,45 +12862,60 @@ async function runFuturesScalperTriggerEngine(
             bStateChanged = true;
             objAutoTrade = {
                 status: "success",
-                message: `SELL ${objFill.openTrade.contractName} triggered at ${objFill.openTrade.entryPrice.toFixed(2)}. SL ${objFill.openTrade.stopLossPrice.toFixed(2)} / TP ${objFill.openTrade.takeProfitPrice.toFixed(2)}.`,
+                message: `${objFill.openTrade.side === "buy" ? "BUY" : "SELL"} ${objFill.openTrade.contractName} triggered at ${objFill.openTrade.entryPrice.toFixed(2)}. SL ${objFill.openTrade.stopLossPrice.toFixed(2)} / TP ${objFill.openTrade.takeProfitPrice.toFixed(2)}.`,
                 trackedOpenPositions: await buildOpenPositionsPayload(pUserId, pStrategyCode, arrTracked)
             };
         }
     }
 
-    // 4) Arm a new trigger sell order on a green box that just reached a ladder level.
-    if (!objEngine.openTrade && !objEngine.pendingOrder && vBoxColor === "G" && vBoxLevel > 0) {
-        const vTriggerLevel = getFuturesScalperTriggerLevelForPrice(vBoxLevel, objLadder);
-        if (vTriggerLevel > 0 && vBoxLevel >= vTriggerLevel && vBoxLevel < vTriggerLevel + objLadder.cancelOffsetPoints) {
-            const vOrderPrice = Number((vTriggerLevel - objLadder.orderOffsetPoints).toFixed(2));
-            if (vOrderPrice > 0) {
-                objEngine.pendingOrder = {
-                    triggerLevel: vTriggerLevel,
-                    orderPrice: vOrderPrice,
-                    qty: Math.max(1, Math.floor(Number(objUiState.bsFutQty || 1))),
-                    createdAt: new Date().toISOString()
-                };
-                bStateChanged = true;
-                await logFuturesEvent(
-                    pUserId,
-                    pStrategyCode,
-                    "trigger_order_placed",
-                    "success",
-                    "Paper Future Trigger Order Placed",
-                    `Green box at ${vBoxLevel.toFixed(2)} hit trigger ${vTriggerLevel.toFixed(2)}. Sell order armed at ${vOrderPrice.toFixed(2)} (${objLadder.orderOffsetPoints} points below). Cancels if the green box reaches ${(vTriggerLevel + objLadder.cancelOffsetPoints).toFixed(2)}.`,
-                    {
-                        symbol: vSymbol,
+    // 4) Arm a new trigger order on a box that just reached a ladder level.
+//Green box -> sell order below the level; red box -> buy order above the level.
+    if (!objEngine.openTrade && !objEngine.pendingOrder && vBoxColor && vBoxLevel > 0) {
+        const bIsGreen = vBoxColor === "G";
+        const bIsRed = vBoxColor === "R";
+        const vArmSide = bIsGreen ? "sell" : (bIsRed ? "buy" : "");
+        if (vArmSide && isFuturesScalperSideEnabled(vSideMode, vArmSide === "buy" ? "buy" : "sell")) {
+            const vTriggerLevel = bIsGreen
+                ? getFuturesScalperTriggerLevelForPrice(vBoxLevel, objLadder)
+                : getFuturesScalperBuyTriggerLevelForPrice(vBoxLevel, objLadder);
+            const bInArmWindow = bIsGreen
+                ? (vTriggerLevel > 0 && vBoxLevel >= vTriggerLevel && vBoxLevel < vTriggerLevel + objLadder.cancelOffsetPoints)
+                : (vTriggerLevel > 0 && vBoxLevel <= vTriggerLevel && vBoxLevel > vTriggerLevel - objLadder.cancelOffsetPoints);
+            if (bInArmWindow) {
+                const vOrderPrice = Number((bIsGreen
+                    ? vTriggerLevel - objLadder.orderOffsetPoints
+                    : vTriggerLevel + objLadder.orderOffsetPoints).toFixed(2));
+                if (vOrderPrice > 0) {
+                    objEngine.pendingOrder = {
                         triggerLevel: vTriggerLevel,
                         orderPrice: vOrderPrice,
-                        boxLevel: vBoxLevel,
-                        qty: objEngine.pendingOrder.qty,
-                        reason: "futures_scalper_trigger_placed"
-                    }
-                );
-                objAutoTrade = {
-                    status: "success",
-                    message: `Green box at ${vBoxLevel.toFixed(2)} — sell order armed at ${vOrderPrice.toFixed(2)}. Cancels above ${(vTriggerLevel + objLadder.cancelOffsetPoints).toFixed(2)}.`
-                };
+                        qty: Math.max(1, Math.floor(Number(objUiState.bsFutQty || 1))),
+                        side: vArmSide,
+                        createdAt: new Date().toISOString()
+                    };
+                    bStateChanged = true;
+                    await logFuturesEvent(
+                        pUserId,
+                        pStrategyCode,
+                        "trigger_order_placed",
+                        "success",
+                        "Paper Future Trigger Order Placed",
+                        `${bIsGreen ? "Green" : "Red"} box at ${vBoxLevel.toFixed(2)} hit trigger ${vTriggerLevel.toFixed(2)}. ${vArmSide === "buy" ? "Buy" : "Sell"} order armed at ${vOrderPrice.toFixed(2)} (${objLadder.orderOffsetPoints} points ${vArmSide === "buy" ? "above" : "below"}). Cancels if the ${bIsGreen ? "green" : "red"} box reaches ${(bIsGreen ? vTriggerLevel + objLadder.cancelOffsetPoints : vTriggerLevel - objLadder.cancelOffsetPoints).toFixed(2)}.`,
+                        {
+                            symbol: vSymbol,
+                            side: vArmSide,
+                            triggerLevel: vTriggerLevel,
+                            orderPrice: vOrderPrice,
+                            boxLevel: vBoxLevel,
+                            qty: objEngine.pendingOrder.qty,
+                            reason: "futures_scalper_trigger_placed"
+                        }
+                    );
+                    objAutoTrade = {
+                        status: "success",
+                        message: `${bIsGreen ? "Green" : "Red"} box at ${vBoxLevel.toFixed(2)} â€” ${vArmSide === "buy" ? "buy" : "sell"} order armed at ${vOrderPrice.toFixed(2)}. Cancels ${vArmSide === "buy" ? "below" : "above"} ${(bIsGreen ? vTriggerLevel + objLadder.cancelOffsetPoints : vTriggerLevel - objLadder.cancelOffsetPoints).toFixed(2)}.`
+                    };
+                }
             }
         }
     }
@@ -13350,6 +13389,7 @@ type FuturesScalperPendingOrderState = {
     triggerLevel: number;
     orderPrice: number;
     qty: number;
+    side: "buy" | "sell";
     createdAt: string;
 };
 
@@ -13360,6 +13400,7 @@ type FuturesScalperOpenTradeState = {
     stopLossPrice: number;
     takeProfitPrice: number;
     qty: number;
+    side: "buy" | "sell";
     openedAt: string;
 };
 
@@ -13387,6 +13428,35 @@ function getFuturesScalperTriggerLevelForPrice(pPrice: number, pConfig: FuturesS
     return Math.floor((pPrice - vGridOffset) / vStep) * vStep + vGridOffset;
 }
 
+// Mirrors the ladder for the buy side: returns the ladder level at or just below
+// pPrice so a red box printing at/above it can arm a buy order above the level.
+function getFuturesScalperBuyTriggerLevelForPrice(pPrice: number, pConfig: FuturesScalperLadderConfig): number {
+    const vStep = pConfig.triggerStepPoints > 0 ? pConfig.triggerStepPoints : gFuturesScalperTriggerStepPoints;
+    const vGridOffset = pConfig.gridOffsetPoints;
+    if (!(vStep > 0)) {
+        return 0;
+    }
+    const vLevel = Math.ceil((pPrice - vGridOffset) / vStep) * vStep + vGridOffset;
+    return vLevel;
+}
+
+type FuturesScalperTradeSideMode = "sell_only" | "buy_only" | "both";
+
+function normalizeFuturesScalperTradeSideMode(pValue: unknown): FuturesScalperTradeSideMode {
+    const vValue = String(pValue || "").trim().toLowerCase();
+    if (vValue === "sell_only" || vValue === "buy_only" || vValue === "both") {
+        return vValue;
+    }
+    return "both";
+}
+
+function isFuturesScalperSideEnabled(pMode: FuturesScalperTradeSideMode, pSide: "buy" | "sell"): boolean {
+    if (pMode === "both") {
+        return true;
+    }
+    return pMode === "buy_only" ? pSide === "buy" : pSide === "sell";
+}
+
 function normalizeFuturesScalperSymbolEngineState(pValue: unknown): FuturesScalperSymbolEngineState {
     const objValue = pValue && typeof pValue === "object" ? pValue as Record<string, unknown> : {};
     const objPending = objValue.pendingOrder && typeof objValue.pendingOrder === "object"
@@ -13402,6 +13472,8 @@ function normalizeFuturesScalperSymbolEngineState(pValue: unknown): FuturesScalp
     const vStopLossPrice = Number(objOpenTrade?.stopLossPrice);
     const vTakeProfitPrice = Number(objOpenTrade?.takeProfitPrice);
     const vOpenQty = Number(objOpenTrade?.qty);
+    const vPendingSide = String(objPending?.side || "").trim().toLowerCase() === "buy" ? "buy" : "sell";
+    const vOpenSide = String(objOpenTrade?.side || "").trim().toLowerCase() === "buy" ? "buy" : "sell";
     return {
         pendingOrder: objPending
             && Number.isFinite(vTriggerLevel) && vTriggerLevel > 0
@@ -13411,6 +13483,7 @@ function normalizeFuturesScalperSymbolEngineState(pValue: unknown): FuturesScalp
                 triggerLevel: vTriggerLevel,
                 orderPrice: vOrderPrice,
                 qty: Math.max(1, Math.floor(vPendingQty)),
+                side: vPendingSide,
                 createdAt: String(objPending.createdAt || "").trim() || new Date().toISOString()
             }
             : null,
@@ -13427,6 +13500,7 @@ function normalizeFuturesScalperSymbolEngineState(pValue: unknown): FuturesScalp
                 stopLossPrice: vStopLossPrice,
                 takeProfitPrice: vTakeProfitPrice,
                 qty: Math.max(1, Math.floor(vOpenQty)),
+                side: vOpenSide,
                 openedAt: String(objOpenTrade.openedAt || "").trim() || new Date().toISOString()
             }
             : null
@@ -13580,8 +13654,8 @@ export async function syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade(
 
     // When EMA is enabled, only open on the first Renko box after a color flip
     // that is also on the correct side of the EMA:
-    //   - Renko above EMA + first Green after Red → open
-    //   - Renko below EMA + first Red after Green → open
+    //   - Renko above EMA + first Green after Red â†’ open
+    //   - Renko below EMA + first Red after Green â†’ open
     if (bEmaEnabled) {
         const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
         const objEmaValues = normalizeOptionsScalperEmaRuntimeValues(objLatestRuntime.state?.optionsScalperEmaBySymbol);
@@ -21150,7 +21224,7 @@ export async function recalculateOptionsScalperRecoveryTotalPnl(req: Request, re
 }
 
 // ---------------------------------------------------------------------------
-// Futures Scalper (paper futures) strategy exports — separate from options-demo.
+// Futures Scalper (paper futures) strategy exports â€” separate from options-demo.
 // ---------------------------------------------------------------------------
 export async function getFuturesScalperProfile(req: Request, res: Response): Promise<void> {
     await getProfileInternal(req, res, "futures-scalper");

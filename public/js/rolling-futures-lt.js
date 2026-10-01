@@ -85,6 +85,7 @@
         symbol: document.getElementById("ddlRollingFuturesSymbol"),
         lotSize: document.getElementById("txtRollingFuturesLotSize"),
         futureOrderType: document.getElementById("ddlRollingFuturesOrderType"),
+        futuresTradeSide: document.getElementById("ddlRollingFuturesTradeSide"),
         futuresLimitPrice: document.getElementById("txtRollingFuturesFutLimitPrice"),
         futuresLadderStepPoints: document.getElementById("txtRollingFuturesLadderStepPoints"),
         futuresLadderGridOffsetPoints: document.getElementById("txtRollingFuturesLadderGridOffsetPoints"),
@@ -1873,6 +1874,15 @@
         return normalizeFuturesScalperLadderValue(node ? node.value : "", pFallback, pMin);
     }
 
+    function normalizeFuturesScalperTradeSideValue(pValue) {
+        const vValue = String(pValue || "").trim().toLowerCase();
+        return (vValue === "sell_only" || vValue === "buy_only" || vValue === "both") ? vValue : "both";
+    }
+
+    function normalizeFuturesScalperTradeSideInput(node) {
+        return normalizeFuturesScalperTradeSideValue(node ? node.value : "");
+    }
+
     function getInputValue(node, fallbackValue) {
         return node instanceof HTMLInputElement || node instanceof HTMLSelectElement
             ? String(node.value || "").trim()
@@ -2114,6 +2124,7 @@
             futuresLadderCancelOffsetPoints: "50",
             futuresLadderStopLossPoints: "100",
             futuresLadderTakeProfitPoints: "150",
+            futuresTradeSide: "both",
             minusDelta: isDualLikeMode ? "-25" : "-15",
             plusDelta: isDualLikeMode ? "25" : "20",
             onlyDeltaNeutral: false,
@@ -3803,6 +3814,7 @@
             futuresLadderCancelOffsetPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderCancelOffsetPoints, 50, 1),
             futuresLadderStopLossPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderStopLossPoints, 100, 0),
             futuresLadderTakeProfitPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderTakeProfitPoints, 150, 0),
+            futuresTradeSide: normalizeFuturesScalperTradeSideInput(ids.futuresTradeSide),
             minusDelta: getInputValue(ids.minusDelta, "-25"),
             plusDelta: getInputValue(ids.plusDelta, "25"),
             onlyDeltaNeutral: isCoveredMode ? false : getCheckboxValue(ids.onlyDeltaNeutral, false),
@@ -3909,6 +3921,9 @@
             }
             syncRenkoBaseValueForSymbol(getCurrentSelectedSymbol());
             setInputValue(ids.futureOrderType, String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order");
+            if (isFuturesScalperPage) {
+                setInputValue(ids.futuresTradeSide, normalizeFuturesScalperTradeSideValue(objUiState.futuresTradeSide));
+            }
             setInputValue(ids.bsFutQty, objUiState.bsFutQty);
             if (isFuturesScalperPage) {
                 setInputValue(ids.futuresLadderStepPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderStepPoints, 200, 1));
@@ -5931,6 +5946,7 @@ async function loadClosedAltPositions() {
         });
     });
     ids.futureOrderType?.addEventListener("change", queueProfileSave);
+    ids.futuresTradeSide?.addEventListener("change", queueProfileSave);
     ids.onlyDeltaNeutral?.addEventListener("change", function () {
         syncNeutralModeCheckboxes("only");
         updateNeutralBadges(lastNeutralStatus);

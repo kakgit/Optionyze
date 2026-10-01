@@ -341,6 +341,14 @@
                 </div>
                 <div class="rolling-futures-demo-grid row futures-scalper-controls-grid">
                     <div class="rolling-demo-field">
+                        <label for="ddlRollingFuturesTradeSide">Trade Side</label>
+                        <select id="ddlRollingFuturesTradeSide">
+                            <option value="both" selected>Both (Buy + Sell)</option>
+                            <option value="sell_only">Sell Only</option>
+                            <option value="buy_only">Buy Only</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field">
                         <label for="ddlRollingFuturesOrderType">Order Type</label>
                         <select id="ddlRollingFuturesOrderType">
                             <option value="market_order" selected>Market</option>
@@ -356,7 +364,9 @@
                         <input type="number" min="1" step="1" id="txtRollingFuturesBsQty" value="1" />
                     </div>
                     <div class="rolling-demo-field">
-                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesBuyFuture">BUY FUT</button>
+                    </div>
+                    <div class="rolling-demo-field">
                         <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesSellFuture">SELL FUT</button>
                     </div>
                 </div>
@@ -386,7 +396,8 @@
                         <input type="number" min="0" step="1" id="txtRollingFuturesLadderTakeProfitPoints" value="150" title="Take profit is placed this many points below the entry" />
                     </div>
                 </div>
-                <div class="rolling-demo-notice">Sell-only paper futures. Symbol comes from the Symbols List above (BTCUSD / ETHUSD). Connect an API profile to enable SELL FUT; with Auto Trader ON the Renko trigger engine sells at the ladder levels automatically.</div>
+                <div class="rolling-demo-notice">Paper futures, buy and sell. Symbol comes from the Symbols List above (BTCUSD / ETHUSD). Connect an API profile to enable BUY FUT / SELL FUT; with Auto Trader ON the Renko trigger engine places orders at the ladder levels automatically.</div>
+                <div class="rolling-demo-notice">Trigger engine: a <strong>green</strong> box at a ladder level arms a SELL that many Order Offset points <strong>below</strong> it (cancelled if green prints Cancel Offset higher); a <strong>red</strong> box arms a BUY Order Offset points <strong>above</strong> it (cancelled if red prints Cancel Offset lower). Fill arms SL/TP from the Stop Loss / Take Profit settings. Trade Side chooses which sides the engine may trade.</div>
                 <div class="rolling-demo-notice">Ladder settings drive the Renko trigger engine. Defaults: levels every 200 points on the ...50 grid, sell order 100 points below the trigger, cancelled if a green box reaches trigger + 50, SL 100 points above entry, TP 150 points below.</div>
 
                 <% if (!bIsStrangleDemoPage) { %>
