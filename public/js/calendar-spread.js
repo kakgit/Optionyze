@@ -159,6 +159,8 @@
         alternatingLegRestrictionEnabled: document.getElementById("chkRollingFuturesAlternatingLegRestrictionEnabled"),
         openIfLastPnlNegative: document.getElementById("chkRollingFuturesOpenIfLastPnlNegative"),
     autoRolloverT2BuyEnabled: document.getElementById("chkRollingFuturesAutoRolloverT2BuyEnabled"),
+    autoReenterOnLossEnabled: document.getElementById("chkRollingFuturesAutoReenterOnLossEnabled"),
+    lossReenterThreshold: document.getElementById("txtRollingFuturesLossReenterThreshold"),
         renkoFeedEnabled: document.getElementById("chkRollingFuturesRenkoFeedEnabled"),
         renkoFeedPts: document.getElementById("txtRollingFuturesRenkoFeedPts"),
         renkoFeedManualPrice: document.getElementById("txtRollingFuturesRenkoFeedManualPrice"),
@@ -3938,6 +3940,8 @@
             alternatingLegRestrictionEnabled: isStrangleLikePage ? true : getCheckboxValue(ids.alternatingLegRestrictionEnabled, true),
             openIfLastPnlNegative: isStrangleLikePage ? false : getCheckboxValue(ids.openIfLastPnlNegative, false),
         autoRolloverT2BuyEnabled: getCheckboxValue(ids.autoRolloverT2BuyEnabled, true),
+        autoReenterOnLossEnabled: getCheckboxValue(ids.autoReenterOnLossEnabled, false),
+        lossReenterThreshold: normalizeLossReenterThresholdInput(ids.lossReenterThreshold),
             renkoEnabled: supportsRenkoFeed ? getCheckboxValue(ids.renkoEnabled, false) : false,
             renkoStepPoints: supportsRenkoFeed ? String(getRenkoBoxSizeValue()) : "100",
             renkoBaseValue: supportsRenkoFeed ? normalizeRenkoBaseValue(ids.renkoBaseValue?.value || "") : "",
@@ -4064,6 +4068,8 @@
             setCheckboxValue(ids.alternatingLegRestrictionEnabled, isStrangleLikePage ? true : (objUiState.alternatingLegRestrictionEnabled ?? true));
             setCheckboxValue(ids.openIfLastPnlNegative, isStrangleLikePage ? false : objUiState.openIfLastPnlNegative);
         setCheckboxValue(ids.autoRolloverT2BuyEnabled, objUiState.autoRolloverT2BuyEnabled ?? true);
+        setCheckboxValue(ids.autoReenterOnLossEnabled, Boolean(objUiState.autoReenterOnLossEnabled));
+        setInputValue(ids.lossReenterThreshold, String(objUiState.lossReenterThreshold ?? "1000"));
             if (usesDeltaRenkoStyleFeedControls()) {
                 setCheckboxValue(ids.renkoFeedEnabled, Boolean(objUiState.renkoFeedEnabled));
                 setInputValue(ids.renkoFeedPts, objUiState.renkoFeedPts || "10");
@@ -6256,7 +6262,24 @@ async function loadClosedAltPositions() {
             queueProfileSave();
         });
     });
+    function normalizeLossReenterThresholdInput(node) {
+        const vRaw = Number(node instanceof HTMLInputElement ? node.value : 1000);
+        if (!Number.isFinite(vRaw) || !(vRaw > 0)) {
+            return "1000";
+        }
+        return String(Math.max(1, Math.round(vRaw * 100) / 100));
+    }
+
     ids.autoRolloverT2BuyEnabled?.addEventListener("change", function () {
+        queueProfileSave();
+    });
+    [ids.autoReenterOnLossEnabled, ids.lossReenterThreshold].forEach(function (node) {
+        node?.addEventListener("change", function () {
+            queueProfileSave();
+        });
+    });
+    ids.lossReenterThreshold?.addEventListener("blur", function () {
+        setInputValue(ids.lossReenterThreshold, normalizeLossReenterThresholdInput(ids.lossReenterThreshold));
         queueProfileSave();
     });
     [

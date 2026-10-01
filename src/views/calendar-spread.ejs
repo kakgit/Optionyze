@@ -518,6 +518,27 @@
                             </div>
                         </div>
                     </div>
+                    <div class="rolling-demo-field rolling-futures-buy-gate-field">
+                        <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
+                            <div class="rolling-futures-buy-gate-row">
+                                <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesAutoReenterOnLossEnabled">
+                                    <input type="checkbox" id="chkRollingFuturesAutoReenterOnLossEnabled" />
+                                </label>
+                                <div class="rolling-futures-buy-gate-text">Close &amp; re-enter when loss crosses</div>
+                                <div class="rolling-demo-field rolling-futures-help-input-field">
+                                    <input type="number" id="txtRollingFuturesLossReenterThreshold" min="1" step="1" value="1000" />
+                                </div>
+                                <span class="rolling-futures-help-icon-wrap">
+                                    <button type="button" class="rolling-futures-help-trigger" aria-label="Show loss limit re-entry help">
+                                        ?
+                                    </button>
+                                    <span class="rolling-futures-help-popout floating">
+                                        When enabled, any open position whose live loss reaches the given amount in USD is closed and immediately re-entered using the Manual Trader settings of the <code>Row</code> that opened it.
+                                    </span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <% } %>
 

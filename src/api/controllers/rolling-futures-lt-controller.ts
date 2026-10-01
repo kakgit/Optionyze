@@ -2755,6 +2755,10 @@ function getDefaultManualTraderUiState(
         // Calendar Spread rolls DAILY T+2 buy positions before Delta settlement.
         // Default on; only meaningful for the calendar-spread strategy.
         autoRolloverT2BuyEnabled: pStrategyCode === "calendar-spread",
+        // Calendar Spread cuts and re-enters a position once its live loss
+        // reaches this USD amount. Off by default; Calendar Spread only.
+        autoReenterOnLossEnabled: false,
+        lossReenterThreshold: "1000",
         buyHedgeSellPremiumGate: pStrategyCode === "covered-options" ? false : isCoveredLikeStrategy(pStrategyCode),
         buyHedgeSellPremiumPct: pStrategyCode === "covered-options" ? "1" : "2",
         strangleDeltaDiffReplaceEnabled: isStrangleOptionsStrategy(pStrategyCode),
@@ -3671,6 +3675,134 @@ async function processCalendarSpreadT2BuyRollover(
     }
     finally {
         gAutoTraderCycleLocks.delete(vRolloverLockKey);
+    }
+}
+
+// Default loss (in USD) at which a Calendar Spread position is cut and
+// immediately re-entered from its own Manual Trader row settings.
+const gCalendarSpreadLossReenterDefaultThreshold = 1000;
+
+// Clamps the editable loss limit to a sane positive USD amount.
+function normalizeLossReenterThresholdString(pValue: unknown): string {
+    const vRaw = Number(pValue);
+    if (!Number.isFinite(vRaw) || !(vRaw > 0)) {
+        return String(gCalendarSpreadLossReenterDefaultThreshold);
+    }
+    return String(Math.max(1, Math.round(vRaw * 100) / 100));
+}
+
+// True when the position's live loss has reached the configured threshold.
+function isCalendarSpreadPositionOverLossLimit(
+    pPosition: RollingFuturesLtImportedPositionRecord,
+    pThreshold: number
+): boolean {
+    if (!isOptionContractSymbol(pPosition.contractName) || isTrackedPositionInactive(pPosition)) {
+        return false;
+    }
+    if (!(pThreshold > 0) || !Number.isFinite(Number(pPosition.markPrice))) {
+        return false;
+    }
+    const vPnl = Number(pPosition.pnl || 0);
+    // "Loss crosses above" means the live PnL is negative and its magnitude has
+    // reached the threshold.
+    return Number.isFinite(vPnl) && vPnl <= -Math.abs(pThreshold);
+}
+
+// Closes any Calendar Spread position whose live loss reaches the configured
+// threshold and immediately re-enters it using the settings of the Manual
+// Trader row that opened it. Calendar Spread only, lock-guarded, and it never
+// throws: a failed re-entry is reported and left for the next cycle instead of
+// being silently swallowed.
+async function processCalendarSpreadLossReenter(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<RollingFuturesLtImportedPositionRecord[]> {
+    const objUiState = getMergedUiState(pProfile);
+    if (!normalizeBooleanValue(objUiState.autoReenterOnLossEnabled, false)) {
+        return pPositions;
+    }
+    const vRawThreshold = Number(objUiState.lossReenterThreshold);
+    const vThreshold = Number.isFinite(vRawThreshold) && vRawThreshold > 0
+        ? vRawThreshold
+        : gCalendarSpreadLossReenterDefaultThreshold;
+
+    const arrBreached = pPositions.filter((objPosition) => isCalendarSpreadPositionOverLossLimit(objPosition, vThreshold));
+    if (!arrBreached.length) {
+        return pPositions;
+    }
+
+    const vLockKey = `${getManualFutureOrderLockKey(pUserId, "calendar-spread")}::loss-reenter`;
+    if (gAutoTraderCycleLocks.has(vLockKey)) {
+        return pPositions;
+    }
+    gAutoTraderCycleLocks.add(vLockKey);
+    try {
+        const vSymbol = normalizeSymbolValue(objUiState.symbol);
+        let arrWorking = pPositions;
+        for (const objPosition of arrBreached) {
+            if (!arrWorking.some((objRow) => objRow.importId === objPosition.importId)) {
+                continue;
+            }
+            try {
+                const objClosed = await closeOptionsScalperPaperPosition(pUserId, "calendar-spread", objPosition);
+                await appendOptionsScalperPaperClosedPositions(pUserId, "calendar-spread", [objClosed]);
+                arrWorking = arrWorking.filter((objRow) => objRow.importId !== objPosition.importId);
+
+                // Re-enter using the settings of the row that opened this position.
+                const vRowIndex = getTrackedOptionRowIndexForUi(objPosition, objUiState);
+                const objRowState = getNormalizedOptionRowUiState(objUiState, "calendar-spread", vRowIndex);
+                const vRowLeg = String(objRowState.legs || "ce").trim().toLowerCase() === "pe" ? "pe" : "ce";
+                const vRowAction = String(objRowState.action || objPosition.side || "buy").trim().toLowerCase() === "sell" ? "sell" : "buy";
+                const vRowExpiryMode = (["1", "2", "4", "5", "6", "7"].includes(String(objRowState.expiryMode || "").trim())
+                    ? String(objRowState.expiryMode || "5").trim()
+                    : "5") as "1" | "2" | "4" | "5" | "6" | "7";
+                const vRowExpiryDate = normalizeIsoDateOnly(objRowState.expiryDate) || resolveRollingFuturesExpiryDateByMode(vRowExpiryMode);
+                const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
+                    pUserId,
+                    "calendar-spread",
+                    pProfile,
+                    {
+                        action: vRowAction,
+                        symbol: vSymbol,
+                        legSide: vRowLeg,
+                        expiryMode: vRowExpiryMode,
+                        expiryDate: vRowExpiryDate,
+                        qty: Math.max(1, Math.floor(Number(objRowState.qty || 1))),
+                        targetDelta: Math.max(0, Number(objRowState.newD || 0.53)),
+                        rowIndex: vRowIndex,
+                        openedReason: "strategy_option_open",
+                        takeProfitDelta: Math.max(0, Number(objRowState.tpD || 0)),
+                        stopLossDelta: Math.max(0, Number(objRowState.slD || 0)),
+                        reEnterEnabled: false
+                    }
+                );
+                arrWorking = [...arrWorking, objPaperOpen.position];
+                await logFuturesEvent(
+                    pUserId, "calendar-spread", "option_closed", "warning", "Loss Limit Closed",
+                    `Closed ${objPosition.contractName} after its live loss reached ${Math.abs(vThreshold).toFixed(2)} USD.`,
+                    { symbol: vSymbol, contractName: objPosition.contractName, reason: "loss_limit_close" }
+                );
+                await logFuturesEvent(
+                    pUserId, "calendar-spread", "option_opened", "success", "Loss Limit Re-entered",
+                    `Re-entered ${vRowAction.toUpperCase()} ${vRowLeg.toUpperCase()} from Row ${vRowIndex} settings after the loss limit closed.`,
+                    { symbol: vSymbol, contractName: objPaperOpen.position.contractName, rowIndex: vRowIndex, reason: "loss_limit_reenter" }
+                );
+            }
+            catch (objError) {
+                // The position is already closed at this point; report loudly so
+                // the missing exposure is visible in the activity log.
+                await logFuturesEvent(
+                    pUserId, "calendar-spread", "engine_error", "error", "Loss Limit Re-entry Failed",
+                    getErrorMessage(objError, "Unable to re-enter after the loss limit closed the position."),
+                    { symbol: vSymbol, contractName: objPosition.contractName, reason: "loss_limit_reenter_error" }
+                );
+            }
+        }
+        return arrWorking;
+    }
+    finally {
+        gAutoTraderCycleLocks.delete(vLockKey);
     }
 }
 
@@ -5075,6 +5207,12 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         autoRolloverT2BuyEnabled: pProfile.strategyCode === "calendar-spread"
             ? normalizeBooleanValue(objUiState.autoRolloverT2BuyEnabled, Boolean(objDefaults.autoRolloverT2BuyEnabled))
             : false,
+        autoReenterOnLossEnabled: pProfile.strategyCode === "calendar-spread"
+            ? normalizeBooleanValue(objUiState.autoReenterOnLossEnabled, Boolean(objDefaults.autoReenterOnLossEnabled))
+            : false,
+        lossReenterThreshold: pProfile.strategyCode === "calendar-spread"
+            ? normalizeLossReenterThresholdString(objUiState.lossReenterThreshold ?? objDefaults.lossReenterThreshold)
+            : "1000",
         buyHedgeSellPremiumGate: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(objUiState.buyHedgeSellPremiumGate, Boolean(objDefaults.buyHedgeSellPremiumGate)),
@@ -5519,6 +5657,12 @@ function normalizeProfileSaveInput(
         autoRolloverT2BuyEnabled: pStrategyCode === "calendar-spread"
             ? normalizeBooleanValue(objUiState.autoRolloverT2BuyEnabled, Boolean(objDefaults.autoRolloverT2BuyEnabled))
             : false,
+        autoReenterOnLossEnabled: pStrategyCode === "calendar-spread"
+            ? normalizeBooleanValue(objUiState.autoReenterOnLossEnabled, Boolean(objDefaults.autoReenterOnLossEnabled))
+            : false,
+        lossReenterThreshold: pStrategyCode === "calendar-spread"
+            ? normalizeLossReenterThresholdString(objUiState.lossReenterThreshold ?? objDefaults.lossReenterThreshold)
+            : "1000",
         buyHedgeSellPremiumGate: isStrangleOptionsStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(objUiState.buyHedgeSellPremiumGate, Boolean(objDefaults.buyHedgeSellPremiumGate)),
@@ -15678,14 +15822,27 @@ async function runAutoTraderCycle(
                 await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode)
             );
             // Calendar Spread rolls DAILY T+2 buy positions one hour before the
-            // 5:30 PM IST settlement, reopening them from the Row 2 settings.
-            arrSavedPositions = pStrategyCode === "calendar-spread"
-                ? await replaceRollingFuturesLtImportedPositions(
+            // 5:30 PM IST settlement, and cuts/re-enters any position whose live
+            // loss crosses the configured limit. Both reopen from Manual Trader
+            // settings.
+            let arrCalendarSpreadPositions = arrRefreshedPaperPositions;
+            if (pStrategyCode === "calendar-spread") {
+                arrCalendarSpreadPositions = await processCalendarSpreadT2BuyRollover(
                     pUserId,
-                    pStrategyCode,
-                    await processCalendarSpreadT2BuyRollover(pUserId, objProfile, arrRefreshedPaperPositions)
-                )
-                : await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrRefreshedPaperPositions);
+                    objProfile,
+                    arrCalendarSpreadPositions
+                );
+                arrCalendarSpreadPositions = await processCalendarSpreadLossReenter(
+                    pUserId,
+                    objProfile,
+                    arrCalendarSpreadPositions
+                );
+            }
+            arrSavedPositions = await replaceRollingFuturesLtImportedPositions(
+                pUserId,
+                pStrategyCode,
+                arrCalendarSpreadPositions
+            );
             await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
                 pUserId,
                 objProfile
