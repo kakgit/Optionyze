@@ -546,6 +546,14 @@ function isStrangleOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode):
     return pStrategyCode === "strangle-options" || pStrategyCode === "strangle-demo" || pStrategyCode === "renko-options" || pStrategyCode === "straddle-demo";
 }
 
+// Calendar Spread dropped these five Manual Trader toggles from its page, so
+// their behaviour must be off for that strategy as well. Every engine read goes
+// through getMergedUiState()/normalizeProfileSaveInput(), so forcing the flags
+// there disables the behaviour without touching any other strategy.
+function isManualTraderToggleRemovedStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
+    return pStrategyCode === "calendar-spread";
+}
+
 function isCoveredOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
     return pStrategyCode === "covered-options" || pStrategyCode === "strangle-options" || pStrategyCode === "renko-options";
 }
@@ -4927,22 +4935,24 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         buyHedgeOppositeLegOnGate: pProfile.strategyCode === "covered-options"
             ? normalizeBooleanValue(objUiState.buyHedgeOppositeLegOnGate, Boolean(objDefaults.buyHedgeOppositeLegOnGate))
             : false,
-        sameSideLegIncrementEnabled: isStrangleOptionsStrategy(pProfile.strategyCode)
+        sameSideLegIncrementEnabled: isStrangleOptionsStrategy(pProfile.strategyCode) || isManualTraderToggleRemovedStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(
                 objUiState.sameSideLegIncrementEnabled,
                 normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.sameSideLegIncrementEnabled))
             ),
-        allowDuplicateContracts: isStrangleOptionsStrategy(pProfile.strategyCode)
+        allowDuplicateContracts: isStrangleOptionsStrategy(pProfile.strategyCode) || isManualTraderToggleRemovedStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(objUiState.allowDuplicateContracts, Boolean(objDefaults.allowDuplicateContracts)),
-        placeOppositeTrades: isStrangleOptionsStrategy(pProfile.strategyCode)
+        placeOppositeTrades: isStrangleOptionsStrategy(pProfile.strategyCode) || isManualTraderToggleRemovedStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(objUiState.placeOppositeTrades, Boolean(objDefaults.placeOppositeTrades)),
-        alternatingLegRestrictionEnabled: isStrangleOptionsStrategy(pProfile.strategyCode)
-            ? true
-            : normalizeBooleanValue(objUiState.alternatingLegRestrictionEnabled, Boolean(objDefaults.alternatingLegRestrictionEnabled)),
-        openIfLastPnlNegative: isStrangleOptionsStrategy(pProfile.strategyCode)
+        alternatingLegRestrictionEnabled: isManualTraderToggleRemovedStrategy(pProfile.strategyCode)
+            ? false
+            : (isStrangleOptionsStrategy(pProfile.strategyCode)
+                ? true
+                : normalizeBooleanValue(objUiState.alternatingLegRestrictionEnabled, Boolean(objDefaults.alternatingLegRestrictionEnabled))),
+        openIfLastPnlNegative: isStrangleOptionsStrategy(pProfile.strategyCode) || isManualTraderToggleRemovedStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(objUiState.openIfLastPnlNegative, Boolean(objDefaults.openIfLastPnlNegative)),
         buyQtyPercentEnabled: isStrangleOptionsStrategy(pProfile.strategyCode)
@@ -5366,22 +5376,24 @@ function normalizeProfileSaveInput(
         buyHedgeOppositeLegOnGate: pStrategyCode === "covered-options"
             ? normalizeBooleanValue(objUiState.buyHedgeOppositeLegOnGate, Boolean(objDefaults.buyHedgeOppositeLegOnGate))
             : false,
-        sameSideLegIncrementEnabled: isStrangleOptionsStrategy(pStrategyCode)
+        sameSideLegIncrementEnabled: isStrangleOptionsStrategy(pStrategyCode) || isManualTraderToggleRemovedStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(
                 objUiState.sameSideLegIncrementEnabled,
                 normalizeBooleanValue(objUiState.buyQtyPercentEnabled, Boolean(objDefaults.sameSideLegIncrementEnabled))
             ),
-        allowDuplicateContracts: isStrangleOptionsStrategy(pStrategyCode)
+        allowDuplicateContracts: isStrangleOptionsStrategy(pStrategyCode) || isManualTraderToggleRemovedStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(objUiState.allowDuplicateContracts, Boolean(objDefaults.allowDuplicateContracts)),
-        placeOppositeTrades: isStrangleOptionsStrategy(pStrategyCode)
+        placeOppositeTrades: isStrangleOptionsStrategy(pStrategyCode) || isManualTraderToggleRemovedStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(objUiState.placeOppositeTrades, Boolean(objDefaults.placeOppositeTrades)),
-        alternatingLegRestrictionEnabled: isStrangleOptionsStrategy(pStrategyCode)
-            ? true
-            : normalizeBooleanValue(objUiState.alternatingLegRestrictionEnabled, Boolean(objDefaults.alternatingLegRestrictionEnabled)),
-        openIfLastPnlNegative: isStrangleOptionsStrategy(pStrategyCode)
+        alternatingLegRestrictionEnabled: isManualTraderToggleRemovedStrategy(pStrategyCode)
+            ? false
+            : (isStrangleOptionsStrategy(pStrategyCode)
+                ? true
+                : normalizeBooleanValue(objUiState.alternatingLegRestrictionEnabled, Boolean(objDefaults.alternatingLegRestrictionEnabled))),
+        openIfLastPnlNegative: isStrangleOptionsStrategy(pStrategyCode) || isManualTraderToggleRemovedStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(objUiState.openIfLastPnlNegative, Boolean(objDefaults.openIfLastPnlNegative)),
         buyQtyPercentEnabled: isStrangleOptionsStrategy(pStrategyCode)
