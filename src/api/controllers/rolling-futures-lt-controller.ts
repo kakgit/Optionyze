@@ -2707,6 +2707,12 @@ function getDefaultManualTraderUiState(
         symbol: "BTC",
         manualFutOrderType: "market_order",
         bsFutQty: "1",
+        futuresLadderStepPoints: String(gFuturesScalperTriggerStepPoints),
+        futuresLadderGridOffsetPoints: String(gFuturesScalperGridOffsetPoints),
+        futuresLadderOrderOffsetPoints: String(gFuturesScalperOrderOffsetPoints),
+        futuresLadderCancelOffsetPoints: String(gFuturesScalperCancelOffsetPoints),
+        futuresLadderStopLossPoints: String(gFuturesScalperStopLossPoints),
+        futuresLadderTakeProfitPoints: String(gFuturesScalperTakeProfitPoints),
         minusDelta: bIsDual ? "-10" : "-25",
         plusDelta: bIsDual ? "10" : "25",
         onlyDeltaNeutral: false,
@@ -4842,6 +4848,24 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         symbol: vSymbol,
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
+        futuresLadderStepPoints: isFuturesScalperStrategy(pProfile.strategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderStepPoints, gFuturesScalperTriggerStepPoints, 1, 1000000)
+            : String(gFuturesScalperTriggerStepPoints),
+        futuresLadderGridOffsetPoints: isFuturesScalperStrategy(pProfile.strategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderGridOffsetPoints, gFuturesScalperGridOffsetPoints, 0, 1000000)
+            : String(gFuturesScalperGridOffsetPoints),
+        futuresLadderOrderOffsetPoints: isFuturesScalperStrategy(pProfile.strategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderOrderOffsetPoints, gFuturesScalperOrderOffsetPoints, 0, 1000000)
+            : String(gFuturesScalperOrderOffsetPoints),
+        futuresLadderCancelOffsetPoints: isFuturesScalperStrategy(pProfile.strategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderCancelOffsetPoints, gFuturesScalperCancelOffsetPoints, 1, 1000000)
+            : String(gFuturesScalperCancelOffsetPoints),
+        futuresLadderStopLossPoints: isFuturesScalperStrategy(pProfile.strategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderStopLossPoints, gFuturesScalperStopLossPoints, 0, 1000000)
+            : String(gFuturesScalperStopLossPoints),
+        futuresLadderTakeProfitPoints: isFuturesScalperStrategy(pProfile.strategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTakeProfitPoints, gFuturesScalperTakeProfitPoints, 0, 1000000)
+            : String(gFuturesScalperTakeProfitPoints),
         minusDelta: normalizeStringValue(objUiState.minusDelta, String(objDefaults.minusDelta)),
         plusDelta: normalizeStringValue(objUiState.plusDelta, String(objDefaults.plusDelta)),
         onlyDeltaNeutral: normalizeBooleanValue(objUiState.onlyDeltaNeutral, Boolean(objDefaults.onlyDeltaNeutral)),
@@ -5251,6 +5275,24 @@ function normalizeProfileSaveInput(
         symbol: vSymbol,
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
+        futuresLadderStepPoints: isFuturesScalperStrategy(pStrategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderStepPoints, gFuturesScalperTriggerStepPoints, 1, 1000000)
+            : String(gFuturesScalperTriggerStepPoints),
+        futuresLadderGridOffsetPoints: isFuturesScalperStrategy(pStrategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderGridOffsetPoints, gFuturesScalperGridOffsetPoints, 0, 1000000)
+            : String(gFuturesScalperGridOffsetPoints),
+        futuresLadderOrderOffsetPoints: isFuturesScalperStrategy(pStrategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderOrderOffsetPoints, gFuturesScalperOrderOffsetPoints, 0, 1000000)
+            : String(gFuturesScalperOrderOffsetPoints),
+        futuresLadderCancelOffsetPoints: isFuturesScalperStrategy(pStrategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderCancelOffsetPoints, gFuturesScalperCancelOffsetPoints, 1, 1000000)
+            : String(gFuturesScalperCancelOffsetPoints),
+        futuresLadderStopLossPoints: isFuturesScalperStrategy(pStrategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderStopLossPoints, gFuturesScalperStopLossPoints, 0, 1000000)
+            : String(gFuturesScalperStopLossPoints),
+        futuresLadderTakeProfitPoints: isFuturesScalperStrategy(pStrategyCode)
+            ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTakeProfitPoints, gFuturesScalperTakeProfitPoints, 0, 1000000)
+            : String(gFuturesScalperTakeProfitPoints),
         minusDelta: normalizeStringValue(objUiState.minusDelta, String(objDefaults.minusDelta)),
         plusDelta: normalizeStringValue(objUiState.plusDelta, String(objDefaults.plusDelta)),
         onlyDeltaNeutral: normalizeBooleanValue(objUiState.onlyDeltaNeutral, Boolean(objDefaults.onlyDeltaNeutral)),
@@ -12655,7 +12697,8 @@ async function fillFuturesScalperPendingOrder(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pSymbol: "BTC" | "ETH",
     pPending: FuturesScalperPendingOrderState,
-    pTracked: RollingFuturesLtImportedPositionRecord[]
+    pTracked: RollingFuturesLtImportedPositionRecord[],
+    pLadder: FuturesScalperLadderConfig
 ): Promise<{ tracked: RollingFuturesLtImportedPositionRecord[]; openTrade: FuturesScalperOpenTradeState }> {
     const objPaperOpen = await buildOptionsScalperPaperFutureOpen(pUserId, pStrategyCode, {
         action: "sell",
@@ -12672,8 +12715,8 @@ async function fillFuturesScalperPendingOrder(
         importId: objPaperOpen.position.importId,
         contractName: objPaperOpen.position.contractName,
         entryPrice: objPaperOpen.position.entryPrice,
-        stopLossPrice: Number((objPaperOpen.position.entryPrice + gFuturesScalperStopLossPoints).toFixed(2)),
-        takeProfitPrice: Number((objPaperOpen.position.entryPrice - gFuturesScalperTakeProfitPoints).toFixed(2)),
+        stopLossPrice: Number((objPaperOpen.position.entryPrice + pLadder.stopLossPoints).toFixed(2)),
+        takeProfitPrice: Number((objPaperOpen.position.entryPrice - pLadder.takeProfitPoints).toFixed(2)),
         qty: objPaperOpen.position.qty,
         openedAt: objPaperOpen.position.openedAt
     };
@@ -12717,6 +12760,7 @@ async function runFuturesScalperTriggerEngine(
 ): Promise<FuturesScalperEngineSyncResult> {
     const objUiState = getMergedUiState(pSync.profile);
     const vSymbol = normalizeSymbolValue(objUiState.symbol);
+    const objLadder = getFuturesScalperLadderConfig(objUiState);
     const vPrice = Number(pSnapshot?.futuresPrice);
     if (!Number.isFinite(vPrice) || !(vPrice > 0)) {
         return { ...pSync, autoTrade: null };
@@ -12763,7 +12807,7 @@ async function runFuturesScalperTriggerEngine(
     // 3) Pending order: cancel on a green box at/above trigger+50, fill on a dip to the order level.
     if (!objEngine.openTrade && objEngine.pendingOrder) {
         const objPending = objEngine.pendingOrder;
-        if (vBoxColor === "G" && vBoxLevel >= objPending.triggerLevel + gFuturesScalperCancelOffsetPoints) {
+        if (vBoxColor === "G" && vBoxLevel >= objPending.triggerLevel + objLadder.cancelOffsetPoints) {
             objEngine.pendingOrder = null;
             bStateChanged = true;
             await logFuturesEvent(
@@ -12787,7 +12831,7 @@ async function runFuturesScalperTriggerEngine(
             };
         }
         else if (vPrice <= objPending.orderPrice) {
-            const objFill = await fillFuturesScalperPendingOrder(pUserId, pStrategyCode, vSymbol, objPending, arrTracked);
+            const objFill = await fillFuturesScalperPendingOrder(pUserId, pStrategyCode, vSymbol, objPending, arrTracked, objLadder);
             arrTracked = objFill.tracked;
             objEngine.openTrade = objFill.openTrade;
             objEngine.pendingOrder = null;
@@ -12802,9 +12846,9 @@ async function runFuturesScalperTriggerEngine(
 
     // 4) Arm a new trigger sell order on a green box that just reached a ladder level.
     if (!objEngine.openTrade && !objEngine.pendingOrder && vBoxColor === "G" && vBoxLevel > 0) {
-        const vTriggerLevel = getFuturesScalperTriggerLevelForPrice(vBoxLevel);
-        if (vTriggerLevel > 0 && vBoxLevel >= vTriggerLevel && vBoxLevel < vTriggerLevel + gFuturesScalperCancelOffsetPoints) {
-            const vOrderPrice = Number((vTriggerLevel - gFuturesScalperOrderOffsetPoints).toFixed(2));
+        const vTriggerLevel = getFuturesScalperTriggerLevelForPrice(vBoxLevel, objLadder);
+        if (vTriggerLevel > 0 && vBoxLevel >= vTriggerLevel && vBoxLevel < vTriggerLevel + objLadder.cancelOffsetPoints) {
+            const vOrderPrice = Number((vTriggerLevel - objLadder.orderOffsetPoints).toFixed(2));
             if (vOrderPrice > 0) {
                 objEngine.pendingOrder = {
                     triggerLevel: vTriggerLevel,
@@ -12819,7 +12863,7 @@ async function runFuturesScalperTriggerEngine(
                     "trigger_order_placed",
                     "success",
                     "Paper Future Trigger Order Placed",
-                    `Green box at ${vBoxLevel.toFixed(2)} hit trigger ${vTriggerLevel.toFixed(2)}. Sell order armed at ${vOrderPrice.toFixed(2)} (100 points below). Cancels if the green box reaches ${(vTriggerLevel + gFuturesScalperCancelOffsetPoints).toFixed(2)}.`,
+                    `Green box at ${vBoxLevel.toFixed(2)} hit trigger ${vTriggerLevel.toFixed(2)}. Sell order armed at ${vOrderPrice.toFixed(2)} (${objLadder.orderOffsetPoints} points below). Cancels if the green box reaches ${(vTriggerLevel + objLadder.cancelOffsetPoints).toFixed(2)}.`,
                     {
                         symbol: vSymbol,
                         triggerLevel: vTriggerLevel,
@@ -12831,7 +12875,7 @@ async function runFuturesScalperTriggerEngine(
                 );
                 objAutoTrade = {
                     status: "success",
-                    message: `Green box at ${vBoxLevel.toFixed(2)} — sell order armed at ${vOrderPrice.toFixed(2)}. Cancels above ${(vTriggerLevel + gFuturesScalperCancelOffsetPoints).toFixed(2)}.`
+                    message: `Green box at ${vBoxLevel.toFixed(2)} — sell order armed at ${vOrderPrice.toFixed(2)}. Cancels above ${(vTriggerLevel + objLadder.cancelOffsetPoints).toFixed(2)}.`
                 };
             }
         }
@@ -13227,6 +13271,81 @@ const gFuturesScalperCancelOffsetPoints = 50;
 const gFuturesScalperStopLossPoints = 100;
 const gFuturesScalperTakeProfitPoints = 150;
 
+// UI-configurable ladder settings (Futures Controls section). Values are read
+// from the saved profile uiState; the constants above remain the defaults so
+// existing profiles keep the original 200 / 50 / 100 / 50 / 100 / 150 behaviour.
+type FuturesScalperLadderConfig = {
+    triggerStepPoints: number;
+    gridOffsetPoints: number;
+    orderOffsetPoints: number;
+    cancelOffsetPoints: number;
+    stopLossPoints: number;
+    takeProfitPoints: number;
+};
+
+function normalizeFuturesScalperPointsString(
+    pValue: unknown,
+    pFallback: number,
+    pMin: number,
+    pMax: number
+): string {
+    const vNumber = Number(pValue);
+    if (!Number.isFinite(vNumber) || vNumber <= 0) {
+        return String(pFallback);
+    }
+    return String(Math.min(pMax, Math.max(pMin, Math.floor(vNumber))));
+}
+
+function normalizeFuturesScalperPointsValue(
+    pValue: unknown,
+    pFallback: number,
+    pMin: number,
+    pMax: number
+): number {
+    return Number(normalizeFuturesScalperPointsString(pValue, pFallback, pMin, pMax));
+}
+
+function getFuturesScalperLadderConfig(pUiState: Record<string, unknown>): FuturesScalperLadderConfig {
+    return {
+        triggerStepPoints: normalizeFuturesScalperPointsValue(
+            pUiState.futuresLadderStepPoints,
+            gFuturesScalperTriggerStepPoints,
+            1,
+            1000000
+        ),
+        gridOffsetPoints: normalizeFuturesScalperPointsValue(
+            pUiState.futuresLadderGridOffsetPoints,
+            gFuturesScalperGridOffsetPoints,
+            0,
+            1000000
+        ),
+        orderOffsetPoints: normalizeFuturesScalperPointsValue(
+            pUiState.futuresLadderOrderOffsetPoints,
+            gFuturesScalperOrderOffsetPoints,
+            0,
+            1000000
+        ),
+        cancelOffsetPoints: normalizeFuturesScalperPointsValue(
+            pUiState.futuresLadderCancelOffsetPoints,
+            gFuturesScalperCancelOffsetPoints,
+            1,
+            1000000
+        ),
+        stopLossPoints: normalizeFuturesScalperPointsValue(
+            pUiState.futuresLadderStopLossPoints,
+            gFuturesScalperStopLossPoints,
+            0,
+            1000000
+        ),
+        takeProfitPoints: normalizeFuturesScalperPointsValue(
+            pUiState.futuresLadderTakeProfitPoints,
+            gFuturesScalperTakeProfitPoints,
+            0,
+            1000000
+        )
+    };
+}
+
 type FuturesScalperPendingOrderState = {
     triggerLevel: number;
     orderPrice: number;
@@ -13262,9 +13381,10 @@ type FuturesScalperEngineSyncResult = {
     };
 };
 
-function getFuturesScalperTriggerLevelForPrice(pPrice: number): number {
-    return Math.floor((pPrice - gFuturesScalperGridOffsetPoints) / gFuturesScalperTriggerStepPoints)
-        * gFuturesScalperTriggerStepPoints + gFuturesScalperGridOffsetPoints;
+function getFuturesScalperTriggerLevelForPrice(pPrice: number, pConfig: FuturesScalperLadderConfig): number {
+    const vStep = pConfig.triggerStepPoints > 0 ? pConfig.triggerStepPoints : gFuturesScalperTriggerStepPoints;
+    const vGridOffset = pConfig.gridOffsetPoints;
+    return Math.floor((pPrice - vGridOffset) / vStep) * vStep + vGridOffset;
 }
 
 function normalizeFuturesScalperSymbolEngineState(pValue: unknown): FuturesScalperSymbolEngineState {

@@ -360,7 +360,34 @@
                         <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesSellFuture">SELL FUT</button>
                     </div>
                 </div>
+                <div class="rolling-futures-demo-grid row futures-scalper-controls-grid futures-scalper-ladder-grid">
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesLadderStepPoints">Ladder Step (Pts)</label>
+                        <input type="number" min="1" step="1" id="txtRollingFuturesLadderStepPoints" value="200" title="Trigger levels are spaced this many points apart" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesLadderGridOffsetPoints">Grid Offset (Pts)</label>
+                        <input type="number" min="0" step="1" id="txtRollingFuturesLadderGridOffsetPoints" value="50" title="Ladder levels land on ...N+offset, e.g. 78850 when offset is 50" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesLadderOrderOffsetPoints">Order Offset (Pts)</label>
+                        <input type="number" min="0" step="1" id="txtRollingFuturesLadderOrderOffsetPoints" value="100" title="Sell order is armed this many points below the trigger level" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesLadderCancelOffsetPoints">Cancel Offset (Pts)</label>
+                        <input type="number" min="1" step="1" id="txtRollingFuturesLadderCancelOffsetPoints" value="50" title="Armed order is cancelled if a green box reaches trigger + this" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesLadderStopLossPoints">Stop Loss (Pts)</label>
+                        <input type="number" min="0" step="1" id="txtRollingFuturesLadderStopLossPoints" value="100" title="Stop loss is placed this many points above the entry" />
+                    </div>
+                    <div class="rolling-demo-field">
+                        <label for="txtRollingFuturesLadderTakeProfitPoints">Take Profit (Pts)</label>
+                        <input type="number" min="0" step="1" id="txtRollingFuturesLadderTakeProfitPoints" value="150" title="Take profit is placed this many points below the entry" />
+                    </div>
+                </div>
                 <div class="rolling-demo-notice">Sell-only paper futures. Symbol comes from the Symbols List above (BTCUSD / ETHUSD). Connect an API profile to enable SELL FUT; with Auto Trader ON the Renko trigger engine sells at the ladder levels automatically.</div>
+                <div class="rolling-demo-notice">Ladder settings drive the Renko trigger engine. Defaults: levels every 200 points on the ...50 grid, sell order 100 points below the trigger, cancelled if a green box reaches trigger + 50, SL 100 points above entry, TP 150 points below.</div>
 
                 <% if (!bIsStrangleDemoPage) { %>
                 <div class="rolling-futures-demo-grid actions-row rolling-futures-actions-row-with-gate">

@@ -86,6 +86,12 @@
         lotSize: document.getElementById("txtRollingFuturesLotSize"),
         futureOrderType: document.getElementById("ddlRollingFuturesOrderType"),
         futuresLimitPrice: document.getElementById("txtRollingFuturesFutLimitPrice"),
+        futuresLadderStepPoints: document.getElementById("txtRollingFuturesLadderStepPoints"),
+        futuresLadderGridOffsetPoints: document.getElementById("txtRollingFuturesLadderGridOffsetPoints"),
+        futuresLadderOrderOffsetPoints: document.getElementById("txtRollingFuturesLadderOrderOffsetPoints"),
+        futuresLadderCancelOffsetPoints: document.getElementById("txtRollingFuturesLadderCancelOffsetPoints"),
+        futuresLadderStopLossPoints: document.getElementById("txtRollingFuturesLadderStopLossPoints"),
+        futuresLadderTakeProfitPoints: document.getElementById("txtRollingFuturesLadderTakeProfitPoints"),
         sellFutureButton: document.getElementById("btnRollingFuturesSellFuture"),
         buyFutureButton: document.getElementById("btnRollingFuturesBuyFuture"),
         sellPeButton: document.getElementById("btnRollingFuturesSellPe"),
@@ -1855,6 +1861,18 @@
         }
     }
 
+    function normalizeFuturesScalperLadderValue(pValue, pFallback, pMin) {
+        const vNumber = Number(pValue);
+        if (!Number.isFinite(vNumber) || vNumber <= 0) {
+            return String(pFallback);
+        }
+        return String(Math.max(pMin, Math.floor(vNumber)));
+    }
+
+    function normalizeFuturesScalperLadderInput(node, pFallback, pMin) {
+        return normalizeFuturesScalperLadderValue(node ? node.value : "", pFallback, pMin);
+    }
+
     function getInputValue(node, fallbackValue) {
         return node instanceof HTMLInputElement || node instanceof HTMLSelectElement
             ? String(node.value || "").trim()
@@ -2090,6 +2108,12 @@
             symbol: "BTC",
             manualFutOrderType: "market_order",
             bsFutQty: "1",
+            futuresLadderStepPoints: "200",
+            futuresLadderGridOffsetPoints: "50",
+            futuresLadderOrderOffsetPoints: "100",
+            futuresLadderCancelOffsetPoints: "50",
+            futuresLadderStopLossPoints: "100",
+            futuresLadderTakeProfitPoints: "150",
             minusDelta: isDualLikeMode ? "-25" : "-15",
             plusDelta: isDualLikeMode ? "25" : "20",
             onlyDeltaNeutral: false,
@@ -3773,6 +3797,12 @@
             symbol: String(ids.symbol?.value || "BTC").trim().toUpperCase(),
             manualFutOrderType: String(ids.futureOrderType?.value || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
             bsFutQty: getInputValue(ids.bsFutQty, "1"),
+            futuresLadderStepPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderStepPoints, 200, 1),
+            futuresLadderGridOffsetPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderGridOffsetPoints, 50, 0),
+            futuresLadderOrderOffsetPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderOrderOffsetPoints, 100, 0),
+            futuresLadderCancelOffsetPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderCancelOffsetPoints, 50, 1),
+            futuresLadderStopLossPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderStopLossPoints, 100, 0),
+            futuresLadderTakeProfitPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderTakeProfitPoints, 150, 0),
             minusDelta: getInputValue(ids.minusDelta, "-25"),
             plusDelta: getInputValue(ids.plusDelta, "25"),
             onlyDeltaNeutral: isCoveredMode ? false : getCheckboxValue(ids.onlyDeltaNeutral, false),
@@ -3880,6 +3910,14 @@
             syncRenkoBaseValueForSymbol(getCurrentSelectedSymbol());
             setInputValue(ids.futureOrderType, String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order");
             setInputValue(ids.bsFutQty, objUiState.bsFutQty);
+            if (isFuturesScalperPage) {
+                setInputValue(ids.futuresLadderStepPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderStepPoints, 200, 1));
+                setInputValue(ids.futuresLadderGridOffsetPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderGridOffsetPoints, 50, 0));
+                setInputValue(ids.futuresLadderOrderOffsetPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderOrderOffsetPoints, 100, 0));
+                setInputValue(ids.futuresLadderCancelOffsetPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderCancelOffsetPoints, 50, 1));
+                setInputValue(ids.futuresLadderStopLossPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderStopLossPoints, 100, 0));
+                setInputValue(ids.futuresLadderTakeProfitPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderTakeProfitPoints, 150, 0));
+            }
             setInputValue(ids.minusDelta, objUiState.minusDelta);
             setInputValue(ids.plusDelta, objUiState.plusDelta);
             setCheckboxValue(ids.onlyDeltaNeutral, isCoveredMode ? false : objUiState.onlyDeltaNeutral);
