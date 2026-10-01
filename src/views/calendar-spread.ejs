@@ -500,6 +500,24 @@
                             <% } %>
                         </div>
                     </div>
+                    <div class="rolling-demo-field rolling-futures-buy-gate-field">
+                        <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
+                            <div class="rolling-futures-buy-gate-row">
+                                <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesAutoRolloverT2BuyEnabled">
+                                    <input type="checkbox" id="chkRollingFuturesAutoRolloverT2BuyEnabled" checked />
+                                </label>
+                                <div class="rolling-futures-buy-gate-text">Auto-roll DAILY T+2 buy positions</div>
+                                <span class="rolling-futures-help-icon-wrap">
+                                    <button type="button" class="rolling-futures-help-trigger" aria-label="Show T+2 rollover help">
+                                        ?
+                                    </button>
+                                    <span class="rolling-futures-help-popout floating">
+                                        Delta Exchange settles all options at <code>5:30 PM IST</code>. One hour before that, any open <code>DAILY T+2</code> buy position is closed and immediately reopened as a fresh T+2 contract using the <code>Row 2</code> Manual Trader settings.
+                                    </span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <% } %>
 

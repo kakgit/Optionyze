@@ -158,6 +158,7 @@
         placeOppositeTrades: document.getElementById("chkRollingFuturesPlaceOppositeTrades"),
         alternatingLegRestrictionEnabled: document.getElementById("chkRollingFuturesAlternatingLegRestrictionEnabled"),
         openIfLastPnlNegative: document.getElementById("chkRollingFuturesOpenIfLastPnlNegative"),
+    autoRolloverT2BuyEnabled: document.getElementById("chkRollingFuturesAutoRolloverT2BuyEnabled"),
         renkoFeedEnabled: document.getElementById("chkRollingFuturesRenkoFeedEnabled"),
         renkoFeedPts: document.getElementById("txtRollingFuturesRenkoFeedPts"),
         renkoFeedManualPrice: document.getElementById("txtRollingFuturesRenkoFeedManualPrice"),
@@ -3936,6 +3937,7 @@
             placeOppositeTrades: isStrangleLikePage ? false : getCheckboxValue(ids.placeOppositeTrades, false),
             alternatingLegRestrictionEnabled: isStrangleLikePage ? true : getCheckboxValue(ids.alternatingLegRestrictionEnabled, true),
             openIfLastPnlNegative: isStrangleLikePage ? false : getCheckboxValue(ids.openIfLastPnlNegative, false),
+        autoRolloverT2BuyEnabled: getCheckboxValue(ids.autoRolloverT2BuyEnabled, true),
             renkoEnabled: supportsRenkoFeed ? getCheckboxValue(ids.renkoEnabled, false) : false,
             renkoStepPoints: supportsRenkoFeed ? String(getRenkoBoxSizeValue()) : "100",
             renkoBaseValue: supportsRenkoFeed ? normalizeRenkoBaseValue(ids.renkoBaseValue?.value || "") : "",
@@ -4061,6 +4063,7 @@
             setCheckboxValue(ids.placeOppositeTrades, isStrangleLikePage ? false : objUiState.placeOppositeTrades);
             setCheckboxValue(ids.alternatingLegRestrictionEnabled, isStrangleLikePage ? true : (objUiState.alternatingLegRestrictionEnabled ?? true));
             setCheckboxValue(ids.openIfLastPnlNegative, isStrangleLikePage ? false : objUiState.openIfLastPnlNegative);
+        setCheckboxValue(ids.autoRolloverT2BuyEnabled, objUiState.autoRolloverT2BuyEnabled ?? true);
             if (usesDeltaRenkoStyleFeedControls()) {
                 setCheckboxValue(ids.renkoFeedEnabled, Boolean(objUiState.renkoFeedEnabled));
                 setInputValue(ids.renkoFeedPts, objUiState.renkoFeedPts || "10");
@@ -6252,6 +6255,9 @@ async function loadClosedAltPositions() {
             syncQtyFromStartQty();
             queueProfileSave();
         });
+    });
+    ids.autoRolloverT2BuyEnabled?.addEventListener("change", function () {
+        queueProfileSave();
     });
     [
         ids.renkoEnabled,

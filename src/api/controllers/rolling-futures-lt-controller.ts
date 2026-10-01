@@ -1,4 +1,4 @@
-﻿import type { Request, Response } from "express";
+import type { Request, Response } from "express";
 import crypto from "node:crypto";
 const DeltaRestClient = require("delta-rest-client");
 import { getAccountById, getAccountByTelegramChatId } from "../../storage/accounts-store";
@@ -443,6 +443,7 @@ interface RollingFuturesLtOptionMetadata {
     openedReason?: string;
     requestedExpiryDate?: string;
     resolvedExpiryDate?: string;
+    expiryMode?: string;
     importedObservationOnly?: boolean;
     importedAt?: string;
     pnlAboveBrokerageSince?: string;
@@ -2751,6 +2752,9 @@ function getDefaultManualTraderUiState(
         closePosPnlAboveBrokerage: false,
         closePosPnlAboveBrokerageX: "5",
         reEnterBlock: bIsDual,
+        // Calendar Spread rolls DAILY T+2 buy positions before Delta settlement.
+        // Default on; only meaningful for the calendar-spread strategy.
+        autoRolloverT2BuyEnabled: pStrategyCode === "calendar-spread",
         buyHedgeSellPremiumGate: pStrategyCode === "covered-options" ? false : isCoveredLikeStrategy(pStrategyCode),
         buyHedgeSellPremiumPct: pStrategyCode === "covered-options" ? "1" : "2",
         strangleDeltaDiffReplaceEnabled: isStrangleOptionsStrategy(pStrategyCode),
@@ -3444,6 +3448,7 @@ function optionMetadataToRecord(pMetadata: RollingFuturesLtOptionMetadata): Reco
         openedReason: pMetadata.openedReason,
         requestedExpiryDate: normalizeIsoDateOnly(pMetadata.requestedExpiryDate),
         resolvedExpiryDate: normalizeIsoDateOnly(pMetadata.resolvedExpiryDate),
+        expiryMode: String(pMetadata.expiryMode || "").trim(),
         importedObservationOnly: Boolean(pMetadata.importedObservationOnly),
         importedAt: String(pMetadata.importedAt || "").trim(),
         pnlAboveBrokerageSince: String(pMetadata.pnlAboveBrokerageSince || "").trim() || undefined
@@ -3520,6 +3525,153 @@ function getTrackedOptionBaseContractKey(pContractName: unknown): string {
         return String(objMatch[1] || "").trim().toUpperCase();
     }
     return vContractName;
+}
+
+// Delta Exchange settles all options at 5:30 PM IST on their expiry date, so
+// a DAILY T+2 position is rolled one hour earlier, at 4:30 PM IST, to avoid
+// holding a contract into settlement/expire.
+const gCalendarSpreadT2ExpiryHour = 16;
+const gCalendarSpreadT2ExpiryMinute = 30;
+
+// True when the position is a DAILY T+2 option that settles today. The expiry
+// mode is preferred; for positions opened before the mode was recorded we fall
+// back to the gap between the open date and the resolved expiry date (1 day =
+// T+1, 2 days = T+2), so older tracked rows are still handled correctly.
+function isCalendarSpreadT2BuyPositionExpiringToday(pPosition: RollingFuturesLtImportedPositionRecord): boolean {
+    if (String(pPosition.side || "").trim().toUpperCase() !== "BUY") {
+        return false;
+    }
+    if (!isOptionContractSymbol(pPosition.contractName) || isTrackedPositionInactive(pPosition)) {
+        return false;
+    }
+    const vExpiryDate = getTrackedOptionResolvedExpiryDate(pPosition);
+    const objUiNow = getCurrentDeltaUiDateTimeParts();
+    if (!vExpiryDate || vExpiryDate !== objUiNow.date) {
+        return false;
+    }
+    const objMetadata = getTrackedOptionMetadata(pPosition);
+    const vStoredMode = String(objMetadata.expiryMode || "").trim();
+    if (vStoredMode) {
+        return vStoredMode === "2";
+    }
+    const vOpenedDate = normalizeIsoDateOnly(String(pPosition.openedAt || "").trim().slice(0, 10));
+    if (!vOpenedDate) {
+        return false;
+    }
+    return getDaysBetweenUtcDates(
+        new Date(`${vOpenedDate}T00:00:00Z`),
+        new Date(`${vExpiryDate}T00:00:00Z`)
+    ) === 2;
+}
+
+// Closes expiring DAILY T+2 BUY positions one hour before Delta settlement and
+// immediately reopens a fresh T+2 contract using the Row 2 Manual Trader
+// settings. Scoped to Calendar Spread only, and never throws: a failed rollover
+// leaves the original position untouched so it can be retried on the next pass.
+async function processCalendarSpreadT2BuyRollover(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<RollingFuturesLtImportedPositionRecord[]> {
+    const objUiState = getMergedUiState(pProfile);
+    if (!normalizeBooleanValue(objUiState.autoRolloverT2BuyEnabled, true)) {
+        return pPositions;
+    }
+    if (!isDeltaUiTimeAtOrAfter(gCalendarSpreadT2ExpiryHour, gCalendarSpreadT2ExpiryMinute)) {
+        return pPositions;
+    }
+    const arrEligible = pPositions.filter(isCalendarSpreadT2BuyPositionExpiringToday);
+    if (!arrEligible.length) {
+        return pPositions;
+    }
+
+    const vSymbol = normalizeSymbolValue(objUiState.symbol);
+    const objRowState = getNormalizedOptionRowUiState(objUiState, "calendar-spread", 2);
+    const vRolloverLockKey = `${getManualFutureOrderLockKey(pUserId, "calendar-spread")}::t2-buy-rollover`;
+    if (gAutoTraderCycleLocks.has(vRolloverLockKey)) {
+        return pPositions;
+    }
+    gAutoTraderCycleLocks.add(vRolloverLockKey);
+    try {
+        let arrWorking = pPositions;
+        for (const objPosition of arrEligible) {
+            if (!arrWorking.some((objRow) => objRow.importId === objPosition.importId)) {
+                continue;
+            }
+            try {
+                // Close first, at the live exit price (best bid for a long).
+                const objClosed = await closeOptionsScalperPaperPosition(
+                    pUserId,
+                    "calendar-spread",
+                    objPosition
+                );
+                await appendOptionsScalperPaperClosedPositions(pUserId, "calendar-spread", [objClosed]);
+
+                const vRowAction = String(objRowState.action || "buy").trim().toLowerCase() === "sell" ? "sell" : "buy";
+                const vRowLeg = String(objRowState.legs || "ce").trim().toLowerCase() === "pe" ? "pe" : "ce";
+                // The replacement is always a DAILY T+2 contract; every other
+                // setting (action, leg, qty, deltas) comes from Row 2.
+                const vNextExpiryDate = resolveRollingFuturesExpiryDateByMode("2");
+                const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
+                    pUserId,
+                    "calendar-spread",
+                    pProfile,
+                    {
+                        action: vRowAction,
+                        symbol: vSymbol,
+                        legSide: vRowLeg,
+                        expiryMode: "2",
+                        expiryDate: vNextExpiryDate,
+                        qty: Math.max(1, Math.floor(Number(objRowState.qty || 1))),
+                        targetDelta: Math.max(0, Number(objRowState.newD || 0.53)),
+                        rowIndex: 2,
+                        openedReason: "strategy_option_open",
+                        takeProfitDelta: Math.max(0, Number(objRowState.tpD || 0)),
+                        stopLossDelta: Math.max(0, Number(objRowState.slD || 0)),
+                        reEnterEnabled: false
+                    }
+                );
+                arrWorking = [
+                    ...arrWorking.filter((objRow) => objRow.importId !== objPosition.importId),
+                    objPaperOpen.position
+                ];
+                await logFuturesEvent(
+                    pUserId,
+                    "calendar-spread",
+                    "option_closed",
+                    "success",
+                    "T+2 Buy Rollover Closed",
+                    `Closed expiring ${objPosition.contractName} one hour before 5:30 PM IST settlement.`,
+                    { symbol: vSymbol, contractName: objPosition.contractName, reason: "t2_buy_rollover_close" }
+                );
+                await logFuturesEvent(
+                    pUserId,
+                    "calendar-spread",
+                    "option_opened",
+                    "success",
+                    "T+2 Buy Rollover Reopened",
+                    `Reopened a DAILY T+2 ${vRowLeg.toUpperCase()} ${vRowAction.toUpperCase()} from Row 2 settings for expiry ${vNextExpiryDate}.`,
+                    { symbol: vSymbol, contractName: objPaperOpen.position.contractName, rowIndex: 2, reason: "t2_buy_rollover_reopen" }
+                );
+            }
+            catch (objError) {
+                // Keep the original position so the next cycle can retry.
+                await logFuturesEvent(
+                    pUserId,
+                    "calendar-spread",
+                    "engine_error",
+                    "warning",
+                    "T+2 Buy Rollover Skipped",
+                    getErrorMessage(objError, "Unable to roll the expiring T+2 buy position."),
+                    { symbol: vSymbol, contractName: objPosition.contractName, reason: "t2_buy_rollover_error" }
+                );
+            }
+        }
+        return arrWorking;
+    }
+    finally {
+        gAutoTraderCycleLocks.delete(vRolloverLockKey);
+    }
 }
 
 function getTrackedOptionResolvedExpiryDate(pPosition: RollingFuturesLtImportedPositionRecord): string {
@@ -4920,6 +5072,9 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         closePosPnlAboveBrokerage: normalizeBooleanValue(objUiState.closePosPnlAboveBrokerage, Boolean(objDefaults.closePosPnlAboveBrokerage)),
         closePosPnlAboveBrokerageX: normalizeStringValue(objUiState.closePosPnlAboveBrokerageX, String(objDefaults.closePosPnlAboveBrokerageX)),
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
+        autoRolloverT2BuyEnabled: pProfile.strategyCode === "calendar-spread"
+            ? normalizeBooleanValue(objUiState.autoRolloverT2BuyEnabled, Boolean(objDefaults.autoRolloverT2BuyEnabled))
+            : false,
         buyHedgeSellPremiumGate: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? false
             : normalizeBooleanValue(objUiState.buyHedgeSellPremiumGate, Boolean(objDefaults.buyHedgeSellPremiumGate)),
@@ -5361,6 +5516,9 @@ function normalizeProfileSaveInput(
         closePosPnlAboveBrokerage: normalizeBooleanValue(objUiState.closePosPnlAboveBrokerage, Boolean(objDefaults.closePosPnlAboveBrokerage)),
         closePosPnlAboveBrokerageX: normalizeStringValue(objUiState.closePosPnlAboveBrokerageX, String(objDefaults.closePosPnlAboveBrokerageX)),
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
+        autoRolloverT2BuyEnabled: pStrategyCode === "calendar-spread"
+            ? normalizeBooleanValue(objUiState.autoRolloverT2BuyEnabled, Boolean(objDefaults.autoRolloverT2BuyEnabled))
+            : false,
         buyHedgeSellPremiumGate: isStrangleOptionsStrategy(pStrategyCode)
             ? false
             : normalizeBooleanValue(objUiState.buyHedgeSellPremiumGate, Boolean(objDefaults.buyHedgeSellPremiumGate)),
@@ -10059,7 +10217,10 @@ async function buildOptionsScalperPaperOptionOpen(
                 baseDelta: getSignedOptionBaseDelta(String(objContract.contractSymbol || "").trim(), vAbsoluteDelta),
                 baseTheta: Math.abs(Number(objContract.theta || 0)),
                 requestedExpiryDate: String(objContract.requestedExpiryDate || "").trim(),
-                resolvedExpiryDate: String(objContract.expiryDate || "").trim()
+                resolvedExpiryDate: String(objContract.expiryDate || "").trim(),
+                // Stored so later cycles can tell a DAILY T+2 contract from T+1
+                // or weekly without guessing from the expiry date alone.
+                expiryMode: pInput.expiryMode
             }),
             openedAt: vOpenedAtIso,
             updatedAt: vOpenedAtIso
@@ -15513,13 +15674,18 @@ async function runAutoTraderCycle(
             }
         }
         if (isPaperDemoStrategy(pStrategyCode)) {
-            arrSavedPositions = await replaceRollingFuturesLtImportedPositions(
-                pUserId,
-                pStrategyCode,
-                await refreshOptionsScalperPaperOpenPositions(
-                    await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode)
-                )
+            const arrRefreshedPaperPositions = await refreshOptionsScalperPaperOpenPositions(
+                await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode)
             );
+            // Calendar Spread rolls DAILY T+2 buy positions one hour before the
+            // 5:30 PM IST settlement, reopening them from the Row 2 settings.
+            arrSavedPositions = pStrategyCode === "calendar-spread"
+                ? await replaceRollingFuturesLtImportedPositions(
+                    pUserId,
+                    pStrategyCode,
+                    await processCalendarSpreadT2BuyRollover(pUserId, objProfile, arrRefreshedPaperPositions)
+                )
+                : await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrRefreshedPaperPositions);
             await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
                 pUserId,
                 objProfile
