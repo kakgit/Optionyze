@@ -221,6 +221,7 @@ import {
     rejectCalendarSpreadLiveAction,
     recalculateCalendarSpreadRecoveryTotalPnl,
     reconcileCalendarSpreadOpenPositions,
+    reenterCalendarSpreadOpenPosition,
     saveCalendarSpreadOpenPositions,
     saveCalendarSpreadProfile,
     setCalendarSpreadRenkoManualSignal,
@@ -1034,6 +1035,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/calendar-spread/open-positions/reconcile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await reconcileCalendarSpreadOpenPositions(req, res);
+    });
+    objRouter.post("/calendar-spread/open-positions/reenter", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await reenterCalendarSpreadOpenPosition(req, res);
     });
     objRouter.post("/calendar-spread/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await closeCalendarSpreadImportedOpenPosition(req, res);

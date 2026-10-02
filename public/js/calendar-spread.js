@@ -5245,6 +5245,20 @@
                             </button>
                 `
                 : "";
+            // Calendar Spread: close this position and immediately reopen it from
+            // the Manual Trader settings of the Row that opened it.
+            const reenterActionButton = isCalendarSpreadPage
+                ? `
+                            <button class="rolling-demo-icon-btn primary rolling-live-reenter-open-position" type="button" data-import-id="${escapeHtml(importId)}" title="${escapeHtml(isInactive ? "Inactive paper position cannot be re-entered." : "Close this position and reopen it using its Manual Trader Row settings")}" aria-label="${escapeHtml(isInactive ? "Inactive paper position cannot be re-entered." : "Close this position and reopen it using its Manual Trader Row settings")}" ${isInactive ? "disabled" : ""}>
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                    <path d="M21 3v6h-6" />
+                                    <path d="M3 12a9 9 0 0 0 2.64 6.36" />
+                                    <path d="M3 21v-6h6" />
+                                </svg>
+                            </button>
+                `
+                : "";
             return `
                 <tr class="${coveredSideRowClass} ${inactiveRowClass}">
                     <td>${renderGreekCell(
@@ -5270,6 +5284,7 @@
                     <td>
                         <div class="rolling-demo-table-actions">
                             ${swapActionButton}
+                            ${reenterActionButton}
                             <button class="rolling-demo-icon-btn sell rolling-live-close-open-position" type="button" data-import-id="${escapeHtml(importId)}" title="${escapeHtml(isInactive ? "Inactive paper position cannot be closed again." : "Close this open position")}" aria-label="${escapeHtml(isInactive ? "Inactive paper position cannot be closed again." : "Close this open position")}" ${isInactive ? "disabled" : ""}>
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="M12 2v10" />
@@ -7342,6 +7357,40 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
     });
     const handleOpenPositionsBodyClick = function (event) {
         const target = event.target instanceof Element ? event.target : null;
+        const reenterButton = target ? target.closest(".rolling-live-reenter-open-position") : null;
+        if (reenterButton instanceof HTMLButtonElement) {
+            const importId = String(reenterButton.dataset.importId || "").trim();
+            const row = displayedPositions.find(function (item) {
+                return String(item?.importId || "").trim() === importId;
+            });
+            if (!row) {
+                setStatus(ids.pageStatus, "Unable to find the selected open position.", "danger");
+                return;
+            }
+            const confirmed = window.confirm(`Close ${row.contractName || "this position"} and reopen it using its Manual Trader Row settings?`);
+            if (!confirmed) {
+                return;
+            }
+            reenterButton.disabled = true;
+            void postJson(`${endpointBase}/open-positions/reenter`, { importId: importId }).then(function (objResult) {
+                const trackedPayload = objResult?.data?.trackedOpenPositions || null;
+                if (trackedPayload) {
+                    renderOpenPositions(trackedPayload);
+                }
+                setStatus(ids.pageStatus, String(objResult?.message || "Position closed and re-entered."), "success");
+                return Promise.all([
+                    loadAccountSummary().catch(function () { return undefined; }),
+                    loadConnectionStatus().catch(function () { return undefined; }),
+                    loadClosedPositions().catch(function () { return undefined; }),
+                    loadEvents().catch(function () { return undefined; })
+                ]);
+            }).catch(function (error) {
+                setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to re-enter the open position.", "danger");
+            }).finally(function () {
+                reenterButton.disabled = false;
+            });
+            return;
+        }
         const swapButton = target ? target.closest(".rolling-live-swap-open-position") : null;
         if (swapButton instanceof HTMLButtonElement) {
             const importId = String(swapButton.dataset.importId || "").trim();

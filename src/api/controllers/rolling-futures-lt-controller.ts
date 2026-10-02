@@ -3753,14 +3753,12 @@ async function processCalendarSpreadLossReenter(
             }
             // Resolve the re-entry settings up front so the catch block can queue
             // them verbatim if the close succeeded but the reopen failed.
-            const vRowIndex = getTrackedOptionRowIndexForUi(objPosition, objUiState);
-            const objRowState = getNormalizedOptionRowUiState(objUiState, "calendar-spread", vRowIndex);
-            const vRowLeg = String(objRowState.legs || "ce").trim().toLowerCase() === "pe" ? "pe" : "ce";
-            const vRowAction = String(objRowState.action || objPosition.side || "buy").trim().toLowerCase() === "sell" ? "sell" : "buy";
-            const vRowExpiryMode = (["1", "2", "4", "5", "6", "7"].includes(String(objRowState.expiryMode || "").trim())
-                ? String(objRowState.expiryMode || "5").trim()
-                : "5") as "1" | "2" | "4" | "5" | "6" | "7";
-            const vRowExpiryDate = normalizeIsoDateOnly(objRowState.expiryDate) || resolveRollingFuturesExpiryDateByMode(vRowExpiryMode);
+            const objRowInput = buildCalendarSpreadRowOpenInput(pProfile, objPosition);
+            const vRowIndex = objRowInput.rowIndex;
+            const vRowAction = objRowInput.action;
+            const vRowLeg = objRowInput.legSide;
+            const vRowExpiryMode = objRowInput.expiryMode;
+            const vRowExpiryDate = objRowInput.expiryDate;
             try {
                 const objClosed = await closeOptionsScalperPaperPosition(pUserId, "calendar-spread", objPosition);
                 await appendOptionsScalperPaperClosedPositions(pUserId, "calendar-spread", [objClosed]);
@@ -3781,12 +3779,12 @@ async function processCalendarSpreadLossReenter(
                         legSide: vRowLeg,
                         expiryMode: vRowExpiryMode,
                         expiryDate: vRowExpiryDate,
-                        qty: Math.max(1, Math.floor(Number(objRowState.qty || 1))),
-                        targetDelta: Math.max(0, Number(objRowState.newD || 0.53)),
+                        qty: objRowInput.qty,
+                        targetDelta: objRowInput.targetDelta,
                         rowIndex: vRowIndex,
                         openedReason: "strategy_option_open",
-                        takeProfitDelta: Math.max(0, Number(objRowState.tpD || 0)),
-                        stopLossDelta: Math.max(0, Number(objRowState.slD || 0)),
+                        takeProfitDelta: objRowInput.takeProfitDelta,
+                        stopLossDelta: objRowInput.stopLossDelta,
                         reEnterEnabled: false
                     }
                 );
@@ -3820,10 +3818,10 @@ async function processCalendarSpreadLossReenter(
                     legSide: vRowLeg,
                     expiryMode: vRowExpiryMode,
                     expiryDate: vRowExpiryDate,
-                    qty: Math.max(1, Math.floor(Number(objRowState.qty || 1))),
-                    targetDelta: Math.max(0, Number(objRowState.newD || 0.53)),
-                    takeProfitDelta: Math.max(0, Number(objRowState.tpD || 0)),
-                    stopLossDelta: Math.max(0, Number(objRowState.slD || 0)),
+                    qty: objRowInput.qty,
+                    targetDelta: objRowInput.targetDelta,
+                    takeProfitDelta: objRowInput.takeProfitDelta,
+                    stopLossDelta: objRowInput.stopLossDelta,
                     createdAt: new Date().toISOString()
                 });
                 await logFuturesEvent(
@@ -4016,6 +4014,44 @@ function sendCalendarSpreadLossAlertPush(
     }).catch((objError) => {
         console.error(`[mobile-push] calendar spread loss alert failed for account ${pUserId}:`, objError);
     });
+}
+
+// Resolves the Manual Trader settings of the row that opened a position, so a
+// replacement can be opened from exactly the same configuration. Shared by the
+// loss-limit re-entry, the T+2 rollover and the manual re-enter action.
+function buildCalendarSpreadRowOpenInput(
+    pProfile: RollingFuturesLtProfileRecord,
+    pPosition: RollingFuturesLtImportedPositionRecord
+): {
+    rowIndex: 1 | 2;
+    action: "buy" | "sell";
+    legSide: "ce" | "pe";
+    expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
+    expiryDate: string;
+    qty: number;
+    targetDelta: number;
+    takeProfitDelta: number;
+    stopLossDelta: number;
+} {
+    const objUiState = getMergedUiState(pProfile);
+    const vRowIndex = getTrackedOptionRowIndexForUi(pPosition, objUiState);
+    const objRowState = getNormalizedOptionRowUiState(objUiState, "calendar-spread", vRowIndex);
+    const vLeg = String(objRowState.legs || "ce").trim().toLowerCase() === "pe" ? "pe" : "ce";
+    const vAction = String(objRowState.action || pPosition.side || "buy").trim().toLowerCase() === "sell" ? "sell" : "buy";
+    const vExpiryMode = (["1", "2", "4", "5", "6", "7"].includes(String(objRowState.expiryMode || "").trim())
+        ? String(objRowState.expiryMode || "5").trim()
+        : "5") as "1" | "2" | "4" | "5" | "6" | "7";
+    return {
+        rowIndex: vRowIndex,
+        action: vAction,
+        legSide: vLeg,
+        expiryMode: vExpiryMode,
+        expiryDate: normalizeIsoDateOnly(objRowState.expiryDate) || resolveRollingFuturesExpiryDateByMode(vExpiryMode),
+        qty: Math.max(1, Math.floor(Number(objRowState.qty || 1))),
+        targetDelta: Math.max(0, Number(objRowState.newD || 0.53)),
+        takeProfitDelta: Math.max(0, Number(objRowState.tpD || 0)),
+        stopLossDelta: Math.max(0, Number(objRowState.slD || 0))
+    };
 }
 
 function getTrackedOptionResolvedExpiryDate(pPosition: RollingFuturesLtImportedPositionRecord): string {
@@ -22089,6 +22125,107 @@ export async function executeCalendarSpreadManualOption(req: Request, res: Respo
 }
 export async function executeCalendarSpreadStrategy(req: Request, res: Response): Promise<void> {
     await executeStrategyInternal(req, res, "calendar-spread");
+}
+
+// Manual per-position close and re-enter. Closes one open position and
+// immediately opens a replacement using the Manual Trader settings of the Row
+// that opened it. Calendar Spread only. The close is persisted before the
+// reopen so the duplicate-contract guard cannot reject the replacement as
+// "already active in Open Positions".
+export async function reenterCalendarSpreadOpenPosition(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const vImportId = String(req.body?.importId || "").trim();
+    if (!vImportId) {
+        res.status(400).json({ status: "warning", message: "An open position id is required." });
+        return;
+    }
+
+    const vLockKey = `${getManualFutureOrderLockKey(vUserId, "calendar-spread")}::manual-reenter`;
+    if (gAutoTraderCycleLocks.has(vLockKey)) {
+        res.status(409).json({ status: "warning", message: "A re-enter is already being processed. Please wait for it to finish." });
+        return;
+    }
+    gAutoTraderCycleLocks.add(vLockKey);
+    try {
+        const objProfile = await readLiveProfile(vUserId, "calendar-spread");
+        const arrPositions = await listRollingFuturesLtImportedPositions(vUserId, "calendar-spread");
+        const objPosition = arrPositions.find((objRow) => String(objRow.importId || "").trim() === vImportId);
+        if (!objPosition) {
+            res.status(404).json({ status: "warning", message: "That open position is no longer available." });
+            return;
+        }
+        if (isTrackedPositionInactive(objPosition)) {
+            res.status(400).json({ status: "warning", message: "That position is already inactive and cannot be re-entered." });
+            return;
+        }
+
+        const objUiState = getMergedUiState(objProfile);
+        const vSymbol = normalizeSymbolValue(objUiState.symbol);
+        const objRowInput = buildCalendarSpreadRowOpenInput(objProfile, objPosition);
+
+        const objClosed = await closeOptionsScalperPaperPosition(vUserId, "calendar-spread", objPosition);
+        await appendOptionsScalperPaperClosedPositions(vUserId, "calendar-spread", [objClosed]);
+        const arrAfterClose = arrPositions.filter((objRow) => String(objRow.importId || "").trim() !== vImportId);
+        // Persist the close first so the reopen is not blocked by the guard.
+        await replaceRollingFuturesLtImportedPositions(vUserId, "calendar-spread", arrAfterClose);
+
+        const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
+            vUserId,
+            "calendar-spread",
+            objProfile,
+            {
+                action: objRowInput.action,
+                symbol: vSymbol,
+                legSide: objRowInput.legSide,
+                expiryMode: objRowInput.expiryMode,
+                expiryDate: objRowInput.expiryDate,
+                qty: objRowInput.qty,
+                targetDelta: objRowInput.targetDelta,
+                rowIndex: objRowInput.rowIndex,
+                openedReason: "manual_reenter",
+                takeProfitDelta: objRowInput.takeProfitDelta,
+                stopLossDelta: objRowInput.stopLossDelta,
+                reEnterEnabled: false
+            }
+        );
+        const arrSaved = await replaceRollingFuturesLtImportedPositions(
+            vUserId,
+            "calendar-spread",
+            [...arrAfterClose, objPaperOpen.position]
+        );
+
+        await logFuturesEvent(
+            vUserId, "calendar-spread", "option_closed", "warning", "Manual Re-enter Closed",
+            `Closed ${objPosition.contractName} on request.`,
+            { symbol: vSymbol, contractName: objPosition.contractName, reason: "manual_reenter_close" }
+        );
+        await logFuturesEvent(
+            vUserId, "calendar-spread", "option_opened", "success", "Manual Re-enter Opened",
+            `Reopened ${objRowInput.action.toUpperCase()} ${objRowInput.legSide.toUpperCase()} from Row ${objRowInput.rowIndex} settings.`,
+            { symbol: vSymbol, contractName: objPaperOpen.position.contractName, rowIndex: objRowInput.rowIndex, reason: "manual_reenter_open" }
+        );
+        await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(vUserId, objProfile);
+
+        res.json({
+            status: "success",
+            message: `Closed ${objPosition.contractName} and re-entered ${objPaperOpen.position.contractName} from Row ${objRowInput.rowIndex} settings.`,
+            data: {
+                closedContractName: objPosition.contractName,
+                openedContractName: objPaperOpen.position.contractName,
+                rowIndex: objRowInput.rowIndex,
+                trackedOpenPositions: await buildOpenPositionsPayload(vUserId, "calendar-spread", arrSaved)
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to re-enter the open position.")
+        });
+    }
+    finally {
+        gAutoTraderCycleLocks.delete(vLockKey);
+    }
 }
 export async function confirmCalendarSpreadLiveAction(req: Request, res: Response): Promise<void> {
     res.status(400).json({
