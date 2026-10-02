@@ -6074,6 +6074,7 @@ async function loadClosedAltPositions() {
     connectRenkoFeedSocket();
     connectStrangleDemoOpenPositionsSocket();
     connectCalendarSpreadOpenPositionsSocket();
+    applyCalendarSpreadAlertDeepLink();
 
     ids.symbol?.addEventListener("change", function () {
         captureRenkoBaseValueForCurrentSymbol();
@@ -6268,6 +6269,39 @@ async function loadClosedAltPositions() {
             return "1000";
         }
         return String(Math.max(1, Math.round(vRaw * 100) / 100));
+    }
+
+    function applyCalendarSpreadAlertDeepLink() {
+        let vParams;
+        try {
+            vParams = new URLSearchParams(window.location.search || "");
+        }
+        catch (_error) {
+            return;
+        }
+        const vAlertType = String(vParams.get("alert") || "").trim().toLowerCase();
+        const vContract = String(vParams.get("contract") || "").trim();
+        const vLoss = String(vParams.get("loss") || "").trim();
+        const vNextAction = String(vParams.get("next") || "").trim();
+        if (vAlertType !== "loss") {
+            return;
+        }
+        // Deep link from the Optionyze Mobile loss alert: surface the open
+        // positions and highlight the contract that triggered the alert.
+        const vMessage = vContract
+            ? `${vContract} breached the loss limit${vLoss ? ` (down ${vLoss} USD)` : ""}. ${vNextAction === "re_entered" ? "It was re-entered from Row settings." : "Re-entry is queued and retrying."}`
+            : "A position breached the loss limit.";
+        setStatus(ids.pageStatus, vMessage, vNextAction === "re_entered" ? "warning" : "danger");
+        if (vContract) {
+            ids.openPositionsBody?.querySelectorAll("tr").forEach(function (row) {
+                if (String(row.textContent || "").includes(vContract)) {
+                    row.classList.add("rolling-demo-open-row-inactive");
+                }
+            });
+        }
+        window.setTimeout(function () {
+            document.getElementById("calendarSpreadOpenPositions")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 400);
     }
 
     ids.autoRolloverT2BuyEnabled?.addEventListener("change", function () {

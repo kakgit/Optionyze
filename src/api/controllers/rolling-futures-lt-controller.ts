@@ -3801,6 +3801,15 @@ async function processCalendarSpreadLossReenter(
                     `Re-entered ${vRowAction.toUpperCase()} ${vRowLeg.toUpperCase()} from Row ${vRowIndex} settings after the loss limit closed.`,
                     { symbol: vSymbol, contractName: objPaperOpen.position.contractName, rowIndex: vRowIndex, reason: "loss_limit_reenter" }
                 );
+                // Alert the mobile app as soon as the loss limit is breached.
+                sendCalendarSpreadLossAlertPush(
+                    pUserId,
+                    objPosition,
+                    Number(objPosition.pnl || 0),
+                    vThreshold,
+                    arrWorking,
+                    "re_entered"
+                );
             }
             catch (objError) {
                 // Queue the re-entry so it is retried on later cycles instead of
@@ -3821,6 +3830,15 @@ async function processCalendarSpreadLossReenter(
                     pUserId, "calendar-spread", "engine_error", "error", "Loss Limit Re-entry Failed",
                     `${getErrorMessage(objError, "Unable to re-enter after the loss limit closed the position.")} The re-entry is queued and will be retried automatically.`,
                     { symbol: vSymbol, contractName: objPosition.contractName, reason: "loss_limit_reenter_error" }
+                );
+                // Still alert the user: the position is closed and not yet replaced.
+                sendCalendarSpreadLossAlertPush(
+                    pUserId,
+                    objPosition,
+                    Number(objPosition.pnl || 0),
+                    vThreshold,
+                    arrWorking,
+                    "reenter_pending"
                 );
             }
         }
@@ -3946,6 +3964,58 @@ async function retryCalendarSpreadPendingReentries(
     finally {
         gAutoTraderCycleLocks.delete(vRetryLockKey);
     }
+}
+
+// Pushes the loss-limit alert to Optionyze Mobile. The data payload carries the
+// page route and a snapshot of the open positions so tapping the notification
+// deep-links straight to Calendar Spread with the positions already rendered.
+function sendCalendarSpreadLossAlertPush(
+    pUserId: string,
+    pPosition: RollingFuturesLtImportedPositionRecord,
+    pLivePnl: number,
+    pThreshold: number,
+    pOpenPositions: RollingFuturesLtImportedPositionRecord[],
+    pNextAction: "re_entered" | "reenter_pending"
+): void {
+    const vSnapshot = pOpenPositions
+        .filter((objRow) => !isTrackedPositionInactive(objRow))
+        .map((objRow) => ({
+            contractName: String(objRow.contractName || "").trim(),
+            side: String(objRow.side || "").trim().toUpperCase(),
+            qty: Number(objRow.qty || 0),
+            entryPrice: Number(objRow.entryPrice || 0),
+            markPrice: Number(objRow.markPrice || 0),
+            pnl: Number(objRow.pnl || 0)
+        }));
+    const vLossText = Math.abs(Number(pLivePnl || 0)).toFixed(2);
+    void sendMobilePushToAccount(pUserId, {
+        title: "Calendar Spread - Loss Limit Hit",
+        message: `${pPosition.contractName} is down ${vLossText} USD (limit ${Math.abs(pThreshold).toFixed(2)} USD). ${pNextAction === "re_entered" ? "Position re-entered from Row settings." : "Re-entry queued and retrying."} Tap to view open positions.`,
+        data: {
+            type: "calendar_spread_loss_alert",
+            strategyCode: "calendar-spread",
+            // Deep link: tapping the notification opens this page with the alert
+            // context in the query string so the page can surface it.
+            route: "/calendar-spread",
+            url: `/calendar-spread?alert=loss&contract=${encodeURIComponent(String(pPosition.contractName || "").trim())}&loss=${encodeURIComponent(vLossText)}&next=${encodeURIComponent(pNextAction)}`,
+            webUrl: `/calendar-spread?alert=loss&contract=${encodeURIComponent(String(pPosition.contractName || "").trim())}&loss=${encodeURIComponent(vLossText)}&next=${encodeURIComponent(pNextAction)}`,
+            contractName: String(pPosition.contractName || "").trim(),
+            side: String(pPosition.side || "").trim().toUpperCase(),
+            loss: vLossText,
+            threshold: String(Math.abs(pThreshold)),
+            nextAction: pNextAction,
+            // Serialised so the app can render the positions without a round trip.
+            openPositionsJson: JSON.stringify(vSnapshot)
+        }
+    }).then((objResult) => {
+        if (objResult.failedCount > 0) {
+            console.warn(
+                `[mobile-push] ${objResult.failedCount}/${objResult.tokenCount} calendar spread loss alerts failed for account ${pUserId}.`
+            );
+        }
+    }).catch((objError) => {
+        console.error(`[mobile-push] calendar spread loss alert failed for account ${pUserId}:`, objError);
+    });
 }
 
 function getTrackedOptionResolvedExpiryDate(pPosition: RollingFuturesLtImportedPositionRecord): string {
