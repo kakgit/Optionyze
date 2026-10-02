@@ -3616,6 +3616,11 @@ async function processCalendarSpreadT2BuyRollover(
                 // The replacement is always a DAILY T+2 contract; every other
                 // setting (action, leg, qty, deltas) comes from Row 2.
                 const vNextExpiryDate = resolveRollingFuturesExpiryDateByMode("2");
+                const arrAfterClose = arrWorking.filter((objRow) => objRow.importId !== objPosition.importId);
+                // Persist the close BEFORE re-entering, otherwise the duplicate
+                // contract guard re-reads the still-stored closed position and
+                // rejects the re-entry as "already active in Open Positions".
+                await replaceRollingFuturesLtImportedPositions(pUserId, "calendar-spread", arrAfterClose);
                 const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
                     pUserId,
                     "calendar-spread",
@@ -3740,24 +3745,32 @@ async function processCalendarSpreadLossReenter(
     try {
         const vSymbol = normalizeSymbolValue(objUiState.symbol);
         let arrWorking = pPositions;
+        // Keep any re-entries already queued by an earlier failed attempt.
+        const arrPendingReentries: CalendarSpreadPendingReentry[] = await getCalendarSpreadPendingReentries(pUserId, pProfile);
         for (const objPosition of arrBreached) {
             if (!arrWorking.some((objRow) => objRow.importId === objPosition.importId)) {
                 continue;
             }
+            // Resolve the re-entry settings up front so the catch block can queue
+            // them verbatim if the close succeeded but the reopen failed.
+            const vRowIndex = getTrackedOptionRowIndexForUi(objPosition, objUiState);
+            const objRowState = getNormalizedOptionRowUiState(objUiState, "calendar-spread", vRowIndex);
+            const vRowLeg = String(objRowState.legs || "ce").trim().toLowerCase() === "pe" ? "pe" : "ce";
+            const vRowAction = String(objRowState.action || objPosition.side || "buy").trim().toLowerCase() === "sell" ? "sell" : "buy";
+            const vRowExpiryMode = (["1", "2", "4", "5", "6", "7"].includes(String(objRowState.expiryMode || "").trim())
+                ? String(objRowState.expiryMode || "5").trim()
+                : "5") as "1" | "2" | "4" | "5" | "6" | "7";
+            const vRowExpiryDate = normalizeIsoDateOnly(objRowState.expiryDate) || resolveRollingFuturesExpiryDateByMode(vRowExpiryMode);
             try {
                 const objClosed = await closeOptionsScalperPaperPosition(pUserId, "calendar-spread", objPosition);
                 await appendOptionsScalperPaperClosedPositions(pUserId, "calendar-spread", [objClosed]);
                 arrWorking = arrWorking.filter((objRow) => objRow.importId !== objPosition.importId);
+                // Persist the close BEFORE re-entering. buildOptionsScalperPaperOptionOpen
+                // re-reads tracked positions from the store to enforce the duplicate
+                // contract guard, so the closed contract must already be gone or the
+                // re-entry is rejected as "already active in Open Positions".
+                await replaceRollingFuturesLtImportedPositions(pUserId, "calendar-spread", arrWorking);
 
-                // Re-enter using the settings of the row that opened this position.
-                const vRowIndex = getTrackedOptionRowIndexForUi(objPosition, objUiState);
-                const objRowState = getNormalizedOptionRowUiState(objUiState, "calendar-spread", vRowIndex);
-                const vRowLeg = String(objRowState.legs || "ce").trim().toLowerCase() === "pe" ? "pe" : "ce";
-                const vRowAction = String(objRowState.action || objPosition.side || "buy").trim().toLowerCase() === "sell" ? "sell" : "buy";
-                const vRowExpiryMode = (["1", "2", "4", "5", "6", "7"].includes(String(objRowState.expiryMode || "").trim())
-                    ? String(objRowState.expiryMode || "5").trim()
-                    : "5") as "1" | "2" | "4" | "5" | "6" | "7";
-                const vRowExpiryDate = normalizeIsoDateOnly(objRowState.expiryDate) || resolveRollingFuturesExpiryDateByMode(vRowExpiryMode);
                 const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
                     pUserId,
                     "calendar-spread",
@@ -3790,19 +3803,148 @@ async function processCalendarSpreadLossReenter(
                 );
             }
             catch (objError) {
-                // The position is already closed at this point; report loudly so
-                // the missing exposure is visible in the activity log.
+                // Queue the re-entry so it is retried on later cycles instead of
+                // leaving the user flat after their position was already closed.
+                arrPendingReentries.push({
+                    rowIndex: vRowIndex,
+                    action: vRowAction,
+                    legSide: vRowLeg,
+                    expiryMode: vRowExpiryMode,
+                    expiryDate: vRowExpiryDate,
+                    qty: Math.max(1, Math.floor(Number(objRowState.qty || 1))),
+                    targetDelta: Math.max(0, Number(objRowState.newD || 0.53)),
+                    takeProfitDelta: Math.max(0, Number(objRowState.tpD || 0)),
+                    stopLossDelta: Math.max(0, Number(objRowState.slD || 0)),
+                    createdAt: new Date().toISOString()
+                });
                 await logFuturesEvent(
                     pUserId, "calendar-spread", "engine_error", "error", "Loss Limit Re-entry Failed",
-                    getErrorMessage(objError, "Unable to re-enter after the loss limit closed the position."),
+                    `${getErrorMessage(objError, "Unable to re-enter after the loss limit closed the position.")} The re-entry is queued and will be retried automatically.`,
                     { symbol: vSymbol, contractName: objPosition.contractName, reason: "loss_limit_reenter_error" }
                 );
             }
         }
+        await saveCalendarSpreadPendingReentries(pUserId, pProfile, arrPendingReentries);
         return arrWorking;
     }
     finally {
         gAutoTraderCycleLocks.delete(vLockKey);
+    }
+}
+
+// Pending loss-limit re-entries that could not be placed yet (for example the
+// Delta API was unavailable). They are stored on the runtime record and retried
+// on later cycles so a transient connection failure does not leave the user
+// flat after their position was already closed.
+interface CalendarSpreadPendingReentry {
+    rowIndex: 1 | 2;
+    action: "buy" | "sell";
+    legSide: "ce" | "pe";
+    expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
+    expiryDate: string;
+    qty: number;
+    targetDelta: number;
+    takeProfitDelta: number;
+    stopLossDelta: number;
+    createdAt: string;
+}
+
+function getCalendarSpreadPendingReentries(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord
+): Promise<CalendarSpreadPendingReentry[]> {
+    return loadRollingFuturesLtRuntime(pUserId, "calendar-spread").then((objRuntime) => {
+        const arrPending = (objRuntime?.state as { pendingLossReentries?: unknown } | undefined)?.pendingLossReentries;
+        return Array.isArray(arrPending)
+            ? arrPending.filter((objRow): objRow is CalendarSpreadPendingReentry => Boolean(objRow) && typeof objRow === "object")
+            : [];
+    });
+}
+
+async function saveCalendarSpreadPendingReentries(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pPending: CalendarSpreadPendingReentry[]
+): Promise<void> {
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, "calendar-spread");
+    const objState = {
+        ...((objRuntime?.state && typeof objRuntime.state === "object") ? objRuntime.state : {})
+    } as Record<string, unknown>;
+    if (pPending.length) {
+        objState.pendingLossReentries = pPending;
+    }
+    else {
+        delete objState.pendingLossReentries;
+    }
+    await saveRollingFuturesLtRuntime({
+        ...(objRuntime || getDefaultRollingFuturesLtRuntime(pUserId, "calendar-spread")),
+        userId: pUserId,
+        strategyCode: "calendar-spread",
+        state: objState
+    });
+}
+
+// Retries any re-entry that failed earlier (typically a Delta outage). Runs on
+// the same cycle as the loss rule, so it recovers as soon as the API does.
+async function retryCalendarSpreadPendingReentries(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pPositions: RollingFuturesLtImportedPositionRecord[]
+): Promise<RollingFuturesLtImportedPositionRecord[]> {
+    const arrPending = await getCalendarSpreadPendingReentries(pUserId, pProfile);
+    if (!arrPending.length) {
+        return pPositions;
+    }
+    const vRetryLockKey = `${getManualFutureOrderLockKey(pUserId, "calendar-spread")}::loss-reenter-retry`;
+    if (gAutoTraderCycleLocks.has(vRetryLockKey)) {
+        return pPositions;
+    }
+    gAutoTraderCycleLocks.add(vRetryLockKey);
+    try {
+        let arrWorking = pPositions;
+        const arrStillPending: CalendarSpreadPendingReentry[] = [];
+        for (const objPending of arrPending) {
+            try {
+                const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
+                    pUserId,
+                    "calendar-spread",
+                    pProfile,
+                    {
+                        action: objPending.action,
+                        symbol: normalizeSymbolValue(getMergedUiState(pProfile).symbol),
+                        legSide: objPending.legSide,
+                        expiryMode: objPending.expiryMode,
+                        expiryDate: objPending.expiryDate,
+                        qty: objPending.qty,
+                        targetDelta: objPending.targetDelta,
+                        rowIndex: objPending.rowIndex,
+                        openedReason: "strategy_option_open",
+                        takeProfitDelta: objPending.takeProfitDelta,
+                        stopLossDelta: objPending.stopLossDelta,
+                        reEnterEnabled: false
+                    }
+                );
+                arrWorking = await replaceRollingFuturesLtImportedPositions(
+                    pUserId,
+                    "calendar-spread",
+                    [...arrWorking, objPaperOpen.position]
+                );
+                await logFuturesEvent(
+                    pUserId, "calendar-spread", "option_opened", "success", "Loss Limit Re-entered",
+                    `Re-entered ${objPending.action.toUpperCase()} ${objPending.legSide.toUpperCase()} from Row ${objPending.rowIndex} settings on retry.`,
+                    { contractName: objPaperOpen.position.contractName, rowIndex: objPending.rowIndex, reason: "loss_limit_reenter_retry" }
+                );
+            }
+            catch (_objError) {
+                // Still unavailable (connection/feed); keep it queued for the next cycle.
+                arrStillPending.push(objPending);
+            }
+        }
+        await saveCalendarSpreadPendingReentries(pUserId, pProfile, arrStillPending);
+        return arrWorking;
+    }
+    finally {
+        gAutoTraderCycleLocks.delete(vRetryLockKey);
     }
 }
 
@@ -15833,6 +15975,13 @@ async function runAutoTraderCycle(
                     arrCalendarSpreadPositions
                 );
                 arrCalendarSpreadPositions = await processCalendarSpreadLossReenter(
+                    pUserId,
+                    objProfile,
+                    arrCalendarSpreadPositions
+                );
+                // Recover any re-entry that previously failed, e.g. while the
+                // Delta API was returning Bad Gateway / Service Unavailable.
+                arrCalendarSpreadPositions = await retryCalendarSpreadPendingReentries(
                     pUserId,
                     objProfile,
                     arrCalendarSpreadPositions
