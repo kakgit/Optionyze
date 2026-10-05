@@ -4147,6 +4147,17 @@
             : true;
     }
 
+    // Typing a Row Qty means "size this Leg independently", so unlink straight
+    // away. Without this the Multiplier overwrites the field on every keystroke
+    // while linked, which makes the Row Qty look read-only.
+    function unlinkRowQtyOnManualEdit() {
+        if (!isRowQtyLinkedToMultiplier()) {
+            return false;
+        }
+        setCheckboxValue(ids.linkRowQtyToMultiplier, false);
+        return true;
+    }
+
     function syncQtyFromStartQty() {
         // When unlinked, each Row keeps its own independent Qty.
         if (!isRowQtyLinkedToMultiplier()) {
@@ -6496,20 +6507,23 @@ async function loadClosedAltPositions() {
             renderCoveredHedgeGateSummary(displayedPositions);
             queueProfileSave();
         });
+        // Editing a Row Qty always means independent sizing: unlink first, then
+        // only refresh derived summaries. syncQtyFromStartQty() is intentionally
+        // skipped here so the typed value is never overwritten.
         nodes.qty?.addEventListener("change", function () {
+            unlinkRowQtyOnManualEdit();
             if (!isCoveredMode) {
                 return;
             }
-            syncQtyFromStartQty();
             renderCoveredHedgeGateSummary(displayedPositions);
             queueProfileSave();
         });
         if (nodes.qty instanceof HTMLInputElement) {
             nodes.qty.addEventListener("input", function () {
+                unlinkRowQtyOnManualEdit();
                 if (!isCoveredMode) {
                     return;
                 }
-                syncQtyFromStartQty();
                 renderCoveredHedgeGateSummary(displayedPositions);
                 queueProfileSave();
             });

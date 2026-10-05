@@ -27,6 +27,9 @@
     const bIsStrangleLikePage = false;
     const bShowLiveSupportSections = false;
     const bShowConfirmationSection = false;
+    // Cache-bust the page script so a redeployed client bundle is never served
+    // from the browser cache after a fix.
+    const vAssetVersion = String(Math.floor(Date.now() / 1000));
     const bShowTelegramAlertsSection = false;
     const bShowImportPositionsUi = false;
     const vStrategyLabel = "Calendar Spread";
@@ -1076,6 +1079,6 @@
             </div>
         </section>
     <% } %>
-    <script src="/js/calendar-spread.js"></script>
+    <script src="/js/calendar-spread.js?v=<%= vAssetVersion %>"></script>
 </body>
 </html>
