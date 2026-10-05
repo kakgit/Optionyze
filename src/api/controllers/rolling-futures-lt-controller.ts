@@ -2755,6 +2755,9 @@ function getDefaultManualTraderUiState(
         // Calendar Spread rolls DAILY T+2 buy positions before Delta settlement.
         // Default on; only meaningful for the calendar-spread strategy.
         autoRolloverT2BuyEnabled: pStrategyCode === "calendar-spread",
+        // When enabled (default), editing the Multiplier drives the Row 1/Row 2
+        // quantities. Turn it off to set each Row's Qty independently.
+        linkRowQtyToMultiplier: true,
         // Calendar Spread cuts and re-enters a position once its live loss
         // reaches this USD amount. Off by default; Calendar Spread only.
         autoReenterOnLossEnabled: false,
@@ -5455,6 +5458,9 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         autoRolloverT2BuyEnabled: pProfile.strategyCode === "calendar-spread"
             ? normalizeBooleanValue(objUiState.autoRolloverT2BuyEnabled, Boolean(objDefaults.autoRolloverT2BuyEnabled))
             : false,
+        linkRowQtyToMultiplier: pProfile.strategyCode === "calendar-spread"
+            ? normalizeBooleanValue(objUiState.linkRowQtyToMultiplier, Boolean(objDefaults.linkRowQtyToMultiplier))
+            : true,
         autoReenterOnLossEnabled: pProfile.strategyCode === "calendar-spread"
             ? normalizeBooleanValue(objUiState.autoReenterOnLossEnabled, Boolean(objDefaults.autoReenterOnLossEnabled))
             : false,
@@ -5905,6 +5911,9 @@ function normalizeProfileSaveInput(
         autoRolloverT2BuyEnabled: pStrategyCode === "calendar-spread"
             ? normalizeBooleanValue(objUiState.autoRolloverT2BuyEnabled, Boolean(objDefaults.autoRolloverT2BuyEnabled))
             : false,
+        linkRowQtyToMultiplier: pStrategyCode === "calendar-spread"
+            ? normalizeBooleanValue(objUiState.linkRowQtyToMultiplier, Boolean(objDefaults.linkRowQtyToMultiplier))
+            : true,
         autoReenterOnLossEnabled: pStrategyCode === "calendar-spread"
             ? normalizeBooleanValue(objUiState.autoReenterOnLossEnabled, Boolean(objDefaults.autoReenterOnLossEnabled))
             : false,
@@ -22125,6 +22134,111 @@ export async function executeCalendarSpreadManualOption(req: Request, res: Respo
 }
 export async function executeCalendarSpreadStrategy(req: Request, res: Response): Promise<void> {
     await executeStrategyInternal(req, res, "calendar-spread");
+}
+
+// Updates the qty of a single tracked open position. Used by the Open
+// Positions edit action. Charges and PnL are recalculated from the new qty so
+// the stored figures stay consistent with the edited size.
+export async function updateCalendarSpreadOpenPositionQty(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const vImportId = String(req.body?.importId || "").trim();
+    if (!vImportId) {
+        res.status(400).json({ status: "warning", message: "An open position id is required." });
+        return;
+    }
+    const vRawQty = Number(req.body?.qty);
+    if (!Number.isFinite(vRawQty)) {
+        res.status(400).json({ status: "warning", message: "Enter a valid quantity." });
+        return;
+    }
+    // 0 is allowed so a position can be reduced out; it is never negative.
+    const vQty = Math.max(0, Math.floor(vRawQty));
+
+    const vLockKey = `${getManualFutureOrderLockKey(vUserId, "calendar-spread")}::open-qty-update`;
+    if (gAutoTraderCycleLocks.has(vLockKey)) {
+        res.status(409).json({ status: "warning", message: "Another position change is in progress. Please wait for it to finish." });
+        return;
+    }
+    gAutoTraderCycleLocks.add(vLockKey);
+    try {
+        const arrPositions = await listRollingFuturesLtImportedPositions(vUserId, "calendar-spread");
+        const objPosition = arrPositions.find((objRow) => String(objRow.importId || "").trim() === vImportId);
+        if (!objPosition) {
+            res.status(404).json({ status: "warning", message: "That open position is no longer available." });
+            return;
+        }
+        const vPreviousQty = Number(objPosition.qty || 0);
+        if (vQty === vPreviousQty) {
+            res.json({
+                status: "success",
+                message: "Quantity is unchanged.",
+                data: { trackedOpenPositions: await buildOpenPositionsPayload(vUserId, "calendar-spread", arrPositions) }
+            });
+            return;
+        }
+
+        // estimateTrackedPositionCharge already sizes the charge for the new qty.
+        const vNextPnl = Number(estimateTrackedPositionPnl({
+            contractName: String(objPosition.contractName || "").trim(),
+            side: objPosition.side,
+            qty: vQty,
+            entryPrice: Number(objPosition.entryPrice || 0),
+            markPrice: Number(objPosition.markPrice || 0)
+        }).toFixed(4));
+        // Margin scales with the size change; charges are recomputed for the new qty.
+        const vMarginScale = vPreviousQty > 0 ? vQty / vPreviousQty : 0;
+        const vNextCharge = await estimateTrackedPositionCharge({
+            contractName: String(objPosition.contractName || "").trim(),
+            qty: vQty,
+            entryPrice: Number(objPosition.entryPrice || 0),
+            markPrice: Number(objPosition.markPrice || 0)
+        }, undefined, resolveTrackedPositionTradingLotSize(objPosition));
+        const objUpdated: RollingFuturesLtImportedPositionRecord = {
+            ...objPosition,
+            qty: vQty,
+            charges: Number(vNextCharge.toFixed(4)),
+            pnl: vNextPnl,
+            margin: Number((Number(objPosition.margin || 0) * vMarginScale).toFixed(4)),
+            updatedAt: new Date().toISOString()
+        };
+        const arrNext = arrPositions.map((objRow) => (
+            String(objRow.importId || "").trim() === vImportId ? objUpdated : objRow
+        ));
+        const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, "calendar-spread", arrNext);
+
+        const objProfile = await readLiveProfile(vUserId, "calendar-spread");
+        await logFuturesEvent(
+            vUserId, "calendar-spread", "manual_action", "info", "Open Position Qty Updated",
+            `Updated ${objPosition.contractName} qty from ${vPreviousQty} to ${vQty}.`,
+            {
+                symbol: normalizeSymbolValue(getMergedUiState(objProfile).symbol),
+                contractName: String(objPosition.contractName || "").trim(),
+                previousQty: vPreviousQty,
+                qty: vQty,
+                reason: "open_position_qty_update"
+            }
+        );
+
+        res.json({
+            status: "success",
+            message: `Updated ${objPosition.contractName} qty from ${vPreviousQty} to ${vQty}.`,
+            data: {
+                importId: vImportId,
+                previousQty: vPreviousQty,
+                qty: vQty,
+                trackedOpenPositions: await buildOpenPositionsPayload(vUserId, "calendar-spread", arrSaved)
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to update the open position quantity.")
+        });
+    }
+    finally {
+        gAutoTraderCycleLocks.delete(vLockKey);
+    }
 }
 
 // Manual per-position close and re-enter. Closes one open position and

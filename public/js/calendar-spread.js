@@ -266,6 +266,14 @@
         closeImportModalButton: document.getElementById(`btn${idPrefix}CloseImportModal`),
         applyImportedPositionsButton: document.getElementById(`btn${idPrefix}ApplyImportedPositions`),
         closedEditOverlay: document.getElementById(`${prefix}ClosedEditOverlay`),
+        openEditOverlay: document.getElementById(`${prefix}OpenEditOverlay`),
+        openEditModal: document.getElementById(`${prefix}OpenEditModal`),
+        openEditSymbol: document.getElementById(`${prefix}OpenEditSymbol`),
+        openEditStatus: document.getElementById(`${prefix}OpenEditStatus`),
+        openEditQty: document.getElementById(`txt${idPrefix}OpenEditQty`),
+        closeOpenEditModalButton: document.getElementById(`btn${idPrefix}CloseOpenEditModal`),
+        saveOpenEditButton: document.getElementById(`btn${idPrefix}SaveOpenEdit`),
+        linkRowQtyToMultiplier: document.getElementById("chkRollingFuturesLinkRowQtyToMultiplier"),
         closedEditModal: document.getElementById(`${prefix}ClosedEditModal`),
         closedEditSymbol: document.getElementById(`${prefix}ClosedEditSymbol`),
         closedEditStatus: document.getElementById(`${prefix}ClosedEditStatus`),
@@ -288,6 +296,7 @@
     let closedAltPositions = [];
     let closedAltPositionsPage = 1;
     let editingClosedPositionCloseId = "";
+    let editingOpenPositionImportId = "";
     let connectionPollTimer = null;
     let confirmationPollTimer = null;
     let isApplyingState = false;
@@ -3940,6 +3949,7 @@
             alternatingLegRestrictionEnabled: isStrangleLikePage ? true : getCheckboxValue(ids.alternatingLegRestrictionEnabled, true),
             openIfLastPnlNegative: isStrangleLikePage ? false : getCheckboxValue(ids.openIfLastPnlNegative, false),
         autoRolloverT2BuyEnabled: getCheckboxValue(ids.autoRolloverT2BuyEnabled, true),
+        linkRowQtyToMultiplier: getCheckboxValue(ids.linkRowQtyToMultiplier, true),
         autoReenterOnLossEnabled: getCheckboxValue(ids.autoReenterOnLossEnabled, false),
         lossReenterThreshold: normalizeLossReenterThresholdInput(ids.lossReenterThreshold),
             renkoEnabled: supportsRenkoFeed ? getCheckboxValue(ids.renkoEnabled, false) : false,
@@ -4068,6 +4078,7 @@
             setCheckboxValue(ids.alternatingLegRestrictionEnabled, isStrangleLikePage ? true : (objUiState.alternatingLegRestrictionEnabled ?? true));
             setCheckboxValue(ids.openIfLastPnlNegative, isStrangleLikePage ? false : objUiState.openIfLastPnlNegative);
         setCheckboxValue(ids.autoRolloverT2BuyEnabled, objUiState.autoRolloverT2BuyEnabled ?? true);
+        setCheckboxValue(ids.linkRowQtyToMultiplier, objUiState.linkRowQtyToMultiplier ?? true);
         setCheckboxValue(ids.autoReenterOnLossEnabled, Boolean(objUiState.autoReenterOnLossEnabled));
         setInputValue(ids.lossReenterThreshold, String(objUiState.lossReenterThreshold ?? "1000"));
             if (usesDeltaRenkoStyleFeedControls()) {
@@ -4130,7 +4141,17 @@
         }
     }
 
+    function isRowQtyLinkedToMultiplier() {
+        return ids.linkRowQtyToMultiplier instanceof HTMLInputElement
+            ? ids.linkRowQtyToMultiplier.checked
+            : true;
+    }
+
     function syncQtyFromStartQty() {
+        // When unlinked, each Row keeps its own independent Qty.
+        if (!isRowQtyLinkedToMultiplier()) {
+            return;
+        }
         if (!(ids.startQty instanceof HTMLInputElement)) {
             return;
         }
@@ -5259,6 +5280,17 @@
                             </button>
                 `
                 : "";
+            // Calendar Spread: edit the current qty of a single open position.
+            const editQtyActionButton = isCalendarSpreadPage
+                ? `
+                            <button class="rolling-demo-icon-btn rolling-live-edit-open-position" type="button" data-import-id="${escapeHtml(importId)}" title="${escapeHtml("Edit the quantity of this open position")}" aria-label="${escapeHtml("Edit the quantity of this open position")}">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M12 20h9" />
+                                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                                </svg>
+                            </button>
+                `
+                : "";
             return `
                 <tr class="${coveredSideRowClass} ${inactiveRowClass}">
                     <td>${renderGreekCell(
@@ -5284,6 +5316,7 @@
                     <td>
                         <div class="rolling-demo-table-actions">
                             ${swapActionButton}
+                            ${editQtyActionButton}
                             ${reenterActionButton}
                             <button class="rolling-demo-icon-btn sell rolling-live-close-open-position" type="button" data-import-id="${escapeHtml(importId)}" title="${escapeHtml(isInactive ? "Inactive paper position cannot be closed again." : "Close this open position")}" aria-label="${escapeHtml(isInactive ? "Inactive paper position cannot be closed again." : "Close this open position")}" ${isInactive ? "disabled" : ""}>
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -5900,6 +5933,56 @@ async function loadClosedAltPositions() {
         setStatus(ids.closedEditStatus, "", "");
     }
 
+    function openOpenEditModal(row) {
+        editingOpenPositionImportId = String(row?.importId || "").trim();
+        if (ids.openEditSymbol) {
+            ids.openEditSymbol.textContent = `Update Qty for ${String(row?.contractName || "this open position").trim() || "this open position"}.`;
+        }
+        if (ids.openEditQty instanceof HTMLInputElement) {
+            ids.openEditQty.value = String(Math.max(1, Math.floor(Number(row?.qty || 1))));
+        }
+        setStatus(ids.openEditStatus, "", "");
+        ids.openEditOverlay?.classList.add("show");
+        ids.openEditModal?.classList.add("show");
+        ids.openEditModal?.setAttribute("aria-hidden", "false");
+        setTimeout(function () {
+            ids.openEditQty?.focus();
+            ids.openEditQty?.select();
+        }, 0);
+    }
+
+    function closeOpenEditModal() {
+        editingOpenPositionImportId = "";
+        ids.openEditOverlay?.classList.remove("show");
+        ids.openEditModal?.classList.remove("show");
+        ids.openEditModal?.setAttribute("aria-hidden", "true");
+        setStatus(ids.openEditStatus, "", "");
+    }
+
+    async function saveOpenEditQty() {
+        const importId = String(editingOpenPositionImportId || "").trim();
+        const qty = Math.floor(Number(ids.openEditQty?.value || 0));
+        if (!importId) {
+            throw new Error("Select an open position to edit.");
+        }
+        if (!(qty > 0)) {
+            throw new Error("Qty must be greater than 0.");
+        }
+        setStatus(ids.openEditStatus, "Saving...", "info");
+        const objResult = await postJson(`${endpointBase}/open-positions/update-qty`, { importId: importId, qty: qty });
+        const trackedPayload = objResult?.data?.trackedOpenPositions || null;
+        if (trackedPayload) {
+            renderOpenPositions(trackedPayload);
+        }
+        closeOpenEditModal();
+        setStatus(ids.pageStatus, String(objResult?.message || "Open position qty updated."), "success");
+        await Promise.all([
+            loadAccountSummary().catch(function () { return undefined; }),
+            loadEvents().catch(function () { return undefined; })
+        ]);
+        return objResult;
+    }
+
     async function saveClosedEditQty() {
         const closeId = String(editingClosedPositionCloseId || "").trim();
         const qty = Math.max(0, Math.floor(Number(ids.closedEditQty?.value || 0)));
@@ -6319,6 +6402,11 @@ async function loadClosedAltPositions() {
         }, 400);
     }
 
+    ids.linkRowQtyToMultiplier?.addEventListener("change", function () {
+        // Re-link immediately so the Row Qty values visibly follow the Multiplier.
+        syncQtyFromStartQty();
+        queueProfileSave();
+    });
     ids.autoRolloverT2BuyEnabled?.addEventListener("change", function () {
         queueProfileSave();
     });
@@ -7302,6 +7390,27 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
     ids.importOverlay?.addEventListener("click", closeImportModal);
     ids.closeImportModalButton?.addEventListener("click", closeImportModal);
     ids.closedEditOverlay?.addEventListener("click", closeClosedEditModal);
+    ids.closeOpenEditModalButton?.addEventListener("click", closeOpenEditModal);
+    ids.openEditOverlay?.addEventListener("click", closeOpenEditModal);
+    ids.saveOpenEditButton?.addEventListener("click", function () {
+        ids.saveOpenEditButton.disabled = true;
+        void saveOpenEditQty().then(function (objResult) {
+            setStatus(ids.pageStatus, objResult?.message || "Open position qty updated.", "success");
+        }).catch(function (error) {
+            setStatus(ids.openEditStatus, error instanceof Error ? error.message : "Unable to update open position qty.", "danger");
+        }).finally(function () {
+            ids.saveOpenEditButton.disabled = false;
+        });
+    });
+    ids.openEditQty?.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            ids.saveOpenEditButton?.click();
+        }
+        if (event.key === "Escape") {
+            closeOpenEditModal();
+        }
+    });
     ids.closeClosedEditModalButton?.addEventListener("click", closeClosedEditModal);
     ids.saveClosedEditButton?.addEventListener("click", function () {
         void saveClosedEditQty().then(function (objResult) {
@@ -7357,6 +7466,19 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
     });
     const handleOpenPositionsBodyClick = function (event) {
         const target = event.target instanceof Element ? event.target : null;
+        const editButton = target ? target.closest(".rolling-live-edit-open-position") : null;
+        if (editButton instanceof HTMLButtonElement) {
+            const importId = String(editButton.dataset.importId || "").trim();
+            const row = displayedPositions.find(function (item) {
+                return String(item?.importId || "").trim() === importId;
+            });
+            if (!row) {
+                setStatus(ids.pageStatus, "Unable to find the selected open position.", "danger");
+                return;
+            }
+            openOpenEditModal(row);
+            return;
+        }
         const reenterButton = target ? target.closest(".rolling-live-reenter-open-position") : null;
         if (reenterButton instanceof HTMLButtonElement) {
             const importId = String(reenterButton.dataset.importId || "").trim();

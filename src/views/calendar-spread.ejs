@@ -498,6 +498,20 @@
                                     </span>
                                 </div>
                             <% } %>
+                            <div class="rolling-futures-buy-gate-row">
+                                <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesLinkRowQtyToMultiplier">
+                                    <input type="checkbox" id="chkRollingFuturesLinkRowQtyToMultiplier" checked />
+                                </label>
+                                <div class="rolling-futures-buy-gate-text">Link Row Qty to Multiplier</div>
+                                <span class="rolling-futures-help-icon-wrap">
+                                    <button type="button" class="rolling-futures-help-trigger" aria-label="Show row quantity link help">
+                                        ?
+                                    </button>
+                                    <span class="rolling-futures-help-popout floating">
+                                        When enabled, changing the <code>Multiplier</code> sets the <code>Qty</code> for both Leg 1 and Leg 2. Turn it off to set each Row's <code>Qty</code> independently.
+                                    </span>
+                                </span>
+                            </div>
                         </div>
                     </div>
                     <div class="rolling-demo-field rolling-futures-buy-gate-field">
@@ -1015,6 +1029,29 @@
         </section>
     <% } %>
     <% if (bIsPaperDemoPage) { %>
+        <div class="rolling-live-overlay" id="rollingDualFuturesOpenEditOverlay"></div>
+        <section class="app-panel rolling-live-modal" id="rollingDualFuturesOpenEditModal" aria-hidden="true">
+            <div class="rolling-live-modal-head">
+                <div>
+                    <h2 class="rolling-live-modal-title">Edit Open Position Qty</h2>
+                    <p class="app-copy" id="rollingDualFuturesOpenEditSymbol">Update the quantity of this open position.</p>
+                </div>
+                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesCloseOpenEditModal" title="Close edit dialog" aria-label="Close edit dialog">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="rolling-live-status" id="rollingDualFuturesOpenEditStatus"></div>
+            <div class="rolling-demo-field">
+                <label for="txtRollingDualFuturesOpenEditQty">Qty</label>
+                <input type="number" min="1" step="1" id="txtRollingDualFuturesOpenEditQty" />
+            </div>
+            <div class="rolling-live-modal-actions">
+                <button class="rolling-demo-btn primary" type="button" id="btnRollingDualFuturesSaveOpenEdit">Save Qty</button>
+            </div>
+        </section>
         <div class="rolling-live-overlay" id="rollingDualFuturesClosedEditOverlay"></div>
         <section class="app-panel rolling-live-modal" id="rollingDualFuturesClosedEditModal" aria-hidden="true">
             <div class="rolling-live-modal-head">
