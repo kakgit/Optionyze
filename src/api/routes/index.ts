@@ -344,6 +344,8 @@ import {
 import { getMyProfileApi } from "../controllers/account-controller";
 import { registerMobilePushTokenController } from "../controllers/mobile-push-controller";
 import type { RunnerManager } from "../../runners/runner-manager";
+import { getSimulatorCandles, getSimulatorChain, getSimulatorFutures } from "../controllers/simulator-controller";
+import { getSimulatorManualSnapshot } from "../controllers/simulator-manual-controller";
 import { requireAdminApi, requireAuthApi, requireFreshPasswordApi, requireSurvivalAdminApi } from "../middleware/auth-middleware";
 
 export function createApiRouter(pRunnerManager: RunnerManager): Router {
@@ -1264,6 +1266,21 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/straddle-demo/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await clearStraddleDemoEventsController(req, res);
+    });
+
+    // Strategy Simulator: read-only proxies to Delta Exchange historical
+    // market data (candles, option chains, futures products).
+    objRouter.get("/simulator/candles", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getSimulatorCandles(req, res);
+    });
+    objRouter.get("/simulator/chain", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getSimulatorChain(req, res);
+    });
+    objRouter.get("/simulator/futures", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getSimulatorFutures(req, res);
+    });
+    objRouter.get("/simulator/manual-snapshot", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getSimulatorManualSnapshot(req, res);
     });
 
     return objRouter;

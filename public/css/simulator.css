@@ -1,0 +1,494 @@
+/* Strategy Simulator — standalone page styles. Shares the app-shell tokens
+   (colors, panels, buttons) so the page matches the rest of Optionyze. */
+
+.sim-layout {
+    display: grid;
+    gap: 18px;
+}
+
+.sim-hero {
+    display: grid;
+    grid-template-columns: 1.1fr .9fr;
+    gap: 20px;
+    padding: 26px;
+    align-items: center;
+}
+
+.sim-hero-copy h1 {
+    margin: 0 0 10px;
+    font-size: 2.1rem;
+    letter-spacing: .02em;
+}
+
+.sim-hero-copy p {
+    margin: 0;
+    color: var(--app-muted);
+    line-height: 1.55;
+    max-width: 58ch;
+}
+
+.sim-hero-badges {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.sim-badge {
+    background: rgba(255, 255, 255, .03);
+    border: 1px solid var(--app-line);
+    border-radius: 14px;
+    padding: 12px 14px;
+}
+
+.sim-badge label {
+    display: block;
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--app-muted);
+    margin-bottom: 6px;
+}
+
+.sim-badge strong {
+    font-size: .92rem;
+    color: var(--app-accent-2);
+    word-break: break-word;
+}
+
+.sim-panel {
+    padding: 22px;
+}
+
+.sim-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+.sim-panel-head h2,
+.sim-notes h2 {
+    margin: 0;
+    font-size: 1.25rem;
+}
+
+.sim-controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+}
+
+.sim-field {
+    display: grid;
+    gap: 6px;
+    align-content: start;
+}
+
+.sim-field label {
+    font-size: .76rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--app-muted);
+}
+
+.sim-field input,
+.sim-field select,
+.sim-field button {
+    min-height: 40px;
+}
+
+.sim-field input[type="datetime-local"],
+.sim-field input[type="date"],
+.sim-field select {
+    width: 100%;
+    padding: 0 10px;
+    border-radius: 12px;
+    border: 1px solid var(--app-line);
+    background: rgba(255, 255, 255, .04);
+    color: var(--app-text);
+    font: inherit;
+}
+
+.sim-inline {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.sim-inline input[type="date"] {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.sim-shift-btn {
+    min-width: 40px;
+    padding: 0 10px;
+    font-size: 1.1rem;
+    line-height: 1;
+}
+
+.sim-field-action .app-solid-btn {
+    width: 100%;
+}
+
+.sim-hint {
+    margin-top: 12px;
+    font-size: .82rem;
+    color: var(--app-muted);
+}
+
+.sim-status {
+    font-size: .84rem;
+    color: var(--app-muted);
+    min-height: 1.2em;
+    text-align: right;
+}
+
+.sim-status.success { color: var(--app-good); }
+.sim-status.warning { color: var(--app-warn); }
+.sim-status.error { color: var(--app-danger); }
+
+.sim-chart-stats {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    font-size: .8rem;
+    color: var(--app-muted);
+}
+
+.sim-chart-stats strong {
+    color: var(--app-text);
+    font-weight: 600;
+}
+
+.sim-canvas-wrap {
+    position: relative;
+    width: 100%;
+    border: 1px solid var(--app-line);
+    border-radius: 16px;
+    background: rgba(4, 10, 24, .55);
+    overflow: hidden;
+}
+
+.sim-canvas {
+    display: block;
+    width: 100%;
+    height: 360px;
+}
+
+.sim-canvas-pnl {
+    height: 260px;
+}
+
+.sim-empty {
+    margin: 12px 0 0;
+    font-size: .86rem;
+    color: var(--app-muted);
+}
+
+.sim-empty-row td {
+    text-align: center;
+    color: var(--app-muted);
+    padding: 18px 10px !important;
+}
+
+.sim-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.sim-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--app-line);
+    border-radius: 16px;
+}
+
+.sim-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .86rem;
+}
+
+.sim-table th,
+.sim-table td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--app-line);
+    white-space: nowrap;
+}
+
+.sim-table thead th {
+    background: rgba(255, 255, 255, .04);
+    font-size: .74rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--app-muted);
+}
+
+.sim-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.sim-table input,
+.sim-table select {
+    min-height: 34px;
+    padding: 0 8px;
+    border-radius: 10px;
+    border: 1px solid var(--app-line);
+    background: rgba(255, 255, 255, .05);
+    color: var(--app-text);
+    font: inherit;
+}
+
+.sim-table input[type="number"] {
+    width: 96px;
+}
+
+.sim-table select {
+    min-width: 96px;
+}
+
+.sim-remove-btn {
+    min-height: 32px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 181, 181, .35);
+    background: rgba(255, 181, 181, .08);
+    color: var(--app-danger);
+    cursor: pointer;
+    font: inherit;
+}
+
+.sim-pnl-good { color: var(--app-good); font-weight: 700; }
+.sim-pnl-bad { color: var(--app-danger); font-weight: 700; }
+
+.sim-tiles {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.sim-tile {
+    padding: 14px 16px;
+    border: 1px solid var(--app-line);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .03);
+}
+
+.sim-tile label {
+    display: block;
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--app-muted);
+    margin-bottom: 8px;
+}
+
+.sim-tile strong {
+    font-size: 1.35rem;
+    word-break: break-word;
+}
+
+.sim-notes ul {
+    margin: 12px 0 0;
+    padding-left: 20px;
+    color: var(--app-muted);
+    line-height: 1.6;
+    font-size: .9rem;
+}
+
+.sim-notes li {
+    margin-bottom: 8px;
+}
+
+.sim-notes code {
+    background: rgba(255, 255, 255, .06);
+    border: 1px solid var(--app-line);
+    border-radius: 6px;
+    padding: 1px 6px;
+    font-size: .84em;
+    color: #bfe9ff;
+}
+
+.sim-notes strong {
+    color: var(--app-text);
+}
+
+@media (max-width: 980px) {
+    .sim-hero {
+        grid-template-columns: 1fr;
+    }
+
+    .sim-tiles {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 620px) {
+    .sim-hero-badges,
+    .sim-tiles {
+        grid-template-columns: 1fr;
+    }
+
+    .sim-status {
+        text-align: left;
+    }
+}
+
+/* ---------- Manual Bi-Directional Lab ---------- */
+
+.sim-lab .sim-hint {
+    margin-top: 0;
+}
+
+.sim-lab-controls {
+    align-items: end;
+}
+
+.sim-lab-steps {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 16px;
+}
+
+.sim-lab-steps-label {
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--app-muted);
+    margin-right: 4px;
+}
+
+.sim-lab-steps .sim-shift-btn {
+    min-width: 64px;
+}
+
+.sim-lab-step-fwd {
+    border-color: rgba(134, 239, 172, .45) !important;
+    color: var(--app-good);
+}
+
+.sim-lab-tiles {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.sim-lab-tiles .sim-tile strong {
+    font-size: 1.05rem;
+}
+
+.sim-lab-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin: 4px 0 18px;
+    font-size: .82rem;
+    color: var(--app-muted);
+}
+
+.sim-lab-meta span {
+    background: rgba(255, 255, 255, .04);
+    border: 1px solid var(--app-line);
+    border-radius: 999px;
+    padding: 4px 10px;
+    white-space: nowrap;
+}
+
+.sim-subhead {
+    margin: 22px 0 10px;
+    font-size: 1.02rem;
+    color: var(--app-text);
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.sim-subhead-note {
+    font-size: .76rem;
+    font-weight: 400;
+    color: var(--app-muted);
+}
+
+.sim-chain-table th,
+.sim-chain-table td {
+    text-align: center;
+    padding: 6px 8px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.sim-chain-table .sim-chain-calls-head {
+    color: var(--app-good);
+    background: rgba(134, 239, 172, .07);
+}
+
+.sim-chain-table .sim-chain-puts-head {
+    color: var(--app-danger);
+    background: rgba(255, 181, 181, .07);
+}
+
+.sim-chain-table .sim-chain-strike-head {
+    background: rgba(255, 255, 255, .05);
+    min-width: 110px;
+}
+
+.sim-chain-table .lab-strike-cell {
+    font-weight: 700;
+    background: rgba(255, 255, 255, .04);
+    position: relative;
+}
+
+.sim-chain-table tr.is-atm .lab-strike-cell {
+    background: rgba(96, 165, 250, .22);
+    color: #cfe6ff;
+}
+
+.sim-chain-table tr.is-atm td {
+    background: rgba(96, 165, 250, .06);
+}
+
+.sim-chain-table tr.is-atm td.lab-strike-cell {
+    background: rgba(96, 165, 250, .22);
+}
+
+.lab-atm-tag {
+    display: inline-block;
+    margin-left: 6px;
+    font-size: .62rem;
+    letter-spacing: .08em;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(96, 165, 250, .35);
+    color: #eaf4ff;
+    vertical-align: middle;
+}
+
+.lab-cell.is-held {
+    outline: 2px solid rgba(253, 224, 71, .85);
+    outline-offset: -2px;
+    background: rgba(253, 224, 71, .10);
+    font-weight: 700;
+}
+
+.lab-cell.is-daily {
+    border-bottom: 2px dashed rgba(134, 239, 172, .40);
+}
+
+.lab-cell.lab-oi {
+    color: var(--app-muted);
+    font-size: .78rem;
+    font-style: italic;
+}
+
+#labPositionsBody td,
+#labLogBody td {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+

@@ -23,6 +23,7 @@ import {
     renderFuturesScalperPage,
     renderCalendarSpreadPage
 } from "../api/controllers/strategyfo-paper-controller";
+import { renderSimulatorPage } from "../api/controllers/simulator-controller";
 import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade, syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade, syncCalendarSpreadRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
 import { loadRollingFuturesLtRuntime } from "../storage/rolling-futures-lt-runtime-store";
 import { ensureLiveTickerSymbols, getLiveMarketSnapshot } from "../strategies/rolling-options-pt-de/market-data";
@@ -161,6 +162,7 @@ async function bootstrap(): Promise<void> {
     app.get("/futures-scalper", requireAuthPage, requireFreshPasswordPage, renderFuturesScalperPage);
     app.get("/calendar-spread", requireAuthPage, requireFreshPasswordPage, renderCalendarSpreadPage);
     app.get("/strangle-demo", requireAuthPage, requireFreshPasswordPage, renderStrangleDemoPage);
+    app.get("/simulator", requireAuthPage, requireFreshPasswordPage, renderSimulatorPage);
     app.get("/mngusers", requireAuthPage, requireFreshPasswordPage, requireAdminPage, renderMngUsersPage);
     app.get("/account/profile", requireAuthPage, renderMyProfilePage);
     app.post("/account/profile", requireAuthPage, async (req, res) => {

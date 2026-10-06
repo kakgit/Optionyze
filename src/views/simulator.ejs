@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= pageTitle %></title>
+    <%- include('partials/brand-head') %>
+    <link rel="stylesheet" href="/css/app-shell.css" />
+    <link rel="stylesheet" href="/css/account-menu.css" />
+    <link rel="stylesheet" href="/css/simulator.css" />
+</head>
+  <%
+    // Standalone page: values are hard-coded rather than derived from a
+    // shared pageVariant switch so the Simulator cannot affect demo pages.
+    const vAssetVersion = String(Math.floor(Date.now() / 1000));
+    const vEndpointBase = "/api/simulator";
+    const arrResolutionOptions = (typeof simulatorResolutions !== "undefined" && simulatorResolutions && simulatorResolutions.length)
+        ? simulatorResolutions
+        : ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "1d", "1w"];
+    const vMaxCandles = (typeof simulatorMaxCandles !== "undefined") ? simulatorMaxCandles : 16000;
+    const vRowsPerCall = (typeof simulatorRowsPerCall !== "undefined") ? simulatorRowsPerCall : 4001;
+  %>
+  <body class="app-page"
+        data-simulator-endpoint-base="<%= vEndpointBase %>"
+        data-simulator-max-candles="<%= vMaxCandles %>"
+        data-current-account-id="<%= currentAccount?.accountId || '' %>"
+        data-current-account-email="<%= currentAccount?.email || '' %>">
+    <div class="app-layout sim-layout">
+        <%- include('partials/app-header', { currentAccount }) %>
+
+        <section class="app-panel sim-hero">
+            <div class="sim-hero-copy">
+                <h1>Strategy Simulator</h1>
+                <p>Backtest multi-leg futures and options strategies against historical Delta Exchange data.
+                   Read-only paper tooling &mdash; the Simulator never places orders.</p>
+            </div>
+            <div class="sim-hero-badges">
+                <div class="sim-badge">
+                    <label>Futures history</label>
+                    <strong>From 2019-04-03 06:00 UTC</strong>
+                </div>
+                <div class="sim-badge">
+                    <label>Options history</label>
+                    <strong>Expiries from 2020-09-25 &middot; BTC 2020-10-02</strong>
+                </div>
+                <div class="sim-badge">
+                    <label>Timeframes</label>
+                    <strong><%= arrResolutionOptions.join(" · ") %></strong>
+                </div>
+                <div class="sim-badge">
+                    <label>Ceiling</label>
+                    <strong><%= vMaxCandles.toLocaleString("en-US") %> candles/request (<%= vRowsPerCall.toLocaleString("en-US") %>/page)</strong>
+                </div>
+            </div>
+        </section>
+
+        <section class="app-panel sim-panel">
+            <div class="sim-panel-head">
+                <h2>Historical Data</h2>
+                <div class="sim-status" id="simDataStatus"></div>
+            </div>
+            <div class="sim-controls">
+                <div class="sim-field">
+                    <label for="simUnderlying">Underlying</label>
+                    <select id="simUnderlying">
+                        <option value="BTC" selected>BTC</option>
+                        <option value="ETH">ETH</option>
+                        <option value="SOL">SOL</option>
+                        <option value="XRP">XRP</option>
+                        <option value="BNB">BNB</option>
+                        <option value="LTC">LTC</option>
+                        <option value="LINK">LINK</option>
+                    </select>
+                </div>
+                <div class="sim-field">
+                    <label for="simInstrument">Market</label>
+                    <select id="simInstrument">
+                        <option value="futures" selected>Futures</option>
+                        <option value="options">Options</option>
+                    </select>
+                </div>
+                <div class="sim-field sim-field-expiry" id="simExpiryField" hidden>
+                    <label for="simExpiry">Expiry date</label>
+                    <div class="sim-inline">
+                        <button class="app-ghost-btn sim-shift-btn" type="button" id="simExpiryPrev" title="Previous day">&lsaquo;</button>
+                        <input type="date" id="simExpiry" />
+                        <button class="app-ghost-btn sim-shift-btn" type="button" id="simExpiryNext" title="Next day">&rsaquo;</button>
+                    </div>
+                </div>
+                <div class="sim-field sim-field-symbol">
+                    <label for="simSymbol">Symbol</label>
+                    <select id="simSymbol">
+                        <option value="">Load symbols&hellip;</option>
+                    </select>
+                </div>
+                <div class="sim-field">
+                    <label for="simResolution">Timeframe</label>
+                    <select id="simResolution">
+                        <% arrResolutionOptions.forEach(function (strRes) { %>
+                            <option value="<%= strRes %>" <%= strRes === "1h" ? "selected" : "" %>><%= strRes %></option>
+                        <% }); %>
+                    </select>
+                </div>
+                <div class="sim-field">
+                    <label for="simFrom">From (local time)</label>
+                    <input type="datetime-local" id="simFrom" />
+                </div>
+                <div class="sim-field">
+                    <label for="simTo">To (local time)</label>
+                    <input type="datetime-local" id="simTo" />
+                </div>
+                <div class="sim-field sim-field-action">
+                    <label>&nbsp;</label>
+                    <button class="app-solid-btn" type="button" id="btnLoadHistory">Load History</button>
+                </div>
+            </div>
+            <div class="sim-hint" id="simRangeHint"></div>
+        </section>
+
+        <section class="app-panel sim-panel sim-lab">
+            <div class="sim-panel-head">
+                <h2>Manual Bi-Directional Lab</h2>
+                <div class="sim-status" id="labStatus"></div>
+            </div>
+            <p class="sim-hint">Time-travel lab: move the cursor through history and the state machine re-evaluates
+                both strategies against the real option chain for that instant. Backward steps restore the portfolio
+                exactly as it was &mdash; checkpoints (positions, wallet and trade log) persist in your browser.</p>
+            <div class="sim-controls sim-lab-controls">
+                <div class="sim-field">
+                    <label for="labDate">Cursor date (UTC)</label>
+                    <input type="date" id="labDate" />
+                </div>
+                <div class="sim-field">
+                    <label for="labTime">Cursor time (UTC)</label>
+                    <input type="time" id="labTime" step="60" />
+                </div>
+                <div class="sim-field">
+                    <label for="labUnderlying">Underlying</label>
+                    <select id="labUnderlying">
+                        <option value="BTC" selected>BTC</option>
+                        <option value="ETH">ETH</option>
+                        <option value="SOL">SOL</option>
+                        <option value="XRP">XRP</option>
+                        <option value="BNB">BNB</option>
+                        <option value="LTC">LTC</option>
+                    </select>
+                </div>
+                <div class="sim-field sim-field-action">
+                    <label>&nbsp;</label>
+                    <button type="button" id="labJump" class="app-solid-btn">Jump to time</button>
+                </div>
+                <div class="sim-field">
+                    <label for="labSlDelta">Daily long stop-loss</label>
+                    <select id="labSlDelta">
+                        <option value="0.5" selected>&Delta; &le; 0.50</option>
+                        <option value="0.6">&Delta; &le; 0.60</option>
+                    </select>
+                </div>
+                <div class="sim-field">
+                    <label for="labMarginMode">Margin mode</label>
+                    <select id="labMarginMode">
+                        <option value="portfolio" selected>Portfolio (offset 1,000L &harr; 2,000S)</option>
+                        <option value="cross">Cross 1.7% of notional</option>
+                    </select>
+                </div>
+                <div class="sim-field sim-field-action">
+                    <label>&nbsp;</label>
+                    <button type="button" id="labReset" class="sim-shift-btn">Reset lab wallet</button>
+                </div>
+            </div>
+            <div class="sim-lab-steps">
+                <span class="sim-lab-steps-label">Step time</span>
+                <button type="button" class="sim-shift-btn" data-lab-step="-3600">&minus;60m</button>
+                <button type="button" class="sim-shift-btn" data-lab-step="-1800">&minus;30m</button>
+                <button type="button" class="sim-shift-btn" data-lab-step="-900">&minus;15m</button>
+                <button type="button" class="sim-shift-btn" data-lab-step="-300">&minus;5m</button>
+                <button type="button" class="sim-shift-btn sim-lab-step-fwd" data-lab-step="300">+5m</button>
+                <button type="button" class="sim-shift-btn sim-lab-step-fwd" data-lab-step="900">+15m</button>
+                <button type="button" class="sim-shift-btn sim-lab-step-fwd" data-lab-step="1800">+30m</button>
+                <button type="button" class="sim-shift-btn sim-lab-step-fwd" data-lab-step="3600">+60m</button>
+            </div>
+            <div class="sim-tiles sim-lab-tiles">
+                <div class="sim-tile">
+                    <label>Cursor (UTC)</label>
+                    <strong id="labTileTime">&mdash;</strong>
+                </div>
+                <div class="sim-tile">
+                    <label>Spot</label>
+                    <strong id="labTileSpot">&mdash;</strong>
+                </div>
+                <div class="sim-tile">
+                    <label>Equity</label>
+                    <strong id="labTileEquity">&mdash;</strong>
+                </div>
+                <div class="sim-tile">
+                    <label>Available margin</label>
+                    <strong id="labTileAvailable">&mdash;</strong>
+                </div>
+                <div class="sim-tile">
+                    <label>Locked margin</label>
+                    <strong id="labTileLocked">&mdash;</strong>
+                </div>
+                <div class="sim-tile">
+                    <label>Net P&amp;L</label>
+                    <strong id="labTileNet">&mdash;</strong>
+                </div>
+                <div class="sim-tile">
+                    <label>Margin mode</label>
+                    <strong id="labTileMode">&mdash;</strong>
+                </div>
+            </div>
+            <div class="sim-lab-meta" id="labMeta"></div>
+            <h3 class="sim-subhead">Historical Option Chain <span class="sim-subhead-note">monthly leg shown when a strike lists in both expiries; hover a cell for the contract</span></h3>
+            <div class="sim-table-wrap">
+                <table class="sim-table sim-chain-table" id="labChainTable">
+                    <thead>
+                        <tr class="sim-chain-group">
+                            <th colspan="4" class="sim-chain-calls-head">Calls</th>
+                            <th rowspan="2" class="sim-chain-strike-head">Strike</th>
+                            <th colspan="4" class="sim-chain-puts-head">Puts</th>
+                        </tr>
+                        <tr>
+                            <th>Premium</th>
+                            <th>&Delta;</th>
+                            <th>&gamma;</th>
+                            <th>OI</th>
+                            <th>OI</th>
+                            <th>&gamma;</th>
+                            <th>&Delta;</th>
+                            <th>Premium</th>
+                        </tr>
+                    </thead>
+                    <tbody id="labChainBody">
+                        <tr class="sim-empty-row"><td colspan="9">Load a snapshot to see the historical chain.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <h3 class="sim-subhead">Active Open Positions</h3>
+            <div class="sim-table-wrap">
+                <table class="sim-table" id="labPositionsTable">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Strategy</th>
+                            <th>Side</th>
+                            <th>Contract</th>
+                            <th>Expiry</th>
+                            <th>Strike</th>
+                            <th>Lots</th>
+                            <th>Entry &Delta;</th>
+                            <th>Entry prem</th>
+                            <th>Mark &Delta;</th>
+                            <th>Mark prem</th>
+                            <th>DTE</th>
+                            <th>Locked</th>
+                            <th>Unrealized</th>
+                        </tr>
+                    </thead>
+                    <tbody id="labPositionsBody">
+                        <tr class="sim-empty-row"><td colspan="14">No open positions yet &mdash; take a forward step to let the state machine enter.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 class="sim-subhead">Historical Trade Log</h3>
+            <div class="sim-table-wrap">
+                <table class="sim-table" id="labLogTable">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Strategy</th>
+                            <th>Side</th>
+                            <th>Strike</th>
+                            <th>Lots</th>
+                            <th>Entry (UTC)</th>
+                            <th>Entry &Delta;</th>
+                            <th>Entry prem</th>
+                            <th>Exit (UTC)</th>
+                            <th>Exit &Delta;</th>
+                            <th>Exit prem</th>
+                            <th>Exit reason</th>
+                            <th>Fees</th>
+                            <th>Slippage</th>
+                            <th>Net P&amp;L</th>
+                        </tr>
+                    </thead>
+                    <tbody id="labLogBody">
+                        <tr class="sim-empty-row"><td colspan="15">Closed trades appear here with their exit reason.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="app-panel sim-panel">
+            <div class="sim-panel-head">
+                <h2>Price Chart</h2>
+                <div class="sim-chart-stats" id="simChartStats"></div>
+            </div>
+            <div class="sim-canvas-wrap">
+                <canvas id="simPriceChart" class="sim-canvas"></canvas>
+            </div>
+            <p class="sim-empty" id="simChartEmpty">Load historical data to draw the candle chart.</p>
+        </section>
+
+        <section class="app-panel sim-panel">
+            <div class="sim-panel-head">
+                <h2>Strategy Legs</h2>
+                <div class="sim-actions">
+                    <button class="app-ghost-btn" type="button" id="btnAddFuturesLeg">Add Futures Leg</button>
+                    <button class="app-ghost-btn" type="button" id="btnAddOptionLeg">Add Option Leg</button>
+                    <button class="app-solid-btn" type="button" id="btnRunBacktest">Run Backtest</button>
+                </div>
+            </div>
+            <div class="sim-table-wrap">
+                <table class="sim-table" id="simLegsTable">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Qty</th>
+                            <th>Multiplier</th>
+                            <th>Entry override</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="simLegsBody">
+                        <tr class="sim-empty-row">
+                            <td colspan="7">No legs yet. Add a futures or option leg to build the strategy.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="sim-status" id="simLegsStatus"></div>
+        </section>
+
+        <section class="app-panel sim-panel">
+            <div class="sim-panel-head">
+                <h2>Backtest Results</h2>
+                <div class="sim-status" id="simResultStatus"></div>
+            </div>
+            <div class="sim-tiles">
+                <div class="sim-tile">
+                    <label>Net P&amp;L</label>
+                    <strong id="simTileNet">&mdash;</strong>
+                </div>
+                <div class="sim-tile">
+                    <label>Return on entry value</label>
+                    <strong id="simTileReturn">&mdash;</strong>
+                </div>
+                <div class="sim-tile">
+                    <label>Best / worst point</label>
+                    <strong id="simTileRange">&mdash;</strong>
+                </div>
+                <div class="sim-tile">
+                    <label>Candles used</label>
+                    <strong id="simTileCandles">&mdash;</strong>
+                </div>
+            </div>
+            <div class="sim-table-wrap">
+                <table class="sim-table" id="simResultsTable">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Qty</th>
+                            <th>Entry</th>
+                            <th>Entry time (UTC)</th>
+                            <th>Exit</th>
+                            <th>Exit time (UTC)</th>
+                            <th>P&amp;L</th>
+                        </tr>
+                    </thead>
+                    <tbody id="simResultsBody">
+                        <tr class="sim-empty-row">
+                            <td colspan="9">Run the backtest to see per-leg results.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="sim-canvas-wrap">
+                <canvas id="simPnlChart" class="sim-canvas sim-canvas-pnl"></canvas>
+            </div>
+            <p class="sim-empty" id="simPnlEmpty">The strategy P&amp;L curve appears here after a backtest.</p>
+        </section>
+
+        <section class="app-panel sim-panel sim-notes">
+            <h2>Data Availability Notes</h2>
+            <ul>
+                <li>Candles come from <code>GET /v2/history/candles</code> on <code>api.delta.exchange</code> (public, no API key). The India host has no candle history.</li>
+                <li>Underlying futures/perpetual history (BTCUSD probed) starts <strong>2019-04-03 06:00 UTC</strong>; earlier windows return an empty result.</li>
+                <li>Option-contract OHLC is kept for the whole life of each contract. Delta's earliest option expiries are <strong>2020-09-25</strong> (LINK weeklies/dailies) and the first BTC option expiry is <strong>2020-10-02</strong>.</li>
+                <li>There is no historical option-chain snapshot endpoint: <code>/v2/tickers?expiry_date=</code> only serves current and future expiries. The Simulator rebuilds past chains from <code>/v2/products?states=expired&amp;expiry=</code> plus each contract's candles.</li>
+                <li>The exchange caps one history call at <strong><%= vRowsPerCall.toLocaleString("en-US") %> candles</strong> (newest first); the server pages backwards and merges up to <%= vMaxCandles.toLocaleString("en-US") %> candles per request.</li>
+                <li>Option legs without trades still carry zero-volume candles, so marks exist for illiquid strikes; legs with fewer candles than the window are marked to their last available price.</li>
+            </ul>
+        </section>
+    </div>
+    <script src="/js/simulator.js?v=<%= vAssetVersion %>"></script>
+</body>
+</html>
