@@ -283,6 +283,10 @@ class DeltaPublicTickerFeed {
         return [...(this.symbolsByOwner.get(String(pOwnerId || "").trim() || "__shared__") || new Set<string>())].sort();
     }
 
+    public getAllTickers(): DeltaTickerRow[] {
+        return [...this.tickerBySymbol.values()];
+    }
+
     public getStats(): {
         connectionState: "open" | "connecting" | "closed";
         desiredSymbolCount: number;
@@ -334,6 +338,8 @@ class DeltaPublicTickerFeed {
         objWs.on("error", () => {
             this.isOpen = false;
             this.isConnecting = false;
+            // Reconnect on error too, not just on close.
+            this.scheduleReconnect();
         });
     }
 
@@ -374,7 +380,7 @@ class DeltaPublicTickerFeed {
         this.reconnectTimer = setTimeout(() => {
             this.reconnectTimer = null;
             this.ensureConnection();
-        }, 3000);
+        }, 120000);
     }
 
     private subscribeAll(): void {
@@ -459,9 +465,10 @@ export function getLiveTickerSymbolsForOwner(pOwnerId: string): string[] {
 export async function getLiveMarketSnapshot(
     pConfig: RollingOptionsPtDeConfig
 ): Promise<RollingOptionsPtDeMarketSnapshot> {
-    const objTicker = gDeltaPublicTickerFeed.getTicker(pConfig.contractName)
-        || (await fetchJson<DeltaApiResponse<DeltaTickerRow>>(`/tickers/${encodeURIComponent(pConfig.contractName)}`)).result
-        || {};
+    const objTicker = gDeltaPublicTickerFeed.getTicker(pConfig.contractName);
+    if (!objTicker) {
+        throw new Error(`No live ticker price available for ${pConfig.contractName}. WebSocket feed may be disconnected.`);
+    }
     const vSpotPrice = parseNumber(objTicker.spot_price);
     const vMarkPrice = parseNumber(objTicker.mark_price, vSpotPrice);
     const vBestBid = getTickerBestBid(objTicker) ?? vMarkPrice;
@@ -503,27 +510,15 @@ export async function findBestLiveOptionContract(
             continue;
         }
 
-        const objParams = new URLSearchParams({
-            contract_types: pOptionSide === "CE" ? "call_options" : "put_options",
-            underlying_asset_symbols: pConfig.symbol,
-            expiry_date: vExpiryDate
-        });
-        let objPayload: DeltaApiResponse<DeltaTickerRow[]>;
-        try {
-            objPayload = await runLiveOptionTickerLookupSerial(() => fetchJson<DeltaApiResponse<DeltaTickerRow[]>>("/tickers", objParams));
+        const objRows: DeltaTickerRow[] = [];
+        // WebSocket-only: use cached ticker rows from the Delta public feed.
+        const arrCached = gDeltaPublicTickerFeed.getAllTickers();
+        for (const objRow of arrCached) {
+            objRows.push(objRow);
         }
-        catch (objError) {
-            if (isDeltaRateLimitError(objError)) {
-                void notifyDeltaMarketDataAlert({
-                    reason: "rate_limited",
-                    path: "/tickers",
-                    status: 429
-                });
-                return null;
-            }
-            throw objError;
+        if (objRows.length === 0) {
+            return null;
         }
-        const objRows = Array.isArray(objPayload.result) ? objPayload.result : [];
 
         let objBestMatch: RollingOptionsPtDeLiveOptionContract | null = null;
         let vBestGap = Number.POSITIVE_INFINITY;
@@ -594,38 +589,7 @@ export async function getLiveOptionTicker(pContractSymbol: string): Promise<Roll
         return objCached?.ticker || null;
     }
 
-    try {
-        return await runLiveOptionTickerLookupSerial(async () => {
-            const objCachedAfterQueue = gLiveOptionTickerCacheBySymbol.get(vContractSymbol);
-            if (objCachedAfterQueue && objCachedAfterQueue.expiresAtMs > Date.now()) {
-                return objCachedAfterQueue.ticker;
-            }
-
-            const objQueuedWsRow = gDeltaPublicTickerFeed.getTicker(vContractSymbol);
-            if (objQueuedWsRow) {
-                const objQueuedWsTicker = buildLiveOptionTickerFromRow(objQueuedWsRow, vContractSymbol);
-                if (objQueuedWsTicker) {
-                    cacheLiveOptionTicker(vContractSymbol, objQueuedWsTicker);
-                    return objQueuedWsTicker;
-                }
-            }
-
-            const objRow = (await fetchJson<DeltaApiResponse<DeltaTickerRow>>(`/tickers/${encodeURIComponent(vContractSymbol)}`)).result;
-            const objTicker = objRow ? buildLiveOptionTickerFromRow(objRow, vContractSymbol) : null;
-            cacheLiveOptionTicker(vContractSymbol, objTicker);
-            return objTicker;
-        });
-    }
-    catch (objError) {
-        if (isDeltaRateLimitError(objError)) {
-            gLiveOptionTickerCooldownUntilMs = Date.now() + gLiveOptionTickerCooldownMs;
-            void notifyDeltaMarketDataAlert({
-                reason: "rate_limited",
-                symbol: vContractSymbol,
-                path: `/tickers/${encodeURIComponent(vContractSymbol)}`,
-                status: 429
-            });
-        }
-        return objCached?.ticker || null;
-    }
+    // WebSocket-only: no REST fallback. Return cached ticker or null if the
+    // WebSocket feed does not have this symbol yet.
+    return objCached?.ticker || null;
 }
