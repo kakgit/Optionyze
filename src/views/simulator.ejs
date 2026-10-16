@@ -210,7 +210,7 @@
                 </div>
             </div>
             <div class="sim-lab-meta" id="labMeta"></div>
-            <h3 class="sim-subhead">Historical Option Chain <span class="sim-subhead-note">monthly leg shown when a strike lists in both expiries; hover a cell for the contract</span></h3>
+            <h3 class="sim-subhead">Historical Option Chain <span class="sim-subhead-note">every listed strike is shown; monthly leg wins when a strike lists in both expiries; click a premium cell to prefill the manual ticket</span></h3>
             <div class="sim-table-wrap">
                 <table class="sim-table sim-chain-table" id="labChainTable">
                     <thead>
@@ -235,6 +235,42 @@
                     </tbody>
                 </table>
             </div>
+
+            <!-- Manual ticket: click any premium cell in the chain to prefill,
+                 then Buy/Sell — repeat for as many legs as you like. -->
+            <div class="lab-manual" id="labManual">
+                <h3 class="sim-subhead">Manual Legs <span class="sim-subhead-note">click a chain cell to prefill, then Buy or Sell &mdash; add as many buy and sell legs as you like</span></h3>
+                <div class="sim-controls lab-manual-controls">
+                    <div class="sim-field">
+                        <label for="labLegExpiry">Expiry</label>
+                        <select id="labLegExpiry"></select>
+                    </div>
+                    <div class="sim-field">
+                        <label for="labLegStrike">Strike</label>
+                        <select id="labLegStrike"></select>
+                    </div>
+                    <div class="sim-field">
+                        <label for="labLegSide">Type</label>
+                        <select id="labLegSide">
+                            <option value="call">Call</option>
+                            <option value="put">Put</option>
+                        </select>
+                    </div>
+                    <div class="sim-field">
+                        <label for="labLegLots">Lots (0.001 BTC each)</label>
+                        <input id="labLegLots" type="number" min="1" step="1" value="1000" />
+                    </div>
+                    <div class="sim-field lab-manual-action">
+                        <label>Order</label>
+                        <div class="lab-manual-btns">
+                            <button type="button" id="labLegBuy" class="app-solid-btn lab-btn-buy">Buy (long)</button>
+                            <button type="button" id="labLegSell" class="app-solid-btn lab-btn-sell">Sell (short)</button>
+                        </div>
+                    </div>
+                </div>
+                <p class="sim-hint" id="labManualHint">Load a snapshot first (Jump / step) &mdash; every listed strike is then selectable in the chain above.</p>
+            </div>
+
             <h3 class="sim-subhead">Active Open Positions</h3>
             <div class="sim-table-wrap">
                 <table class="sim-table" id="labPositionsTable">
@@ -254,10 +290,11 @@
                             <th>DTE</th>
                             <th>Locked</th>
                             <th>Unrealized</th>
+                            <th>Action</th>
                         </tr>
                     </thead>
                     <tbody id="labPositionsBody">
-                        <tr class="sim-empty-row"><td colspan="14">No open positions yet &mdash; take a forward step to let the state machine enter.</td></tr>
+                        <tr class="sim-empty-row"><td colspan="15">No open positions yet &mdash; take a forward step to let the state machine enter, or add legs manually from the chain above.</td></tr>
                     </tbody>
                 </table>
             </div>

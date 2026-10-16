@@ -492,3 +492,124 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* ---------- Manual leg ticket + full-chain cells ---------- */
+
+.sim-chain-table td[data-lab-strike] {
+    cursor: pointer;
+}
+
+.sim-chain-table td[data-lab-strike]:hover {
+    filter: brightness(1.3);
+}
+
+.lab-cell.is-sel {
+    outline: 2px solid rgba(96, 165, 250, .9);
+    outline-offset: -2px;
+    background: rgba(96, 165, 250, .14);
+}
+
+.lab-cell.is-model {
+    border-bottom: 2px dotted rgba(253, 224, 71, .35);
+}
+
+.lab-prem {
+    display: block;
+    font-weight: 600;
+}
+
+.lab-iv {
+    display: block;
+    margin-top: 1px;
+    font-size: .66rem;
+    letter-spacing: .02em;
+    color: var(--app-muted);
+}
+
+.lab-cell.is-model .lab-iv {
+    color: rgba(253, 224, 71, .75);
+}
+
+.lab-manual {
+    margin-top: 8px;
+    padding: 14px 16px 12px;
+    border: 1px solid var(--app-line);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .025);
+}
+
+.lab-manual .sim-subhead {
+    margin-top: 0;
+    margin-bottom: 12px;
+}
+
+.lab-manual-controls {
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.lab-manual-btns {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.lab-manual-btns button {
+    flex: 1 1 auto;
+    min-width: 110px;
+    min-height: 40px;
+    font-weight: 700;
+    letter-spacing: .02em;
+}
+
+.lab-btn-buy {
+    background: rgba(16, 185, 129, .85) !important;
+    border-color: rgba(134, 239, 172, .65) !important;
+    color: #052e1c !important;
+}
+
+.lab-btn-buy:hover {
+    background: rgba(16, 185, 129, 1) !important;
+}
+
+.lab-btn-sell {
+    background: rgba(244, 63, 94, .8) !important;
+    border-color: rgba(255, 181, 181, .65) !important;
+    color: #2e0510 !important;
+}
+
+.lab-btn-sell:hover {
+    background: rgba(244, 63, 94, .95) !important;
+}
+
+.lab-manual .sim-hint {
+    margin-top: 10px;
+}
+
+.lab-close-btn {
+    padding: 4px 12px;
+    min-height: 28px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 181, 181, .5);
+    background: rgba(244, 63, 94, .16);
+    color: #ffb5b5;
+    font-size: .78rem;
+    font-weight: 600;
+    cursor: pointer;
+    font: inherit;
+}
+
+.lab-close-btn:hover {
+    background: rgba(244, 63, 94, .36);
+}
+
+.lab-tag-manual {
+    display: inline-block;
+    margin-left: 6px;
+    font-size: .62rem;
+    letter-spacing: .08em;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(253, 224, 71, .28);
+    color: #fde68a;
+    vertical-align: middle;
+}
+

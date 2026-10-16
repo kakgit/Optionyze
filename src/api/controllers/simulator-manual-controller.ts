@@ -585,17 +585,21 @@ export async function getSimulatorManualSnapshot(req: Request, res: Response): P
             res.json({ status: "warning", message: "Pass a valid timestamp (unix seconds or ISO date).", data: null });
             return;
         }
+        // window=0 → every listed strike for the chosen expiries (full chain);
+        // positive values keep a bounded ATM window (5..200 each side).
         let vWin = Math.floor(Number(req.query.window));
-        if (!Number.isFinite(vWin)) {
-            vWin = 10;
+        if (!Number.isFinite(vWin) || vWin <= 0) {
+            vWin = 0;
         }
-        vWin = Math.max(5, Math.min(20, vWin));
+        else {
+            vWin = Math.max(5, Math.min(200, vWin));
+        }
 
         // Optional held contracts: "SYMBOL:YYYY-MM-DD|SYMBOL:YYYY-MM-DD" so
         // open positions keep fresh marks even outside the ATM strike window.
         const arrHeld: Array<{ symbol: string; expiryDate: string }> = [];
         const strHeld = String(req.query.held || "").trim();
-        if (strHeld && strHeld.length <= 600) {
+        if (strHeld && strHeld.length <= 4000) {
             for (const strPart of strHeld.split("|")) {
                 const arrBits = strPart.split(":");
                 const strSym = String(arrBits[0] || "").trim().toUpperCase();
@@ -665,7 +669,9 @@ export async function getSimulatorManualSnapshot(req: Request, res: Response): P
             return;
         }
         const vAtmIdx = sorted.indexOf(vAtm);
-        const winStrikes = sorted.slice(Math.max(0, vAtmIdx - vWin), vAtmIdx + vWin + 1);
+        const winStrikes = vWin > 0
+            ? sorted.slice(Math.max(0, vAtmIdx - vWin), vAtmIdx + vWin + 1)
+            : sorted; // window=0 → full chain: every listed strike
         const legs: Array<{ row: ChainRow; side: "call" | "put" }> = [];
         const seenSymbols = new Set<string>();
         const pushLeg = (row: ChainRow | undefined, side: "call" | "put"): void => {
@@ -698,9 +704,10 @@ export async function getSimulatorManualSnapshot(req: Request, res: Response): P
             strike: number; side: "call" | "put"; symbol: string;
             expiry: string; expiryDate: string; premium: number;
             delta: number | null; gamma: number | null; iv: number | null; oi: null;
+            model?: boolean;
         }
         interface FetchedLeg { leg: { row: ChainRow; side: "call" | "put" }; prem: number | null; }
-        const fetched = await poolMap(legs, 6, async (leg): Promise<FetchedLeg | null> => {
+        const fetched = await poolMap(legs, 8, async (leg): Promise<FetchedLeg | null> => {
             if (leg.row.launchMs !== null && leg.row.launchMs > vTs) {
                 return null; // contract not listed yet at that timestamp
             }
@@ -725,7 +732,10 @@ export async function getSimulatorManualSnapshot(req: Request, res: Response): P
                 objPutPrem.set(strKey, f.prem);
             }
         }
+        // Pass 1 — real marks: candle close at/before T, then parity fill.
         const enriched: EnrichedLeg[] = [];
+        const arrUnpriced: FetchedLeg[] = [];
+        const objIvByExpiry = new Map<string, number[]>();
         for (const f of fetched) {
             let vPrem = f.prem;
             const strKey = `${f.leg.row.expiryDate}|${f.leg.row.strike}`;
@@ -744,7 +754,8 @@ export async function getSimulatorManualSnapshot(req: Request, res: Response): P
                 }
             }
             if (vPrem === null || !Number.isFinite(vPrem) || vPrem < 0) {
-                continue; // neither side traded/marked at or before that timestamp
+                arrUnpriced.push(f); // no real mark yet — model fill below
+                continue;
             }
             const expMs = Date.parse(f.leg.row.expiry);
             const yrs = Number.isFinite(expMs) ? Math.max(0, (expMs - vTs * 1000) / 31557600000) : 0;
@@ -754,10 +765,69 @@ export async function getSimulatorManualSnapshot(req: Request, res: Response): P
                 expiry: f.leg.row.expiry, expiryDate: f.leg.row.expiryDate, premium: vPrem,
                 delta: g.delta, gamma: g.gamma, iv: g.iv, oi: null
             });
+            if (g.iv !== null && Number.isFinite(g.iv) && g.iv > 0) {
+                const arrIv = objIvByExpiry.get(f.leg.row.expiryDate);
+                if (arrIv) {
+                    arrIv.push(g.iv);
+                }
+                else {
+                    objIvByExpiry.set(f.leg.row.expiryDate, [g.iv]);
+                }
+            }
+        }
+        if (enriched.length === 0) {
+            res.json({
+                status: "warning",
+                message: `No priced ${vUnder} option contracts at that timestamp (first BTC option expiry is 2020-10-02).`,
+                data: null
+            });
+            return;
         }
 
-        // Only strikes with at least one priced contract become grid rows, and
-        // ATM is recomputed against those (unpriced/unlisted strikes drop out).
+        // Pass 2 — model fill: strikes that never traded at/before T still get
+        // a row so the chain lists every listed strike like a live chain.
+        // Marks use the median IV of that expiry's real prices (global median
+        // as cross-expiry fallback) and are flagged `model: true` for the UI.
+        const medianOf = (pArr: number[]): number => {
+            const s = [...pArr].sort((a, b) => a - b);
+            const vMid = Math.floor(s.length / 2);
+            return s.length % 2 ? s[vMid] : (s[vMid - 1] + s[vMid]) / 2;
+        };
+        const objIvAnchor = new Map<string, number>();
+        for (const [strD, arrIv] of objIvByExpiry) {
+            if (arrIv.length) {
+                objIvAnchor.set(strD, medianOf(arrIv));
+            }
+        }
+        const vGlobalIv = objIvAnchor.size > 0 ? medianOf([...objIvAnchor.values()]) : null;
+        let vModelCount = 0;
+        for (const f of arrUnpriced) {
+            const expMs = Date.parse(f.leg.row.expiry);
+            const yrs = Number.isFinite(expMs) ? Math.max(0, (expMs - vTs * 1000) / 31557600000) : 0;
+            let vIv: number | null = objIvAnchor.has(f.leg.row.expiryDate)
+                ? objIvAnchor.get(f.leg.row.expiryDate) as number
+                : vGlobalIv;
+            if (vIv === null && yrs > 0) {
+                continue; // no IV anchor anywhere — cannot model a live premium
+            }
+            if (vIv === null) {
+                vIv = 0.5; // T=0 below: bsPrice returns intrinsic regardless of IV
+            }
+            const vModelPrem = bsPrice(vSpot, f.leg.row.strike, yrs, vIv, f.leg.side);
+            if (!Number.isFinite(vModelPrem) || vModelPrem < 0) {
+                continue;
+            }
+            const g = bsGreeks(vSpot, f.leg.row.strike, yrs, vModelPrem, f.leg.side);
+            enriched.push({
+                strike: f.leg.row.strike, side: f.leg.side, symbol: f.leg.row.symbol,
+                expiry: f.leg.row.expiry, expiryDate: f.leg.row.expiryDate, premium: vModelPrem,
+                delta: g.delta, gamma: g.gamma, iv: g.iv !== null ? g.iv : vIv, oi: null, model: true
+            });
+            vModelCount += 1;
+        }
+
+        // Every listed strike that still has a contract listed at T becomes a
+        // grid row (real, parity or model mark — rows are never dropped).
         const pricedStrikes = winStrikes.filter((st) => enriched.some((e) => e.strike === st));
         if (pricedStrikes.length === 0) {
             res.json({
@@ -786,7 +856,7 @@ export async function getSimulatorManualSnapshot(req: Request, res: Response): P
 
         res.json({
             status: "success",
-            message: `Snapshot ${new Date(vTs * 1000).toISOString()}: ${vUnder} ${vSpot}, ATM ${vAtmFinal}.`,
+            message: `Snapshot ${new Date(vTs * 1000).toISOString()}: ${vUnder} ${vSpot}, ATM ${vAtmFinal}, ${pricedStrikes.length} strikes${vModelCount > 0 ? ` (${vModelCount} model-marked)` : ""}.`,
             data: {
                 underlying: vUnder, timestamp: vTs,
                 isoTime: new Date(vTs * 1000).toISOString(),
@@ -795,7 +865,8 @@ export async function getSimulatorManualSnapshot(req: Request, res: Response): P
                 monthlyExpiryFull: Number.isFinite(mMs) ? new Date(mMs).toISOString() : null,
                 dailyExpiryFull: Number.isFinite(dMs) ? new Date(dMs).toISOString() : null,
                 atmStrike: vAtmFinal, window: vWin, strikes: grid, legs: enriched,
-                greeksNote: "delta/gamma via Black-Scholes IV inversion from historical premiums; OI unavailable historically (null)."
+                modelCount: vModelCount,
+                greeksNote: "delta/gamma via Black-Scholes IV inversion from historical premiums; OI unavailable historically (null); strikes without a trade at/before the cursor are modelled at the expiry's median IV and flagged model:true."
             }
         });
     }

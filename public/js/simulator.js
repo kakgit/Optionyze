@@ -776,7 +776,14 @@
         tileAvailable: byId("labTileAvailable"),
         tileLocked: byId("labTileLocked"),
         tileNet: byId("labTileNet"),
-        tileMode: byId("labTileMode")
+        tileMode: byId("labTileMode"),
+        legExpiry: byId("labLegExpiry"),
+        legStrike: byId("labLegStrike"),
+        legSide: byId("labLegSide"),
+        legLots: byId("labLegLots"),
+        legBuy: byId("labLegBuy"),
+        legSell: byId("labLegSell"),
+        legHint: byId("labManualHint")
     };
 
     // Wallet / strategy constants (spec): $5,000 start, 1 lot = 0.001 BTC,
@@ -799,7 +806,7 @@
         DAILY_ENTRY_DELTA: 0.7,
         DAILY_TP_DELTA: 0.995, // spec target Δ≥1.00; BS delta asymptotes below 1
         MONTHLY_MIN_DTE: 15,
-        WINDOW: 10,
+        WINDOW: 0, // 0 = every listed strike (full chain); >0 = ±N ATM window
         KEY: "optionyze-sim-lab-v1",
         MAX_CHECKPOINTS: 400
     };
@@ -813,6 +820,7 @@
         realized: 0,        // realised P&L net of fees/slippage, start $5,000
         seq: 0,             // id counter for positions/trades
         checkpoints: {},    // ts -> { positions, realized, seq, tradeCount }
+        sel: null,          // manual ticket selection { expiryDate, strike, side }
         busy: false
     };
 
@@ -823,6 +831,7 @@
     }
 
     function labStrategyLabel(pStrategy) {
+        if (pStrategy === "manual") { return "Manual leg"; }
         return pStrategy === "monthly" ? "Monthly short CE" : "Daily long CE";
     }
 
@@ -988,6 +997,7 @@
             id: lab.seq,
             strategy: pPos.strategy,
             direction: pPos.direction,
+            side: pPos.side || "call",
             symbol: pPos.symbol,
             expiry: pPos.expiryDate,
             strike: pPos.strike,
@@ -1028,6 +1038,9 @@
                 const objT = labClose(objPos, "Expired — settled at intrinsic", false, vIntr);
                 arrOut.push(`closed ${labStrategyLabel(objPos.strategy)} @${formatPrice(objPos.strike)} on expiry ${labSigned(objT.net)}`);
                 continue;
+            }
+            if (objPos.strategy === "manual") {
+                continue; // manual legs never auto-exit — close them by hand
             }
             if (objPos.strategy === "monthly") {
                 const vDte = (vExpiryMs - lab.ts * 1000) / 86400000;
@@ -1095,6 +1108,7 @@
             id: lab.seq,
             strategy: pStrategy,
             direction: vDirection,
+            side: "call",
             symbol: pLeg.symbol,
             strike: pLeg.strike,
             expiryDate: pLeg.expiryDate,
@@ -1157,15 +1171,29 @@
             return vN.toFixed(3);
         };
         const titleOf = (pLeg) => pLeg
-            ? `${pLeg.symbol} · ${pLeg.expiryDate} expiry · IV ${Number.isFinite(Number(pLeg.iv)) ? `${(Number(pLeg.iv) * 100).toFixed(1)}%` : "n/a"}`
+            ? `${pLeg.symbol} · ${pLeg.expiryDate} expiry · IV ${Number.isFinite(Number(pLeg.iv)) ? `${(Number(pLeg.iv) * 100).toFixed(1)}%` : "n/a"}${pLeg.model ? " · modelled (no trade at/before cursor)" : ""} · click to select for a manual leg`
             : "";
         const clsOf = (pLeg) => {
             let str = "lab-cell";
             if (pLeg && objHeld.has(pLeg.symbol)) { str += " is-held"; }
             if (pLeg && pLeg.expiryDate && pLeg.expiryDate !== objS.monthlyExpiry) { str += " is-daily"; }
+            if (pLeg && pLeg.model) { str += " is-model"; }
+            if (pLeg && lab.sel && lab.sel.expiryDate === pLeg.expiryDate
+                && Number(lab.sel.strike) === Number(pLeg.strike) && lab.sel.side === pLeg.side) {
+                str += " is-sel";
+            }
             return str;
         };
-        const cellOf = (pLeg, pKey) => `<td class="${clsOf(pLeg)}" title="${escapeHtml(titleOf(pLeg))}">${fmtVal(pLeg, pKey)}</td>`;
+        const cellOf = (pLeg, pKey) => {
+            const strCls = clsOf(pLeg);
+            const strTitle = escapeHtml(titleOf(pLeg));
+            if (pKey === "premium" && pLeg) {
+                const vIv = Number(pLeg.iv);
+                const strIv = Number.isFinite(vIv) ? `${(vIv * 100).toFixed(1)}%` : "—";
+                return `<td class="${strCls}" title="${strTitle}" data-lab-strike="${Number(pLeg.strike)}" data-lab-exp="${escapeHtml(String(pLeg.expiryDate || ""))}" data-lab-side="${pLeg.side}"><span class="lab-prem">${fmtVal(pLeg, "premium")}</span><span class="lab-iv">${strIv}</span></td>`;
+            }
+            return `<td class="${strCls}" title="${strTitle}">${fmtVal(pLeg, pKey)}</td>`;
+        };
         const oiOf = (pLeg) => pLeg
             ? '<td class="lab-cell lab-oi" title="Open interest is not available for historical expiries.">n/a</td>'
             : '<td class="lab-cell">—</td>';
@@ -1219,7 +1247,8 @@
             `<span>Daily T+2 ${strDaily} (${labDteLabel(strDaily, objS.dailyExpiryFull)}d)</span>`,
             `<span>ATM ${formatPrice(objS.atmStrike)}</span>`,
             `<span>Spot ${escapeHtml(String(objS.spotSymbol || ""))}</span>`,
-            `<span>Window ±${objS.window} strikes</span>`,
+            objS.window > 0 ? `<span>Window ±${objS.window} strikes</span>` : "<span>All listed strikes</span>",
+            `<span>Positions ${lab.positions.length} (${lab.positions.filter((p) => p.strategy === "manual").length} manual)</span>`,
             "<span>$5,000 start · 1 lot = 0.001 BTC · fee 0.01% + 18% GST · slippage 0.02% on SL exits</span>",
             "<span>Greeks computed via Black-Scholes IV inversion · historical OI = n/a</span>"
         ].join("");
@@ -1228,7 +1257,7 @@
         const objBody = labEls.positionsBody;
         if (!objBody) { return; }
         if (!lab.positions.length) {
-            objBody.innerHTML = '<tr class="sim-empty-row"><td colspan="14">No open positions yet — take a forward step to let the state machine enter.</td></tr>';
+            objBody.innerHTML = '<tr class="sim-empty-row"><td colspan="15">No open positions yet — take a forward step to let the state machine enter, or add legs manually from the chain above.</td></tr>';
             return;
         }
         objBody.innerHTML = lab.positions.map((objPos) => {
@@ -1249,7 +1278,7 @@
             return `<tr>
                 <td>${objPos.id}</td>
                 <td>${labStrategyLabel(objPos.strategy)}</td>
-                <td>${objPos.direction === "short" ? "Short CE" : "Long CE"}</td>
+                <td>${objPos.direction === "short" ? "Short" : "Long"} ${objPos.side === "put" ? "PE" : "CE"}</td>
                 <td title="${escapeHtml(objPos.symbol)}">${escapeHtml(String(objPos.symbol || "").slice(0, 26))}</td>
                 <td>${escapeHtml(String(objPos.expiryDate || ""))}</td>
                 <td>${formatPrice(objPos.strike)}</td>
@@ -1261,6 +1290,7 @@
                 <td>${vDte === null ? "—" : vDte.toFixed(1)}</td>
                 <td title="${escapeHtml(vLocked.t)}">${vLocked.v === null || vLocked.v === undefined ? "—" : `$${formatMoney(vLocked.v)}`}</td>
                 <td class="${strGrossCls}">${vGross === null ? "—" : labSigned(vGross)}</td>
+                <td><button type="button" class="lab-close-btn" data-lab-close="${objPos.id}">Close</button></td>
             </tr>`;
         }).join("");
     }
@@ -1276,7 +1306,7 @@
         objBody.innerHTML = arrTrades.map((objT) => `<tr>
             <td>${objT.id}</td>
             <td>${labStrategyLabel(objT.strategy)}</td>
-            <td>${objT.direction === "short" ? "Short CE" : "Long CE"}</td>
+            <td>${objT.direction === "short" ? "Short" : "Long"} ${objT.side === "put" ? "PE" : "CE"}</td>
             <td>${formatPrice(objT.strike)}</td>
             <td>${objT.lots}</td>
             <td>${formatUtc(objT.entryTs, true)}</td>
@@ -1292,12 +1322,187 @@
         </tr>`).join("");
     }
 
+    // ------------- Manual ticket: unlimited buy/sell legs at the cursor -------------
+    function labManualDates() {
+        const objS = lab.snapshot;
+        if (!objS) { return []; }
+        const arr = [];
+        if (objS.monthlyExpiry) {
+            arr.push({ date: objS.monthlyExpiry, label: `Monthly ${objS.monthlyExpiry}` });
+        }
+        if (objS.dailyExpiry && objS.dailyExpiry !== objS.monthlyExpiry) {
+            arr.push({ date: objS.dailyExpiry, label: `Daily ${objS.dailyExpiry}` });
+        }
+        return arr;
+    }
+
+    // Rebuild the ticket's expiry/side/strike dropdowns from the current
+    // snapshot, keeping the user's pick (or lab.sel from a chain click) valid.
+    function labSyncManualForm() {
+        const selExp = labEls.legExpiry;
+        const selStrike = labEls.legStrike;
+        const selSide = labEls.legSide;
+        if (!selExp || !selStrike || !selSide) { return; }
+        const arrDates = labManualDates();
+        if (lab.sel && lab.sel.expiryDate && !arrDates.some((d) => d.date === lab.sel.expiryDate)) {
+            arrDates.push({ date: lab.sel.expiryDate, label: `Selected ${lab.sel.expiryDate}` });
+        }
+        const strPrevExp = selExp.value;
+        selExp.innerHTML = arrDates.length
+            ? arrDates.map((d) => `<option value="${escapeHtml(d.date)}">${escapeHtml(d.label)}</option>`).join("")
+            : '<option value="">—</option>';
+        if (lab.sel && arrDates.some((d) => d.date === lab.sel.expiryDate)) {
+            selExp.value = lab.sel.expiryDate;
+        }
+        else if (strPrevExp && arrDates.some((d) => d.date === strPrevExp)) {
+            selExp.value = strPrevExp;
+        }
+        if (lab.sel) {
+            selSide.value = lab.sel.side === "put" ? "put" : "call";
+        }
+        const strExp = selExp.value;
+        const strSide = selSide.value === "put" ? "put" : "call";
+        const arrStrikes = [];
+        for (const objL of labLegs()) {
+            if (objL.expiryDate !== strExp || objL.side !== strSide) { continue; }
+            const vSt = Number(objL.strike);
+            if (Number.isFinite(vSt) && !arrStrikes.includes(vSt)) {
+                arrStrikes.push(vSt);
+            }
+        }
+        arrStrikes.sort((a, b) => a - b);
+        const strPrevStrike = selStrike.value;
+        selStrike.innerHTML = arrStrikes.length
+            ? arrStrikes.map((s) => `<option value="${s}">${formatPrice(s)}</option>`).join("")
+            : '<option value="">—</option>';
+        if (lab.sel && arrStrikes.some((s) => s === Number(lab.sel.strike))) {
+            selStrike.value = String(lab.sel.strike);
+        }
+        else if (strPrevStrike && arrStrikes.some((s) => String(s) === strPrevStrike)) {
+            selStrike.value = strPrevStrike;
+        }
+        else if (arrStrikes.length) {
+            const vSpot = lab.snapshot ? Number(lab.snapshot.spot) : NaN;
+            let vBest = arrStrikes[0];
+            if (Number.isFinite(vSpot)) {
+                let vBestDist = Math.abs(vBest - vSpot);
+                for (const s of arrStrikes) {
+                    const vDist = Math.abs(s - vSpot);
+                    if (vDist < vBestDist) { vBest = s; vBestDist = vDist; }
+                }
+            }
+            selStrike.value = String(vBest);
+        }
+    }
+
+    function labManualPrefill(pLeg) {
+        lab.sel = { expiryDate: pLeg.expiryDate, strike: Number(pLeg.strike), side: pLeg.side };
+        labSyncManualForm();
+        setStatus(labEls.legHint,
+            `Selected ${pLeg.side === "put" ? "put" : "call"} ${formatPrice(pLeg.strike)} · ${pLeg.expiryDate} — now press Buy or Sell.`,
+            "");
+        labRenderChain();
+    }
+
+    // Manual edits rewrite history at the cursor: drop checkpoints after it
+    // and trim the master log so later forward steps re-derive from here.
+    function labInvalidateAfter(pTs) {
+        for (const strKey of Object.keys(lab.checkpoints)) {
+            if (Number(strKey) > Number(pTs)) {
+                delete lab.checkpoints[strKey];
+            }
+        }
+        lab.tradeEvents = [...lab.trades];
+    }
+
+    function labManualAdd(pDir) {
+        if (!lab.snapshot || lab.ts === null) {
+            setStatus(labEls.legHint, "Load a snapshot first (Jump / step).", "warning");
+            return;
+        }
+        const strExp = labEls.legExpiry ? labEls.legExpiry.value : "";
+        const strSide = labEls.legSide && labEls.legSide.value === "put" ? "put" : "call";
+        const vStrike = Number(labEls.legStrike ? labEls.legStrike.value : NaN);
+        const vLots = Math.floor(Number(labEls.legLots ? labEls.legLots.value : NaN));
+        if (!strExp || !Number.isFinite(vStrike)) {
+            setStatus(labEls.legHint, "Pick an expiry and strike (click a chain cell).", "warning");
+            return;
+        }
+        if (!Number.isFinite(vLots) || vLots < 1) {
+            setStatus(labEls.legHint, "Lots must be at least 1.", "warning");
+            return;
+        }
+        const objLeg = labLegs().find((l) =>
+            l.expiryDate === strExp && l.side === strSide && Number(l.strike) === vStrike);
+        if (!objLeg) {
+            setStatus(labEls.legHint, "That contract is not in the current snapshot.", "warning");
+            return;
+        }
+        const vPrem = Number(objLeg.premium);
+        if (!Number.isFinite(vPrem) || vPrem < 0) {
+            setStatus(labEls.legHint, "No mark available for that contract at this cursor.", "warning");
+            return;
+        }
+        const vDirection = pDir === "sell" ? "short" : "long";
+        const vSpot = lab.snapshot ? Number(lab.snapshot.spot) : NaN;
+        const vFee = labFee(vLots * LAB.LOT * (Number.isFinite(vSpot) ? vSpot : 0));
+        lab.realized -= vFee;
+        lab.seq += 1;
+        const vExpMs = Date.parse(objLeg.expiry);
+        lab.positions.push({
+            id: lab.seq,
+            strategy: "manual",
+            direction: vDirection,
+            side: strSide,
+            symbol: objLeg.symbol,
+            strike: Number(objLeg.strike),
+            expiryDate: objLeg.expiryDate,
+            expiryMs: Number.isFinite(vExpMs) ? vExpMs : 0,
+            lots: vLots,
+            entryTs: lab.ts,
+            entryPremium: vPrem,
+            entryDelta: Number.isFinite(Number(objLeg.delta)) ? Number(objLeg.delta) : null,
+            entryFee: vFee,
+            markPremium: vPrem,
+            markDelta: Number.isFinite(Number(objLeg.delta)) ? Number(objLeg.delta) : null
+        });
+        // Wallet guard: reject when the order would push available below zero.
+        if (labWallet().available < 0) {
+            lab.positions.pop();
+            lab.realized += vFee;
+            lab.seq -= 1;
+            setStatus(labEls.legHint, `Not enough available balance for ${vLots} lots — lower the size.`, "error");
+            return;
+        }
+        labInvalidateAfter(lab.ts);
+        labCheckpoint(lab.ts);
+        labSave();
+        labRenderAll();
+        setStatus(labEls.legHint,
+            `Opened ${vDirection === "short" ? "SELL" : "BUY"} ${strSide} ${formatPrice(vStrike)} · ${vLots} lots @ ${formatPrice(vPrem)}${objLeg.model ? " (model mark)" : ""}.`,
+            "success");
+        setStatus(labEls.status, `Manual leg #${lab.seq} added at ${formatUtc(lab.ts, true)} UTC.`, "success");
+    }
+
+    function labManualClose(pId) {
+        const objPos = lab.positions.find((p) => p.id === Number(pId));
+        if (!objPos || lab.ts === null) { return; }
+        labMarkPositions();
+        const objT = labClose(objPos, "Manual close", false);
+        labInvalidateAfter(lab.ts);
+        labCheckpoint(lab.ts);
+        labSave();
+        labRenderAll();
+        setStatus(labEls.status, `Closed #${objT.id} ${formatPrice(objT.strike)} → ${labSigned(objT.net)}.`, "success");
+    }
+
     function labRenderAll() {
         labRenderChain();
         labRenderTiles();
         labRenderMeta();
         labRenderPositions();
         labRenderLog();
+        labSyncManualForm();
     }
     // Core time-travel routine. Fetches the snapshot at pTargetTs, then:
     //   init  → restore the newest checkpoint ≤ target (display only)
@@ -1440,6 +1645,42 @@
                 void labGoto(vBase + vDelta, "step");
             });
         }
+
+        // Manual ticket wiring: chain cell click → prefill, Buy/Sell → open a
+        // leg, positions Close button → close at the current mark.
+        if (labEls.chainBody) {
+            labEls.chainBody.addEventListener("click", (objEvent) => {
+                const objCell = objEvent.target instanceof Element ? objEvent.target.closest("td[data-lab-strike]") : null;
+                if (!objCell) { return; }
+                const strExp = objCell.getAttribute("data-lab-exp") || "";
+                const strSide = objCell.getAttribute("data-lab-side") === "put" ? "put" : "call";
+                const vStrike = Number(objCell.getAttribute("data-lab-strike"));
+                const objLeg = labLegs().find((l) =>
+                    l.expiryDate === strExp && l.side === strSide && Number(l.strike) === vStrike);
+                if (objLeg) { labManualPrefill(objLeg); }
+            });
+        }
+        if (labEls.positionsBody) {
+            labEls.positionsBody.addEventListener("click", (objEvent) => {
+                const objBtn = objEvent.target instanceof Element ? objEvent.target.closest("[data-lab-close]") : null;
+                if (!objBtn) { return; }
+                labManualClose(Number(objBtn.getAttribute("data-lab-close")));
+            });
+        }
+        if (labEls.legBuy) {
+            labEls.legBuy.addEventListener("click", () => labManualAdd("buy"));
+        }
+        if (labEls.legSell) {
+            labEls.legSell.addEventListener("click", () => labManualAdd("sell"));
+        }
+        const onTicketChange = () => {
+            lab.sel = null;
+            labSyncManualForm();
+            labRenderChain();
+        };
+        if (labEls.legExpiry) { labEls.legExpiry.addEventListener("change", onTicketChange); }
+        if (labEls.legSide) { labEls.legSide.addEventListener("change", onTicketChange); }
+        if (labEls.legStrike) { labEls.legStrike.addEventListener("change", onTicketChange); }
 
         void labGoto(vStartTs, "init");
     }
