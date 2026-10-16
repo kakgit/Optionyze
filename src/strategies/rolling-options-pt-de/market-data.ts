@@ -100,6 +100,10 @@ function addDaysToIsoDate(pDateValue: string, pDays: number): string {
 }
 
 async function fetchJson<T>(pPath: string, pSearchParams?: URLSearchParams): Promise<T> {
+    // If we are in a global rate-limit cooldown, do not hit Delta at all.
+    if (Date.now() < gDeltaMarketDataRateLimitCooldownUntilMs) {
+        throw new Error("Delta public market-data request failed: 429 (rate-limit cooldown active)");
+    }
     const vUrl = `${getApiBaseUrl()}${pPath}${pSearchParams ? `?${pSearchParams.toString()}` : ""}`;
     const objResponse = await fetch(vUrl, {
         headers: {
@@ -108,6 +112,16 @@ async function fetchJson<T>(pPath: string, pSearchParams?: URLSearchParams): Pro
     });
 
     if (!objResponse.ok) {
+        if (objResponse.status === 429) {
+            const vRetryAfter = objResponse.headers.get("retry-after");
+            const vRetryAfterMs = vRetryAfter ? Number.parseInt(vRetryAfter, 10) * 1000 : gDeltaMarketDataRateLimitCooldownMs;
+            gDeltaMarketDataRateLimitCooldownUntilMs = Date.now() + Math.min(vRetryAfterMs, gDeltaMarketDataRateLimitCooldownMs);
+            void notifyDeltaMarketDataAlert({
+                reason: "rate_limited",
+                path: pPath,
+                status: 429
+            });
+        }
         throw new Error(`Delta public market-data request failed: ${objResponse.status}`);
     }
 
@@ -126,8 +140,11 @@ let gDeltaMarketDataAlertHandler: ((pPayload: { reason: string; symbol?: string;
 let gDeltaMarketDataAlertCooldownUntilMs = 0;
 let gDeltaMarketDataRateLimitSignal: { reason: string; symbol?: string; path?: string; status?: number } | null = null;
 
+let gDeltaMarketDataRateLimitCooldownUntilMs = 0;
+
 const gLiveOptionTickerCacheTtlMs = 5000;
 const gLiveOptionTickerCooldownMs = 15000;
+const gDeltaMarketDataRateLimitCooldownMs = 60 * 1000;
 const gDeltaMarketDataAlertCooldownMs = 60 * 1000;
 
 function isDeltaRateLimitError(pError: unknown): boolean {
