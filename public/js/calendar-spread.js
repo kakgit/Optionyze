@@ -302,6 +302,11 @@
     let isApplyingState = false;
     let saveTimer = null;
     let previousOpenPositionLtps = new Map();
+    // Tracks the last time the /ws/calendar-spread/open-positions WebSocket
+    // delivered a positions state payload. Used to detect a stale socket and
+    // fall back to a REST poll so open positions keep updating.
+    let lastWebSocketOpenPositionsUpdateAt = 0;
+    let openPositionsStalenessMonitorTimer = null;
     let runtimeStatus = "idle";
     let autoTraderEnabled = false;
     let manualFutureOrderInFlight = false;
@@ -1434,6 +1439,32 @@
         }, 3000);
     }
 
+    // If the /ws/calendar-spread/open-positions WebSocket has not delivered a
+    // positions state payload for more than 30 seconds, fall back to a REST
+    // poll so open positions keep updating even when the socket is silent.
+    function checkOpenPositionsStaleness() {
+        if (!isCalendarSpreadPage) {
+            return;
+        }
+        const vStaleMs = Date.now() - lastWebSocketOpenPositionsUpdateAt;
+        if (vStaleMs > 30000) {
+            lastWebSocketOpenPositionsUpdateAt = Date.now();
+            void loadSavedOpenPositions().catch(function () { return undefined; });
+        }
+    }
+
+    function startOpenPositionsStalenessMonitor() {
+        stopOpenPositionsStalenessMonitor();
+        openPositionsStalenessMonitorTimer = setInterval(checkOpenPositionsStaleness, 30000);
+    }
+
+    function stopOpenPositionsStalenessMonitor() {
+        if (openPositionsStalenessMonitorTimer) {
+            clearInterval(openPositionsStalenessMonitorTimer);
+            openPositionsStalenessMonitorTimer = null;
+        }
+    }
+
     // Streams the calendar-spread open positions so the grid stays in sync with
     // whatever the server-side engine and manual actions have tracked. The
     // server binds this path to the "calendar-spread" strategy code only.
@@ -1460,6 +1491,7 @@
             try {
                 const payload = JSON.parse(String(event.data || ""));
                 if (payload && payload.type === "calendar_spread_open_positions_state" && payload.trackedOpenPositions) {
+                    lastWebSocketOpenPositionsUpdateAt = Date.now();
                     scheduleOpenPositionsRender(payload.trackedOpenPositions);
                     return;
                 }
@@ -6183,6 +6215,7 @@ async function loadClosedAltPositions() {
     connectRenkoFeedSocket();
     connectStrangleDemoOpenPositionsSocket();
     connectCalendarSpreadOpenPositionsSocket();
+    startOpenPositionsStalenessMonitor();
     applyCalendarSpreadAlertDeepLink();
 
     ids.symbol?.addEventListener("change", function () {
