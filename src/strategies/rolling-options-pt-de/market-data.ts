@@ -144,7 +144,7 @@ let gDeltaMarketDataRateLimitCooldownUntilMs = 0;
 
 const gLiveOptionTickerCacheTtlMs = 5000;
 const gLiveOptionTickerCooldownMs = 15000;
-const gDeltaMarketDataRateLimitCooldownMs = 60 * 1000;
+const gDeltaMarketDataRateLimitCooldownMs = 180 * 1000;
 const gDeltaMarketDataAlertCooldownMs = 60 * 1000;
 
 function isDeltaRateLimitError(pError: unknown): boolean {
@@ -169,6 +169,31 @@ export function consumeDeltaMarketDataRateLimitSignal(): { reason: string; symbo
     const objSignal = gDeltaMarketDataRateLimitSignal;
     gDeltaMarketDataRateLimitSignal = null;
     return objSignal;
+}
+
+export function getDeltaMarketDataRateLimitStatus(): {
+    rateLimited: boolean;
+    cooldownUntilMs: number;
+    cooldownRemainingMs: number;
+    cooldownMs: number;
+    lastSignal: { reason: string; symbol?: string; path?: string; status?: number } | null;
+    cachedTickerCount: number;
+    connectionState: string;
+} {
+    const vNow = Date.now();
+    const bRateLimited = vNow < gDeltaMarketDataRateLimitCooldownUntilMs;
+    const objStats = gDeltaPublicTickerFeed.getStats();
+    return {
+        rateLimited: bRateLimited,
+        cooldownUntilMs: gDeltaMarketDataRateLimitCooldownUntilMs,
+        cooldownRemainingMs: bRateLimited
+            ? Math.max(0, gDeltaMarketDataRateLimitCooldownUntilMs - vNow)
+            : 0,
+        cooldownMs: gDeltaMarketDataRateLimitCooldownMs,
+        lastSignal: gDeltaMarketDataRateLimitSignal,
+        cachedTickerCount: gLiveOptionTickerCacheBySymbol.size,
+        connectionState: objStats.connectionState
+    };
 }
 
 async function notifyDeltaMarketDataAlert(
@@ -536,6 +561,11 @@ export async function findBestLiveOptionContract(
             objPayload = await runLiveOptionTickerLookupSerial(() => fetchJson<DeltaApiResponse<DeltaTickerRow[]>>("/tickers", objParams));
         }
         catch (objError) {
+            // If we're in global rate-limit cooldown, fetchJson threw before
+            // reaching Delta. Return null silently without alerting.
+            if (Date.now() < gDeltaMarketDataRateLimitCooldownUntilMs) {
+                return null;
+            }
             if (isDeltaRateLimitError(objError)) {
                 void notifyDeltaMarketDataAlert({
                     reason: "rate_limited",
@@ -640,6 +670,11 @@ export async function getLiveOptionTicker(pContractSymbol: string): Promise<Roll
         });
     }
     catch (objError) {
+        // If we're in global rate-limit cooldown, fetchJson threw before
+        // reaching Delta. Return cached silently without alerting.
+        if (Date.now() < gDeltaMarketDataRateLimitCooldownUntilMs) {
+            return objCached?.ticker || null;
+        }
         if (isDeltaRateLimitError(objError)) {
             gLiveOptionTickerCooldownUntilMs = Date.now() + gLiveOptionTickerCooldownMs;
             void notifyDeltaMarketDataAlert({

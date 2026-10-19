@@ -49,6 +49,7 @@ import { getPendingStrategyAutoExecSettings } from "../../storage/admin-settings
 import {
     consumeDeltaMarketDataRateLimitSignal,
     findBestLiveOptionContract,
+    getDeltaMarketDataRateLimitStatus,
     getLiveMarketSnapshot,
     getLiveOptionTicker
 } from "../../strategies/rolling-options-pt-de/market-data";
@@ -22358,6 +22359,13 @@ export async function getCalendarSpreadImportableOpenPositions(req: Request, res
 }
 export async function getCalendarSpreadOpenPositions(req: Request, res: Response): Promise<void> {
     await getOpenPositionsInternal(req, res, "calendar-spread");
+}
+export async function getCalendarSpreadMarketDataStatus(req: Request, res: Response): Promise<void> {
+    const objStatus = getDeltaMarketDataRateLimitStatus();
+    res.json({
+        status: "success",
+        data: objStatus
+    });
 }
 export async function saveCalendarSpreadOpenPositions(req: Request, res: Response): Promise<void> {
     await saveOpenPositionsInternal(req, res, "calendar-spread");

@@ -214,6 +214,7 @@ import {
     getCalendarSpreadEvents,
     getCalendarSpreadImportableOpenPositions,
     getCalendarSpreadIndicator,
+    getCalendarSpreadMarketDataStatus,
     getCalendarSpreadOpenPositions,
     getCalendarSpreadProfile,
     getCalendarSpreadRsiStatus,
@@ -1050,6 +1051,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/calendar-spread/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await executeCalendarSpreadKillSwitch(req, res);
+    });
+    objRouter.get("/calendar-spread/market-data-status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCalendarSpreadMarketDataStatus(req, res);
     });
     objRouter.post("/calendar-spread/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await updateCalendarSpreadRecoveryMetrics(req, res);
