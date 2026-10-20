@@ -5238,7 +5238,7 @@
         }
         if (!arrRows.length) {
             previousOpenPositionLtps = new Map();
-            const openPositionsColumnCount = isCoveredMode ? 13 : 14;
+            const openPositionsColumnCount = isCoveredMode ? 12 : 13;
             ids.openPositionsBody.innerHTML = `<tr><td colspan="${openPositionsColumnCount}" class="rolling-demo-empty">${escapeHtml(openPositionsEmptyText)}</td></tr>`;
             if (ids.openCount) {
                 ids.openCount.textContent = "0";
@@ -5344,7 +5344,6 @@
                         ),
                         2
                     )}</td>
-                    <td>${renderGreekCell(greeks.thetaDisplayTotal ?? greeks.thetaTotal, greeks.thetaBaseDisplayTotal ?? greeks.thetaTotal, 4)}</td>
                     <td>${escapeHtml(contractName)}</td>
                     <td>${renderPositionSide(side)}</td>
                     <td>${escapeHtml(fmt(row.lotSize || lotSize, 3))}</td>
@@ -5402,7 +5401,6 @@
                     ),
                     2
                 )}</td>
-                <td>${renderGreekCell(objTotals.totalThetaDisplay ?? objTotals.totalTheta, objTotals.totalThetaBaseDisplay ?? objTotals.totalTheta, 4)}</td>
                 <td><strong>TOTAL</strong></td>
                 <td>-</td>
                 <td>-</td>
@@ -5447,10 +5445,6 @@
             totalDeltaDisplay: 0,
             totalGammaPerContract: 0,
             totalGamma: 0,
-            totalThetaPerContract: 0,
-            totalTheta: 0,
-            totalThetaDisplay: 0,
-            totalThetaBaseDisplay: 0,
             totalVegaPerContract: 0,
             totalVega: 0,
             totalCharges: 0,
@@ -5467,8 +5461,6 @@
             objTotals.totalDelta += Number(greeks.deltaTotal || 0);
             objTotals.totalDeltaDisplayPerContract += Number(greeks.deltaDisplayPerContract || 0);
             objTotals.totalDeltaDisplay += Number(greeks.deltaDisplayTotal || 0);
-            objTotals.totalThetaDisplay += Number(greeks.thetaDisplayTotal || 0);
-            objTotals.totalThetaBaseDisplay += Number(greeks.thetaBaseDisplayTotal || 0);
             objTotals.totalCharges += Number(row?.charges || 0);
             objTotals.totalPnl += Number(row?.pnl || 0);
             objTotals.totalMargin += Number(row?.margin || 0);

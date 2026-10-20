@@ -21,7 +21,7 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row1-break {
 }
 
 body[data-rolling-futures-live="covered"] .rolling-covered-row1-break-newd {
-    grid-column: 1;
+    grid-column: 2;
 }
 
 body[data-rolling-futures-live="covered"] .rolling-covered-row1-break-red {
@@ -29,15 +29,20 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row1-break-red {
 }
 
 body[data-rolling-futures-live="covered"] .rolling-covered-row1-break-tpd {
-    grid-column: 2;
+    grid-column: 3;
 }
 
 body[data-rolling-futures-live="covered"] .rolling-covered-row1-break-sld {
-    grid-column: 3;
+    grid-column: 4;
 }
 
 body[data-rolling-futures-live="covered"] .rolling-covered-row1-break-reenter {
     grid-column: 5;
+}
+
+body[data-rolling-futures-live="covered"] .rolling-covered-row1-qty {
+    grid-row: 2;
+    grid-column: 1;
 }
 
 body[data-rolling-futures-live="covered"][data-rolling-futures-variant="strangle"] .rolling-covered-row1-break-reenter,
@@ -81,7 +86,7 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break {
 }
 
 body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-newd {
-    grid-column: 1;
+    grid-column: 2;
 }
 
 body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-red {
@@ -89,15 +94,32 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-red {
 }
 
 body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-tpd {
-    grid-column: 2;
+    grid-column: 3;
 }
 
 body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-sld {
-    grid-column: 3;
+    grid-column: 4;
 }
 
 body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-reenter {
     grid-column: 5;
+}
+
+body[data-rolling-futures-live="covered"] .rolling-covered-row2-qty {
+    grid-row: 2;
+    grid-column: 1;
+}
+
+body[data-rolling-futures-live="covered"] .rolling-covered-row1-break,
+body[data-rolling-futures-live="covered"] .rolling-covered-row2-break {
+    overflow: hidden;
+}
+
+body[data-rolling-futures-live="covered"] .rolling-covered-row1-break input,
+body[data-rolling-futures-live="covered"] .rolling-covered-row2-break input,
+body[data-rolling-futures-live="covered"] .rolling-covered-row1-break select,
+body[data-rolling-futures-live="covered"] .rolling-covered-row2-break select {
+    min-width: 0;
 }
 
 body[data-rolling-futures-live="covered"][data-rolling-futures-variant="strangle"] .rolling-covered-row2-break-reenter,
