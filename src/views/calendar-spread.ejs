@@ -574,6 +574,7 @@
                         <% if (bIsPaperDemoPage || bIsCoveredLivePage) { %>
                             <input type="number" min="1" step="1" value="120" id="txtRollingDualFuturesProfitCloseTimerSecs" class="rolling-live-open-timer-input" title="Close timer in seconds" aria-label="Close timer in seconds" />
                         <% } %>
+                        <span class="app-ws-badge app-ws-checking" id="appWebSocketStatus" role="status" aria-live="polite" title="WebSocket status...">WS ...</span>
                     </div>
                     <div class="rolling-covered-hedge-summary" id="rollingDualFuturesHedgeGateSummary" aria-live="polite">
                         <span class="rolling-covered-hedge-chip off">Gate Off</span>
