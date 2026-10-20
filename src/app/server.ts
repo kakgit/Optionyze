@@ -10,6 +10,7 @@ import WebSocket, { WebSocketServer } from "ws";
 import { createApiRouter } from "../api/routes";
 import { RunnerManager } from "../runners/runner-manager";
 import { getServerId } from "../runtime/server-runtime";
+import { releaseWebSocketClient, releaseWebSocketMonitor, trackWebSocketClient, trackWebSocketMonitor } from "../runtime/websocket-registry";
 import { ensurePostgresSchema, isPostgresConfigured } from "../storage/postgres";
 import { ensureSurvivalPostgresSchema } from "../storage/survival-postgres";
 import { getAccountById } from "../storage/accounts-store";
@@ -184,7 +185,8 @@ async function bootstrap(): Promise<void> {
     server.on("upgrade", async (req, socket, head) => {
         try {
             const objUrl = new URL(String(req.url || ""), "http://localhost");
-            if (objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/covered-options/renko" && objUrl.pathname !== "/ws/futures-scalper/renko" && objUrl.pathname !== "/ws/calendar-spread/renko" && objUrl.pathname !== "/ws/calendar-spread/open-positions" && objUrl.pathname !== "/ws/strangle-demo/open-positions") {
+            const vIsStatusSocket = objUrl.pathname === "/ws/status";
+            if (!vIsStatusSocket && objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/covered-options/renko" && objUrl.pathname !== "/ws/futures-scalper/renko" && objUrl.pathname !== "/ws/calendar-spread/renko" && objUrl.pathname !== "/ws/calendar-spread/open-positions" && objUrl.pathname !== "/ws/strangle-demo/open-positions") {
                 socket.destroy();
                 return;
             }
@@ -215,6 +217,29 @@ async function bootstrap(): Promise<void> {
 
     websocketServer.on("connection", (ws: WebSocket, req: IncomingMessage, userId: string) => {
         const objUrl = new URL(String(req.url || ""), "http://localhost");
+        // The status socket is a heartbeat-only connection used by the header
+        // badge. It carries no market data, so it is tracked separately from
+        // the strategy data streams.
+        if (objUrl.pathname === "/ws/status") {
+            trackWebSocketMonitor();
+            ws.on("close", () => {
+                releaseWebSocketMonitor();
+            });
+            ws.on("error", () => {
+                // "close" always follows "error", so the counter is released
+                // there to avoid double-decrementing it.
+            });
+            return;
+        }
+
+        trackWebSocketClient();
+        ws.on("close", () => {
+            releaseWebSocketClient();
+        });
+        ws.on("error", () => {
+            // The "close" event always follows "error", so the counter is
+            // released there to avoid double-decrementing it.
+        });
         // Dedicated open-positions push streams. Each path is bound to its own
         // strategy code, so the positions streamed to Calendar Spread are read
         // from the calendar-spread partition only and cannot surface another

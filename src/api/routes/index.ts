@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getHealth } from "../controllers/health-controller";
+import { getHealth, getWebSocketStatus } from "../controllers/health-controller";
 import {
     createManagedUserController,
     deleteManagedUserController,
@@ -353,6 +353,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     const objRouter = Router();
 
     objRouter.get("/health", getHealth);
+    objRouter.get("/system/websocket-status", requireAuthApi, (req, res) => {
+        getWebSocketStatus(req, res);
+    });
     objRouter.get("/arbitrage/instruments", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getArbitrageInstruments(req, res);
     });
