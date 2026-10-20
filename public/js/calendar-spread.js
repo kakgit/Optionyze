@@ -140,6 +140,7 @@
         brok2Rec: document.getElementById("txtRollingFuturesBrok2Rec"),
         yet2Recover: document.getElementById("txtRollingFuturesYet2Recover"),
         netPl: document.getElementById("divRollingFuturesNetPl"),
+        maxLoss: document.getElementById("divRollingFuturesMaxLoss"),
         reEnterBrok: document.getElementById("chkRollingFuturesReEnterBrok"),
         closeBlockedMargin: document.getElementById("chkRollingFuturesCloseBlockedMargin"),
         autoTraderOffOnProfitClose: document.getElementById("chkRollingFuturesAutoTraderOffOnProfitClose"),
@@ -338,6 +339,8 @@
         };
     let lastNeutralStatus = null;
     let lastRecoveryMetrics = null;
+    const maxLossStorageKey = `optionyze.calendar-spread.max-loss.${currentAccountId}`;
+    let maxLossValue = readStoredMaxLoss();
     let pendingLiveConfirmation = null;
     let profitClosePending = null;
     let localProfitClosePending = null;
@@ -2765,6 +2768,7 @@
             return;
         }
         const vNetPnl = Number(lastRecoveryMetrics?.netPnl);
+        trackMaxLoss(vNetPnl);
         const vNetPnlText = fmt(vNetPnl, 4) === "-" ? "0.0000" : fmt(vNetPnl, 4);
         if (!isCoveredMode) {
             ids.netPl.textContent = vNetPnlText;
@@ -2791,6 +2795,52 @@
             ids.yet2Recover.value = fmt(objMetrics.totalPnl, 4) === "-" ? "0" : fmt(objMetrics.totalPnl, 4);
         }
         renderNetPnlValue();
+    }
+
+    function readStoredMaxLoss() {
+        try {
+            const vStored = Number(window.localStorage.getItem(maxLossStorageKey));
+            return Number.isFinite(vStored) && vStored < 0 ? vStored : 0;
+        }
+        catch (_error) {
+            return 0;
+        }
+    }
+
+    function saveMaxLoss() {
+        try {
+            window.localStorage.setItem(maxLossStorageKey, String(maxLossValue));
+        }
+        catch (_error) {
+        }
+    }
+
+    function renderMaxLoss() {
+        if (!ids.maxLoss) {
+            return;
+        }
+        ids.maxLoss.textContent = fmt(maxLossValue, 4) === "-" ? "0.0000" : fmt(maxLossValue, 4);
+    }
+
+    // Max Loss tracks the most negative Net PnL seen. It only moves lower (more
+    // negative) when the live Net PnL drops below the current value; profits
+    // never reset it. Persisted per account so a page reload keeps the worst
+    // drawdown. Click the value to reset it back to 0.
+    function trackMaxLoss(vNetPnl) {
+        if (Number.isFinite(vNetPnl) && vNetPnl < maxLossValue) {
+            maxLossValue = Number(vNetPnl.toFixed(4));
+            saveMaxLoss();
+        }
+        renderMaxLoss();
+    }
+
+    if (ids.maxLoss) {
+        ids.maxLoss.style.cursor = "pointer";
+        ids.maxLoss.addEventListener("click", function () {
+            maxLossValue = 0;
+            saveMaxLoss();
+            renderMaxLoss();
+        });
     }
 
     function mergeRuntimeRecoveryMetrics(runtimeState) {
