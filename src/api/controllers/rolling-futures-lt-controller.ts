@@ -2607,7 +2607,7 @@ function getNormalizedOptionRowUiState(
     pRowIndex: unknown
 ): {
     rowIndex: 1 | 2;
-    action: "buy" | "sell";
+    action: "buy" | "sell" | "none";
     legs: "ce" | "pe" | "both";
     expiryMode: string;
     expiryDate: string;
@@ -2622,9 +2622,11 @@ function getNormalizedOptionRowUiState(
     const objKeys = getOptionRowStateKeys(pStrategyCode, vRowIndex);
     const objDefaults = getDefaultOptionRowUiState(pStrategyCode, vRowIndex);
     const vExpiryMode = normalizeStringValue(pUiState[objKeys.expiryMode], String(objDefaults.expiryMode));
+    const vRawAction = String(pUiState[objKeys.action] || objDefaults.action).trim().toLowerCase();
+    const vAction = vRawAction === "buy" || vRawAction === "sell" || vRawAction === "none" ? vRawAction : "sell";
     return {
         rowIndex: vRowIndex,
-        action: String(pUiState[objKeys.action] || objDefaults.action).trim().toLowerCase() === "buy" ? "buy" : "sell",
+        action: vAction,
         legs: normalizeRollingFuturesLegSelection(pUiState[objKeys.legs], String(objDefaults.legs || "ce")),
         expiryMode: vExpiryMode,
         expiryDate: normalizeRollingFuturesExpiryDate(vExpiryMode, pUiState[objKeys.expiryDate]),
@@ -3823,7 +3825,7 @@ async function processCalendarSpreadLossReenter(
 // flat after their position was already closed.
 interface CalendarSpreadPendingReentry {
     rowIndex: 1 | 2;
-    action: "buy" | "sell";
+    action: "buy" | "sell" | "none";
     legSide: "ce" | "pe";
     expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
     expiryDate: string;
@@ -3993,7 +3995,7 @@ function buildCalendarSpreadRowOpenInput(
     pPosition: RollingFuturesLtImportedPositionRecord
 ): {
     rowIndex: 1 | 2;
-    action: "buy" | "sell";
+    action: "buy" | "sell" | "none";
     legSide: "ce" | "pe";
     expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
     expiryDate: string;
@@ -4006,7 +4008,8 @@ function buildCalendarSpreadRowOpenInput(
     const vRowIndex = getTrackedOptionRowIndexForUi(pPosition, objUiState);
     const objRowState = getNormalizedOptionRowUiState(objUiState, "calendar-spread", vRowIndex);
     const vLeg = String(objRowState.legs || "ce").trim().toLowerCase() === "pe" ? "pe" : "ce";
-    const vAction = String(objRowState.action || pPosition.side || "buy").trim().toLowerCase() === "sell" ? "sell" : "buy";
+    const vRawAction = String(objRowState.action || pPosition.side || "none").trim().toLowerCase();
+    const vAction = vRawAction === "buy" || vRawAction === "sell" || vRawAction === "none" ? vRawAction : "sell";
     const vExpiryMode = (["1", "2", "4", "5", "6", "7"].includes(String(objRowState.expiryMode || "").trim())
         ? String(objRowState.expiryMode || "5").trim()
         : "5") as "1" | "2" | "4" | "5" | "6" | "7";
@@ -7026,7 +7029,7 @@ type CoveredPendingOptionReEntryState = {
     dedupeKey: string;
     rowIndex: 1 | 2;
     legSide: "ce" | "pe";
-    action: "buy" | "sell";
+    action: "buy" | "sell" | "none";
     qty: number;
     reason: "sl" | "tp" | "expiry_cutoff" | "missing_leg";
     targetDelta: number;
@@ -14768,7 +14771,7 @@ function appendOptionsDemoRsiHistoryEntry(
         crossMode: "cross_above" | "cross_below";
         legSide: "ce" | "pe";
         rowIndex: 1 | 2;
-        action: "buy" | "sell";
+        action: "buy" | "sell" | "none";
     }
 ): Record<string, unknown>[] {
     return [{
