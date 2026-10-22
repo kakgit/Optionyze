@@ -3,17 +3,15 @@
     const pageVariant = String(document.body?.dataset?.rollingFuturesVariant || "").trim().toLowerCase();
     const isDemoVariant = pageVariant === "demo";
     const isStranglePage = pageVariant === "strangle";
-    const isStrangleDemoPage = pageVariant === "strangle-demo";
-    const isPaperDemoVariant = isDemoVariant || isStrangleDemoPage;
+    const isPaperDemoVariant = isDemoVariant;
     const isRenkoPage = pageVariant === "renko";
-    const isFuturesScalperPage = String(document.body?.dataset?.futuresScalper || "").trim().toLowerCase() === "true";
     const endpointBaseOverride = String(document.body?.dataset?.rollingFuturesEndpointBase || "").trim();
     const strategyLabel = String(document.body?.dataset?.rollingFuturesStrategyLabel || "").trim() || "Covered Options";
     const manualTraderLabel = String(document.body?.dataset?.manualTraderLabel || "").trim() || "Manual Trader";
     const mode = rawMode === "short" || rawMode === "covered" ? rawMode : "long";
     const isCoveredMode = mode === "covered";
     const supportsRenkoFeed = isDemoVariant || isRenkoPage || isCoveredMode;
-    const isStrangleLikePage = isStranglePage || isStrangleDemoPage || isRenkoPage;
+    const isStrangleLikePage = isStranglePage || isRenkoPage;
     const initialExecStrategyEnabled = String(document.body?.dataset?.execStrategyEnabled || "").trim().toLowerCase() === "true";
     const prefix = mode === "short"
         ? "rollingShortFutures"
@@ -354,8 +352,6 @@
     let renkoFeedSocket = null;
     let renkoFeedSocketReconnectTimer = null;
     let renkoFeedSocketSymbol = "";
-    let strangleDemoOpenPositionsSocket = null;
-    let strangleDemoOpenPositionsSocketReconnectTimer = null;
     let renkoBaseValuesBySymbol = { BTC: "", ETH: "" };
     let renkoEmaValuesBySymbol = { BTC: "", ETH: "" };
     let emaStateBySymbol = {
@@ -1229,7 +1225,7 @@
         }
         disconnectRenkoFeedSocket();
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const socketPath = isFuturesScalperPage ? "/ws/futures-scalper/renko" : (isDemoRenkoFeedMode() ? "/ws/options-demo/renko" : "/ws/covered-options/renko");
+        const socketPath = isDemoRenkoFeedMode() ? "/ws/options-demo/renko" : "/ws/covered-options/renko";
         const url = `${protocol}//${window.location.host}${socketPath}?symbol=${encodeURIComponent(symbol)}`;
         const socket = new WebSocket(url);
         renkoFeedSocket = socket;
@@ -1317,79 +1313,6 @@
         };
         socket.onerror = function () {
             scheduleRenkoFeedSocketReconnect();
-        };
-    }
-
-    function disconnectStrangleDemoOpenPositionsSocket() {
-        if (strangleDemoOpenPositionsSocketReconnectTimer) {
-            clearTimeout(strangleDemoOpenPositionsSocketReconnectTimer);
-            strangleDemoOpenPositionsSocketReconnectTimer = null;
-        }
-        if (strangleDemoOpenPositionsSocket) {
-            try {
-                strangleDemoOpenPositionsSocket.onopen = null;
-                strangleDemoOpenPositionsSocket.onmessage = null;
-                strangleDemoOpenPositionsSocket.onclose = null;
-                strangleDemoOpenPositionsSocket.onerror = null;
-                strangleDemoOpenPositionsSocket.close();
-            }
-            catch (_error) {
-            }
-        }
-        strangleDemoOpenPositionsSocket = null;
-    }
-
-    function scheduleStrangleDemoOpenPositionsSocketReconnect() {
-        if (strangleDemoOpenPositionsSocketReconnectTimer || !isStrangleDemoPage) {
-            return;
-        }
-        strangleDemoOpenPositionsSocketReconnectTimer = setTimeout(function () {
-            strangleDemoOpenPositionsSocketReconnectTimer = null;
-            connectStrangleDemoOpenPositionsSocket();
-        }, 3000);
-    }
-
-    function connectStrangleDemoOpenPositionsSocket() {
-        if (!isStrangleDemoPage) {
-            disconnectStrangleDemoOpenPositionsSocket();
-            return;
-        }
-        if (strangleDemoOpenPositionsSocket && (strangleDemoOpenPositionsSocket.readyState === WebSocket.OPEN || strangleDemoOpenPositionsSocket.readyState === WebSocket.CONNECTING)) {
-            return;
-        }
-        disconnectStrangleDemoOpenPositionsSocket();
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const url = `${protocol}//${window.location.host}/ws/strangle-demo/open-positions`;
-        const socket = new WebSocket(url);
-        strangleDemoOpenPositionsSocket = socket;
-
-        socket.onopen = function () {
-            if (strangleDemoOpenPositionsSocket !== socket) {
-                return;
-            }
-        };
-        socket.onmessage = function (event) {
-            try {
-                const payload = JSON.parse(String(event.data || ""));
-                if (payload && payload.type === "strangle_open_positions_state" && payload.trackedOpenPositions) {
-                    scheduleOpenPositionsRender(payload.trackedOpenPositions);
-                    return;
-                }
-                if (payload && payload.type === "strangle_open_positions_error") {
-                    setStatus(ids.pageStatus, String(payload.message || "Unable to load demo open positions."), "danger");
-                }
-            }
-            catch (_error) {
-            }
-        };
-        socket.onclose = function () {
-            if (strangleDemoOpenPositionsSocket === socket) {
-                strangleDemoOpenPositionsSocket = null;
-                scheduleStrangleDemoOpenPositionsSocketReconnect();
-            }
-        };
-        socket.onerror = function () {
-            scheduleStrangleDemoOpenPositionsSocketReconnect();
         };
     }
 
@@ -1686,7 +1609,7 @@
         if (!isCoveredMode) {
             return;
         }
-        if (isStrangleDemoPage) {
+        if (false) {
             return;
         }
         const vAvailableBalance = Number(lastAccountSummary?.availableBalance);
@@ -2535,7 +2458,7 @@
     }
 
     function canUseExecStrategy() {
-        if (isStrangleDemoPage) {
+        if (false) {
             return true;
         }
         if (isCoveredMode) {
@@ -2577,9 +2500,9 @@
             });
         });
         if (ids.execStrategyButton instanceof HTMLButtonElement) {
-            const canRunExec = isStrangleDemoPage ? canUseLiveActions() : false;
+            const canRunExec = false ? canUseLiveActions() : false;
             ids.execStrategyButton.disabled = !canRunExec;
-            ids.execStrategyButton.title = isStrangleDemoPage
+            ids.execStrategyButton.title = false
                 ? "Execute the paper strategy"
                 : (isDemoVariant
                     ? `Exec Strategy is disabled on ${strategyLabel} for now.`
@@ -3930,11 +3853,11 @@
             }
             syncRenkoBaseValueForSymbol(getCurrentSelectedSymbol());
             setInputValue(ids.futureOrderType, String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order");
-            if (isFuturesScalperPage) {
+            if (false) {
                 setInputValue(ids.futuresTradeSide, normalizeFuturesScalperTradeSideValue(objUiState.futuresTradeSide));
             }
             setInputValue(ids.bsFutQty, objUiState.bsFutQty);
-            if (isFuturesScalperPage) {
+            if (false) {
                 setInputValue(ids.futuresLadderStepPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderStepPoints, 200, 1));
                 setInputValue(ids.futuresLadderGridOffsetPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderGridOffsetPoints, 50, 0));
                 setInputValue(ids.futuresLadderOrderOffsetPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderOrderOffsetPoints, 100, 0));
@@ -4354,7 +4277,7 @@
         const url = autoTraderEnabled
             ? `${endpointBase}/auto-trader/stop`
             : `${endpointBase}/auto-trader/start`;
-        const objResult = await postJson(url, autoTraderEnabled ? {} : { engineMode: isFuturesScalperPage ? "futures" : "options" });
+        const objResult = await postJson(url, autoTraderEnabled ? {} : { engineMode: false ? "futures" : "options" });
         applyRuntimeStatus(objResult?.data || {});
         return objResult;
     }
@@ -4412,10 +4335,10 @@
         if (!canUseLiveActions()) {
             throw new Error("Delta connection is not healthy enough to execute the live strategy.");
         }
-        if (!isStrangleDemoPage && !autoTraderEnabled) {
+        if (!false && !autoTraderEnabled) {
             throw new Error("Turn Auto Trader ON before executing the live strategy.");
         }
-        if (!isStrangleDemoPage) {
+        if (!false) {
             ensureCoveredExecBalance();
         }
 
@@ -4596,7 +4519,7 @@
         if (!canUseLiveActions()) {
             throw new Error("Delta connection is not healthy enough to place a live option order.");
         }
-        if (!isStrangleDemoPage && isPaperDemoVariant && !autoTraderEnabled) {
+        if (!false && isPaperDemoVariant && !autoTraderEnabled) {
             throw new Error("Turn Auto Trader ON before placing paper option orders.");
         }
 
@@ -4958,7 +4881,7 @@
         updateNeutralBadges(lastNeutralStatus);
         syncLocalProfitClosePendingFromOpenPositions();
         restartProfitCloseCountdown();
-        if (isStrangleDemoPage) {
+        if (false) {
             renderStrangleDemoOpenPositionSections(objPayload, arrRows);
             if (ids.openCount) {
                 ids.openCount.textContent = String(arrRows.length);
@@ -5869,7 +5792,7 @@ async function loadClosedAltPositions() {
     resetEmaFeedState(undefined, false);
     setButtonsEnabled();
     connectRenkoFeedSocket();
-    connectStrangleDemoOpenPositionsSocket();
+    
 
     ids.symbol?.addEventListener("change", function () {
         captureRenkoBaseValueForCurrentSymbol();
@@ -5879,7 +5802,7 @@ async function loadClosedAltPositions() {
         resetEmaFeedState("Symbol changed. EMA history is waiting for the next crossover.");
         queueProfileSave();
         connectRenkoFeedSocket();
-        connectStrangleDemoOpenPositionsSocket();
+        
         const refreshTasks = [
             loadAccountSummary().catch(function () { return undefined; }),
             loadClosedPositions().catch(function () { return undefined; })
@@ -6476,7 +6399,7 @@ ids.closedAltFromDate?.addEventListener("change", function () {
         });
     });
     ids.execStrategyButton?.addEventListener("click", function () {
-        if (isCoveredMode && !isStrangleDemoPage) {
+        if (isCoveredMode && !false) {
             setStatus(ids.pageStatus, "Covered live trades run only through Delta Renko-Style Feed or EMA Trigger while Auto Trader is ON.", "warning");
             return;
         }
@@ -6484,7 +6407,7 @@ ids.closedAltFromDate?.addEventListener("change", function () {
             setStatus(ids.pageStatus, `Exec Strategy is disabled on ${strategyLabel} for now.`, "warning");
             return;
         }
-        if (isStrangleDemoPage) {
+        if (false) {
             void executeStrangleDemoStrategy().then(function (objSummary) {
                 const vPlacedOrders = Number(objSummary?.placedOrders || 0);
                 const arrErrors = Array.isArray(objSummary?.errors) ? objSummary.errors : [];

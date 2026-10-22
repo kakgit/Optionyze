@@ -35,16 +35,6 @@ export function renderStrangleOptionsPage(req: Request, res: Response): void {
     });
 }
 
-export function renderStrangleDemoPage(req: Request, res: Response): void {
-    res.render("covered-options", {
-        pageTitle: "Strangle Demo | Optionyze",
-        pageVariant: "strangle-demo",
-        currentAccount: req.authAccount,
-        defaultUserId: req.authAccount?.accountId || "demo-paper",
-        rollingTelegramEventTypes: gRollingFuturesTelegramEventTypes
-    });
-}
-
 export function renderRenkoOptionsPage(req: Request, res: Response): void {
     res.render("covered-options", {
         pageTitle: "Renko Options - Live | Optionyze",
@@ -58,15 +48,6 @@ export function renderRenkoOptionsPage(req: Request, res: Response): void {
 export function renderOptionsDemoPage(req: Request, res: Response): void {
     res.render("covered-options", {
         pageTitle: "Options Demo | Optionyze",
-        pageVariant: "demo",
-        currentAccount: req.authAccount,
-        defaultUserId: req.authAccount?.accountId || "demo-paper"
-    });
-}
-
-export function renderFuturesScalperPage(req: Request, res: Response): void {
-    res.render("futures-scalper", {
-        pageTitle: "Futures Scalper | Optionyze",
         pageVariant: "demo",
         currentAccount: req.authAccount,
         defaultUserId: req.authAccount?.accountId || "demo-paper"

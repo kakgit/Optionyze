@@ -18,14 +18,11 @@ import { getSessionById, getSessionCookieName } from "../storage/sessions-store"
 import {
     renderCoveredOptionsPage,
     renderRenkoOptionsPage,
-    renderStrangleDemoPage,
     renderStrangleOptionsPage,
     renderOptionsDemoPage,
-    renderFuturesScalperPage,
     renderCalendarSpreadPage
 } from "../api/controllers/strategyfo-paper-controller";
-import { renderSimulatorPage } from "../api/controllers/simulator-controller";
-import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade, syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade, syncCalendarSpreadRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
+import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade, syncCalendarSpreadRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
 import { loadRollingFuturesLtRuntime } from "../storage/rolling-futures-lt-runtime-store";
 import { ensureLiveTickerSymbols, getLiveMarketSnapshot } from "../strategies/rolling-options-pt-de/market-data";
 import type { RollingOptionsPtDeConfig } from "../strategies/rolling-options-pt-de/types";
@@ -82,10 +79,7 @@ function getDemoRenkoLotSize(symbol: "BTC" | "ETH"): number {
 
 // Maps an open-positions WebSocket path to the strategy code it is allowed to
 // stream. Returning "" means the path is not an open-positions stream.
-function resolveOpenPositionsStreamStrategyCode(pathname: string): "" | "strangle-demo" | "calendar-spread" {
-    if (pathname === "/ws/strangle-demo/open-positions") {
-        return "strangle-demo";
-    }
+function resolveOpenPositionsStreamStrategyCode(pathname: string): "" | "calendar-spread" {
     if (pathname === "/ws/calendar-spread/open-positions") {
         return "calendar-spread";
     }
@@ -160,10 +154,7 @@ async function bootstrap(): Promise<void> {
     app.get("/strangle-options", requireAuthPage, requireFreshPasswordPage, renderStrangleOptionsPage);
     app.get("/renko-options", requireAuthPage, requireFreshPasswordPage, renderRenkoOptionsPage);
     app.get("/options-demo", requireAuthPage, requireFreshPasswordPage, renderOptionsDemoPage);
-    app.get("/futures-scalper", requireAuthPage, requireFreshPasswordPage, renderFuturesScalperPage);
     app.get("/calendar-spread", requireAuthPage, requireFreshPasswordPage, renderCalendarSpreadPage);
-    app.get("/strangle-demo", requireAuthPage, requireFreshPasswordPage, renderStrangleDemoPage);
-    app.get("/simulator", requireAuthPage, requireFreshPasswordPage, renderSimulatorPage);
     app.get("/mngusers", requireAuthPage, requireFreshPasswordPage, requireAdminPage, renderMngUsersPage);
     app.get("/account/profile", requireAuthPage, renderMyProfilePage);
     app.post("/account/profile", requireAuthPage, async (req, res) => {
@@ -186,7 +177,7 @@ async function bootstrap(): Promise<void> {
         try {
             const objUrl = new URL(String(req.url || ""), "http://localhost");
             const vIsStatusSocket = objUrl.pathname === "/ws/status";
-            if (!vIsStatusSocket && objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/covered-options/renko" && objUrl.pathname !== "/ws/futures-scalper/renko" && objUrl.pathname !== "/ws/calendar-spread/renko" && objUrl.pathname !== "/ws/calendar-spread/open-positions" && objUrl.pathname !== "/ws/strangle-demo/open-positions") {
+            if (!vIsStatusSocket && objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/covered-options/renko" && objUrl.pathname !== "/ws/calendar-spread/renko" && objUrl.pathname !== "/ws/calendar-spread/open-positions") {
                 socket.destroy();
                 return;
             }
@@ -317,13 +308,10 @@ async function bootstrap(): Promise<void> {
         const contractName = getDemoRenkoContractName(symbol);
         const lotSize = getDemoRenkoLotSize(symbol);
         const bCoveredRenkoSocket = objUrl.pathname === "/ws/covered-options/renko";
-        const bFuturesScalperSocket = objUrl.pathname === "/ws/futures-scalper/renko";
         const bCalendarSpreadSocket = objUrl.pathname === "/ws/calendar-spread/renko";
         const vRenkoStrategyCode = bCoveredRenkoSocket
             ? "covered-options"
-            : (bFuturesScalperSocket
-                ? "futures-scalper"
-                : (bCalendarSpreadSocket ? "calendar-spread" : "options-scalper"));
+            : (bCalendarSpreadSocket ? "calendar-spread" : "options-scalper");
         let closed = false;
         let timerRef: NodeJS.Timeout | null = null;
         let tickInFlight = false;
@@ -367,14 +355,7 @@ async function bootstrap(): Promise<void> {
                         bestBidPrice: objSnapshot.bestBidPrice,
                         bestAskPrice: objSnapshot.bestAskPrice
                     })
-                    : (bFuturesScalperSocket
-                        ? await syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade(userId, {
-                            spotPrice: objSnapshot.spotPrice,
-                            futuresPrice: objSnapshot.futuresPrice,
-                            bestBidPrice: objSnapshot.bestBidPrice,
-                            bestAskPrice: objSnapshot.bestAskPrice
-                        })
-                        : (bCalendarSpreadSocket
+                    : (bCalendarSpreadSocket
                             ? await syncCalendarSpreadRenkoRuntimeAndMaybeAutoTrade(userId, {
                                 spotPrice: objSnapshot.spotPrice,
                                 futuresPrice: objSnapshot.futuresPrice,
@@ -386,7 +367,7 @@ async function bootstrap(): Promise<void> {
                                 futuresPrice: objSnapshot.futuresPrice,
                                 bestBidPrice: objSnapshot.bestBidPrice,
                                 bestAskPrice: objSnapshot.bestAskPrice
-                            })));
+                            }));
                 const objTrackedOpenPositions = await buildOpenPositionsPayload(userId, vRenkoStrategyCode);
                 const objLatestRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(userId, vRenkoStrategyCode);
                 const objPendingConfirmation = objLatestRuntime?.state

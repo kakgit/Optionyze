@@ -91,6 +91,62 @@ body.app-page {
 
 .app-nav-dropdown { position:relative; }
 
+/* WebSocket health badge shown in the shared app header. */
+.app-ws-badge {
+    min-height:42px;
+    padding:0 14px;
+    border-radius:999px;
+    border:1px solid var(--app-line-strong);
+    background:rgba(255,255,255,.03);
+    color:var(--app-muted);
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    font-size:.78rem;
+    font-weight:700;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    white-space:nowrap;
+    cursor:default;
+}
+
+.app-ws-badge::before {
+    content:"";
+    width:9px;
+    height:9px;
+    border-radius:50%;
+    background:currentColor;
+    flex:0 0 auto;
+}
+
+.app-ws-online {
+    color:var(--app-good);
+    border-color:rgba(134,239,172,.30);
+    background:rgba(134,239,172,.10);
+}
+
+.app-ws-offline {
+    color:var(--app-danger);
+    border-color:rgba(255,181,181,.30);
+    background:rgba(255,181,181,.10);
+}
+
+.app-ws-checking {
+    color:var(--app-muted);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .app-ws-online::before {
+        animation:app-ws-pulse 2s ease-in-out infinite;
+    }
+}
+
+@keyframes app-ws-pulse {
+    0%, 100% { opacity:1; }
+    50% { opacity:.35; }
+}
+
 .app-link-btn,
 .app-solid-btn,
 .app-ghost-btn {

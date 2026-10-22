@@ -48,10 +48,12 @@ import {
 import { getPendingStrategyAutoExecSettings } from "../../storage/admin-settings-store";
 import {
     consumeDeltaMarketDataRateLimitSignal,
+    ensureLiveTickerSymbolsForOwner,
     findBestLiveOptionContract,
     getDeltaMarketDataRateLimitStatus,
     getLiveMarketSnapshot,
-    getLiveOptionTicker
+    getLiveOptionTicker,
+    waitForLiveTickerSymbols
 } from "../../strategies/rolling-options-pt-de/market-data";
 import {
     formatCoinSwitchExpiryLabel,
@@ -167,9 +169,7 @@ const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
     "strangle-options": "Strangle Options",
     "renko-options": "Renko Options",
     "options-scalper": "Options Demo",
-    "strangle-demo": "Strangle Demo",
     "straddle-demo": "Straddle Demo",
-    "futures-scalper": "Futures Scalper",
     "calendar-spread": "Calendar Spread"
 };
 const gFutureLimitRetryDelayMs = 5000;
@@ -492,7 +492,6 @@ function getAccountId(req: Request): string {
         && (
             req.originalUrl.includes("/covered-options")
             || req.originalUrl.includes("/strangle-options")
-            || req.originalUrl.includes("/strangle-demo")
             || req.originalUrl.includes("/renko-options")
         )
     );
@@ -514,22 +513,16 @@ function isCoveredLikeStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boo
         || pStrategyCode === "strangle-options"
         || pStrategyCode === "renko-options"
         || pStrategyCode === "options-scalper"
-        || pStrategyCode === "strangle-demo"
         || pStrategyCode === "straddle-demo"
-        || pStrategyCode === "calendar-spread"
-        || pStrategyCode === "futures-scalper";
+        || pStrategyCode === "calendar-spread";
 }
 
 function isOptionsScalperStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "options-scalper" || pStrategyCode === "strangle-demo" || pStrategyCode === "straddle-demo" || pStrategyCode === "calendar-spread" || pStrategyCode === "futures-scalper";
-}
-
-function isFuturesScalperStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "futures-scalper";
+    return pStrategyCode === "options-scalper" || pStrategyCode === "straddle-demo" || pStrategyCode === "calendar-spread";
 }
 
 function isPaperDemoStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return isOptionsScalperStrategy(pStrategyCode) || isFuturesScalperStrategy(pStrategyCode);
+    return isOptionsScalperStrategy(pStrategyCode);
 }
 
 function usesOptionsDemoManualTraderSettings(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
@@ -537,7 +530,7 @@ function usesOptionsDemoManualTraderSettings(pStrategyCode: RollingFuturesLtStra
 }
 
 function supportsRenkoFeedStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "renko-options" || pStrategyCode === "options-scalper" || pStrategyCode === "futures-scalper" || pStrategyCode === "calendar-spread";
+    return pStrategyCode === "renko-options" || pStrategyCode === "options-scalper" || pStrategyCode === "calendar-spread";
 }
 
 function supportsRenkoSettingsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
@@ -545,7 +538,7 @@ function supportsRenkoSettingsStrategy(pStrategyCode: RollingFuturesLtStrategyCo
 }
 
 function isStrangleOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "strangle-options" || pStrategyCode === "strangle-demo" || pStrategyCode === "renko-options" || pStrategyCode === "straddle-demo";
+    return pStrategyCode === "strangle-options" || pStrategyCode === "renko-options" || pStrategyCode === "straddle-demo";
 }
 
 // Calendar Spread dropped these five Manual Trader toggles from its page, so
@@ -568,14 +561,8 @@ function getCoveredLikeStrategyLabel(pStrategyCode: RollingFuturesLtStrategyCode
     if (pStrategyCode === "renko-options") {
         return "Renko Options";
     }
-    if (pStrategyCode === "strangle-demo") {
-        return "Strangle Demo";
-    }
     if (pStrategyCode === "straddle-demo") {
         return "Straddle Demo";
-    }
-    if (pStrategyCode === "futures-scalper") {
-        return "Futures Scalper";
     }
     if (pStrategyCode === "calendar-spread") {
         return "Calendar Spread";
@@ -587,9 +574,6 @@ function getCoveredLikeLowerLabel(pStrategyCode: RollingFuturesLtStrategyCode): 
     if (pStrategyCode === "renko-options") {
         return "renko";
     }
-    if (pStrategyCode === "strangle-demo") {
-        return "strangle demo";
-    }
     if (pStrategyCode === "straddle-demo") {
         return "straddle demo";
     }
@@ -599,9 +583,6 @@ function getCoveredLikeLowerLabel(pStrategyCode: RollingFuturesLtStrategyCode): 
 function getCoveredLikeLegText(pStrategyCode: RollingFuturesLtStrategyCode): string {
     if (pStrategyCode === "renko-options") {
         return "renko leg";
-    }
-    if (pStrategyCode === "strangle-demo") {
-        return "strangle demo leg";
     }
     if (pStrategyCode === "straddle-demo") {
         return "straddle demo leg";
@@ -615,9 +596,6 @@ function getCoveredLikeLegText(pStrategyCode: RollingFuturesLtStrategyCode): str
 function getCoveredLikePositionText(pStrategyCode: RollingFuturesLtStrategyCode): string {
     if (pStrategyCode === "renko-options") {
         return "renko position";
-    }
-    if (pStrategyCode === "strangle-demo") {
-        return "strangle demo position";
     }
     if (pStrategyCode === "straddle-demo") {
         return "straddle demo position";
@@ -797,20 +775,7 @@ async function runExecStrategyPlacement(
             pSelectedApiProfileId,
             pProfile,
             pInput,
-            {
-                // Strangle Demo Exec Strategy: Row 1 picks its paper contract from
-                // the CoinSwitch option chain and Row 2 from the Delta Exchange
-                // option chain, matching the strike placed on Row 1. Every other
-                // strategy keeps the live Delta lookup.
-                strangleDemoChainSource: pStrategyCode === "strangle-demo"
-                    ? (normalizeOptionRowIndex(pStrategyCode, pInput.rowIndex) === 2 ? "delta" as const : "coinswitch" as const)
-                    : undefined,
-                strangleDemoRequestedStrikes: pStrategyCode === "strangle-demo"
-                    && Array.isArray(pInput.requestedStrikes)
-                    && pInput.requestedStrikes.length
-                    ? pInput.requestedStrikes
-                    : undefined
-            }
+            {}
         );
 
         await logFuturesEvent(
@@ -4169,6 +4134,9 @@ async function applyImportedOptionBaseGreeks(
             .map((objPosition) => String(objPosition.contractName || "").trim())
             .filter((vContractName) => isOptionContractSymbol(vContractName))
     ));
+    // Subscribe these contracts to the shared ticker WebSocket so the base
+    // greeks come from the socket instead of one REST call per contract.
+    ensureLiveTickerSymbolsForOwner("imported-option-base-greeks", arrOptionContracts);
     const objTickerByContract = new Map<string, Awaited<ReturnType<typeof getLiveOptionTicker>>>();
     await Promise.all(arrOptionContracts.map(async (vContractName) => {
         try {
@@ -5407,34 +5375,34 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         symbol: vSymbol,
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
-        futuresLadderStepPoints: isFuturesScalperStrategy(pProfile.strategyCode)
+        futuresLadderStepPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderStepPoints, gFuturesScalperTriggerStepPoints, 1, 1000000)
             : String(gFuturesScalperTriggerStepPoints),
-        futuresLadderGridOffsetPoints: isFuturesScalperStrategy(pProfile.strategyCode)
+        futuresLadderGridOffsetPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderGridOffsetPoints, gFuturesScalperGridOffsetPoints, 0, 1000000)
             : String(gFuturesScalperGridOffsetPoints),
-        futuresLadderOrderOffsetPoints: isFuturesScalperStrategy(pProfile.strategyCode)
+        futuresLadderOrderOffsetPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderOrderOffsetPoints, gFuturesScalperOrderOffsetPoints, 0, 1000000)
             : String(gFuturesScalperOrderOffsetPoints),
-        futuresLadderCancelOffsetPoints: isFuturesScalperStrategy(pProfile.strategyCode)
+        futuresLadderCancelOffsetPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderCancelOffsetPoints, gFuturesScalperCancelOffsetPoints, 1, 1000000)
             : String(gFuturesScalperCancelOffsetPoints),
-        futuresLadderStopLossPoints: isFuturesScalperStrategy(pProfile.strategyCode)
+        futuresLadderStopLossPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderStopLossPoints, gFuturesScalperStopLossPoints, 0, 1000000)
             : String(gFuturesScalperStopLossPoints),
-        futuresLadderTakeProfitPoints: isFuturesScalperStrategy(pProfile.strategyCode)
+        futuresLadderTakeProfitPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTakeProfitPoints, gFuturesScalperTakeProfitPoints, 0, 1000000)
             : String(gFuturesScalperTakeProfitPoints),
-        futuresLadderTrailingEnabled: isFuturesScalperStrategy(pProfile.strategyCode)
+        futuresLadderTrailingEnabled: false
             ? normalizeBooleanValue(objUiState.futuresLadderTrailingEnabled, false)
             : false,
-        futuresLadderTrailingStopPoints: isFuturesScalperStrategy(pProfile.strategyCode)
+        futuresLadderTrailingStopPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTrailingStopPoints, gFuturesScalperTrailingStopPoints, 1, 1000000)
             : String(gFuturesScalperTrailingStopPoints),
-        futuresLadderTrailingActivatePoints: isFuturesScalperStrategy(pProfile.strategyCode)
+        futuresLadderTrailingActivatePoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTrailingActivatePoints, gFuturesScalperTrailingActivatePoints, 0, 1000000)
             : String(gFuturesScalperTrailingActivatePoints),
-        futuresTradeSide: isFuturesScalperStrategy(pProfile.strategyCode)
+        futuresTradeSide: false
             ? normalizeFuturesScalperTradeSideMode(objUiState.futuresTradeSide)
             : "both",
         minusDelta: normalizeStringValue(objUiState.minusDelta, String(objDefaults.minusDelta)),
@@ -5860,34 +5828,34 @@ function normalizeProfileSaveInput(
         symbol: vSymbol,
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
-        futuresLadderStepPoints: isFuturesScalperStrategy(pStrategyCode)
+        futuresLadderStepPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderStepPoints, gFuturesScalperTriggerStepPoints, 1, 1000000)
             : String(gFuturesScalperTriggerStepPoints),
-        futuresLadderGridOffsetPoints: isFuturesScalperStrategy(pStrategyCode)
+        futuresLadderGridOffsetPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderGridOffsetPoints, gFuturesScalperGridOffsetPoints, 0, 1000000)
             : String(gFuturesScalperGridOffsetPoints),
-        futuresLadderOrderOffsetPoints: isFuturesScalperStrategy(pStrategyCode)
+        futuresLadderOrderOffsetPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderOrderOffsetPoints, gFuturesScalperOrderOffsetPoints, 0, 1000000)
             : String(gFuturesScalperOrderOffsetPoints),
-        futuresLadderCancelOffsetPoints: isFuturesScalperStrategy(pStrategyCode)
+        futuresLadderCancelOffsetPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderCancelOffsetPoints, gFuturesScalperCancelOffsetPoints, 1, 1000000)
             : String(gFuturesScalperCancelOffsetPoints),
-        futuresLadderStopLossPoints: isFuturesScalperStrategy(pStrategyCode)
+        futuresLadderStopLossPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderStopLossPoints, gFuturesScalperStopLossPoints, 0, 1000000)
             : String(gFuturesScalperStopLossPoints),
-        futuresLadderTakeProfitPoints: isFuturesScalperStrategy(pStrategyCode)
+        futuresLadderTakeProfitPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTakeProfitPoints, gFuturesScalperTakeProfitPoints, 0, 1000000)
             : String(gFuturesScalperTakeProfitPoints),
-        futuresLadderTrailingEnabled: isFuturesScalperStrategy(pStrategyCode)
+        futuresLadderTrailingEnabled: false
             ? normalizeBooleanValue(objUiState.futuresLadderTrailingEnabled, false)
             : false,
-        futuresLadderTrailingStopPoints: isFuturesScalperStrategy(pStrategyCode)
+        futuresLadderTrailingStopPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTrailingStopPoints, gFuturesScalperTrailingStopPoints, 1, 1000000)
             : String(gFuturesScalperTrailingStopPoints),
-        futuresLadderTrailingActivatePoints: isFuturesScalperStrategy(pStrategyCode)
+        futuresLadderTrailingActivatePoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderTrailingActivatePoints, gFuturesScalperTrailingActivatePoints, 0, 1000000)
             : String(gFuturesScalperTrailingActivatePoints),
-        futuresTradeSide: isFuturesScalperStrategy(pStrategyCode)
+        futuresTradeSide: false
             ? normalizeFuturesScalperTradeSideMode(objUiState.futuresTradeSide)
             : "both",
         minusDelta: normalizeStringValue(objUiState.minusDelta, String(objDefaults.minusDelta)),
@@ -6408,6 +6376,17 @@ async function enrichTrackedOpenPositions(
         .filter((objRow) => objChainSourceByPosition.get(objRow) !== "coinswitch")
         .map((objRow) => String(objRow.contractName || "").trim())
         .filter(Boolean);
+    // Subscribe the open Delta contracts to the shared public ticker WebSocket
+    // before pricing them. Without this the feed never receives these symbols,
+    // so every refresh falls back to a per-symbol REST /tickers call, which is
+    // what triggers the HTTP 429 rate-limit errors.
+    ensureLiveTickerSymbolsForOwner(
+        `open-positions:${pUserId || "shared"}:${pStrategyCode || "default"}`,
+        arrDeltaOptionContracts
+    );
+    // Give the socket a moment to deliver the first tickers so the pricing
+    // below is served from the WebSocket instead of the REST fallback.
+    await waitForLiveTickerSymbols(arrDeltaOptionContracts, 4000);
     const objTickerByContract = new Map<string, Awaited<ReturnType<typeof getLiveOptionTicker>>>();
     await Promise.all(arrDeltaOptionContracts.map(async (pContractName) => {
         objTickerByContract.set(pContractName, await getLiveOptionTicker(pContractName));
@@ -9706,7 +9685,7 @@ async function executeStrategyPlacement(
     const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
     const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pInput.rowIndex);
     const arrOpenOptions = listTrackedOpenOptionPositions(arrExisting);
-    if (!isCoveredLikeStrategy(pStrategyCode) && pStrategyCode !== "strangle-demo" && arrOpenOptions.length > 0) {
+    if (!isCoveredLikeStrategy(pStrategyCode) && true && arrOpenOptions.length > 0) {
         throw new Error(`An option position is already open (${arrOpenOptions[0].contractName}). Close the existing option before opening a new one.`);
     }
     if (isOptionsScalperStrategy(pStrategyCode)) {
@@ -9717,7 +9696,7 @@ async function executeStrategyPlacement(
         const arrOrders: Array<Record<string, unknown>> = [];
         const arrNewPositions: RollingFuturesLtImportedPositionRecord[] = [];
         for (const vLegSide of arrOptionSides) {
-            if (pStrategyCode !== "strangle-demo" && hasTrackedOptionRowLeg(arrExisting, vRowIndex, vLegSide)) {
+            if (true && hasTrackedOptionRowLeg(arrExisting, vRowIndex, vLegSide)) {
                 throw new Error(`Row ${vRowIndex} ${vLegSide.toUpperCase()} paper option is already open. Close it before executing again.`);
             }
             const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
@@ -9754,7 +9733,7 @@ async function executeStrategyPlacement(
             ...arrExisting,
             ...arrNewPositions
         ]);
-        const objNeutralCheck = pOptions?.skipNeutralityCheck || pStrategyCode === "strangle-demo"
+        const objNeutralCheck = pOptions?.skipNeutralityCheck || false
             ? {
                 trackedOpenPositions: arrInitialSaved,
                 hedgePlaced: false,
@@ -10466,41 +10445,13 @@ async function buildOptionsScalperPaperOptionOpen(
     let vSourceLotSize = 0;
     let vTradingLotSize = getLotSizeForSymbol(pInput.symbol);
     let vEqualizedLotFactor = 1;
-    if (pStrategyCode === "strangle-demo" && (pInput.chainSource === "coinswitch" || pInput.chainSource === "delta")) {
-        const vDeltaLotSize = getLotSizeForSymbol(pInput.symbol);
-        let vCoinSwitchLotSize = 0;
-        if (pInput.chainSource === "coinswitch") {
-            if (isOptionContractSymbol(objContract.contractSymbol)) {
-                vCoinSwitchLotSize = await getCoinSwitchLotSizeForSymbol(String(objContract.contractSymbol || ""));
-            }
-            if (!(vCoinSwitchLotSize > 0)) {
-                vCoinSwitchLotSize = await getCoinSwitchLotSizeForUnderlying(pInput.symbol);
-            }
-        }
-        else {
-            vCoinSwitchLotSize = await getCoinSwitchLotSizeForUnderlying(pInput.symbol);
-        }
-        if (vCoinSwitchLotSize > 0 && vDeltaLotSize > 0 && Math.abs(vCoinSwitchLotSize - vDeltaLotSize) > 1e-9) {
-            vEqualizedLotFactor = vCoinSwitchLotSize / vDeltaLotSize;
-            if (pInput.chainSource === "coinswitch") {
-                // CoinSwitch leg keeps its native (larger) lot: qty stays as entered.
-                vSourceLotSize = vCoinSwitchLotSize;
-                vTradingLotSize = vCoinSwitchLotSize;
-                vEffectiveQty = vBaseQty;
-            }
-            else if (!pInput.qtyAlreadyEqualized) {
-                // Delta leg is scaled up so 1 input lot = 1 CoinSwitch lot of exposure.
-                vEffectiveQty = Math.max(1, Math.round(vBaseQty * vEqualizedLotFactor));
-            }
-        }
-    }
     if (isOptionsScalperStrategy(pStrategyCode)) {
         const arrExisting = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
         const objLatestActiveOption = getLatestEligibleTrackedOptionPosition(arrExisting);
         const vLatestLegSide = objLatestActiveOption
             ? getTrackedOptionLegSide(objLatestActiveOption.contractName)
             : "";
-        const bAlternatingLegRestrictionEnabled = pStrategyCode === "strangle-demo"
+        const bAlternatingLegRestrictionEnabled = false
             ? false
             : normalizeBooleanValue(objUiState.alternatingLegRestrictionEnabled, true);
         const bApplyAlternatingLegGuard = bAlternatingLegRestrictionEnabled
@@ -10529,7 +10480,7 @@ async function buildOptionsScalperPaperOptionOpen(
         }
         if (!bIsReEntryOpen && (vOpenedReason === "strategy_option_open" || vOpenedReason === "webhook_option_open")) {
             const vContractName = String(objContract.contractSymbol || "").trim();
-            const bAllowDuplicateContracts = pStrategyCode === "strangle-demo"
+            const bAllowDuplicateContracts = false
                 ? true
                 : normalizeBooleanValue(objUiState.allowDuplicateContracts, false);
             if (!bAllowDuplicateContracts && hasActiveTrackedOptionContract(arrExisting, vContractName)) {
@@ -10556,7 +10507,7 @@ async function buildOptionsScalperPaperOptionOpen(
     const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
     const vTakeProfitDelta = Math.max(0, Number(pInput.takeProfitDelta ?? objOptionMetadata.takeProfitDelta ?? objRowState.tpD ?? 0.25));
     const vStopLossDelta = Math.max(0, Number(pInput.stopLossDelta ?? objOptionMetadata.stopLossDelta ?? objRowState.slD ?? 0.65));
-    if (!bIsReEntryOpen && pStrategyCode !== "strangle-demo") {
+    if (!bIsReEntryOpen && true) {
         const objImmediateRuleDecision = shouldTriggerTrackedOption(
             pInput.action.toUpperCase(),
             vAbsoluteDelta,
@@ -10984,10 +10935,10 @@ async function openTrackedOptionReEntry(
                 qty: vOptionQty,
                 targetDelta: vTargetDelta,
                 rowIndex: vRowIndex,
-                chainSource: pStrategyCode === "strangle-demo"
+                chainSource: false
                     ? resolveTrackedPositionChainSource(pClosedPosition, pStrategyCode)
                     : undefined,
-                qtyAlreadyEqualized: pStrategyCode === "strangle-demo" ? true : undefined,
+                qtyAlreadyEqualized: false ? true : undefined,
                 openedReason: pReason === "sl"
                     ? "sl_reentry"
                     : (pReason === "tp"
@@ -13073,7 +13024,7 @@ async function syncOptionsDemoRenkoRuntimeState(
     signals: OptionsDemoRenkoSignal[];
     emaSignal: OptionsDemoRenkoSignal | "";
 }> {
-    if (!isOptionsScalperStrategy(pStrategyCode) && pStrategyCode !== "covered-options" && !isFuturesScalperStrategy(pStrategyCode)) {
+    if (!isOptionsScalperStrategy(pStrategyCode) && pStrategyCode !== "covered-options" && !false) {
         return {
             runtime: pRuntime,
             profile: pProfile,
@@ -14245,7 +14196,7 @@ export async function syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade(
     } | null,
     pManualSignal: OptionsDemoRenkoSignal | "" = ""
 ): Promise<FuturesScalperEngineSyncResult> {
-    const pStrategyCode: RollingFuturesLtStrategyCode = "futures-scalper";
+    const pStrategyCode: RollingFuturesLtStrategyCode = "options-scalper";
     const objProfile = await readLiveProfile(pUserId, pStrategyCode);
     const objRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
     return syncFuturesScalperEngineTick(pUserId, pStrategyCode, objProfile, objRuntime, pSnapshot, pManualSignal);
@@ -16065,7 +16016,7 @@ async function runAutoTraderCycle(
             if (pStrategyCode === "covered-options") {
                 await syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(pUserId, objRenkoSnapshot);
             }
-            else if (isFuturesScalperStrategy(pStrategyCode)) {
+            else if (false) {
                 await syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade(pUserId, objRenkoSnapshot);
             }
             else if (pStrategyCode === "calendar-spread") {
@@ -16861,7 +16812,7 @@ export async function recoverRollingFuturesLtAutoTraderCycles(): Promise<void> {
                 || vStrategyCode === "covered-options"
                 || isDualRollingFuturesStrategy(vStrategyCode)
                 || isOptionsScalperStrategy(vStrategyCode)
-                || isFuturesScalperStrategy(vStrategyCode)
+                || false
             );
 
         if (!bShouldResume) {
@@ -21896,9 +21847,6 @@ async function executeOptionsScalperPaperManualFutureInternal(req: Request, res:
 export async function executeOptionsScalperManualFuture(req: Request, res: Response): Promise<void> {
     await executeOptionsScalperPaperManualFutureInternal(req, res, "options-scalper");
 }
-export async function executeFuturesScalperManualFuture(req: Request, res: Response): Promise<void> {
-    await executeOptionsScalperPaperManualFutureInternal(req, res, "futures-scalper");
-}
 export async function executeOptionsScalperManualOption(req: Request, res: Response): Promise<void> {
     await executeManualOptionInternal(req, res, "options-scalper");
 }
@@ -22411,265 +22359,6 @@ export async function updateCalendarSpreadRecoveryMetrics(req: Request, res: Res
 }
 export async function recalculateCalendarSpreadRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "calendar-spread");
-}
-
-// ---------------------------------------------------------------------------
-// Futures Scalper (paper futures) strategy exports â€” separate from options-demo.
-// ---------------------------------------------------------------------------
-export async function getFuturesScalperProfile(req: Request, res: Response): Promise<void> {
-    await getProfileInternal(req, res, "futures-scalper");
-}
-export async function saveFuturesScalperProfile(req: Request, res: Response): Promise<void> {
-    await saveProfileInternal(req, res, "futures-scalper");
-}
-export async function getFuturesScalperConnectionStatus(req: Request, res: Response): Promise<void> {
-    await getConnectionStatusInternal(req, res, "futures-scalper");
-}
-export async function getFuturesScalperRuntimeStatus(req: Request, res: Response): Promise<void> {
-    await getRuntimeStatusInternal(req, res, "futures-scalper");
-}
-export async function checkFuturesScalperConnection(req: Request, res: Response): Promise<void> {
-    await checkConnectionInternal(req, res, "futures-scalper");
-}
-export async function enableFuturesScalperAutoTrader(req: Request, res: Response): Promise<void> {
-    await enableAutoTraderInternal(req, res, "futures-scalper");
-}
-export async function disableFuturesScalperAutoTrader(req: Request, res: Response): Promise<void> {
-    await disableAutoTraderInternal(req, res, "futures-scalper");
-}
-export async function getFuturesScalperAccountSummary(req: Request, res: Response): Promise<void> {
-    await getAccountSummaryInternal(req, res, "futures-scalper");
-}
-export async function calculateFuturesScalperRecommendedStartQty(req: Request, res: Response): Promise<void> {
-    await calculateRecommendedStartQtyInternal(req, res, "futures-scalper");
-}
-
-export async function getFuturesScalperIndicator(req: Request, res: Response): Promise<void> {
-    try {
-        const vUserId = getAccountId(req);
-        const objProfile = await readLiveProfile(vUserId, "futures-scalper");
-        const objUiState = getMergedUiState(objProfile);
-        const vSelectedSymbol = normalizeSymbolValue(req.query?.symbol || req.body?.symbol || objUiState.symbol);
-        const objIndicator = await getOptionsDemoOiIndicatorSummary(vSelectedSymbol);
-        res.json({
-            status: "success",
-            data: objIndicator
-        });
-    }
-    catch (objError) {
-        res.status(500).json({
-            status: "danger",
-            message: getErrorMessage(objError, "Unable to fetch futures scalper indicator.")
-        });
-    }
-}
-export async function setFuturesScalperRenkoManualSignal(req: Request, res: Response): Promise<void> {
-    try {
-        const vUserId = getAccountId(req);
-        const objProfile = await readLiveProfile(vUserId, "futures-scalper");
-        const objUiState = getMergedUiState(objProfile);
-        const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
-        const vSignal = String(req.body?.signal || req.body?.color || "").trim().toUpperCase() === "G" ? "G"
-            : (String(req.body?.signal || req.body?.color || "").trim().toUpperCase() === "R" ? "R" : "");
-        if (!vSignal) {
-            res.status(400).json({
-                status: "warning",
-                message: "Select R or G for the manual Renko signal."
-            });
-            return;
-        }
-        const objSnapshot = await getLiveMarketSnapshot({
-            symbol: vSelectedSymbol,
-            contractName: getContractNameForSymbol(vSelectedSymbol),
-            lotSize: getLotSizeForSymbol(vSelectedSymbol),
-            futureQty: 1,
-            futureOrderType: "market_order",
-            action: "buy",
-            legSide: "ce",
-            expiryMode: "1",
-            expiryDate: "",
-            optionQty: 1,
-            redOptionQtyPct: 100,
-            greenOptionQtyPct: 100,
-            newDelta: 0.53,
-            reDelta: 0.53,
-            deltaTakeProfit: 0.15,
-            deltaStopLoss: 0.85,
-            reEnter: false,
-            addOneLotFuture: false,
-            renkoEnabled: Boolean(objUiState.renkoFeedEnabled ?? objUiState.renkoEnabled),
-            renkoStepPoints: Math.max(1, Math.floor(Number(objUiState.renkoFeedPts || objUiState.renkoStepPoints || 10) || 10)),
-            renkoPriceSource: normalizeRenkoFeedPriceSourceValue(objUiState.renkoFeedPriceSrc || "spot_price"),
-            loopSeconds: 8
-        });
-        const objSync = await syncFuturesScalperRenkoRuntimeAndMaybeAutoTrade(vUserId, objSnapshot, vSignal);
-        res.json({
-            status: "success",
-            message: `Manual Renko signal set to ${vSignal}.`,
-            data: {
-                renko: objSync.renko,
-                renkoHistoryBySymbol: getMergedUiState(objSync.profile).renkoHistoryBySymbol,
-                autoTrade: objSync.autoTrade || null
-            }
-        });
-    }
-    catch (objError) {
-        res.status(500).json({
-            status: "danger",
-            message: getErrorMessage(objError, "Unable to set the manual Renko signal.")
-        });
-    }
-}
-export async function getFuturesScalperImportableOpenPositions(req: Request, res: Response): Promise<void> {
-    await getImportableOpenPositionsInternal(req, res, "futures-scalper");
-}
-export async function getFuturesScalperOpenPositions(req: Request, res: Response): Promise<void> {
-    await getOpenPositionsInternal(req, res, "futures-scalper");
-}
-export async function saveFuturesScalperOpenPositions(req: Request, res: Response): Promise<void> {
-    await saveOpenPositionsInternal(req, res, "futures-scalper");
-}
-export async function deleteFuturesScalperOpenPosition(req: Request, res: Response): Promise<void> {
-    await deleteOpenPositionInternal(req, res, "futures-scalper");
-}
-export async function clearFuturesScalperOpenPositions(req: Request, res: Response): Promise<void> {
-    await clearOpenPositionsInternal(req, res, "futures-scalper");
-}
-export async function reconcileFuturesScalperOpenPositions(req: Request, res: Response): Promise<void> {
-    await reconcileOpenPositionsInternal(req, res, "futures-scalper");
-}
-export async function closeFuturesScalperImportedOpenPosition(req: Request, res: Response): Promise<void> {
-    await closeImportedOpenPositionInternal(req, res, "futures-scalper");
-}
-export async function getFuturesScalperClosedPositions(req: Request, res: Response): Promise<void> {
-    await getClosedPositionsInternal(req, res, "futures-scalper");
-}
-export async function clearFuturesScalperClosedPositions(req: Request, res: Response): Promise<void> {
-    await clearOptionsScalperClosedPositionsInternal(req, res, "futures-scalper");
-}
-export async function deleteFuturesScalperClosedPosition(req: Request, res: Response): Promise<void> {
-    await deleteOptionsScalperClosedPositionInternal(req, res, "futures-scalper");
-}
-export async function updateFuturesScalperClosedPosition(req: Request, res: Response): Promise<void> {
-    await updateOptionsScalperClosedPositionInternal(req, res, "futures-scalper");
-}
-export async function getFuturesScalperEvents(req: Request, res: Response): Promise<void> {
-    await getEventsInternal(req, res, "futures-scalper");
-}
-export async function clearFuturesScalperEventsController(req: Request, res: Response): Promise<void> {
-    await clearEventsInternal(req, res, "futures-scalper");
-}
-export async function deleteFuturesScalperEventController(req: Request, res: Response): Promise<void> {
-    await deleteEventInternal(req, res, "futures-scalper");
-}
-export async function executeFuturesScalperKillSwitch(req: Request, res: Response): Promise<void> {
-    await executeKillSwitchInternal(req, res, "futures-scalper");
-}
-export async function updateFuturesScalperRecoveryMetrics(req: Request, res: Response): Promise<void> {
-    await updateRecoveryMetricsInternal(req, res, "futures-scalper");
-}
-export async function recalculateFuturesScalperRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
-    await recalculateRecoveryTotalPnlInternal(req, res, "futures-scalper");
-}
-
-export async function getStrangleDemoProfile(req: Request, res: Response): Promise<void> {
-    await getProfileInternal(req, res, "strangle-demo");
-}
-export async function saveStrangleDemoProfile(req: Request, res: Response): Promise<void> {
-    await saveProfileInternal(req, res, "strangle-demo");
-}
-export async function getStrangleDemoConnectionStatus(req: Request, res: Response): Promise<void> {
-    await getConnectionStatusInternal(req, res, "strangle-demo");
-}
-export async function getStrangleDemoRuntimeStatus(req: Request, res: Response): Promise<void> {
-    await getRuntimeStatusInternal(req, res, "strangle-demo");
-}
-export async function checkStrangleDemoConnection(req: Request, res: Response): Promise<void> {
-    await checkConnectionInternal(req, res, "strangle-demo");
-}
-export async function enableStrangleDemoAutoTrader(req: Request, res: Response): Promise<void> {
-    await enableAutoTraderInternal(req, res, "strangle-demo");
-}
-export async function disableStrangleDemoAutoTrader(req: Request, res: Response): Promise<void> {
-    await disableAutoTraderInternal(req, res, "strangle-demo");
-}
-export async function getStrangleDemoAccountSummary(req: Request, res: Response): Promise<void> {
-    await getAccountSummaryInternal(req, res, "strangle-demo");
-}
-export async function calculateStrangleDemoRecommendedStartQty(req: Request, res: Response): Promise<void> {
-    await calculateRecommendedStartQtyInternal(req, res, "strangle-demo");
-}
-export async function executeStrangleDemoManualFuture(req: Request, res: Response): Promise<void> {
-    await respondOptionsScalperPaperActionNotReady(req, res, "Strangle Demo paper future entries are not wired yet.");
-}
-export async function executeStrangleDemoManualOption(req: Request, res: Response): Promise<void> {
-    await executeManualOptionInternal(req, res, "strangle-demo");
-}
-export async function executeStrangleDemoStrategy(req: Request, res: Response): Promise<void> {
-    await executeStrategyInternal(req, res, "strangle-demo");
-}
-export async function confirmStrangleDemoLiveAction(req: Request, res: Response): Promise<void> {
-    res.status(400).json({
-        status: "warning",
-        message: "Paper actions do not need confirmation on Strangle Demo."
-    });
-}
-export async function rejectStrangleDemoLiveAction(req: Request, res: Response): Promise<void> {
-    res.status(400).json({
-        status: "warning",
-        message: "Paper actions do not need confirmation on Strangle Demo."
-    });
-}
-export async function getStrangleDemoImportableOpenPositions(req: Request, res: Response): Promise<void> {
-    await getImportableOpenPositionsInternal(req, res, "strangle-demo");
-}
-export async function getStrangleDemoOpenPositions(req: Request, res: Response): Promise<void> {
-    await getOpenPositionsInternal(req, res, "strangle-demo");
-}
-export async function saveStrangleDemoOpenPositions(req: Request, res: Response): Promise<void> {
-    await saveOpenPositionsInternal(req, res, "strangle-demo");
-}
-export async function deleteStrangleDemoOpenPosition(req: Request, res: Response): Promise<void> {
-    await deleteOpenPositionInternal(req, res, "strangle-demo");
-}
-export async function clearStrangleDemoOpenPositions(req: Request, res: Response): Promise<void> {
-    await clearOpenPositionsInternal(req, res, "strangle-demo");
-}
-export async function reconcileStrangleDemoOpenPositions(req: Request, res: Response): Promise<void> {
-    await reconcileOpenPositionsInternal(req, res, "strangle-demo");
-}
-export async function closeStrangleDemoImportedOpenPosition(req: Request, res: Response): Promise<void> {
-    await closeImportedOpenPositionInternal(req, res, "strangle-demo");
-}
-export async function getStrangleDemoClosedPositions(req: Request, res: Response): Promise<void> {
-    await getClosedPositionsInternal(req, res, "strangle-demo");
-}
-export async function clearStrangleDemoClosedPositions(req: Request, res: Response): Promise<void> {
-    await clearOptionsScalperClosedPositionsInternal(req, res, "strangle-demo");
-}
-export async function deleteStrangleDemoClosedPosition(req: Request, res: Response): Promise<void> {
-    await deleteOptionsScalperClosedPositionInternal(req, res, "strangle-demo");
-}
-export async function updateStrangleDemoClosedPosition(req: Request, res: Response): Promise<void> {
-    await updateOptionsScalperClosedPositionInternal(req, res, "strangle-demo");
-}
-export async function getStrangleDemoEvents(req: Request, res: Response): Promise<void> {
-    await getEventsInternal(req, res, "strangle-demo");
-}
-export async function clearStrangleDemoEventsController(req: Request, res: Response): Promise<void> {
-    await clearEventsInternal(req, res, "strangle-demo");
-}
-export async function deleteStrangleDemoEventController(req: Request, res: Response): Promise<void> {
-    await deleteEventInternal(req, res, "strangle-demo");
-}
-export async function executeStrangleDemoKillSwitch(req: Request, res: Response): Promise<void> {
-    await executeKillSwitchInternal(req, res, "strangle-demo");
-}
-export async function updateStrangleDemoRecoveryMetrics(req: Request, res: Response): Promise<void> {
-    await updateRecoveryMetricsInternal(req, res, "strangle-demo");
-}
-export async function recalculateStrangleDemoRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
-    await recalculateRecoveryTotalPnlInternal(req, res, "strangle-demo");
 }
 
 // ============================================================

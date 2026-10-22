@@ -16,6 +16,11 @@ BEGIN;
 -- - rolling options live profiles/runtime/positions
 -- - rolling options paper profiles/runtime/positions
 --
+-- Removed feature persistent records (rolling futures lt):
+-- - optionyze_rolling_futures_lt_profiles  (strategy_code = 'futures-scalper', 'strangle-demo')
+-- - optionyze_rolling_futures_lt_positions (strategy_code = 'futures-scalper', 'strangle-demo')
+-- - optionyze_rolling_futures_lt_runtime   (strategy_code = 'futures-scalper', 'strangle-demo')
+--
 -- Kept on purpose:
 -- - optionyze_rolling_options_pt_de_events
 --   Dual still uses this shared event table for activity/event logging.
@@ -33,6 +38,16 @@ DROP TABLE IF EXISTS optionyze_rolling_options_lt_de_profiles;
 DROP TABLE IF EXISTS optionyze_rolling_options_pt_de_positions;
 DROP TABLE IF EXISTS optionyze_rolling_options_pt_de_runtime;
 DROP TABLE IF EXISTS optionyze_rolling_options_pt_de_profiles;
+
+-- Clean up persistent records for removed Futures Scalper and Strangle Demo strategies
+DELETE FROM optionyze_rolling_futures_lt_profiles
+WHERE strategy_code IN ('futures-scalper', 'strangle-demo');
+
+DELETE FROM optionyze_rolling_futures_lt_positions
+WHERE strategy_code IN ('futures-scalper', 'strangle-demo');
+
+DELETE FROM optionyze_rolling_futures_lt_runtime
+WHERE strategy_code IN ('futures-scalper', 'strangle-demo');
 
 COMMIT;
 
