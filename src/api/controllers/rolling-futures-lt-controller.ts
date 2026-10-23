@@ -3740,6 +3740,10 @@ async function processCalendarSpreadLossReenter(
                 // re-entry is rejected as "already active in Open Positions".
                 await replaceRollingFuturesLtImportedPositions(pUserId, "calendar-spread", arrWorking);
 
+                if (vRowAction === "none") {
+                    continue;
+                }
+
                 const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
                     pUserId,
                     "calendar-spread",
@@ -3892,6 +3896,10 @@ async function retryCalendarSpreadPendingReentries(
         const arrStillPending: CalendarSpreadPendingReentry[] = [];
         for (const objPending of arrPending) {
             try {
+                if (objPending.action === "none") {
+                    continue;
+                }
+
                 const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
                     pUserId,
                     "calendar-spread",
@@ -5322,7 +5330,7 @@ async function cancelOpenCoveredOptionEntryOrdersForLeg(
     pClient: any,
     pSymbol: "BTC" | "ETH",
     pLegSide: "ce" | "pe",
-    pAction: "buy" | "sell"
+    pAction: "buy" | "sell" | "none"
 ): Promise<number> {
     if (typeof pClient?.apis?.Orders?.cancelOrder !== "function") {
         return 0;
@@ -10210,7 +10218,7 @@ const gStrangleDemoDeltaThreshold = 0.4;
 
 function hasUsableStrangleDemoChainPrice(
     pRow: StrangleDemoChainRowInput,
-    pAction: "buy" | "sell"
+    pAction: "buy" | "sell" | "none"
 ): boolean {
     const vSidePrice = pAction === "buy" ? Number(pRow.ask) : Number(pRow.bid);
     const vMarkPrice = Number(pRow.markPrice);
@@ -10220,7 +10228,7 @@ function hasUsableStrangleDemoChainPrice(
 
 function pickStrangleDemoChainRow(
     pRows: StrangleDemoChainRowInput[],
-    pAction: "buy" | "sell",
+    pAction: "buy" | "sell" | "none",
     pForceStrike?: number
 ): StrangleDemoChainRowInput | null {
     const vTargetMagnitude = gStrangleDemoDeltaThreshold;
@@ -10261,7 +10269,7 @@ async function findStrangleDemoChainContract(
         legSide: "ce" | "pe";
         expiryDate: string;
         targetDelta: number;
-        action: "buy" | "sell";
+        action: "buy" | "sell" | "none";
         forceStrike?: number;
     }
 ): Promise<NonNullable<Awaited<ReturnType<typeof findBestLiveOptionContract>>> | null> {
@@ -10351,7 +10359,7 @@ async function buildOptionsScalperPaperOptionOpen(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pProfile: RollingFuturesLtProfileRecord,
     pInput: {
-        action: "buy" | "sell";
+        action: "buy" | "sell" | "none";
         symbol: "BTC" | "ETH";
         legSide: "ce" | "pe";
         expiryMode: "1" | "2" | "4" | "5" | "6" | "7";
@@ -10373,6 +10381,9 @@ async function buildOptionsScalperPaperOptionOpen(
     contract: Record<string, unknown>;
     order: Record<string, unknown>;
 }> {
+    if (pInput.action === "none") {
+        throw new Error("buildOptionsScalperPaperOptionOpen called with action 'none'");
+    }
     const objUiState = getMergedUiState(pProfile);
     const vRowIndex = normalizeOptionRowIndex(pStrategyCode, pInput.rowIndex);
     const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
@@ -11133,6 +11144,9 @@ async function executeCoveredPendingReEntryNow(
     pProfile: RollingFuturesLtProfileRecord,
     pPending: CoveredPendingOptionReEntryState
 ): Promise<boolean> {
+    if (pPending.action === "none") {
+        return false;
+    }
     const pStrategyCode = isCoveredOptionsStrategy(pProfile.strategyCode) ? pProfile.strategyCode : "covered-options";
     const objProfile = await refreshModeDrivenExpiryDatesInProfile(pUserId, pStrategyCode, pProfile);
     let arrSavedPositions = await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
@@ -11305,7 +11319,7 @@ function buildCoveredReEntryPlaceholderPosition(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pRowIndex: 1 | 2,
     pLegSide: "ce" | "pe",
-    pAction: "buy" | "sell",
+    pAction: "buy" | "sell" | "none",
     pQty: number
 ): RollingFuturesLtImportedPositionRecord {
     return {
@@ -11398,6 +11412,9 @@ async function processCoveredPendingOptionReEntries(
             reEnterEnabled: Boolean(objRowState.reEnter)
         };
         try {
+            if (objPending.action === "none") {
+                continue;
+            }
             const vCancelledCount = await cancelOpenCoveredOptionEntryOrdersForLeg(
                 client,
                 vSymbol,
@@ -22234,6 +22251,10 @@ export async function reenterCalendarSpreadOpenPosition(req: Request, res: Respo
         const arrAfterClose = arrPositions.filter((objRow) => String(objRow.importId || "").trim() !== vImportId);
         // Persist the close first so the reopen is not blocked by the guard.
         await replaceRollingFuturesLtImportedPositions(vUserId, "calendar-spread", arrAfterClose);
+
+        if (objRowInput.action === "none") {
+            return;
+        }
 
         const objPaperOpen = await buildOptionsScalperPaperOptionOpen(
             vUserId,
