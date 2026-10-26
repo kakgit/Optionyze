@@ -184,6 +184,7 @@ import {
     executeCalendarSpreadManualFuture,
     executeCalendarSpreadManualOption,
     executeCalendarSpreadStrategy,
+    executeCalendarSpreadTermStructureStrangle,
     getCalendarSpreadAccountSummary,
     getCalendarSpreadClosedPositions,
     getCalendarSpreadConnectionStatus,
@@ -191,6 +192,8 @@ import {
     getCalendarSpreadImportableOpenPositions,
     getCalendarSpreadIndicator,
     getCalendarSpreadMarketDataStatus,
+    getCalendarSpreadAtmOption,
+    getCalendarSpreadTermStructure,
     getCalendarSpreadOpenPositions,
     getCalendarSpreadProfile,
     getCalendarSpreadRsiStatus,
@@ -850,6 +853,15 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.get("/calendar-spread/indicator", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getCalendarSpreadIndicator(req, res);
+    });
+    objRouter.get("/calendar-spread/atm-option", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCalendarSpreadAtmOption(req, res);
+    });
+    objRouter.get("/calendar-spread/term-structure", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCalendarSpreadTermStructure(req, res);
+    });
+    objRouter.post("/calendar-spread/term-structure/execute-strangle", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeCalendarSpreadTermStructureStrangle(req, res);
     });
     objRouter.get("/calendar-spread/rsi", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getCalendarSpreadRsiStatus(req, res);

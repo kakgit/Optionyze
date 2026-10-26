@@ -40,6 +40,15 @@ import {
 } from "../../storage/options-scalper-paper-store";
 import { getOptionsDemoOiIndicatorSummary } from "../../strategies/directional-options-demo/oi-indicator";
 import {
+    executeTermStructureStrangle,
+    evaluateTermStructureState,
+    fetchTermStructureSnapshot,
+    fetchAtmOptionForExpiry,
+    resetTermStructureState,
+    type TermStructureSnapshot,
+    type TermStructureState
+} from "../../services/term-structure-analytics";
+import {
     createPendingStrategyExecutionRequest,
     deletePendingStrategyExecutionRequest,
     getPendingStrategyExecutionRequestById,
@@ -22032,6 +22041,107 @@ export async function getCalendarSpreadRsiStatus(req: Request, res: Response): P
         });
     }
 }
+export async function getCalendarSpreadTermStructure(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const objProfile = await readLiveProfile(vUserId, "calendar-spread");
+        const objUiState = getMergedUiState(objProfile);
+        const vSelectedSymbol = normalizeSymbolValue(
+            req.query?.symbol || req.body?.symbol || objUiState.symbol
+        );
+        const objSnapshot = await fetchTermStructureSnapshot(vSelectedSymbol);
+        const objState = evaluateTermStructureState(vUserId, vSelectedSymbol, objSnapshot);
+        res.json({
+            status: "success",
+            data: {
+                symbol: objState.symbol,
+                spot: objSnapshot.spot,
+                weeklyIv: objState.weeklyIv,
+                monthlyIv: objState.monthlyIv,
+                peakWeeklyIv: objState.peakWeeklyIv,
+                spread: objState.spread,
+                coolingPoints: objState.coolingPoints,
+                condition1: objState.condition1,
+                condition2: objState.condition2,
+                condition3: objState.condition3,
+                tradeTriggered: objState.tradeTriggered,
+                state: objState.state,
+                weekly: objSnapshot.weekly,
+                monthly: objSnapshot.monthly,
+                updatedAt: objState.updatedAt
+            }
+        });
+    } catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to fetch calendar spread term structure.")
+        });
+    }
+}
+
+
+export async function getCalendarSpreadAtmOption(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const vSymbol = normalizeSymbolValue(req.query?.symbol || req.body?.symbol || "BTCUSD");
+        let vExpiry = String(req.query?.expiry || req.body?.expiry || "").trim();
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(vExpiry);
+        if (m) {
+            vExpiry = `${m[3]}-${m[2]}-${m[1]}`;
+        }
+        const vSideRaw = String(req.query?.side || req.body?.side || "call").trim().toLowerCase();
+        const vSide: "call" | "put" = (vSideRaw === "put" || vSideRaw === "p" || vSideRaw === "pe") ? "put" : "call";
+
+        const objResult = await fetchAtmOptionForExpiry(vSymbol, vExpiry, vSide);
+        res.json({ status: "success", data: objResult });
+    } catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to fetch ATM option.")
+        });
+    }
+}
+
+export async function executeCalendarSpreadTermStructureStrangle(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const objProfile = await readLiveProfile(vUserId, "calendar-spread");
+        const objUiState = getMergedUiState(objProfile);
+        const vSelectedSymbol = normalizeSymbolValue(
+            req.body?.symbol || objUiState.symbol
+        );
+        const vSelectedApiProfileId = String(
+            req.body?.selectedApiProfileId || objProfile.selectedApiProfileId || ""
+        ).trim();
+        if (!vSelectedApiProfileId) {
+            res.status(400).json({
+                status: "warning",
+                message: "Select a connected Delta API profile before executing the short strangle."
+            });
+            return;
+        }
+        const objResult = await executeTermStructureStrangle(vUserId, vSelectedSymbol, vSelectedApiProfileId);
+        if (objResult.ok) {
+            await logFuturesEvent(
+                vUserId, "calendar-spread", "strategy_executed", "success",
+                "Term Structure Strangle Executed",
+                `Executed 0.15-delta short strangle on ${vSelectedSymbol}.`,
+                { symbol: vSelectedSymbol, targets: objResult.targets, orders: objResult.orders }
+            );
+        }
+        res.status(objResult.ok ? 200 : 400).json({
+            status: objResult.ok ? "success" : "warning",
+            message: objResult.message,
+            data: { symbol: vSelectedSymbol, targets: objResult.targets, orders: objResult.orders }
+        });
+    } catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to execute the term structure short strangle.")
+        });
+    }
+}
+
 export async function setCalendarSpreadRenkoManualSignal(req: Request, res: Response): Promise<void> {
     try {
         const vUserId = getAccountId(req);

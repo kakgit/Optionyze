@@ -27,6 +27,12 @@ export function renderMngUsersPage(req: Request, res: Response): void {
 export async function listRunnerStates(_req: Request, res: Response, pRunnerManager: RunnerManager): Promise<void> {
     res.json({ status: "success", data: pRunnerManager.listStates() });
 }
+export function renderManageTradesPage(req: Request, res: Response): void {
+    res.render("manage-trades", {
+        pageTitle: "Manage Trades | Optionyze",
+        currentAccount: req.authAccount
+    });
+}
 
 export async function listManagedUsersController(_req: Request, res: Response): Promise<void> {
     try {
@@ -297,3 +303,7 @@ function getErrorMessage(pError: unknown, pFallback: string): string {
 
     return pFallback;
 }
+
+
+
+

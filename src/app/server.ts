@@ -22,6 +22,7 @@ import {
     renderOptionsDemoPage,
     renderCalendarSpreadPage
 } from "../api/controllers/strategyfo-paper-controller";
+import { renderManageTradesPage } from "../api/controllers/users-controller";
 import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade, syncCalendarSpreadRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
 import { loadRollingFuturesLtRuntime } from "../storage/rolling-futures-lt-runtime-store";
 import { ensureLiveTickerSymbols, getLiveMarketSnapshot } from "../strategies/rolling-options-pt-de/market-data";
@@ -155,6 +156,9 @@ async function bootstrap(): Promise<void> {
     app.get("/renko-options", requireAuthPage, requireFreshPasswordPage, renderRenkoOptionsPage);
     app.get("/options-demo", requireAuthPage, requireFreshPasswordPage, renderOptionsDemoPage);
     app.get("/calendar-spread", requireAuthPage, requireFreshPasswordPage, renderCalendarSpreadPage);
+app.get("/manage-trades", requireAuthPage,
+requireFreshPasswordPage, requireAdminPage,
+renderManageTradesPage);
     app.get("/mngusers", requireAuthPage, requireFreshPasswordPage, requireAdminPage, renderMngUsersPage);
     app.get("/account/profile", requireAuthPage, renderMyProfilePage);
     app.post("/account/profile", requireAuthPage, async (req, res) => {
@@ -461,6 +465,12 @@ void bootstrap().catch((objError) => {
     console.error("Failed to bootstrap Optionyze", objError);
     process.exitCode = 1;
 });
+
+
+
+
+
+
 
 
 
