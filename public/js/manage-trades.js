@@ -1027,6 +1027,35 @@
             const padding = Math.max(1, (maxValue - minValue) * 0.15);
             return { min: Math.max(0, minValue - padding), max: maxValue + padding };
         }
+        function drawOptionIvAxes(ctx, cssW, cssH, pad, minY, maxY) {
+            ctx.fillStyle = "rgba(8, 16, 36, 1)";
+            ctx.fillRect(0, 0, cssW, cssH);
+            ctx.strokeStyle = "rgba(148, 163, 184, 0.18)";
+            ctx.fillStyle = "#94a3b8";
+            ctx.font = "11px sans-serif";
+            const tickCount = 5;
+            for (let i = 0; i <= tickCount; i++) {
+                const ratio = i / tickCount;
+                const y = pad.top + (1 - ratio) * (cssH - pad.top - pad.bottom);
+                ctx.beginPath();
+                ctx.moveTo(pad.left, y);
+                ctx.lineTo(cssW - pad.right, y);
+                ctx.stroke();
+                const value = minY + ratio * (maxY - minY);
+                ctx.textAlign = "left";
+                ctx.fillText(value.toFixed(2) + "%", 6, y + 4);
+                ctx.textAlign = "right";
+                ctx.fillText(value.toFixed(2) + "%", cssW - 6, y + 4);
+                ctx.textAlign = "left";
+            }
+            ctx.strokeStyle = "rgba(148, 163, 184, 0.35)";
+            ctx.beginPath();
+            ctx.moveTo(pad.left, cssH - pad.bottom);
+            ctx.lineTo(cssW - pad.right, cssH - pad.bottom);
+            ctx.stroke();
+        }
+
+
         function drawOptionIvSeries(ctx, points, cssW, cssH, pad, minValue, maxValue, key, color) {
             ctx.strokeStyle = color;
             ctx.lineWidth = 2;
@@ -1134,8 +1163,7 @@
                 return;
             }
             const bounds = getOptionIvBounds();
-            ctx.fillStyle = "rgba(8, 16, 36, 1)";
-            ctx.fillRect(0, 0, cssW, cssH);
+            drawOptionIvAxes(ctx, cssW, cssH, pad, bounds.min, bounds.max);
             drawOptionIvSeries(ctx, optionIvPoints, cssW, cssH, pad, bounds.min, bounds.max, "call", "#ef4444");
             drawOptionIvSeries(ctx, optionIvPoints, cssW, cssH, pad, bounds.min, bounds.max, "put", "#22c55e");
             drawOptionIvXLabels(ctx, optionIvPoints, cssW, cssH, pad);
