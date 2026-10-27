@@ -910,12 +910,34 @@
         }
         drawIvChart();
     }
+    function storageKeyForSelect(selectId) {
+        return `mt_ivExpiry_${selectId}`;
+    }
+    function restoreSelectValue(select) {
+        if (!(select instanceof HTMLSelectElement)) return;
+        try {
+            const saved = localStorage.getItem(storageKeyForSelect(select.id));
+            if (saved && Array.prototype.some.call(select.options, function (opt) { return opt.value === saved; })) {
+                select.value = saved;
+            }
+        } catch (e) { /* ignore storage errors */ }
+    }
+    function persistSelectValue(select) {
+        if (!(select instanceof HTMLSelectElement)) return;
+        try {
+            localStorage.setItem(storageKeyForSelect(select.id), select.value);
+        } catch (e) { /* ignore storage errors */ }
+    }
+
+
     function init() {
         controlPairs.forEach(function (pair) {
             const select = document.getElementById(pair.selectId);
             const input = document.getElementById(pair.inputId);
+            restoreSelectValue(select);
             if (select instanceof HTMLSelectElement) {
                 select.addEventListener("change", function () {
+                    persistSelectValue(select);
                     applyExpiryMode(pair, true);
                 });
             }
@@ -937,8 +959,12 @@
         fastIvExpiryLabel = getSelectedExpiryLabel(`${prefix}FastIvExpiryType`) || fastIvExpiryLabel;
         const slowSelect = document.getElementById(`${prefix}SlowIvExpiryType`);
         const fastSelect = document.getElementById(`${prefix}FastIvExpiryType`);
-        if (slowSelect) slowSelect.addEventListener("change", updateIvChartLabels);
-        if (fastSelect) fastSelect.addEventListener("change", updateIvChartLabels);
+        if (slowSelect) {
+            slowSelect.addEventListener("change", function () { persistSelectValue(slowSelect); updateIvChartLabels(); });
+        }
+        if (fastSelect) {
+            fastSelect.addEventListener("change", function () { persistSelectValue(fastSelect); updateIvChartLabels(); });
+        }
         const titleEl = document.getElementById(`${prefix}IvChartTitle`);
         if (titleEl) titleEl.textContent = `BTCUSD ${side === "put" ? "Put" : "Call"} Mark IV`;
         initIvChart();
