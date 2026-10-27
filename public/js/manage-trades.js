@@ -1,7 +1,13 @@
 (function () {
     "use strict";
-    function createIvTracker(prefix, side) {
+    function createIvTracker(prefix, side, options) {
         side = side === "put" ? "put" : "call";
+        options = options || {};
+        function reportFastIvChanged() {
+            if (typeof options.onFastIvChange === "function") {
+                options.onFastIvChange(latestFastIv);
+            }
+        }
 
     const deltaUiTimezoneOffsetMinutes = 5.5 * 60;
 
@@ -497,12 +503,16 @@
             const isFast = symbol === fastIvSymbol;
             if (!isSlow && !isFast) return;
             let ivChanged = false;
+            let fastChanged = false;
             if (isSlow) {
                 if (latestSlowIv === null || Math.abs(latestSlowIv - iv) > 0.000001) ivChanged = true;
                 latestSlowIv = iv;
             }
             if (isFast) {
-                if (latestFastIv === null || Math.abs(latestFastIv - iv) > 0.000001) ivChanged = true;
+                if (latestFastIv === null || Math.abs(latestFastIv - iv) > 0.000001) {
+                    ivChanged = true;
+                    fastChanged = true;
+                }
                 latestFastIv = iv;
             }
             if (ivChanged) {
@@ -519,6 +529,7 @@
                 scheduleIvShiftLog();
                 pushIvChartPoint();
             }
+            if (fastChanged) reportFastIvChanged();
         });
     }
 
@@ -769,6 +780,7 @@
                     fastIvSymbol = newSymbol;
                     const iv = (info.iv === null || info.iv === undefined) ? null : Number(info.iv);
                     if (iv !== null && Number.isFinite(iv)) latestFastIv = iv;
+                    reportFastIvChanged();
                     changed = true;
                 }
             }
@@ -825,6 +837,7 @@
             fastIvSymbol = String(fastInfo.optionSymbol || "").trim();
             latestSlowIv = (slowInfo.iv === null || slowInfo.iv === undefined) ? null : Number(slowInfo.iv);
             latestFastIv = (fastInfo.iv === null || fastInfo.iv === undefined) ? null : Number(fastInfo.iv);
+            reportFastIvChanged();
             slowIvStrike = (slowInfo.strike === null || slowInfo.strike === undefined) ? null : Number(slowInfo.strike);
             fastIvStrike = (fastInfo.strike === null || fastInfo.strike === undefined) ? null : Number(fastInfo.strike);
             slowIvNextRefreshAt = Date.now() + (IV_ATM_REFRESH_MS[slowIvExpiryType] || 60000);
@@ -939,6 +952,199 @@
     }
     }
 
-    createIvTracker("manageTrades", "call");
-    createIvTracker("manageTradesPut", "put");
+    function createOptionIvChart() {
+        let optionIvCanvas = null;
+        let optionIvCtx = null;
+        let optionIvPoints = [];
+        let optionIvBaseWidth = 0;
+        let latestCallFastIv = null;
+        let latestPutFastIv = null;
+
+        function getOptionIvCanvas() {
+            return document.getElementById("manageTradesOptionIvChart");
+        }
+        function pushOptionIvPoint() {
+            if (latestCallFastIv === null && latestPutFastIv === null) return;
+            optionIvPoints.push({
+                t: Date.now(),
+                call: latestCallFastIv,
+                put: latestPutFastIv
+            });
+            if (optionIvPoints.length > 2000) optionIvPoints.shift();
+            optionIvDraw();
+        }
+        function noteFastIv(sideValue, value) {
+            if (value === null || value === undefined || !Number.isFinite(Number(value))) return;
+            const numeric = Number(value);
+            if (sideValue === "call") {
+                if (latestCallFastIv !== null && Math.abs(latestCallFastIv - numeric) < 0.000001) return;
+                latestCallFastIv = numeric;
+            } else {
+                if (latestPutFastIv !== null && Math.abs(latestPutFastIv - numeric) < 0.000001) return;
+                latestPutFastIv = numeric;
+            }
+            pushOptionIvPoint();
+        }
+        function getOptionIvBounds() {
+            const values = [];
+            optionIvPoints.forEach(function (p) {
+                if (p.call !== null) values.push(p.call * 100);
+                if (p.put !== null) values.push(p.put * 100);
+            });
+            if (!values.length) return { min: 0, max: 1 };
+            let minValue = values[0];
+            let maxValue = values[0];
+            values.forEach(function (v) {
+                if (v < minValue) minValue = v;
+                if (v > maxValue) maxValue = v;
+            });
+            const padding = Math.max(1, (maxValue - minValue) * 0.15);
+            return { min: Math.max(0, minValue - padding), max: maxValue + padding };
+        }
+        function drawOptionIvSeries(ctx, points, cssW, cssH, pad, minValue, maxValue, key, color) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            const t0 = points[0].t;
+            const t1 = points[points.length - 1].t;
+            const span = Math.max(1, t1 - t0);
+            const plotW = cssW - pad.left - pad.right;
+            const plotH = cssH - pad.top - pad.bottom;
+            let started = false;
+            points.forEach(function (p) {
+                const v = p[key];
+                if (v === null || v === undefined) return;
+                const x = pad.left + ((p.t - t0) / span) * plotW;
+                const y = pad.top + plotH - ((v * 100 - minValue) / Math.max(0.000001, maxValue - minValue)) * plotH;
+                if (!started) {
+                    ctx.moveTo(x, y);
+                    started = true;
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+            ctx.stroke();
+        }
+        function drawOptionIvLegend(ctx, cssW, pad) {
+            const y = 14;
+            let x = cssW - pad.right - 220;
+            ctx.strokeStyle = "#ef4444";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x + 18, y);
+            ctx.stroke();
+            ctx.fillStyle = "#e2e8f0";
+            ctx.font = "11px sans-serif";
+            ctx.fillText("Fast Call IV", x + 24, y + 4);
+            x += 125;
+            ctx.strokeStyle = "#22c55e";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x + 18, y);
+            ctx.stroke();
+            ctx.fillStyle = "#e2e8f0";
+            ctx.fillText("Fast Put IV", x + 24, y + 4);
+        }
+        function drawOptionIvXLabels(ctx, points, cssW, cssH, pad) {
+            const t0 = points[0].t;
+            const t1 = points[points.length - 1].t;
+            const span = Math.max(1, t1 - t0);
+            const plotW = cssW - pad.left - pad.right;
+            ctx.fillStyle = "#94a3b8";
+            ctx.font = "10px sans-serif";
+            const count = points.length <= 20 ? points.length : 12;
+            for (let i = 0; i < count; i++) {
+                const idx = Math.round((i / (count - 1 || 1)) * (points.length - 1));
+                const p = points[idx];
+                const x = pad.left + ((p.t - t0) / span) * plotW;
+                const d = new Date(p.t);
+                const hh = String(d.getHours()).padStart(2, "0");
+                const mm = String(d.getMinutes()).padStart(2, "0");
+                const ss = String(d.getSeconds()).padStart(2, "0");
+                ctx.fillText(hh + ":" + mm + ":" + ss, x - 18, cssH - pad.bottom + 16);
+            }
+        }
+        function optionIvDraw() {
+            const canvas = optionIvCanvas || getOptionIvCanvas();
+            if (!canvas) return;
+            if (!optionIvCtx) optionIvCtx = canvas.getContext("2d");
+            const ctx = optionIvCtx;
+            if (!ctx) return;
+            const dpr = window.devicePixelRatio || 1;
+            const scrollBox = document.getElementById("manageTradesOptionIvChartScroll");
+            if (scrollBox && !optionIvBaseWidth) optionIvBaseWidth = scrollBox.clientWidth;
+            const baseWidth = optionIvBaseWidth || (scrollBox && scrollBox.clientWidth) || (canvas.clientWidth || 1000);
+            const desiredWidth = Math.max(baseWidth, optionIvPoints.length * 24);
+            if (canvas.width !== Math.round(desiredWidth * dpr) || canvas.height !== Math.round(320 * dpr)) {
+                canvas.width = Math.round(desiredWidth * dpr);
+                canvas.height = Math.round(320 * dpr);
+                canvas.style.width = desiredWidth + "px";
+                canvas.style.height = "320px";
+                canvas.style.maxWidth = "none";
+                const spacer = document.getElementById("manageTradesOptionIvChartSpacer");
+                if (spacer) spacer.style.width = desiredWidth + "px";
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            }
+            const cssW = canvas.width / dpr;
+            const cssH = canvas.height / dpr;
+            const pad = { top: 34, right: 52, bottom: 34, left: 52 };
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            if (optionIvPoints.length < 2) {
+                ctx.fillStyle = "rgba(8, 16, 36, 1)";
+                ctx.fillRect(0, 0, cssW, cssH);
+                ctx.fillStyle = "#94a3b8";
+                ctx.font = "13px sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText("Waiting for fast IV updates...", cssW / 2, cssH / 2);
+                return;
+            }
+            const bounds = getOptionIvBounds();
+            ctx.fillStyle = "rgba(8, 16, 36, 1)";
+            ctx.fillRect(0, 0, cssW, cssH);
+            drawOptionIvSeries(ctx, optionIvPoints, cssW, cssH, pad, bounds.min, bounds.max, "call", "#ef4444");
+            drawOptionIvSeries(ctx, optionIvPoints, cssW, cssH, pad, bounds.min, bounds.max, "put", "#22c55e");
+            drawOptionIvXLabels(ctx, optionIvPoints, cssW, cssH, pad);
+            drawOptionIvLegend(ctx, cssW, pad);
+        }
+        function initOptionIvChart() {
+            optionIvCanvas = getOptionIvCanvas();
+            if (!optionIvCanvas) return;
+            optionIvBaseWidth = 0;
+            const scrollBox = document.getElementById("manageTradesOptionIvChartScroll");
+            const dpr = window.devicePixelRatio || 1;
+            const width = (scrollBox && scrollBox.clientWidth) ? scrollBox.clientWidth : (optionIvCanvas.width || 1000);
+            const height = 320;
+            optionIvCanvas.width = Math.round(width * dpr);
+            optionIvCanvas.height = Math.round(height * dpr);
+            optionIvCanvas.style.width = width + "px";
+            optionIvCanvas.style.height = height + "px";
+            const spacer0 = document.getElementById("manageTradesOptionIvChartSpacer");
+            if (spacer0) spacer0.style.width = width + "px";
+            optionIvCtx = optionIvCanvas.getContext("2d");
+            if (optionIvCtx) optionIvCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            optionIvDraw();
+        }
+        window.addEventListener("resize", initOptionIvChart);
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", initOptionIvChart);
+        } else {
+            initOptionIvChart();
+        }
+        return {
+            noteFastIv: noteFastIv
+        };
+    }
+
+    const optionIvChart = createOptionIvChart();
+    createIvTracker("manageTrades", "call", {
+        onFastIvChange: function (value) { optionIvChart.noteFastIv("call", value); }
+    });
+    createIvTracker("manageTradesPut", "put", {
+        onFastIvChange: function (value) { optionIvChart.noteFastIv("put", value); }
+    });
 })();
+
