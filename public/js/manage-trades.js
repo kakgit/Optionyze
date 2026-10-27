@@ -906,7 +906,7 @@
         fastIvExpiryLabel = getSelectedExpiryLabel(`${prefix}FastIvExpiryType`) || fastIvExpiryLabel;
         const titleEl = document.getElementById(`${prefix}IvChartTitle`);
         if (titleEl) {
-            titleEl.textContent = `BTCUSD Term Structure Shift: ${fastIvExpiryLabel} vs. ${slowIvExpiryLabel} IV`;
+            titleEl.textContent = `BTCUSD ${side === "put" ? "Put" : "Call"} Mark IV`;
         }
         drawIvChart();
     }
@@ -940,7 +940,7 @@
         if (slowSelect) slowSelect.addEventListener("change", updateIvChartLabels);
         if (fastSelect) fastSelect.addEventListener("change", updateIvChartLabels);
         const titleEl = document.getElementById(`${prefix}IvChartTitle`);
-        if (titleEl) titleEl.textContent = `BTCUSD ${side === "put" ? "Put" : "Call"} Mark IV Term Structure Shift: ${fastIvExpiryLabel} vs. ${slowIvExpiryLabel} IV`;
+        if (titleEl) titleEl.textContent = `BTCUSD ${side === "put" ? "Put" : "Call"} Mark IV`;
         initIvChart();
         window.addEventListener("resize", initIvChart);
     }
