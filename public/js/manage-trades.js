@@ -1078,6 +1078,11 @@
             const scrollBox = document.getElementById("manageTradesOptionIvChartScroll");
             if (scrollBox && !optionIvBaseWidth) optionIvBaseWidth = scrollBox.clientWidth;
             const baseWidth = optionIvBaseWidth || (scrollBox && scrollBox.clientWidth) || (canvas.clientWidth || 1000);
+            if (scrollBox) {
+                scrollBox.style.width = baseWidth + "px";
+                scrollBox.style.minWidth = baseWidth + "px";
+                scrollBox.style.maxWidth = baseWidth + "px";
+            }
             const desiredWidth = Math.max(baseWidth, optionIvPoints.length * 24);
             if (canvas.width !== Math.round(desiredWidth * dpr) || canvas.height !== Math.round(320 * dpr)) {
                 canvas.width = Math.round(desiredWidth * dpr);
