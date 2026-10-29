@@ -12470,7 +12470,8 @@ async function closeTrackedPositionsOnDelta(
     profileLabel: string;
 }> {
     if (isPaperDemoStrategy(pStrategyCode)) {
-        const arrClosedRows = await Promise.all((Array.isArray(pPositions) ? pPositions : []).map((objPosition) => {
+        const arrActivePositions = (Array.isArray(pPositions) ? pPositions : []).filter((objPosition) => !isTrackedPositionInactive(objPosition));
+        const arrClosedRows = await Promise.all(arrActivePositions.map((objPosition) => {
             return closeOptionsScalperPaperPosition(pUserId, pStrategyCode, objPosition, undefined, undefined, "limit_order");
         }));
         await appendOptionsScalperPaperClosedPositions(pUserId, pStrategyCode, arrClosedRows);
@@ -12498,7 +12499,7 @@ async function closeTrackedPositionsOnDelta(
     const arrCloseCharges: number[] = [];
     const arrClosePnls: number[] = [];
     const arrClosed: Array<Record<string, unknown>> = [];
-    for (const objPosition of pPositions) {
+    for (const objPosition of (Array.isArray(pPositions) ? pPositions : []).filter((objRow) => !isTrackedPositionInactive(objRow))) {
         const vClientOrderId = await allocateStrategyClientOrderId(pUserId, pStrategyCode, "CL");
         const objOrderPayload: Record<string, unknown> = {
             product_symbol: objPosition.contractName,
@@ -12556,7 +12557,7 @@ async function closeTrackedPositionsOnDelta(
     );
     if (isCoveredOptionsStrategy(pStrategyCode)) {
         const arrClosedOptions = (Array.isArray(pPositions) ? pPositions : []).filter((objPosition) => {
-            return isOptionContractSymbol(objPosition.contractName);
+            return isOptionContractSymbol(objPosition.contractName) && !isTrackedPositionInactive(objPosition);
         });
         const objLatestClosedOption = getLatestActiveTrackedOptionPosition(arrClosedOptions);
         if (objLatestClosedOption) {
