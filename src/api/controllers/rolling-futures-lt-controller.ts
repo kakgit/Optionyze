@@ -1,9 +1,18 @@
-import type { Request, Response } from "express";
+﻿import type { Request, Response } from "express";
 import crypto from "node:crypto";
+import path from "node:path";
+import { readJsonFile, writeJsonFileAtomic } from "../../storage/json-store";
 const DeltaRestClient = require("delta-rest-client");
 import { getAccountById, getAccountByTelegramChatId } from "../../storage/accounts-store";
 import { sendMobilePushToAccount } from "../../services/firebase-push-service";
 import { getDeltaApiProfile } from "../../storage/delta-api-profile-store";
+import {
+    createPositionTriggerPendingRecord,
+    deletePositionTriggerPendingByContent,
+    deletePositionTriggerPendingRecord,
+    listPositionTriggerPendingRecords,
+    PositionTriggerPendingRecord
+} from "../../storage/position-trigger-pending-store";
 import {
     deleteRollingFuturesLtImportedPosition,
     getDefaultRollingFuturesLtProfile,
@@ -91,7 +100,7 @@ import {
     renewSurvivalStateLease,
     upsertSurvivalState
 } from "../../storage/survival-store";
-import { isPostgresConfigured, isPrimaryDatabaseUnavailableError } from "../../storage/postgres";
+import { getPostgresPool, isPostgresConfigured, isPrimaryDatabaseUnavailableError } from "../../storage/postgres";
 
 interface DeltaWalletBalanceRow {
     asset_symbol?: string;
@@ -177,6 +186,7 @@ const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
     "covered-options": "Covered Options",
     "strangle-options": "Strangle Options",
     "renko-options": "Renko Options",
+    "crypto-scalper": "Crypto Scalper",
     "options-scalper": "Options Demo",
     "straddle-demo": "Straddle Demo",
     "calendar-spread": "Calendar Spread"
@@ -1306,6 +1316,88 @@ async function readLiveProfile(
     return await loadRollingFuturesLtProfile(pUserId, pStrategyCode) || getDefaultRollingFuturesLtProfile(pUserId, pStrategyCode);
 }
 
+// ---- Crypto-scalper position-trigger defaults (admin-owned, shared by all users) ----
+// Stored in optionyze_admin_settings (Postgres) with a JSON-file fallback, under
+// key "crypto_scalper_pos_trg_defaults". Only admins may write it; every user
+// (admin or not) reads the same values. Per-user profiles never carry these keys.
+const gCryptoScalperPosTrgDefaultsAdminKey = "crypto_scalper_pos_trg_defaults";
+
+function getPosTrgDefaultsJsonFile(): string {
+    return path.resolve(process.cwd(), "data", "rolling-futures-lt", "crypto-scalper-pos-trg-defaults.json");
+}
+
+const gCryptoScalperPosTrgAdminFields = [
+    "posTrgMultiplier",
+    "posTrgTolerance",
+    "posTrgSlPoints",
+    "posTrgTpPoints"
+] as const;
+
+function getCryptoScalperPosTrgDefaultsFallback(): Record<string, string> {
+    return {
+        posTrgMultiplier: "2",
+        posTrgTolerance: "20",
+        posTrgSlPoints: "300",
+        posTrgTpPoints: "400"
+    };
+}
+
+function normalizeCryptoScalperPosTrgDefaults(pRaw: unknown): Record<string, string> {
+    const objFallback = getCryptoScalperPosTrgDefaultsFallback();
+    const objSrc = (pRaw && typeof pRaw === "object" ? pRaw : {}) as Record<string, unknown>;
+    const vNum = (pKey: string, pMin: number, pFallback: string): string => {
+        const vRaw = Number(objSrc[pKey] ?? objFallback[pKey] ?? pFallback);
+        if (!Number.isFinite(vRaw)) { return pFallback; }
+        if (pKey === "posTrgMultiplier" || pKey === "posTrgTolerance") {
+            return String(Math.max(pMin, Math.floor(vRaw)));
+        }
+        return String(vRaw > 0 ? vRaw : Number(pFallback));
+    };
+    return {
+        posTrgMultiplier: vNum("posTrgMultiplier", 1, objFallback.posTrgMultiplier),
+        posTrgTolerance: vNum("posTrgTolerance", 1, objFallback.posTrgTolerance),
+        posTrgSlPoints: vNum("posTrgSlPoints", 1, objFallback.posTrgSlPoints),
+        posTrgTpPoints: vNum("posTrgTpPoints", 1, objFallback.posTrgTpPoints)
+    };
+}
+
+async function readCryptoScalperPosTrgDefaults(): Promise<Record<string, string>> {
+    try {
+        if (isPostgresConfigured()) {
+            const objPool = getPostgresPool();
+            const objResult = await objPool.query<{ setting_value_json: Record<string, unknown> | null }>(
+                `SELECT setting_value_json FROM optionyze_admin_settings WHERE setting_key = $1`,
+                [gCryptoScalperPosTrgDefaultsAdminKey]
+            );
+            const objRaw = (objResult.rows[0]?.setting_value_json ?? {}) as Record<string, unknown>;
+            return normalizeCryptoScalperPosTrgDefaults(objRaw);
+        }
+        const objRaw = await readJsonFile<Record<string, unknown>>(getPosTrgDefaultsJsonFile(), {});
+        return normalizeCryptoScalperPosTrgDefaults(objRaw);
+    }
+    catch (_objErr) {
+        return getCryptoScalperPosTrgDefaultsFallback();
+    }
+}
+
+async function writeCryptoScalperPosTrgDefaults(pRaw: unknown): Promise<Record<string, string>> {
+    const objNormalized = normalizeCryptoScalperPosTrgDefaults(pRaw);
+    if (isPostgresConfigured()) {
+        const objPool = getPostgresPool();
+        await objPool.query(
+            `INSERT INTO optionyze_admin_settings (setting_key, setting_value_json, updated_at)
+             VALUES ($1, $2::jsonb, NOW())
+             ON CONFLICT (setting_key)
+             DO UPDATE SET setting_value_json = EXCLUDED.setting_value_json, updated_at = NOW()`,
+            [gCryptoScalperPosTrgDefaultsAdminKey, JSON.stringify(objNormalized)]
+        );
+    }
+    else {
+        await writeJsonFileAtomic(getPosTrgDefaultsJsonFile(), objNormalized);
+    }
+    return objNormalized;
+}
+
 async function ensureRuntimeProfileSelection(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode,
@@ -1756,6 +1848,11 @@ function normalizeBooleanValue(pValue: unknown, pFallback: boolean): boolean {
 function normalizeStringValue(pValue: unknown, pFallback: string): string {
     const vValue = String(pValue ?? "").trim();
     return vValue || pFallback;
+}
+
+function normalizeQtyLikeValue(pValue: unknown, pFallback: unknown): string {
+    const vParsed = Math.max(1, Math.floor(Number(pValue ?? pFallback ?? 1) || 1));
+    return String(Number.isFinite(vParsed) ? vParsed : 1);
 }
 
 function normalizeRenkoBaseValueString(pValue: unknown): string {
@@ -2704,6 +2801,9 @@ function getDefaultManualTraderUiState(
         symbol: "BTC",
         manualFutOrderType: "market_order",
         bsFutQty: "1",
+        manualBtcQty: "1",
+        manualEthQty: "1",
+        manualXautQty: "1",
         futuresLadderStepPoints: String(gFuturesScalperTriggerStepPoints),
         futuresLadderGridOffsetPoints: String(gFuturesScalperGridOffsetPoints),
         futuresLadderOrderOffsetPoints: String(gFuturesScalperOrderOffsetPoints),
@@ -5096,6 +5196,57 @@ function getDeltaErrorPayload(pError: unknown): { error?: { code?: string; conte
     return null;
 }
 
+function getFriendlyDeltaPlaceOrderError(
+    pError: unknown,
+    pMeta: { side: "buy" | "sell"; strike: number; symbol: "BTC" | "ETH" }
+): { status: string; message: string; data: { errorCode: string | null } } {
+    const vCode = String(getDeltaErrorPayload(pError)?.error?.code || "").trim().toLowerCase();
+    const vRawMessage = getErrorMessage(pError, "").trim();
+    const vNormalized = vRawMessage.toLowerCase();
+
+    // post_only + marketable: the buy/sell limit sits on the wrong side of the
+    // book so it would match immediately as a taker; Delta rejects with HTTP 400.
+    if (isRetryablePostOnlyRejection(pError)) {
+        const vSideWord = pMeta.side.toUpperCase();
+        const vDirection = pMeta.side === "buy"
+            ? "above the current ask (which would fill it instantly as a taker)"
+            : "below the current bid (which would fill it instantly as a taker)";
+        const vFixHint = pMeta.side === "buy"
+            ? "Use a Strike Price BELOW the current market price for a maker-only BUY rest."
+            : "Use a Strike Price ABOVE the current market price for a maker-only SELL rest.";
+        return {
+            status: "warning",
+            message: `Delta rejected the post-only order: ${vSideWord} at ${pMeta.strike} would match immediately because it is ${vDirection}. ${vFixHint}`,
+            data: { errorCode: vCode || "post_only_would_match_immediately" }
+        };
+    }
+
+    // Order-value / precision rejections are very common from Delta. Try to surface a
+    // human-friendly hint when the message confirms a known shape.
+    if (vCode.includes("invalid_price") || vCode.includes("tick_size") || vNormalized.includes("tick size") || vNormalized.includes("precision")) {
+        return {
+            status: "warning",
+            message: "Delta rejected the order because the Strike Price does not match the contract tick size. Choose a Strike Price aligned to the BTC / ETH future minimum price increment.",
+            data: { errorCode: vCode || "invalid_price" }
+        };
+    }
+
+    if (vNormalized.includes("insufficient") || vNormalized.includes("margin") || vNormalized.includes("balance")) {
+        return {
+            status: "warning",
+            message: "Delta rejected the order: insufficient available margin for the requested quantity at this strike.",
+            data: { errorCode: vCode || "insufficient_margin" }
+        };
+    }
+
+    return {
+        status: "danger",
+        message: vRawMessage || "Delta rejected the order with no message.",
+        data: { errorCode: vCode || null }
+    };
+}
+
+
 function isRetryablePostOnlyRejection(pError: unknown): boolean {
     const vMessage = getErrorMessage(pError, "").toLowerCase();
     const vCode = String(getDeltaErrorPayload(pError)?.error?.code || "").trim().toLowerCase();
@@ -5395,6 +5546,9 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         symbol: vSymbol,
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
+        manualBtcQty: normalizeQtyLikeValue(objUiState.manualBtcQty, objDefaults.manualBtcQty),
+        manualEthQty: normalizeQtyLikeValue(objUiState.manualEthQty, objDefaults.manualEthQty),
+        manualXautQty: normalizeQtyLikeValue(objUiState.manualXautQty, objDefaults.manualXautQty),
         futuresLadderStepPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderStepPoints, gFuturesScalperTriggerStepPoints, 1, 1000000)
             : String(gFuturesScalperTriggerStepPoints),
@@ -5848,6 +6002,9 @@ function normalizeProfileSaveInput(
         symbol: vSymbol,
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
+        manualBtcQty: normalizeQtyLikeValue(objUiState.manualBtcQty, objDefaults.manualBtcQty),
+        manualEthQty: normalizeQtyLikeValue(objUiState.manualEthQty, objDefaults.manualEthQty),
+        manualXautQty: normalizeQtyLikeValue(objUiState.manualXautQty, objDefaults.manualXautQty),
         futuresLadderStepPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderStepPoints, gFuturesScalperTriggerStepPoints, 1, 1000000)
             : String(gFuturesScalperTriggerStepPoints),
@@ -12350,7 +12507,7 @@ async function findTriggeredTrackedOptions(
                 const vNowIso = new Date().toISOString();
                 const vSinceIso = String(objMetadata.pnlAboveBrokerageSince || "").trim();
                 if (!vSinceIso) {
-                    // First time above threshold â€” start the timer
+                    // First time above threshold Ã¢â‚¬â€ start the timer
                     arrUpdatedPositions.push({
                         ...objPosition,
                         metadata: optionMetadataToRecord({
@@ -12363,7 +12520,7 @@ async function findTriggeredTrackedOptions(
                 const vSinceMs = new Date(vSinceIso).getTime();
                 const vElapsedSecs = (Date.now() - vSinceMs) / 1000;
                 if (Number.isFinite(vElapsedSecs) && vElapsedSecs >= vTimerSecs) {
-                    // Timer expired â€” close the position
+                    // Timer expired Ã¢â‚¬â€ close the position
                     arrTriggered.push({
                         position: objPosition,
                         currentDelta: vCurrentDelta,
@@ -12381,10 +12538,10 @@ async function findTriggeredTrackedOptions(
                     });
                     continue;
                 }
-                // Timer still running â€” keep the position open
+                // Timer still running Ã¢â‚¬â€ keep the position open
                 continue;
             } else {
-                // PnL dropped below threshold â€” reset the timer
+                // PnL dropped below threshold Ã¢â‚¬â€ reset the timer
                 if (String(objMetadata.pnlAboveBrokerageSince || "").trim()) {
                     arrUpdatedPositions.push({
                         ...objPosition,
@@ -12932,10 +13089,24 @@ async function saveProfileInternal(req: Request, res: Response, pStrategyCode: R
     const vUserId = getAccountId(req);
     const objExisting = await readLiveProfile(vUserId, pStrategyCode);
     const objExistingUiState = getMergedUiState(objExisting);
+    // Crypto-scalper position-trigger defaults are admin-owned globals; they must
+    // never be stored inside a normal user's profile. Strip them from every
+    // profile save (admin flow writes via the dedicated /defaults endpoint).
+    // Keep a surgical scope: only the crypto-scalper page uses these keys.
+    let objIncomingUiState: Record<string, unknown> = req.body?.uiState && typeof req.body.uiState === "object"
+        ? req.body.uiState as Record<string, unknown>
+        : (objExisting.uiState && typeof objExisting.uiState === "object" ? objExisting.uiState as Record<string, unknown> : {});
+    if (pStrategyCode === "crypto-scalper" && objIncomingUiState) {
+        const objClean: Record<string, unknown> = { ...objIncomingUiState };
+        for (const vKey of gCryptoScalperPosTrgAdminFields) {
+            delete objClean[vKey];
+        }
+        objIncomingUiState = objClean;
+    }
     const objIncoming = normalizeProfileSaveInput(vUserId, pStrategyCode, {
         ...objExisting,
         selectedApiProfileId: String(req.body?.selectedApiProfileId || objExisting.selectedApiProfileId || "").trim(),
-        uiState: req.body?.uiState && typeof req.body.uiState === "object" ? req.body.uiState as Record<string, unknown> : objExisting.uiState,
+        uiState: objIncomingUiState,
         connectionStatus: objExisting.connectionStatus
     });
     let objSaved = await saveRollingFuturesLtProfile(objIncoming);
@@ -13478,7 +13649,7 @@ async function runFuturesScalperTriggerEngine(
             );
             objAutoTrade = {
                 status: "warning",
-                message: `${vIsPendingBuy ? "Red" : "Green"} box at ${vBoxLevel.toFixed(2)} â€” ${vIsPendingBuy ? "buy" : "sell"} order at ${objPending.orderPrice.toFixed(2)} cancelled. Waiting for the next trigger.`
+                message: `${vIsPendingBuy ? "Red" : "Green"} box at ${vBoxLevel.toFixed(2)} Ã¢â‚¬â€ ${vIsPendingBuy ? "buy" : "sell"} order at ${objPending.orderPrice.toFixed(2)} cancelled. Waiting for the next trigger.`
             };
         }
         else if (vIsPendingBuy ? (vPrice >= objPending.orderPrice) : (vPrice <= objPending.orderPrice)) {
@@ -13540,7 +13711,7 @@ async function runFuturesScalperTriggerEngine(
                     );
                     objAutoTrade = {
                         status: "success",
-                        message: `${bIsGreen ? "Green" : "Red"} box at ${vBoxLevel.toFixed(2)} â€” ${vArmSide === "buy" ? "buy" : "sell"} order armed at ${vOrderPrice.toFixed(2)}. Cancels ${vArmSide === "buy" ? "below" : "above"} ${(bIsGreen ? vTriggerLevel + objLadder.cancelOffsetPoints : vTriggerLevel - objLadder.cancelOffsetPoints).toFixed(2)}.`
+                        message: `${bIsGreen ? "Green" : "Red"} box at ${vBoxLevel.toFixed(2)} Ã¢â‚¬â€ ${vArmSide === "buy" ? "buy" : "sell"} order armed at ${vOrderPrice.toFixed(2)}. Cancels ${vArmSide === "buy" ? "below" : "above"} ${(bIsGreen ? vTriggerLevel + objLadder.cancelOffsetPoints : vTriggerLevel - objLadder.cancelOffsetPoints).toFixed(2)}.`
                     };
                 }
             }
@@ -14300,8 +14471,8 @@ async function syncRenkoPaperRuntimeAndMaybeAutoTradeInternal(
 
     // When EMA is enabled, only open on the first Renko box after a color flip
     // that is also on the correct side of the EMA:
-    //   - Renko above EMA + first Green after Red â†’ open
-    //   - Renko below EMA + first Red after Green â†’ open
+    //   - Renko above EMA + first Green after Red Ã¢â€ â€™ open
+    //   - Renko below EMA + first Red after Green Ã¢â€ â€™ open
     if (bEmaEnabled) {
         const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
         const objEmaValues = normalizeOptionsScalperEmaRuntimeValues(objLatestRuntime.state?.optionsScalperEmaBySymbol);
@@ -16558,6 +16729,8 @@ async function runAutoTraderCycle(
                     }
                 );
                 stopAutoTraderCycle(pUserId, pStrategyCode);
+                // Auto Trader auto-switched off -> stop the Position Trigger watcher too.
+                stopPositionTriggerWatcher(pUserId, pStrategyCode);
                 await releaseDualStrategyLease(pUserId, pStrategyCode, true);
             }
             else if (bAutoTraderWasRunning && objLatestRuntimeAfterClose) {
@@ -16842,6 +17015,7 @@ export async function recoverRollingFuturesLtAutoTraderCycles(): Promise<void> {
                 || vStrategyCode === "covered-options"
                 || isDualRollingFuturesStrategy(vStrategyCode)
                 || isOptionsScalperStrategy(vStrategyCode)
+                || vStrategyCode === "crypto-scalper"
                 || false
             );
 
@@ -16865,7 +17039,250 @@ export async function recoverRollingFuturesLtAutoTraderCycles(): Promise<void> {
             state: buildRuntimeStateWithRestartCloseProtection(objRuntime, vProtectionUntil)
         });
         startAutoTraderCycle(vUserId, vStrategyCode);
+        // Resume the server-side Position Trigger watcher after a restart.
+        startPositionTriggerWatcher(vUserId, vStrategyCode);
     }
+}
+
+// Server-side Position Trigger watcher (Crypto Scalper).
+// -------------------------------------------------------------------------
+// Runs on the server so queued pending limit orders keep auto-firing even
+// when the browser is closed. The watcher is tied to the Auto Trader state:
+// it starts when Auto Trader is enabled and stops when it is switched off.
+// It also resumes automatically after a server restart.
+
+const gPositionTriggerWatcherIntervals = new Map<string, NodeJS.Timeout>();
+const gPositionTriggerWatcherLocks = new Set<string>();
+const gPositionTriggerWatcherIntervalMs = 3000;
+
+function getPositionTriggerWatcherKey(pUserId: string, pStrategyCode: string): string {
+    return `${String(pUserId || "").trim()}::${String(pStrategyCode || "").trim()}::position-trigger-watcher`;
+}
+
+function stopPositionTriggerWatcher(pUserId: string, pStrategyCode: string): void {
+    const vKey = getPositionTriggerWatcherKey(pUserId, pStrategyCode);
+    const objTimer = gPositionTriggerWatcherIntervals.get(vKey);
+    if (objTimer) {
+        clearInterval(objTimer);
+        gPositionTriggerWatcherIntervals.delete(vKey);
+    }
+    gPositionTriggerWatcherLocks.delete(vKey);
+}
+
+// Evaluates one queued pending order against the live mark price.
+// Returns true when the order should be placed on the exchange.
+function isPositionTriggerReadyToFire(pRecord: { side: string; strike: number; tolerance: number }, pMarkPrice: number): boolean {
+    if (!Number.isFinite(pMarkPrice) || !Number.isFinite(pRecord.strike)) {
+        return false;
+    }
+    const vSide = String(pRecord.side || "").trim().toUpperCase();
+    const vStrike = Number(pRecord.strike);
+    const vTolerance = Math.max(1, Number(pRecord.tolerance || 1));
+    // Maker-valid means the limit would rest on the book instead of crossing it.
+    const bMakerValid = vSide === "BUY"
+        ? pMarkPrice > vStrike
+        : pMarkPrice < vStrike;
+    if (!bMakerValid) {
+        return false;
+    }
+    return Math.abs(pMarkPrice - vStrike) <= vTolerance;
+}
+
+async function runPositionTriggerWatcherCycle(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode
+): Promise<void> {
+    const vKey = getPositionTriggerWatcherKey(pUserId, pStrategyCode);
+    if (gPositionTriggerWatcherLocks.has(vKey)) {
+        return;
+    }
+    gPositionTriggerWatcherLocks.add(vKey);
+    try {
+        const vRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+        const bAutoTraderOn = Boolean(vRuntime?.autoTraderEnabled)
+            && String(vRuntime?.status || "").trim().toLowerCase() === "running";
+        if (!bAutoTraderOn) {
+            // Auto Trader was switched off -> stop watching entirely.
+            stopPositionTriggerWatcher(pUserId, pStrategyCode);
+            return;
+        }
+
+        const arrPending = await listPositionTriggerPendingRecords(pUserId, pStrategyCode);
+        if (!arrPending.length) {
+            return;
+        }
+
+        // Group by symbol so we only fetch one ticker per contract.
+        const arrBySymbol = new Map<string, typeof arrPending>();
+        for (const objRecord of arrPending) {
+            const vSymbol = String(objRecord.symbol || "BTC").trim().toUpperCase();
+            const arrExisting = arrBySymbol.get(vSymbol);
+            if (arrExisting) {
+                arrExisting.push(objRecord);
+            }
+            else {
+                arrBySymbol.set(vSymbol, [objRecord]);
+            }
+        }
+
+        for (const [vSymbolRaw, arrRecords] of arrBySymbol.entries()) {
+            const vSymbol: "BTC" | "ETH" = (vSymbolRaw === "ETH" || vSymbolRaw === "ETHUSD") ? "ETH" : "BTC";
+            let vMarkPrice = 0;
+            try {
+                const objSnapshot = await getLiveMarketSnapshot({ symbol: vSymbol, contractName: getContractNameForSymbol(vSymbol) } as unknown as Parameters<typeof getLiveMarketSnapshot>[0]);
+                vMarkPrice = Number(objSnapshot.futuresPrice || objSnapshot.spotPrice || 0);
+            }
+            catch (objSnapErr) {
+                continue;
+            }
+            if (!Number.isFinite(vMarkPrice) || vMarkPrice <= 0) {
+                continue;
+            }
+
+            for (const objRecord of arrRecords) {
+                if (!isPositionTriggerReadyToFire(objRecord, vMarkPrice)) {
+                    continue;
+                }
+                try {
+                    const vPlaced = await placeQueuedPositionTriggerOnDelta(pUserId, pStrategyCode, objRecord);
+                    if (!vPlaced) {
+                        continue;
+                    }
+                    // Fire succeeded -> remove it from the local queue.
+                    await deletePositionTriggerPendingRecord(pUserId, objRecord.id);
+                }
+                catch (objFireErr) {
+                    const vMsg = getErrorMessage(objFireErr, "Unable to place queued position trigger order.");
+                    await logFuturesEvent(
+                        pUserId,
+                        pStrategyCode,
+                        "manual_action",
+                        "warning",
+                        "Queued Position Trigger Fire Failed",
+                        vMsg,
+                        {
+                            reason: "queued_position_trigger_fire_error",
+                            side: objRecord.side,
+                            strike: objRecord.strike,
+                            pendingId: objRecord.id,
+                            errorCode: (objFireErr as { response?: { data?: { error?: { code?: unknown } } } })?.response?.data?.error?.code || null
+                        }
+                    );
+                }
+            }
+        }
+    }
+    catch (_objErr) {
+        // Transient failures are ignored; the next tick retries.
+    }
+    finally {
+        gPositionTriggerWatcherLocks.delete(vKey);
+    }
+}
+
+// Places a queued pending order on the exchange using the same bracket shape
+// as the manual flow (maker-only entry limit + attached SL/TP).
+async function placeQueuedPositionTriggerOnDelta(
+    pUserId: string,
+    pStrategyCode: RollingFuturesLtStrategyCode,
+    pRecord: { id: string; symbol: string; contractSymbol: string; side: string; qty: number; strike: number; slPoints: number; tpPoints: number }
+): Promise<boolean> {
+    const vSide = String(pRecord.side || "").trim().toLowerCase() === "sell" ? "sell" : "buy";
+    const vQty = Math.max(1, Math.floor(Number(pRecord.qty || 1)));
+    const vStrike = Number(pRecord.strike);
+    const vSlPoints = Number(pRecord.slPoints || 0);
+    const vTpPoints = Number(pRecord.tpPoints || 0);
+    const vContractName = String(pRecord.contractSymbol || getContractNameForSymbol(pRecord.symbol)).trim().toUpperCase();
+    const slPrice = vSide === "buy" ? (vStrike - vSlPoints) : (vStrike + vSlPoints);
+    const tpPrice = vSide === "buy" ? (vStrike + vTpPoints) : (vStrike - vTpPoints);
+    // Trigger fires 25% of the leg's points BEFORE the price reaches the rest limit,
+    // so the closing limit is already resting and fills at exactly slPrice/tpPrice.
+    const slTriggerGap = Math.max(0, Number(vSlPoints || 0) * 0.25);
+    const tpTriggerGap = Math.max(0, Number(vTpPoints || 0) * 0.25);
+    const slTriggerPrice = vSide === "buy" ? (slPrice + slTriggerGap) : (slPrice - slTriggerGap);
+    const tpTriggerPrice = vSide === "buy" ? (tpPrice - tpTriggerGap) : (tpPrice + tpTriggerGap);
+    if (!(slPrice > 0) || !(tpPrice > 0) || !(slTriggerPrice > 0) || !(tpTriggerPrice > 0)) {
+        return false;
+    }
+
+    const objProfile = await readLiveProfile(pUserId, pStrategyCode);
+    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        return false;
+    }
+    const objApiProfile = await getDeltaApiProfile(pUserId, vSelectedApiProfileId);
+    const vExchange = String(objApiProfile?.exchange || "delta-exchange").trim().toLowerCase();
+    if (vExchange !== "delta-exchange") {
+        return false;
+    }
+
+    const vLockKey = getManualFutureOrderLockKey(pUserId, pStrategyCode);
+    if (gManualFutureOrderLocks.has(vLockKey)) {
+        return false;
+    }
+    gManualFutureOrderLocks.add(vLockKey);
+    try {
+        const { client, profile } = await getDeltaClientForAccountId(pUserId, vSelectedApiProfileId);
+        const objOrderPayload: Record<string, unknown> = {
+            product_symbol: vContractName,
+            size: vQty,
+            side: vSide,
+            order_type: "limit_order",
+            limit_price: String(vStrike),
+            time_in_force: "gtc",
+            post_only: true,
+            reduce_only: false,
+            bracket_stop_loss_price: String(slTriggerPrice),
+            bracket_stop_loss_limit_price: String(slPrice),
+            bracket_stop_trigger_method: "mark_price",
+            bracket_take_profit_price: String(tpTriggerPrice),
+            bracket_take_profit_limit_price: String(tpPrice)
+        };
+        const objResponse = await client.apis.Orders.placeOrder({ order: objOrderPayload });
+        const objPayload = readResponsePayload(objResponse);
+        const objResult = (objPayload.result && typeof objPayload.result === "object")
+            ? objPayload.result as Record<string, unknown>
+            : objPayload;
+        const vOrderId = String(objResult.id || objResult.order_id || "").trim();
+
+        await logFuturesEvent(
+            pUserId,
+            pStrategyCode,
+            vOrderId ? "future_opened" : "manual_action",
+            vOrderId ? "success" : "warning",
+            vOrderId ? "Queued Position Trigger Placed" : "Queued Position Trigger Submitted",
+            `Server-side watcher fired queued ${vSide.toUpperCase()} ${vContractName} limit x${vQty} @ ${vStrike} with SL @ ${slPrice} and TP @ ${tpPrice} on ${profile.referenceName || "(no name)"}.`,
+            {
+                reason: "queued_position_trigger_fired",
+                side: vSide,
+                contractName: vContractName,
+                qty: vQty,
+                limitPrice: vStrike,
+                slPrice: slPrice,
+                tpPrice: tpPrice,
+                orderId: vOrderId,
+                pendingId: pRecord.id
+            }
+        );
+        return true;
+    }
+    finally {
+        gManualFutureOrderLocks.delete(vLockKey);
+    }
+}
+
+function startPositionTriggerWatcher(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): void {
+    if (pStrategyCode !== "crypto-scalper") {
+        return;
+    }
+    const vKey = getPositionTriggerWatcherKey(pUserId, pStrategyCode);
+    if (gPositionTriggerWatcherIntervals.has(vKey)) {
+        return;
+    }
+    void runPositionTriggerWatcherCycle(pUserId, pStrategyCode);
+    gPositionTriggerWatcherIntervals.set(vKey, setInterval(() => {
+        void runPositionTriggerWatcherCycle(pUserId, pStrategyCode);
+    }, gPositionTriggerWatcherIntervalMs));
 }
 
 async function enableAutoTraderInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
@@ -16931,6 +17348,9 @@ async function enableAutoTraderInternal(req: Request, res: Response, pStrategyCo
         }
     );
     startAutoTraderCycle(vUserId, pStrategyCode);
+    // Keep the server-side Position Trigger watcher running for Crypto Scalper so
+    // queued pending orders keep firing even when the browser is closed.
+    startPositionTriggerWatcher(vUserId, pStrategyCode);
 
     res.json({
         status: "success",
@@ -16967,6 +17387,8 @@ async function disableAutoTraderInternal(req: Request, res: Response, pStrategyC
         }
     );
     stopAutoTraderCycle(vUserId, pStrategyCode);
+    // Auto Trader OFF -> stop the server-side Position Trigger watcher too.
+    stopPositionTriggerWatcher(vUserId, pStrategyCode);
     await releaseDualStrategyLease(vUserId, pStrategyCode, true);
 
     res.json({
@@ -18254,6 +18676,616 @@ async function executeManualFutureInternal(req: Request, res: Response, pStrateg
         res.status(500).json({
             status: "danger",
             message: getErrorMessage(objError, "Unable to place live future order.")
+        });
+    }
+    finally {
+        gManualFutureOrderLocks.delete(vLockKey);
+    }
+}
+
+async function cancelOpenDeltaLimitOrdersMatching(
+    pClient: any,
+    pContractName: string,
+    pSide: "buy" | "sell"
+): Promise<{ cancelledCount: number; firstCancelledId: string }> {
+    if (!pClient?.apis?.Orders?.getOrders || !pClient?.apis?.Orders?.cancelOrder) {
+        return { cancelledCount: 0, firstCancelledId: "" };
+    }
+    const vContract = String(pContractName || "").trim().toUpperCase();
+    const arrOpen = await listOpenDeltaOrders(pClient);
+    const arrMatching = arrOpen.filter((objOrder) => {
+        if (String(objOrder.product_symbol || "").trim().toUpperCase() !== vContract) { return false; }
+        if (String(objOrder.side || "").trim().toLowerCase() !== pSide) { return false; }
+        if (String(objOrder.order_type || "").trim().toLowerCase() !== "limit_order") { return false; }
+        const vState = String(objOrder.state || objOrder.status || "").trim().toLowerCase();
+        if (vState === "filled" || vState === "cancelled" || vState === "canceled" || vState === "rejected" || vState === "expired") { return false; }
+        return true;
+    });
+    let vCancelled = 0;
+    let vFirstId = "";
+    for (const objMatched of arrMatching) {
+        const vOrderId = String(objMatched.id || objMatched.order_id || "").trim();
+        if (!vOrderId) { continue; }
+        try {
+            await pClient.apis.Orders.cancelOrder({
+                order: {
+                    id: Number.isFinite(Number(vOrderId)) ? Number(vOrderId) : vOrderId,
+                    product_symbol: vContract
+                }
+            });
+            vCancelled += 1;
+            if (!vFirstId) { vFirstId = vOrderId; }
+        }
+        catch (_objErr) { /* best-effort */ }
+    }
+    return { cancelledCount: vCancelled, firstCancelledId: vFirstId };
+}
+
+async function saveCryptoScalperPositionTriggerInternal(
+    req: Request,
+    res: Response,
+    pStrategyCode: RollingFuturesLtStrategyCode
+): Promise<void> {
+    if (pStrategyCode !== "crypto-scalper") {
+        res.status(400).json({
+            status: "warning",
+            message: "Position triggers are only supported on the Crypto Scalper strategy."
+        });
+        return;
+    }
+    const vUserId = getAccountId(req);
+
+    const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
+    if (!objRuntime
+        || !objRuntime.autoTraderEnabled
+        || String(objRuntime.status || "").trim().toLowerCase() !== "running") {
+        res.status(400).json({
+            status: "warning",
+            message: "Turn Auto Trader ON before saving position triggers."
+        });
+        return;
+    }
+
+    const vSymbolRaw = String(req.body?.symbol || "BTC").trim().toUpperCase();
+    const vSymbol: "BTC" | "ETH" = (vSymbolRaw === "ETH" || vSymbolRaw === "ETHUSD") ? "ETH" : "BTC";
+    const vSideRaw = String(req.body?.side || req.body?.action || "").trim().toUpperCase();
+    const vSide: "" | "buy" | "sell" = vSideRaw === "SELL"
+        ? "sell"
+        : (vSideRaw === "BUY" ? "buy" : "");
+    const vQty = Math.max(1, Math.floor(Number(req.body?.qty || 1)));
+    const vLimitPrice = Number(req.body?.limitPrice);
+    const vSlPoints = Number(req.body?.slPoints);
+    const vTpPoints = Number(req.body?.tpPoints);
+    const vTolerance = Math.max(1, Math.floor(Number(req.body?.tolerance || 20)));
+
+    if (vSide !== "buy" && vSide !== "sell") {
+        res.status(400).json({ status: "warning", message: "Select a valid side (Buy or Sell) before saving the position trigger." });
+        return;
+    }
+    if (!(vQty > 0)) {
+        res.status(400).json({ status: "warning", message: "Enter a valid Qty before saving the position trigger." });
+        return;
+    }
+    if (!(vLimitPrice > 0) || !Number.isFinite(vLimitPrice)) {
+        res.status(400).json({ status: "warning", message: "Enter a valid Strike Price before saving the position trigger." });
+        return;
+    }
+    if (!(vSlPoints > 0) || !Number.isFinite(vSlPoints)) {
+        res.status(400).json({ status: "warning", message: "Enter a valid SL Points value before saving the position trigger." });
+        return;
+    }
+    if (!(vTpPoints > 0) || !Number.isFinite(vTpPoints)) {
+        res.status(400).json({ status: "warning", message: "Enter a valid TP Points value before saving the position trigger." });
+        return;
+    }
+    if (!((vLimitPrice - vSlPoints) > 0 && (vLimitPrice + vTpPoints) > 0)) {
+        res.status(400).json({
+            status: "warning",
+            message: "Computed SL / TP prices would be non-positive. Reduce SL / TP Points or increase Strike Price."
+        });
+        return;
+    }
+
+    const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        res.status(400).json({ status: "warning", message: "Select an API profile before saving the position trigger." });
+        return;
+    }
+    const objCheck = await performRollingFuturesLtConnectionCheck(vUserId, pStrategyCode, vSelectedApiProfileId);
+    if (objCheck.profile.connectionStatus.state !== "connected") {
+        res.status(400).json({
+            status: "warning",
+            message: objCheck.profile.connectionStatus.message || "Delta connection is not healthy.",
+            data: objCheck.profile
+        });
+        return;
+    }
+
+    const vLockKey = getManualFutureOrderLockKey(vUserId, pStrategyCode);
+    if (gManualFutureOrderLocks.has(vLockKey)) {
+        res.status(409).json({
+            status: "warning",
+            message: "A position trigger is already being processed. Please wait for it to finish."
+        });
+        return;
+    }
+    gManualFutureOrderLocks.add(vLockKey);
+
+    try {
+        const objApiProfile = await getDeltaApiProfile(vUserId, vSelectedApiProfileId);
+        const vExchange = String(objApiProfile?.exchange || "delta-exchange").trim().toLowerCase();
+        if (vExchange !== "delta-exchange") {
+            res.status(400).json({
+                status: "warning",
+                message: `Position triggers for ${vExchange || "this exchange"} are pending support. Only Delta Exchange is wired up right now.`
+            });
+            return;
+        }
+
+        const vContractName = getContractNameForSymbol(vSymbol);
+        const vLotSize = getLotSizeForSymbol(vSymbol);
+
+        const slPrice = vSide === "buy" ? (vLimitPrice - vSlPoints) : (vLimitPrice + vSlPoints);
+        const tpPrice = vSide === "buy" ? (vLimitPrice + vTpPoints) : (vLimitPrice - vTpPoints);
+        // Trigger fires 25% of the leg's points BEFORE the price reaches the rest limit,
+        // so the closing limit is already resting and fills at exactly slPrice/tpPrice.
+        const slTriggerGap = Math.max(0, Number(vSlPoints || 0) * 0.25);
+        const tpTriggerGap = Math.max(0, Number(vTpPoints || 0) * 0.25);
+        const slTriggerPrice = vSide === "buy" ? (slPrice + slTriggerGap) : (slPrice - slTriggerGap);
+        const tpTriggerPrice = vSide === "buy" ? (tpPrice - tpTriggerGap) : (tpPrice + tpTriggerGap);
+        if (!(slPrice > 0) || !(tpPrice > 0) || !(slTriggerPrice > 0) || !(tpTriggerPrice > 0)) {
+            res.status(400).json({
+                status: "warning",
+                message: "Computed SL / TP prices are non-positive. Check Strike Price and SL Points / TP Points."
+            });
+            return;
+        }
+
+        const { client: gateClient, profile: gateProfile } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
+        const { cancelledCount: arrCancelledCount, firstCancelledId } = await cancelOpenDeltaLimitOrdersMatching(gateClient, vContractName, vSide);
+        if (arrCancelledCount > 0) {
+            await logFuturesEvent(
+                vUserId,
+                pStrategyCode,
+                "manual_action",
+                "info",
+                "Previous Limit Order Cancelled For Edit",
+                `Cancelled ${arrCancelledCount} existing open ${vSide.toUpperCase()} ${vContractName} limit order(s)${firstCancelledId ? ` (first id ${firstCancelledId})` : ""} before saving a new one on ${gateProfile.referenceName || "(no name)"}.`,
+                {
+                    reason: "edit_existing_limit_cancelled",
+                    symbol: vSymbol,
+                    contractName: vContractName,
+                    side: vSide,
+                    cancelledCount: arrCancelledCount,
+                    firstCancelledId
+                }
+            );
+        }
+
+        await deletePositionTriggerPendingByContent(vUserId, pStrategyCode, { symbol: vSymbol, side: vSide });
+
+        let vMarkPrice: number | null = null;
+        try {
+            const objSnapshot = await getLiveMarketSnapshot({ symbol: vSymbol, contractName: vContractName } as unknown as Parameters<typeof getLiveMarketSnapshot>[0]);
+            vMarkPrice = Number(objSnapshot.futuresPrice || objSnapshot.spotPrice || 0);
+        }
+        catch (objSnapErr) {
+            vMarkPrice = null;
+        }
+        const vNumericMark = Number.isFinite(vMarkPrice) ? (vMarkPrice as number) : null;
+        const vMakerValid = vNumericMark !== null && (
+            vSide === "buy" ? vNumericMark > vLimitPrice : vNumericMark < vLimitPrice
+        );
+
+        if (vNumericMark !== null && vMakerValid) {
+            const objOrderPayload: Record<string, unknown> = {
+                product_symbol: vContractName,
+                size: vQty,
+                side: vSide,
+                order_type: "limit_order",
+                limit_price: String(vLimitPrice),
+                time_in_force: "gtc",
+                post_only: true,
+                reduce_only: false,
+                bracket_stop_loss_price: String(slTriggerPrice),
+                bracket_stop_loss_limit_price: String(slPrice),
+                bracket_stop_trigger_method: "mark_price",
+                bracket_take_profit_price: String(tpTriggerPrice),
+                bracket_take_profit_limit_price: String(tpPrice)
+            };
+            const objResponse = await gateClient.apis.Orders.placeOrder({ order: objOrderPayload });
+            const objPayload = readResponsePayload(objResponse);
+            const objResult = (objPayload.result && typeof objPayload.result === "object")
+                ? objPayload.result as Record<string, unknown>
+                : objPayload;
+            const vOrderId = String(objResult.id || objResult.order_id || "").trim();
+
+            await logFuturesEvent(
+                vUserId,
+                pStrategyCode,
+                vOrderId ? "future_opened" : "manual_action",
+                vOrderId ? "success" : "warning",
+                vOrderId ? "Position Trigger Limit Order Placed" : "Position Trigger Limit Order Submitted",
+                `Saved and placed maker-only ${vSide.toUpperCase()} ${vContractName} limit x${vQty} @ ${vLimitPrice} with SL @ ${slPrice} and TP @ ${tpPrice} on ${gateProfile.referenceName || "(no name)"}.`,
+                {
+                    symbol: vSymbol,
+                    contractName: vContractName,
+                    qty: vQty,
+                    lotSize: vLotSize,
+                    side: vSide,
+                    limitPrice: vLimitPrice,
+                    slPrice: slPrice,
+                    tpPrice: tpPrice,
+                    orderId: vOrderId,
+                    reason: "position_trigger_save"
+                }
+            );
+
+            res.json({
+                status: vOrderId ? "success" : "warning",
+                message: vOrderId
+                    ? `${vSide.toUpperCase()} ${vContractName} limit @ ${vLimitPrice} placed on Delta (order id ${vOrderId})${arrCancelledCount > 0 ? ` after cancelling ${arrCancelledCount} prior order(s) on this side.` : "."}`
+                    : `${vSide.toUpperCase()} ${vContractName} order submitted but no order id was returned.`,
+                data: {
+                    kind: "placed",
+                    id: vOrderId,
+                    side: vSide,
+                    symbol: vSymbol,
+                    contractName: vContractName,
+                    qty: vQty,
+                    strike: vLimitPrice,
+                    slPrice: slPrice,
+                    tpPrice: tpPrice,
+                    cancelled: arrCancelledCount,
+                    firstCancelledId: firstCancelledId || null
+                }
+            });
+            return;
+        }
+
+        const objRecord = await createPositionTriggerPendingRecord({
+            accountId: vUserId,
+            strategyCode: pStrategyCode,
+            exchange: vExchange,
+            symbol: vSymbol,
+            contractSymbol: vContractName,
+            side: vSide,
+            qty: vQty,
+            strike: vLimitPrice,
+            slPoints: vSlPoints,
+            tpPoints: vTpPoints,
+            tolerance: vTolerance
+        });
+        // Make sure the server-side watcher is live so this queued order can fire
+        // on its own even if the browser is closed.
+        startPositionTriggerWatcher(vUserId, pStrategyCode);
+
+        await logFuturesEvent(
+            vUserId,
+            pStrategyCode,
+            "manual_action",
+            "info",
+            "Position Trigger Queued",
+            `Saved ${vSide.toUpperCase()} ${vContractName} limit x${vQty} @ ${vLimitPrice} to pending (id ${objRecord.id}); will auto-place when mark crosses strike by ${vTolerance} pts${arrCancelledCount > 0 ? ` (also cancelled ${arrCancelledCount} prior order(s) on this side)` : ""}.`,
+            {
+                reason: "position_trigger_queue",
+                symbol: vSymbol,
+                contractName: vContractName,
+                qty: vQty,
+                strike: vLimitPrice,
+                tolerance: vTolerance,
+                pendingId: objRecord.id,
+                cancelled: arrCancelledCount
+            }
+        );
+
+        const vExpectedFireWhen = vSide === "buy"
+            ? vLimitPrice + vTolerance
+            : vLimitPrice - vTolerance;
+        res.json({
+            status: "queued",
+            message: `${vSide.toUpperCase()} ${vContractName} limit @ ${vLimitPrice} is not maker-valid right now${Number.isFinite(vMarkPrice) ? ` (mark ${vMarkPrice})` : ""}. Saved to pending; will auto-place when mark crosses ${vExpectedFireWhen}${arrCancelledCount > 0 ? ` (also cancelled ${arrCancelledCount} prior order(s) on this side)` : ""}.`,
+            data: {
+                kind: "queued",
+                id: objRecord.id,
+                side: vSide,
+                symbol: vSymbol,
+                contractName: vContractName,
+                qty: vQty,
+                strike: vLimitPrice,
+                slPoints: vSlPoints,
+                tpPoints: vTpPoints,
+                tolerance: vTolerance,
+                currentMark: vNumericMark,
+                expectedFireWhenMark: vExpectedFireWhen,
+                cancelled: arrCancelledCount
+            }
+        });
+    }
+    catch (objError) {
+        const vErrorMsg = getErrorMessage(objError, "Unable to save position trigger.");
+        await logFuturesEvent(
+            vUserId,
+            pStrategyCode,
+            "manual_action",
+            "error",
+            "Position Trigger Save Failed",
+            vErrorMsg,
+            { reason: "position_trigger_save_error" }
+        );
+        res.status(500).json({
+            status: "danger",
+            message: vErrorMsg
+        });
+    }
+    finally {
+        gManualFutureOrderLocks.delete(vLockKey);
+    }
+}
+
+async function executePositionTriggerInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
+    if (pStrategyCode !== "crypto-scalper") {
+        res.status(400).json({
+            status: "warning",
+            message: "Position triggers are only supported on the Crypto Scalper strategy."
+        });
+        return;
+    }
+
+    const vUserId = getAccountId(req);
+
+    const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
+    if (!objRuntime
+        || !objRuntime.autoTraderEnabled
+        || String(objRuntime.status || "").trim().toLowerCase() !== "running") {
+        res.status(400).json({
+            status: "warning",
+            message: "Turn Auto Trader ON before executing position triggers."
+        });
+        return;
+    }
+
+    const vSymbolRaw = String(req.body?.symbol || "BTC").trim().toUpperCase();
+    const vSymbol: "BTC" | "ETH" = (vSymbolRaw === "ETH" || vSymbolRaw === "ETHUSD") ? "ETH" : "BTC";
+    const vSideRaw = String(req.body?.side || req.body?.action || "").trim().toUpperCase();
+    const vSide: "" | "buy" | "sell" = vSideRaw === "SELL"
+        ? "sell"
+        : (vSideRaw === "BUY" ? "buy" : "");
+    const vQty = Math.max(1, Math.floor(Number(req.body?.qty || 1)));
+    const vLimitPrice = Number(req.body?.limitPrice);
+    const vSlPoints = Number(req.body?.slPoints);
+    const vTpPoints = Number(req.body?.tpPoints);
+
+    if (vSide !== "buy" && vSide !== "sell") {
+        res.status(400).json({ status: "warning", message: "Select a valid side (Buy or Sell) before executing the position trigger." });
+        return;
+    }
+    if (!(vQty > 0)) {
+        res.status(400).json({ status: "warning", message: "Enter a valid Qty before executing the position trigger." });
+        return;
+    }
+    if (!(vLimitPrice > 0) || !Number.isFinite(vLimitPrice)) {
+        res.status(400).json({ status: "warning", message: "Enter a valid Strike Price before executing the position trigger." });
+        return;
+    }
+    if (!(vSlPoints > 0) || !Number.isFinite(vSlPoints)) {
+        res.status(400).json({ status: "warning", message: "Enter a valid SL Points value before executing the position trigger." });
+        return;
+    }
+    if (!(vTpPoints > 0) || !Number.isFinite(vTpPoints)) {
+        res.status(400).json({ status: "warning", message: "Enter a valid TP Points value before executing the position trigger." });
+        return;
+    }
+
+    const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+    const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (!vSelectedApiProfileId) {
+        res.status(400).json({ status: "warning", message: "Select an API profile before executing the position trigger." });
+        return;
+    }
+    const objCheck = await performRollingFuturesLtConnectionCheck(vUserId, pStrategyCode, vSelectedApiProfileId);
+    if (objCheck.profile.connectionStatus.state !== "connected") {
+        res.status(400).json({
+            status: "warning",
+            message: objCheck.profile.connectionStatus.message || "Delta connection is not healthy.",
+            data: objCheck.profile
+        });
+        return;
+    }
+
+    const vLockKey = getManualFutureOrderLockKey(vUserId, pStrategyCode);
+    if (gManualFutureOrderLocks.has(vLockKey)) {
+        res.status(409).json({
+            status: "warning",
+            message: "A position trigger is already being processed. Please wait for it to finish."
+        });
+        return;
+    }
+    gManualFutureOrderLocks.add(vLockKey);
+
+    try {
+        const objApiProfile = await getDeltaApiProfile(vUserId, vSelectedApiProfileId);
+        const vExchange = String(objApiProfile?.exchange || "delta-exchange").trim().toLowerCase();
+        if (vExchange !== "delta-exchange") {
+            res.status(400).json({
+                status: "warning",
+                message: `Position triggers for ${vExchange || "this exchange"} are pending support. Only Delta Exchange is wired up right now.`
+            });
+            return;
+        }
+
+        const vContractName = getContractNameForSymbol(vSymbol);
+        const vLotSize = getLotSizeForSymbol(vSymbol);
+
+        const slPrice = vSide === "buy" ? (vLimitPrice - vSlPoints) : (vLimitPrice + vSlPoints);
+        const tpPrice = vSide === "buy" ? (vLimitPrice + vTpPoints) : (vLimitPrice - vTpPoints);
+        // Trigger fires 25% of the leg's points BEFORE the price reaches the rest limit,
+        // so the closing limit is already resting and fills at exactly slPrice/tpPrice.
+        const slTriggerGap = Math.max(0, Number(vSlPoints || 0) * 0.25);
+        const tpTriggerGap = Math.max(0, Number(vTpPoints || 0) * 0.25);
+        const slTriggerPrice = vSide === "buy" ? (slPrice + slTriggerGap) : (slPrice - slTriggerGap);
+        const tpTriggerPrice = vSide === "buy" ? (tpPrice - tpTriggerGap) : (tpPrice + tpTriggerGap);
+        if (!(slPrice > 0) || !(tpPrice > 0) || !(slTriggerPrice > 0) || !(tpTriggerPrice > 0)) {
+            res.status(400).json({
+                status: "warning",
+                message: "Computed SL / TP prices are non-positive. Check Strike Price and SL Points / TP Points."
+            });
+            return;
+        }
+
+        const objOrderPayload: Record<string, unknown> = {
+            product_symbol: vContractName,
+            size: vQty,
+            side: vSide,
+            order_type: "limit_order",
+            limit_price: String(vLimitPrice),
+            time_in_force: "gtc",
+            post_only: true,
+            reduce_only: false,
+            bracket_stop_loss_price: String(slTriggerPrice),
+            bracket_stop_loss_limit_price: String(slPrice),
+            bracket_stop_trigger_method: "mark_price",
+            bracket_take_profit_price: String(tpTriggerPrice),
+            bracket_take_profit_limit_price: String(tpPrice)
+        };
+
+        // Open-order gate (per-symbol, per-side).
+        // Refuse to place a second open limit order on the same side for this contract.
+        // Same-side limit orders are blocked; BUY + SELL coexist OK.
+        try {
+            const { client: gateClient } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
+            const arrOpen = await listOpenDeltaOrders(gateClient);
+            const arrSameSideLimits = (Array.isArray(arrOpen) ? arrOpen : []).filter((objRow: { product_symbol?: unknown; side?: unknown; order_type?: unknown; state?: unknown; status?: unknown }) => {
+                const vProd = String(objRow.product_symbol || "").trim().toUpperCase();
+                const vRowSide = String(objRow.side || "").trim().toLowerCase();
+                const vRowType = String(objRow.order_type || "").trim().toLowerCase();
+                const vRowState = String(objRow.state || objRow.status || "").trim().toLowerCase();
+                if (vProd !== vContractName) { return false; }
+                if (vRowSide !== vSide) { return false; }
+                if (vRowType !== "limit_order") { return false; }
+                return vRowState !== "filled" && vRowState !== "cancelled" && vRowState !== "canceled" && vRowState !== "rejected" && vRowState !== "expired";
+            });
+            if (arrSameSideLimits.length > 0) {
+                const arrOrderIds = arrSameSideLimits.map((objRow: { id?: unknown; order_id?: unknown }) => String(objRow.id || objRow.order_id || "").trim()).filter((s: string) => Boolean(s));
+                const vFirstId = arrOrderIds[0] || "";
+                await logFuturesEvent(
+                    vUserId,
+                    pStrategyCode,
+                    "manual_action",
+                    "warning",
+                    "Position Trigger Delta-Rejected",
+                    `Refused to place another ''${vSide.toUpperCase()}'' trigger: ${arrSameSideLimits.length} open limit order(s) already on ${vContractName}${vFirstId ? ` (id ${vFirstId})` : ""}.`,
+                    {
+                        reason: "open_order_already_exists",
+                        symbol: vSymbol,
+                        contractName: vContractName,
+                        side: vSide,
+                        existingOrderIds: arrOrderIds
+                    }
+                );
+                const vMsgExtra = vFirstId ? ` (id ${vFirstId})` : "";
+                const vPosNoun = arrSameSideLimits.length === 1 ? "order" : "orders";
+                res.status(400).json({
+                    status: "warning",
+                    message: `Delta already has ${arrSameSideLimits.length} open ${vSide.toUpperCase()} ${vContractName} limit ${vPosNoun}${vMsgExtra}. Close or cancel ${arrSameSideLimits.length === 1 ? "it" : "them"} before placing another ${vSide.toUpperCase()} trigger.`,
+                    data: { errorCode: "open_order_already_exists", existingOrderIds: arrOrderIds }
+                });
+                return;
+            }
+        }
+        catch (objGateError) {
+            const vGateMsg = getErrorMessage(objGateError, "Unable to read Delta open orders before placing the trigger.");
+            await logFuturesEvent(
+                vUserId,
+                pStrategyCode,
+                "manual_action",
+                "error",
+                "Position Trigger Open-Order Gate Failed",
+                vGateMsg,
+                { reason: "open_order_gate_error" }
+            );
+            res.status(500).json({ status: "danger", message: "Open-order pre-check failed: " + vGateMsg });
+            return;
+        }
+
+        const { client, profile } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
+        const objResponse = await client.apis.Orders.placeOrder({ order: objOrderPayload });
+        const objPayload = readResponsePayload(objResponse);
+        const objResult = (objPayload.result && typeof objPayload.result === "object")
+            ? objPayload.result as Record<string, unknown>
+            : objPayload;
+        const vOrderId = String(objResult.id || objResult.order_id || "").trim();
+
+        await logFuturesEvent(
+            vUserId,
+            pStrategyCode,
+            vOrderId ? "future_opened" : "manual_action",
+            vOrderId ? "success" : "warning",
+            vOrderId ? "Position Trigger Limit Order Placed" : "Position Trigger Limit Order Submitted",
+            `Placed maker-only ${vSide.toUpperCase()} ${vContractName} limit x${vQty} @ ${vLimitPrice} with SL @ ${slPrice} (trigger ${slTriggerPrice}) and TP @ ${tpPrice} (trigger ${tpTriggerPrice}) on ${profile.referenceName}.`,
+            {
+                symbol: vSymbol,
+                contractName: vContractName,
+                qty: vQty,
+                lotSize: vLotSize,
+                side: vSide,
+                limitPrice: vLimitPrice,
+                slPrice: slPrice,
+                tpPrice: tpPrice,
+                postOnly: true,
+                orderId: vOrderId,
+                apiProfile: profile.referenceName,
+                reason: "position_trigger_execute"
+            }
+        );
+
+        res.json({
+            status: vOrderId ? "success" : "warning",
+            message: vOrderId
+                ? `Position trigger ${vSide.toUpperCase()} ${vContractName} order placed (maker-only).`
+                : `Position trigger ${vSide.toUpperCase()} ${vContractName} order submitted but no order id was returned.`,
+            data: {
+                side: vSide,
+                symbol: vSymbol,
+                contractName: vContractName,
+                qty: vQty,
+                lotSize: vLotSize,
+                limitPrice: vLimitPrice,
+                slPrice: slPrice,
+                tpPrice: tpPrice,
+                order: objResult
+            }
+        });
+    }
+    catch (objError) {
+        const objFriendly = getFriendlyDeltaPlaceOrderError(objError, {
+            side: vSide,
+            strike: vLimitPrice,
+            symbol: vSymbol
+        });
+        const vErrorMsg = objFriendly.message;
+        const vLogSeverity = objFriendly.status === "warning" ? "warning" : "error";
+        await logFuturesEvent(
+            vUserId,
+            pStrategyCode,
+            "manual_action",
+            vLogSeverity,
+            objFriendly.status === "warning" ? "Position Trigger Delta-Rejected" : "Position Trigger Failed",
+            vErrorMsg,
+            {
+                reason: "position_trigger_error",
+                errorCode: objFriendly.data.errorCode
+            }
+        );
+        if (objFriendly.status === "warning") {
+            // Client-fixable input (e.g. post-only crossed, tick size, margin). HTTP 400.
+            res.status(400).json(objFriendly);
+            return;
+        }
+        res.status(500).json({
+            status: objFriendly.status,
+            message: vErrorMsg
         });
     }
     finally {
@@ -21611,6 +22643,414 @@ export async function updateRenkoOptionsRecoveryMetrics(req: Request, res: Respo
 export async function recalculateCoveredOptionsRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "covered-options");
 }
+export async function listCryptoScalperVerifierRunningUsers(req: Request, res: Response): Promise<void> {
+    await listCoveredLikeVerifierRunningUsers(req, res, "crypto-scalper", "Crypto Scalper");
+}
+
+export async function getCryptoScalperProfile(req: Request, res: Response): Promise<void> {
+    await getProfileInternal(req, res, "crypto-scalper");
+}
+
+export async function saveCryptoScalperProfile(req: Request, res: Response): Promise<void> {
+    await saveProfileInternal(req, res, "crypto-scalper");
+}
+
+export async function getCryptoScalperConnectionStatus(req: Request, res: Response): Promise<void> {
+    await getConnectionStatusInternal(req, res, "crypto-scalper");
+}
+
+export async function getCryptoScalperRuntimeStatus(req: Request, res: Response): Promise<void> {
+    await getRuntimeStatusInternal(req, res, "crypto-scalper");
+}
+
+export async function checkCryptoScalperConnection(req: Request, res: Response): Promise<void> {
+    await checkConnectionInternal(req, res, "crypto-scalper");
+}
+
+export async function enableCryptoScalperAutoTrader(req: Request, res: Response): Promise<void> {
+    await enableAutoTraderInternal(req, res, "crypto-scalper");
+}
+
+export async function disableCryptoScalperAutoTrader(req: Request, res: Response): Promise<void> {
+    await disableAutoTraderInternal(req, res, "crypto-scalper");
+}
+
+export async function getCryptoScalperAccountSummary(req: Request, res: Response): Promise<void> {
+    await getAccountSummaryInternal(req, res, "crypto-scalper");
+}
+
+export async function executeCryptoScalperManualFuture(req: Request, res: Response): Promise<void> {
+    await executeManualFutureInternal(req, res, "crypto-scalper");
+}
+
+export async function getCryptoScalperPositionTriggerTicker(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const vSymbolRaw = String(req.query?.symbol || req.body?.symbol || "BTC").trim().toUpperCase();
+    const vSymbol: "BTC" | "ETH" = (vSymbolRaw === "ETH" || vSymbolRaw === "ETHUSD") ? "ETH" : "BTC";
+    try {
+        const objSnapshot = await getLiveMarketSnapshot({ symbol: vSymbol, contractName: getContractNameForSymbol(vSymbol) } as unknown as Parameters<typeof getLiveMarketSnapshot>[0]);
+        const vMarkPrice = Number(objSnapshot.futuresPrice || objSnapshot.spotPrice || 0);
+        if (!(vMarkPrice > 0)) {
+            res.status(502).json({ status: "warning", message: `No live ticker price available for ${vSymbol}.` });
+            return;
+        }
+        res.json({
+            status: "success",
+            data: {
+                symbol: vSymbol,
+                contractName: String(objSnapshot.contractName || "").trim().toUpperCase(),
+                markPrice: vMarkPrice,
+                bestBidPrice: Number(objSnapshot.bestBidPrice || vMarkPrice),
+                bestAskPrice: Number(objSnapshot.bestAskPrice || vMarkPrice),
+                ts: String(objSnapshot.ts || new Date().toISOString())
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({ status: "danger", message: getErrorMessage(objError, `Unable to fetch ticker price for ${vSymbol}.`) });
+    }
+}
+
+
+export async function executeCryptoScalperPositionTrigger(req: Request, res: Response): Promise<void> {
+    await executePositionTriggerInternal(req, res, "crypto-scalper");
+}
+
+export async function saveCryptoScalperPositionTrigger(req: Request, res: Response): Promise<void> {
+    await saveCryptoScalperPositionTriggerInternal(req, res, "crypto-scalper");
+}
+
+export async function getCryptoScalperPosTrgDefaults(req: Request, res: Response): Promise<void> {
+    try {
+        const objDefaults = await readCryptoScalperPosTrgDefaults();
+        res.json({ status: "success", data: { ...objDefaults, isAdmin: Boolean(req.authAccount?.isAdmin) } });
+    }
+    catch (objError) {
+        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to load position trigger defaults.") });
+    }
+}
+
+export async function saveCryptoScalperPosTrgDefaults(req: Request, res: Response): Promise<void> {
+    if (!req.authAccount?.isAdmin) {
+        res.status(403).json({ status: "danger", message: "Only admins can change the Position Trigger defaults." });
+        return;
+    }
+    try {
+        const objBody = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
+        const objSaved = await writeCryptoScalperPosTrgDefaults(objBody);
+        res.json({ status: "success", message: "Position Trigger defaults saved for all users.", data: objSaved });
+    }
+    catch (objError) {
+        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to save position trigger defaults.") });
+    }
+}
+
+async function fetchOpenDeltaOrdersForSymbol(pClient: any, pContractName: string, pSide: "buy" | "sell"): Promise<Array<Record<string, unknown>>> {
+    if (!pClient?.apis?.Orders?.getOrders) { return []; }
+    const vContract = String(pContractName || "").trim().toUpperCase();
+    const vSide = pSide;
+    try {
+        const objResponse = await pClient.apis.Orders.getOrders({ state: "open", page_size: 200 });
+        const objPayload = readResponsePayload(objResponse);
+        const arrRows = Array.isArray(objPayload.result) ? objPayload.result as Array<{ product_symbol?: unknown; side?: unknown; order_type?: unknown; state?: unknown; status?: unknown; reduced_size?: unknown; unfilled_size?: unknown; size?: unknown; limit_price?: unknown; id?: unknown; order_id?: unknown; created_at?: unknown }> : [];
+        return arrRows.filter((objRow) => {
+            if (String(objRow.product_symbol || "").trim().toUpperCase() !== vContract) { return false; }
+            if (String(objRow.side || "").trim().toLowerCase() !== vSide) { return false; }
+            if (String(objRow.order_type || "").trim().toLowerCase() !== "limit_order") { return false; }
+            const vState = String(objRow.state || objRow.status || "").trim().toLowerCase();
+            if (vState === "filled" || vState === "cancelled" || vState === "canceled" || vState === "rejected" || vState === "expired") { return false; }
+            return true;
+        }).map((objRow) => {
+            const vId = String(objRow.id || objRow.order_id || "").trim();
+            const vSize = Number(objRow.size || 0);
+            const vFilled = Number(objRow.reduced_size || 0);
+            return {
+                orderId: vId,
+                symbol: vContract,
+                side: vSide,
+                limitPrice: Number(objRow.limit_price || 0),
+                size: vSize > 0 ? vSize : Number(objRow.unfilled_size || 0),
+                filledSize: vFilled,
+                state: String(objRow.state || objRow.status || "open").trim(),
+                createdAt: (() => { const vTs = objRow.created_at; if (typeof vTs === "string" || typeof vTs === "number") { const d = new Date(vTs); return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString(); } return new Date().toISOString(); })()
+            };
+        });
+    }
+    catch (_objErr) {
+        return [];
+    }
+}
+
+export async function getCryptoScalperPositionTriggerWatcherStatus(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const vStrategyCode = "crypto-scalper" as RollingFuturesLtStrategyCode;
+    const vKey = getPositionTriggerWatcherKey(vUserId, vStrategyCode);
+    const bWatcherRunning = gPositionTriggerWatcherIntervals.has(vKey);
+    let arrPending: PositionTriggerPendingRecord[] = [];
+    try {
+        arrPending = await listPositionTriggerPendingRecords(vUserId, vStrategyCode);
+    }
+    catch (_objErr) {
+        arrPending = [];
+    }
+    const objRuntime = await loadRollingFuturesLtRuntime(vUserId, vStrategyCode);
+    res.json({
+        status: "success",
+        data: {
+            watcherRunning: bWatcherRunning,
+            autoTraderEnabled: Boolean(objRuntime?.autoTraderEnabled),
+            runtimeStatus: String(objRuntime?.status || "idle").trim(),
+            pendingCount: arrPending.length,
+            intervalMs: gPositionTriggerWatcherIntervalMs
+        }
+    });
+}
+
+export async function listCryptoScalperOpenOrders(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const vSymbolRaw = String(req.query?.symbol || req.body?.symbol || "BTC").trim().toUpperCase();
+    const vSymbol: "BTC" | "ETH" = (vSymbolRaw === "ETH" || vSymbolRaw === "ETHUSD") ? "ETH" : "BTC";
+    try {
+        const objProfile = await readLiveProfile(vUserId, "crypto-scalper");
+        const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+        if (!vSelectedApiProfileId) {
+            res.json({ status: "success", data: [{ side: "buy", orders: [] }, { side: "sell", orders: [] }] });
+            return;
+        }
+        const objApiProfile = await getDeltaApiProfile(vUserId, vSelectedApiProfileId);
+        const vExchange = String(objApiProfile?.exchange || "delta-exchange").trim().toLowerCase();
+        if (vExchange !== "delta-exchange") {
+            res.json({ status: "success", data: [{ side: "buy", orders: [] }, { side: "sell", orders: [] }] });
+            return;
+        }
+        const vContractName = getContractNameForSymbol(vSymbol);
+        const { client } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
+        const [arrBuy, arrSell] = await Promise.all([
+            fetchOpenDeltaOrdersForSymbol(client, vContractName, "buy"),
+            fetchOpenDeltaOrdersForSymbol(client, vContractName, "sell")
+        ]);
+        res.json({ status: "success", data: { symbol: vSymbol, contractName: vContractName, buy: arrBuy, sell: arrSell } });
+    }
+    catch (objError) {
+        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to list open Delta orders.") });
+    }
+}
+
+export async function cancelCryptoScalperOpenOrder(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const vOrderId = String(req.body?.orderId || req.query?.orderId || "").trim();
+    const vSymbolRaw = String(req.body?.symbol || req.query?.symbol || "BTC").trim().toUpperCase();
+    const vSymbol: "BTC" | "ETH" = (vSymbolRaw === "ETH" || vSymbolRaw === "ETHUSD") ? "ETH" : "BTC";
+    if (!vOrderId) {
+        res.status(400).json({ status: "warning", message: "orderId is required." });
+        return;
+    }
+    try {
+        const objProfile = await readLiveProfile(vUserId, "crypto-scalper");
+        const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+        if (!vSelectedApiProfileId) {
+            res.status(400).json({ status: "warning", message: "Select an API profile before cancelling open orders." });
+            return;
+        }
+        const objApiProfile = await getDeltaApiProfile(vUserId, vSelectedApiProfileId);
+        const vExchange = String(objApiProfile?.exchange || "delta-exchange").trim().toLowerCase();
+        if (vExchange !== "delta-exchange") {
+            res.status(400).json({ status: "warning", message: "Open order cancellation for non-Delta exchanges is not wired up." });
+            return;
+        }
+        const { client } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
+        try {
+            const vCancelContract = getContractNameForSymbol(vSymbol);
+            await client.apis.Orders.cancelOrder({
+                order: {
+                    id: Number.isFinite(Number(vOrderId)) ? Number(vOrderId) : vOrderId,
+                    product_symbol: vCancelContract
+                }
+            });
+        }
+        catch (objCancelErr) {
+            const vMsg = getErrorMessage(objCancelErr, `Delta rejected the cancel request for order ${vOrderId}.`);
+            res.status(502).json({ status: "danger", message: vMsg });
+            return;
+        }
+        await logFuturesEvent(vUserId, "crypto-scalper", "manual_action", "info", "Manual Cancel On Delta", `Cancelled open Delta order ${vOrderId} for ${vSymbol}.`, { reason: "manual_open_cancel", orderId: vOrderId, symbol: vSymbol });
+        res.json({ status: "success", message: `Open order ${vOrderId} cancelled on Delta.` });
+    }
+    catch (objError) {
+        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to cancel open order.") });
+    }
+}
+
+export async function listCryptoScalperPositionTriggerPending(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const arrRecords = await listPositionTriggerPendingRecords(vUserId, "crypto-scalper");
+        res.json({ status: "success", data: arrRecords });
+    }
+    catch (objError) {
+        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to list pending position triggers.") });
+    }
+}
+
+export async function deleteCryptoScalperPositionTriggerPending(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const vId = String(req.params.id || "").trim();
+    if (!vId) {
+        res.status(400).json({ status: "warning", message: "Pending id is required." });
+        return;
+    }
+    try {
+        const objRemoved = await deletePositionTriggerPendingRecord(vUserId, vId);
+        if (!objRemoved) {
+            res.status(404).json({ status: "warning", message: "Pending trigger not found." });
+            return;
+        }
+        await logFuturesEvent(
+            vUserId,
+            "crypto-scalper",
+            "manual_action",
+            "info",
+            "Pending Position Trigger Cancelled",
+            `Pending ${objRemoved.side.toUpperCase()} ${objRemoved.contractSymbol} trigger @ ${objRemoved.strike} removed without placing.`,
+            { reason: "pending_cancelled", side: objRemoved.side, strike: objRemoved.strike, pendingId: objRemoved.id }
+        );
+        res.json({ status: "success", message: `Pending ${objRemoved.side.toUpperCase()} ${objRemoved.contractSymbol} trigger @ ${objRemoved.strike} cancelled.` });
+    }
+    catch (objError) {
+        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to cancel pending position trigger.") });
+    }
+}
+
+export async function executeCryptoScalperManualOption(req: Request, res: Response): Promise<void> {
+    await executeManualOptionInternal(req, res, "crypto-scalper");
+}
+
+export async function executeCryptoScalperStrategy(req: Request, res: Response): Promise<void> {
+    await executeStrategyInternal(req, res, "crypto-scalper");
+}
+
+export async function confirmCryptoScalperLiveAction(req: Request, res: Response): Promise<void> {
+    await confirmCoveredLiveActionInternal(req, res, "crypto-scalper");
+}
+
+export async function rejectCryptoScalperLiveAction(req: Request, res: Response): Promise<void> {
+    await rejectCoveredLiveActionInternal(req, res, "crypto-scalper");
+}
+
+export async function setCryptoScalperRenkoManualSignal(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const objProfile = await readLiveProfile(vUserId, "crypto-scalper");
+        const objUiState = getMergedUiState(objProfile);
+        const vSelectedSymbol = normalizeSymbolValue(objUiState.symbol);
+        const vSignal = String(req.body?.signal || req.body?.color || "").trim().toUpperCase() === "G" ? "G"
+            : (String(req.body?.signal || req.body?.color || "").trim().toUpperCase() === "R" ? "R" : "");
+        if (!vSignal) {
+            res.status(400).json({
+                status: "warning",
+                message: "Select R or G for the manual Renko signal."
+            });
+            return;
+        }
+        const objSnapshot = await getLiveMarketSnapshot({
+            symbol: vSelectedSymbol,
+            contractName: getContractNameForSymbol(vSelectedSymbol),
+            lotSize: getLotSizeForSymbol(vSelectedSymbol),
+            futureQty: 1,
+            futureOrderType: "market_order",
+            action: "buy",
+            legSide: "ce",
+            expiryMode: "1",
+            expiryDate: "",
+            optionQty: 1,
+            redOptionQtyPct: 100,
+            greenOptionQtyPct: 100,
+            newDelta: 0.53,
+            reDelta: 0.53,
+            deltaTakeProfit: 0.15,
+            deltaStopLoss: 0.85,
+            reEnter: false,
+            addOneLotFuture: false,
+            renkoEnabled: Boolean(objUiState.renkoFeedEnabled ?? objUiState.renkoEnabled),
+            renkoStepPoints: Math.max(1, Math.floor(Number(objUiState.renkoFeedPts || objUiState.renkoStepPoints || 10) || 10)),
+            renkoPriceSource: normalizeRenkoFeedPriceSourceValue(objUiState.renkoFeedPriceSrc || "spot_price"),
+            loopSeconds: 8
+        });
+        const objSync = await syncRenkoPaperRuntimeAndMaybeAutoTradeInternal(vUserId, "crypto-scalper", objSnapshot, vSignal);
+        res.json({
+            status: objSync.autoTrade?.status || "success",
+            message: objSync.autoTrade?.message || `Manual Renko signal set to ${vSignal}.`,
+            data: {
+                renko: objSync.renko,
+                renkoHistoryBySymbol: getMergedUiState(objSync.profile).renkoHistoryBySymbol,
+                autoTrade: objSync.autoTrade || null
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to set the manual Renko signal.")
+        });
+    }
+}
+
+export async function getCryptoScalperImportableOpenPositions(req: Request, res: Response): Promise<void> {
+    await getImportableOpenPositionsInternal(req, res, "crypto-scalper");
+}
+
+export async function getCryptoScalperOpenPositions(req: Request, res: Response): Promise<void> {
+    await getOpenPositionsInternal(req, res, "crypto-scalper");
+}
+
+export async function saveCryptoScalperOpenPositions(req: Request, res: Response): Promise<void> {
+    await saveOpenPositionsInternal(req, res, "crypto-scalper");
+}
+
+export async function deleteCryptoScalperOpenPosition(req: Request, res: Response): Promise<void> {
+    await deleteOpenPositionInternal(req, res, "crypto-scalper");
+}
+
+export async function clearCryptoScalperOpenPositions(req: Request, res: Response): Promise<void> {
+    await clearOpenPositionsInternal(req, res, "crypto-scalper");
+}
+
+export async function reconcileCryptoScalperOpenPositions(req: Request, res: Response): Promise<void> {
+    await reconcileOpenPositionsInternal(req, res, "crypto-scalper");
+}
+
+export async function closeCryptoScalperImportedOpenPosition(req: Request, res: Response): Promise<void> {
+    await closeImportedOpenPositionInternal(req, res, "crypto-scalper");
+}
+
+export async function getCryptoScalperClosedPositions(req: Request, res: Response): Promise<void> {
+    await getClosedPositionsInternal(req, res, "crypto-scalper");
+}
+
+export async function getCryptoScalperEvents(req: Request, res: Response): Promise<void> {
+    await getEventsInternal(req, res, "crypto-scalper");
+}
+
+export async function deleteCryptoScalperEventController(req: Request, res: Response): Promise<void> {
+    await deleteEventInternal(req, res, "crypto-scalper");
+}
+
+export async function clearCryptoScalperEventsController(req: Request, res: Response): Promise<void> {
+    await clearEventsInternal(req, res, "crypto-scalper");
+}
+
+export async function executeCryptoScalperKillSwitch(req: Request, res: Response): Promise<void> {
+    await executeKillSwitchInternal(req, res, "crypto-scalper");
+}
+
+export async function updateCryptoScalperRecoveryMetrics(req: Request, res: Response): Promise<void> {
+    await updateRecoveryMetricsInternal(req, res, "crypto-scalper");
+}
+
+export async function recalculateCryptoScalperRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
+    await recalculateRecoveryTotalPnlInternal(req, res, "crypto-scalper");
+}
+
 export async function recalculateStrangleOptionsRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "strangle-options");
 }
@@ -21948,7 +23388,7 @@ export async function recalculateOptionsScalperRecoveryTotalPnl(req: Request, re
 }
 
 // ---------------------------------------------------------------------------
-// Calendar Spread (paper) strategy exports — fully independent of Options Demo.
+// Calendar Spread (paper) strategy exports â€” fully independent of Options Demo.
 //
 // Every function below is bound to the "calendar-spread" strategy code. Because
 // profiles, runtime, tracked positions, closed positions and events are all

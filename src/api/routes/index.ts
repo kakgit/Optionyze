@@ -1,4 +1,4 @@
-import { Router } from "express";
+﻿import { Router } from "express";
 import { getHealth, getWebSocketStatus } from "../controllers/health-controller";
 import {
     createManagedUserController,
@@ -270,7 +270,46 @@ import {
     swapStrangleOptionsImportedOpenPosition,
     handleTelegramWebhook,
     handleOptionsDemoTradeWebhook,
-    handleCoveredOptionsTradeWebhook
+    handleCoveredOptionsTradeWebhook,
+    listCryptoScalperVerifierRunningUsers,
+    getCryptoScalperAccountSummary,
+    getCryptoScalperClosedPositions,
+    getCryptoScalperConnectionStatus,
+    getCryptoScalperEvents,
+    getCryptoScalperImportableOpenPositions,
+    getCryptoScalperOpenPositions,
+    getCryptoScalperProfile,
+    getCryptoScalperRuntimeStatus,
+    checkCryptoScalperConnection,
+    clearCryptoScalperEventsController,
+    clearCryptoScalperOpenPositions,
+    closeCryptoScalperImportedOpenPosition,
+    deleteCryptoScalperEventController,
+    deleteCryptoScalperOpenPosition,
+    disableCryptoScalperAutoTrader,
+    enableCryptoScalperAutoTrader,
+    executeCryptoScalperKillSwitch,
+    executeCryptoScalperManualFuture,
+    executeCryptoScalperManualOption,
+    executeCryptoScalperPositionTrigger,
+    getCryptoScalperPositionTriggerTicker,
+    getCryptoScalperPosTrgDefaults,
+    saveCryptoScalperPosTrgDefaults,
+    saveCryptoScalperPositionTrigger,
+    listCryptoScalperPositionTriggerPending,
+    deleteCryptoScalperPositionTriggerPending,
+    listCryptoScalperOpenOrders,
+    cancelCryptoScalperOpenOrder,
+    getCryptoScalperPositionTriggerWatcherStatus,
+    executeCryptoScalperStrategy,
+    confirmCryptoScalperLiveAction,
+    rejectCryptoScalperLiveAction,
+    setCryptoScalperRenkoManualSignal,
+    updateCryptoScalperRecoveryMetrics,
+    recalculateCryptoScalperRecoveryTotalPnl,
+    reconcileCryptoScalperOpenPositions,
+    saveCryptoScalperOpenPositions,
+    saveCryptoScalperProfile
 } from "../controllers/rolling-futures-lt-controller";
 import {
     createDeltaApiProfileController,
@@ -541,6 +580,124 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/covered-options/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await clearCoveredOptionsEventsController(req, res);
+    });
+
+    objRouter.get("/crypto-scalper/admin/running-users", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await listCryptoScalperVerifierRunningUsers(req, res);
+    });
+    objRouter.get("/crypto-scalper/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCryptoScalperProfile(req, res);
+    });
+    objRouter.post("/crypto-scalper/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveCryptoScalperProfile(req, res);
+    });
+    objRouter.get("/crypto-scalper/connection/status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCryptoScalperConnectionStatus(req, res);
+    });
+    objRouter.get("/crypto-scalper/runtime", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCryptoScalperRuntimeStatus(req, res);
+    });
+    objRouter.post("/crypto-scalper/connection/check", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await checkCryptoScalperConnection(req, res);
+    });
+    objRouter.post("/crypto-scalper/auto-trader/start", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await enableCryptoScalperAutoTrader(req, res);
+    });
+    objRouter.post("/crypto-scalper/auto-trader/stop", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await disableCryptoScalperAutoTrader(req, res);
+    });
+    objRouter.get("/crypto-scalper/account-summary", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCryptoScalperAccountSummary(req, res);
+    });
+    objRouter.post("/crypto-scalper/renko/manual-signal", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await setCryptoScalperRenkoManualSignal(req, res);
+    });
+    objRouter.post("/crypto-scalper/manual/future", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeCryptoScalperManualFuture(req, res);
+    });
+    objRouter.post("/crypto-scalper/position-triggers/execute", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeCryptoScalperPositionTrigger(req, res);
+    });
+    objRouter.post("/crypto-scalper/position-triggers/save", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveCryptoScalperPositionTrigger(req, res);
+    });
+    objRouter.get("/crypto-scalper/position-triggers/pending", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await listCryptoScalperPositionTriggerPending(req, res);
+    });
+    objRouter.get("/crypto-scalper/position-triggers/open-orders", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await listCryptoScalperOpenOrders(req, res);
+    });
+    objRouter.get("/crypto-scalper/position-triggers/watcher-status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCryptoScalperPositionTriggerWatcherStatus(req, res);
+    });
+    objRouter.post("/crypto-scalper/position-triggers/open-orders/cancel", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await cancelCryptoScalperOpenOrder(req, res);
+    });
+    objRouter.delete("/crypto-scalper/position-triggers/pending/:id", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteCryptoScalperPositionTriggerPending(req, res);
+    });
+    objRouter.get("/crypto-scalper/position-triggers/ticker", requireAuthApi, async (req, res) => {
+        await getCryptoScalperPositionTriggerTicker(req, res);
+    });
+    objRouter.get("/crypto-scalper/position-triggers/defaults", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCryptoScalperPosTrgDefaults(req, res);
+    });
+    objRouter.post("/crypto-scalper/position-triggers/defaults", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveCryptoScalperPosTrgDefaults(req, res);
+    });
+    objRouter.post("/crypto-scalper/manual/option", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeCryptoScalperManualOption(req, res);
+    });
+    objRouter.post("/crypto-scalper/strategy/execute", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeCryptoScalperStrategy(req, res);
+    });
+    objRouter.post("/crypto-scalper/live-action/confirm", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await confirmCryptoScalperLiveAction(req, res);
+    });
+    objRouter.post("/crypto-scalper/live-action/reject", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await rejectCryptoScalperLiveAction(req, res);
+    });
+    objRouter.get("/crypto-scalper/open-positions/importable", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCryptoScalperImportableOpenPositions(req, res);
+    });
+    objRouter.get("/crypto-scalper/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCryptoScalperOpenPositions(req, res);
+    });
+    objRouter.post("/crypto-scalper/open-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveCryptoScalperOpenPositions(req, res);
+    });
+    objRouter.post("/crypto-scalper/open-positions/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteCryptoScalperOpenPosition(req, res);
+    });
+    objRouter.post("/crypto-scalper/open-positions/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearCryptoScalperOpenPositions(req, res);
+    });
+    objRouter.post("/crypto-scalper/open-positions/reconcile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await reconcileCryptoScalperOpenPositions(req, res);
+    });
+    objRouter.post("/crypto-scalper/open-positions/close", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await closeCryptoScalperImportedOpenPosition(req, res);
+    });
+    objRouter.get("/crypto-scalper/closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCryptoScalperClosedPositions(req, res);
+    });
+    objRouter.get("/crypto-scalper/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getCryptoScalperEvents(req, res);
+    });
+    objRouter.post("/crypto-scalper/events/delete", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteCryptoScalperEventController(req, res);
+    });
+    objRouter.post("/crypto-scalper/events/clear", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await clearCryptoScalperEventsController(req, res);
+    });
+    objRouter.post("/crypto-scalper/kill-switch", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await executeCryptoScalperKillSwitch(req, res);
+    });
+    objRouter.post("/crypto-scalper/metrics/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await updateCryptoScalperRecoveryMetrics(req, res);
+    });
+    objRouter.post("/crypto-scalper/metrics/recalculate-total-pnl", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await recalculateCryptoScalperRecoveryTotalPnl(req, res);
     });
 
     objRouter.get("/strangle-options/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
@@ -824,7 +981,7 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
 
 
     // -----------------------------------------------------------------------
-    // Calendar Spread — own API namespace, bound to the "calendar-spread"
+    // Calendar Spread â€” own API namespace, bound to the "calendar-spread"
     // strategy code so it never reads or writes Options Demo state.
     // -----------------------------------------------------------------------
     objRouter.get("/calendar-spread/profile", requireAuthApi, requireFreshPasswordApi, async (req, res) => {

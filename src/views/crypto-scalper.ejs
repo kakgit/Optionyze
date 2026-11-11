@@ -1,0 +1,1464 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= pageTitle %></title>
+    <%- include('partials/brand-head') %>
+    <link rel="stylesheet" href="/css/app-shell.css" />
+    <link rel="stylesheet" href="/css/account-menu.css" />
+    <link rel="stylesheet" href="/css/rolling-options-pt-de.css" />
+    <link rel="stylesheet" href="/css/rolling-futures-lt-common.css" />
+    <link rel="stylesheet" href="/css/rolling-futures-lt-dual.css" />
+</head>
+  <%
+    const vPageVariantRaw = String(pageVariant || "live").trim().toLowerCase();
+    const vPageVariant = vPageVariantRaw === "demo"
+        ? "demo"
+        : (vPageVariantRaw === "strangle"
+            ? "strangle"
+            : (vPageVariantRaw === "strangle-demo"
+                ? "strangle-demo"
+                : (vPageVariantRaw === "renko" ? "renko" : "live")));
+    const bIsDemoPage = vPageVariant === "demo";
+    const bIsStranglePage = vPageVariant === "strangle";
+    const bIsStrangleDemoPage = vPageVariant === "strangle-demo";
+    const bIsRenkoPage = vPageVariant === "renko";
+    const bIsPaperDemoPage = bIsDemoPage || bIsStrangleDemoPage;
+    const bIsCoveredLivePage = !bIsDemoPage && !bIsStranglePage && !bIsStrangleDemoPage && !bIsRenkoPage;
+    const bShowRenkoSection = bIsDemoPage || bIsRenkoPage || bIsCoveredLivePage;
+    const bIsStrangleLikePage = bIsStranglePage || bIsStrangleDemoPage || bIsRenkoPage;
+    const bShowLiveSupportSections = !bIsDemoPage && !bIsStrangleDemoPage && !bIsCoveredLivePage;
+    const bShowConfirmationSection = !bIsDemoPage && !bIsStrangleDemoPage && (bShowLiveSupportSections || bIsCoveredLivePage);
+    const bShowTelegramAlertsSection = false;
+    const bShowImportPositionsUi = !bIsPaperDemoPage;
+    const vStrategyLabel = "Crypto Scalper";
+    const vPageHeading = bIsDemoPage ? "Options Demo" : (bIsStrangleDemoPage ? "Strangle Demo" : `${vStrategyLabel} - Live`);
+    const vEndpointBase = "/api/crypto-scalper";
+    const vOpenPositionsEmpty = bIsPaperDemoPage
+        ? "No demo positions are currently shown."
+        : `Select an API profile and load live ${bIsRenkoPage ? "options-scalper" : ((bIsStranglePage || bIsStrangleDemoPage) ? "strangle-option" : "covered-option")} positions from Delta Exchange.`;
+    const vClosedPositionsEmpty = bIsPaperDemoPage
+        ? "No demo trade history found for the selected date range."
+        : "No Delta fill history found for the selected date range.";
+    const vConfirmationHeading = "Confirmation";
+    const vConfirmationAutoText = `Auto-confirm all ${bIsRenkoPage ? "options-scalper" : ((bIsStranglePage || bIsStrangleDemoPage) ? "strangle" : "covered")} live actions`;
+    const vConfirmationEmpty = "No live action is waiting for confirmation.";
+    const vActivityEmpty = bIsPaperDemoPage ? "No demo activity has been logged yet." : "No live activity has been logged yet.";
+    const vClearOpenPositionsTitle = bIsPaperDemoPage ? "Clear all demo open positions locally" : "Clear all imported open positions locally";
+    const vRefreshOpenPositionsTitle = bIsPaperDemoPage ? "Refresh demo positions" : "Refresh open positions";
+    const vKillSwitchTitle = bIsPaperDemoPage ? "Kill switch to close demo option legs" : "Kill switch to close live option legs";
+    const vClearClosedPositionsTitle = bIsPaperDemoPage ? "Clear all demo closed positions locally" : "";
+    const vRefreshClosedTitle = bIsPaperDemoPage ? "Refresh closed demo positions" : "Refresh closed positions from Delta Exchange";
+  %>
+  <body class="app-page"
+        data-rolling-futures-live="covered"
+        data-rolling-futures-variant="<%= vPageVariant %>"
+        data-rolling-futures-endpoint-base="<%= vEndpointBase %>"
+        data-rolling-futures-strategy-label="<%= vStrategyLabel %>"
+        data-manual-trader-label="Manual Trader"
+        data-exec-strategy-enabled="<%= currentAccount?.execStrategy ? 'true' : 'false' %>"
+        data-current-account-id="<%= currentAccount?.accountId || '' %>"
+        data-current-account-admin="<%= currentAccount?.isAdmin ? 'true' : 'false' %>"
+        data-current-account-verifier="<%= currentAccount?.isVerifier ? 'true' : 'false' %>"
+        data-current-account-full-name="<%= currentAccount?.fullName || '' %>"
+        data-current-account-email="<%= currentAccount?.email || '' %>"
+        data-current-account-telegram-chat-id="<%= currentAccount?.telegramChatId || '' %>">
+    <div class="app-layout rolling-demo-layout">
+        <%- include('partials/app-header', { currentAccount }) %>
+
+
+        <section class="rolling-demo-section rolling-manual-settings-section">
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <h2 class="rolling-manual-settings-title">Manual Settings</h2>
+                    <div class="rolling-demo-card-tools" aria-label="Manual Settings">
+                        <% if (currentAccount?.isVerifier) { %>
+                            <div class="rolling-live-admin-target-head">
+                                <div class="rolling-demo-field rolling-live-admin-target-field">
+                                    <select id="ddlRollingDualAdminTargetUser">
+                                        <option value="">Loading running users...</option>
+                                    </select>
+                                </div>
+                                <div class="rolling-live-admin-target-meta" id="rollingDualAdminTargetMeta">Select a running <%= vStrategyLabel %> user to load settings and positions.</div>
+                            </div>
+                        <% } %>
+                        
+                    <button class="rolling-demo-btn warn" type="button" id="btnRollingFuturesDemoAutoTrader" title="Toggle Auto Trader" aria-label="Toggle Auto Trader" style="width:auto">Auto Trader</button>
+                    <button class="rolling-manual-settings-collapse-btn" type="button" id="btnManualSettingsCollapse" title="Collapse Manual Settings" aria-label="Collapse Manual Settings" aria-expanded="false">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M7 9l5 5 5-5" />
+                        </svg>
+                    </button>
+                    </div>
+                </div>
+                <div class="rolling-manual-settings-body is-collapsed" id="rollingManualSettingsBody">
+                    <div class="rolling-live-status" id="rollingDualFuturesConnectionStatus"></div>
+<div class="rolling-live-status" id="rollingDualFuturesPageStatus"></div>
+                    <div class="rolling-live-connection-grid">
+    <div class="rolling-demo-metric">
+        <div class="rolling-demo-metric-label api-name-label">
+    API Name
+    <select id="ddlRollingDualFuturesApiProfile">
+        <option value="">Select API profile</option>
+    </select>
+</div>
+    </div>
+    <div class="rolling-demo-metric">
+        <div class="rolling-demo-metric-label connection-status-label">
+    Connection Status
+    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesCheckConnection" title="Check Delta connection" aria-label="Check Delta connection">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+            <path d="M21 3v6h-6" />
+        </svg>
+    </button>
+</div>
+<div class="rolling-demo-metric-value" id="rollingDualFuturesConnectionStateValue">Not Selected</div>
+    </div>
+    <div class="rolling-demo-metric">
+        <div class="rolling-demo-metric-label rolling-live-ip-label">
+    Whitelist IP
+    <button class="rolling-live-copy-ip-btn" type="button" id="btnRollingDualFuturesCopyWhitelistIp" title="Copy this server IP for Delta Exchange whitelist" aria-label="Copy this server IP for Delta Exchange whitelist">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 9h10v12H9z" />
+            <path d="M5 15V5h10" />
+        </svg>
+    </button>
+</div>
+<div class="rolling-demo-metric-value" id="rollingDualFuturesWhitelistIpValue">-</div>
+</div>
+    <div class="rolling-demo-metric">
+        <div class="rolling-demo-metric-label">Total Balance</div>
+        <div class="rolling-demo-metric-value" id="rollingDualFuturesTotalBalanceValue">-</div>
+    </div>
+</div>
+    <div class="rolling-demo-grid" style="grid-template-columns:repeat(3, minmax(0, 1fr)); margin-top:14px;">
+        <div class="rolling-demo-field">
+            <label for="txtRollingBtcUsdQty">BTCUSD Qty</label>
+            <input type="number" id="txtRollingBtcUsdQty" name="txtRollingBtcUsdQty" min="1" step="1" value="1" title="Number of contracts (Delta size). 1 contract = 0.001 BTC for BTCUSD." placeholder="e.g. 1" />
+        </div>
+        <div class="rolling-demo-field">
+            <label for="txtRollingEthUsdQty">ETHUSD Qty</label>
+            <input type="number" id="txtRollingEthUsdQty" name="txtRollingEthUsdQty" min="1" step="1" value="1" title="Number of contracts (Delta size). 1 contract = 0.01 ETH for ETHUSD." placeholder="e.g. 1" />
+        </div>
+        <div class="rolling-demo-field">
+            <label for="txtRollingXautUsdQty">XAUTUSD Qty</label>
+            <input type="number" id="txtRollingXautUsdQty" name="txtRollingXautUsdQty" min="1" step="1" value="1" title="Number of contracts (Delta size). 1 contract = 0.01 XAUT for XAUTUSD." placeholder="e.g. 1" />
+        </div>
+    </div>
+            </div>
+                </div>
+        </section>
+        <section class="rolling-demo-section rolling-pos-trg-section">
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <h2 class="rolling-pos-trg-title">Position Triggers</h2>
+                    <div class="rolling-demo-card-tools" aria-label="Position Triggers symbol tabs">
+                        <button type="button" class="rolling-pos-trg-tab-trigger is-active" data-pos-trg-tab-trigger="btc" aria-controls="rollingPosTrgPanelBtc" aria-selected="true">BTCUSD</button>
+                        <button type="button" class="rolling-pos-trg-tab-trigger" data-pos-trg-tab-trigger="eth" aria-controls="rollingPosTrgPanelEth" aria-selected="false" tabindex="-1">ETHUSD</button>
+                        <button type="button" class="rolling-pos-trg-tab-trigger" data-pos-trg-tab-trigger="xaut" aria-controls="rollingPosTrgPanelXaut" aria-selected="false" tabindex="-1">XAUTUSD</button>
+                    </div>
+                </div>
+                <div class="rolling-pos-trg-panels">
+                    <div class="rolling-pos-trg-panel is-active" id="rollingPosTrgPanelBtc" data-pos-trg-tab-panel="btc" role="tabpanel" aria-label="BTCUSD position triggers">
+                        <div class="rolling-pos-trg-panel-head">
+                            <span>BTCUSD</span>
+                            <span class="rolling-pos-trg-ticker" id="rollingPosTrgBtcTicker">
+                                <span class="rolling-pos-trg-ticker-label">Mark</span>
+                                <strong data-pos-trg-ticker-price>—</strong>
+                                <span class="rolling-pos-trg-ticker-vs" data-pos-trg-ticker-vs></span>
+                            </span>
+                        </div>
+                        <div class="rolling-demo-grid rolling-pos-trg-fields">
+                            <div class="rolling-demo-field">
+                                <label for="txtRollingFuturesStartQty">Multiplier</label>
+                                <% if (!bIsCoveredLivePage) { %>
+                                <button class="rolling-futures-start-qty-calc-btn" type="button" id="btnRollingFuturesCalcStartQty" title="Calculate Multiplier from Available Balance" aria-label="Calculate Multiplier from Available Balance">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <rect x="4" y="3" width="16" height="18" rx="2" />
+                                        <path d="M8 7h8" />
+                                        <path d="M8 12h2" />
+                                        <path d="M14 12h2" />
+                                        <path d="M8 16h2" />
+                                        <path d="M14 16h2" />
+                                    </svg>
+                                </button>
+                                <% } %>
+                                <input class="rolling-futures-start-qty" type="number" min="<%= (bIsDemoPage || bIsStrangleLikePage || bIsCoveredLivePage) ? '1' : '2' %>" max="1000" step="1" id="txtRollingFuturesStartQty" value="<%= (bIsDemoPage || bIsStrangleLikePage || bIsCoveredLivePage) ? '1' : '2' %>" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgBtcTolerance">Tolerance</label>
+                                <input type="number" id="txtPosTrgBtcTolerance" name="txtPosTrgBtcTolerance" min="1" step="1" value="20" title="Auto-watch fires when current price is within this many points of the Strike Price." placeholder="e.g. 20" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgBtcBuyStrike">Strike Price</label>
+                                <input type="number" id="txtPosTrgBtcBuyStrike" name="txtPosTrgBtcBuyStrike" step="any" inputmode="decimal" placeholder="e.g. 95000" />
+
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgBtcSlPoints">SL Points</label>
+                                <input type="number" id="txtPosTrgBtcSlPoints" name="txtPosTrgBtcSlPoints" step="any" inputmode="decimal" value="300" placeholder="e.g. 300" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgBtcTpPoints">TP Points</label>
+                                <input type="number" id="txtPosTrgBtcTpPoints" name="txtPosTrgBtcTpPoints" step="any" inputmode="decimal" value="400" placeholder="e.g. 400" />
+                            </div>
+                            <div class="rolling-demo-field rolling-pos-trg-execute-cell">
+                                <label>Action</label>
+                                <div style="display:flex; gap:8px;">
+                                    <button id="btnPosTrgBtcBuy" class="rolling-demo-btn buy" type="button" style="flex:1; min-height:44px;" title="Place a BUY maker-only limit order at the Strike Price with attached SL/TP points. Places on Delta when maker-valid; otherwise queues locally and auto-places when the mark crosses Strike Price by Tolerance." aria-label="Place a BUY maker-only limit order at the Strike Price">Buy</button>
+                                    <button id="btnPosTrgBtcSell" class="rolling-demo-btn sell" type="button" style="flex:1; min-height:44px;" title="Place a SELL maker-only limit order at the Strike Price with attached SL/TP points. Places on Delta when maker-valid; otherwise queues locally and auto-places when the mark crosses Strike Price by Tolerance." aria-label="Place a SELL maker-only limit order at the Strike Price">Sell</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="rollingPosTrgBtcStatus" class="rolling-pos-trg-status" aria-live="polite"></div>
+                    <div class="rolling-pos-trg-pending-section" id="rollingPosTrgBtcPendingSection">
+                        <div class="rolling-pos-trg-pending-head">
+                            <span>Open &amp; Queued Limit Orders</span>
+                            <span class="rolling-pos-trg-watcher-badge" id="rollingPosTrgWatcherBadge" title="Server-side watcher status">Server: checking...</span>
+                            <span class="rolling-pos-trg-pending-hint">Pending = queued locally (auto-fires when mark crosses strike by Tolerance). Delta = live on the exchange. Click — auto-fires when mark crosses the strike by Tolerance.</span>
+                        </div>
+                        <div class="rolling-pos-trg-pending-empty" id="rollingPosTrgBtcPendingEmpty">No open or queued orders. Use <strong>Buy / Sell</strong> above to place or queue one.</div>
+                        <table class="rolling-pos-trg-pending-table" id="rollingPosTrgBtcPendingTable" hidden>
+                            <thead>
+                                <tr>
+                                    <th>Side</th>
+                                    <th>Qty</th>
+                                    <th>Strike</th>
+                                    <th>SL/TP</th>
+                                    <th>Tol</th>
+                                    <th>Distance</th>
+                                    <th>Source</th>
+                                    <th class="rolling-pos-trg-pending-cancel-col" aria-label="Cancel"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="rollingPosTrgBtcPendingBody"></tbody>
+                        </table>
+                    </div>
+                    </div>
+                    <div class="rolling-pos-trg-panel" id="rollingPosTrgPanelEth" data-pos-trg-tab-panel="eth" role="tabpanel" aria-label="ETHUSD position triggers" hidden>
+                        <div class="rolling-pos-trg-panel-head">ETHUSD</div>
+                        <div class="rolling-pos-trg-panel-body">Position triggers for ETHUSD will appear here.</div>
+                    </div>
+                    <div class="rolling-pos-trg-panel" id="rollingPosTrgPanelXaut" data-pos-trg-tab-panel="xaut" role="tabpanel" aria-label="XAUTUSD position triggers" hidden>
+                        <div class="rolling-pos-trg-panel-head">XAUTUSD</div>
+                        <div class="rolling-pos-trg-panel-body">Position triggers for XAUTUSD will appear here.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="rolling-demo-section rolling-futures-card-stack">
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head rolling-live-open-head">
+                    <div class="rolling-live-open-title-group">
+                        <h2>Open Positions</h2>
+                        <% if (bIsPaperDemoPage || bIsCoveredLivePage) { %>
+                            <input type="number" min="1" step="1" value="120" id="txtRollingDualFuturesProfitCloseTimerSecs" class="rolling-live-open-timer-input" title="Close timer in seconds" aria-label="Close timer in seconds" />
+                        <% } %>
+                    </div>
+                    <div class="rolling-covered-hedge-summary" id="rollingDualFuturesHedgeGateSummary" aria-live="polite">
+                        <span class="rolling-covered-hedge-chip off">Gate Off</span>
+                    </div>
+                    <div class="rolling-live-open-signal rolling-live-profit-close-timer" id="rollingDualFuturesProfitCloseTimer" hidden></div>
+                    <div class="rolling-demo-card-tools">
+                        <% if (bIsCoveredLivePage) { %>
+                            <label class="rolling-futures-neutral-mode rolling-live-auto-trader-off" for="chkRollingFuturesAutoTraderOffOnProfitClose" title="Stop Auto Trader when Exit All profit rules close all positions">
+                                <input type="checkbox" id="chkRollingFuturesAutoTraderOffOnProfitClose" />
+                                <span>Auto Trader-Off</span>
+                            </label>
+                        <% } %>
+                        <% if (bShowImportPositionsUi) { %>
+                            <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesImportPositions" title="Import existing live positions" aria-label="Import existing live positions">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M12 3v12" />
+                                    <path d="m7 10 5 5 5-5" />
+                                    <path d="M5 21h14" />
+                                </svg>
+                            </button>
+                        <% } %>
+                        <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClearOpenPositions" title="<%= vClearOpenPositionsTitle %>" aria-label="<%= vClearOpenPositionsTitle %>">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M18 6 6 18" />
+                                <path d="m6 6 12 12" />
+                            </svg>
+                        </button>
+                        <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesRefreshOpenPositions" title="<%= vRefreshOpenPositionsTitle %>" aria-label="<%= vRefreshOpenPositionsTitle %>">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                <path d="M21 3v6h-6" />
+                            </svg>
+                        </button>
+                        <button class="rolling-demo-icon-btn sell" type="button" id="btnRollingDualFuturesKillSwitch" title="<%= vKillSwitchTitle %>" aria-label="<%= vKillSwitchTitle %>">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M12 2v10" />
+                                <path d="M6.2 6.2a8 8 0 1 0 11.3 0" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <% if (bIsStrangleDemoPage) { %>
+                    <div class="rolling-demo-open-source-head">
+                        <h3>CoinSwitch Open Positions</h3>
+                        <span class="rolling-demo-open-source-count" id="rollingDualFuturesOpenCountCoinswitch">0</span>
+                    </div>
+                    <div class="rolling-demo-table-wrap">
+                        <table class="rolling-demo-table rolling-demo-table-open">
+                            <thead>
+                                <tr>
+                                    <th>Delta</th>
+                                    <th>Theta</th>
+                                    <th>Symbol</th>
+                                    <th>Side</th>
+                                    <th>Lot Sz</th>
+                                    <th>Qty</th>
+                                    <th>Buy Price</th>
+                                    <th>Sell Price</th>
+                                    <th>LTP</th>
+                                    <th>Charges</th>
+                                    <th>P &amp; L</th>
+                                    <th>Start DT</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rollingDualFuturesOpenPositionsBodyCoinswitch">
+                                <tr>
+                                    <td colspan="13" class="rolling-demo-empty">No CoinSwitch demo positions are currently shown.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="rolling-demo-open-source-head">
+                        <h3>Delta Exchange Open Positions</h3>
+                        <span class="rolling-demo-open-source-count" id="rollingDualFuturesOpenCountDelta">0</span>
+                    </div>
+                    <div class="rolling-demo-table-wrap">
+                        <table class="rolling-demo-table rolling-demo-table-open">
+                            <thead>
+                                <tr>
+                                    <th>Delta</th>
+                                    <th>Theta</th>
+                                    <th>Symbol</th>
+                                    <th>Side</th>
+                                    <th>Lot Sz</th>
+                                    <th>Qty</th>
+                                    <th>Buy Price</th>
+                                    <th>Sell Price</th>
+                                    <th>LTP</th>
+                                    <th>Charges</th>
+                                    <th>P &amp; L</th>
+                                    <th>Start DT</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rollingDualFuturesOpenPositionsBodyDelta">
+                                <tr>
+                                    <td colspan="13" class="rolling-demo-empty">No Delta Exchange demo positions are currently shown.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                <% } else { %>
+                <div class="rolling-demo-table-wrap">
+                    <table class="rolling-demo-table rolling-demo-table-open">
+                        <thead>
+                            <tr>
+                                <th>Delta</th>
+                                <th>Theta</th>
+                                <th>Symbol</th>
+                                <th>Side</th>
+                                <th>Lot Sz</th>
+                                <th>Qty</th>
+                                <th>Buy Price</th>
+                                <th>Sell Price</th>
+                                <th>LTP</th>
+                                <th>Charges</th>
+                                <th>P &amp; L</th>
+                                <th>Start DT</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rollingDualFuturesOpenPositionsBody">
+                            <tr>
+                                <td colspan="13" class="rolling-demo-empty"><%= vOpenPositionsEmpty %></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="rolling-demo-card-tools rolling-live-pagination">
+                    <div class="rolling-live-open-signal" id="rollingDualFuturesOpenPositionsPageInfo">Page 0 of 0</div>
+                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesOpenPrevPage" title="Previous open-positions page" aria-label="Previous open-positions page">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m15 18-6-6 6-6" />
+                        </svg>
+                    </button>
+                    <div class="rolling-live-page-numbers" id="rollingDualFuturesOpenPageNumbers"></div>
+                    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesOpenNextPage" title="Next open-positions page" aria-label="Next open-positions page">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m9 6 6 6-6 6" />
+                        </svg>
+                    </button>
+                </div>
+                <% } %>
+            </div>
+
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <h2>Closed Positions</h2>
+                    <div class="rolling-demo-card-tools">
+                        <div class="rolling-demo-filters rolling-live-filters rolling-demo-filters-closed">
+                            <div class="rolling-demo-field">
+                                <input type="datetime-local" id="txtRollingDualFuturesClosedAltFromDate" title="Filter closed positions from this date and time" aria-label="Filter closed positions from this date and time" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <input type="datetime-local" id="txtRollingDualFuturesClosedAltToDate" title="Filter closed positions up to this date and time" aria-label="Filter closed positions up to this date and time" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <div class="rolling-demo-check-wrap">
+                                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClosedAltClearFilters" title="Clear closed-position date filters" aria-label="Clear closed-position date filters">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M18 6 6 18" />
+                                            <path d="m6 6 12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="rolling-demo-field">
+                                <div class="rolling-demo-check-wrap">
+                                    <% if (bIsPaperDemoPage) { %>
+                                        <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClosedAltClear" title="<%= vClearClosedPositionsTitle %>" aria-label="<%= vClearClosedPositionsTitle %>">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                                <path d="M18 6 6 18" />
+                                                <path d="m6 6 12 12" />
+                                            </svg>
+                                        </button>
+                                    <% } %>
+                                    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesClosedAltRefresh" title="<%= vRefreshClosedTitle %>" aria-label="<%= vRefreshClosedTitle %>">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                            <path d="M21 3v6h-6" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="rolling-demo-table-wrap">
+                    <table class="rolling-demo-table rolling-demo-table-closed">
+                        <thead>
+                            <tr>
+                                <th>Executed DT</th>
+                                <th>Symbol</th>
+                                <th>Side</th>
+                                <th>Lot Sz</th>
+                                <th>Qty</th>
+                                <th>Buy Price</th>
+                                <th>Sell Price</th>
+                                <th>Charges</th>
+                                <th>P &amp; L</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rollingDualFuturesClosedAltClosedPositionsBody">
+                            <tr>
+                                <td colspan="10" class="rolling-demo-empty"><%= vClosedPositionsEmpty %></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="rolling-demo-card-tools rolling-live-pagination">
+                    <div class="rolling-live-open-signal" id="rollingDualFuturesClosedAltClosedPositionsPageInfo">Page 0 of 0</div>
+                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClosedAltPrevPage" title="Previous closed-positions page" aria-label="Previous closed-positions page">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m15 18-6-6 6-6" />
+                        </svg>
+                    </button>
+                    <div class="rolling-live-page-numbers" id="rollingDualFuturesClosedAltClosedPageNumbers"></div>
+                    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesClosedAltNextPage" title="Next closed-positions page" aria-label="Next closed-positions page">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m9 6 6 6-6 6" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <% if (!bIsPaperDemoPage && !bIsCoveredLivePage) { %>
+            <div class="app-panel rolling-demo-card rolling-futures-hidden rolling-futures-indicator-card" id="cardRollingFuturesDeltaDirec">
+                <div class="rolling-demo-card-head rolling-futures-indicator-head-row">
+                    <h2>Delta Direction</h2>
+                </div>
+                <div class="rolling-demo-table-wrap">
+                    <table class="rolling-demo-table">
+                        <thead>
+                            <tr>
+                                <th>Dated</th>
+                                <th>Daily Call</th>
+                                <th>Daily Put</th>
+                                <th>Direc</th>
+                                <th>Weekly Call</th>
+                                <th>Weekly Put</th>
+                                <th>Direc</th>
+                                <th>Monthly Call</th>
+                                <th>Monthly Put</th>
+                                <th>Direc</th>
+                                <th>OA Direc</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tBodyRollingFuturesDeltas">
+                            <tr class="rolling-futures-empty-body">
+                                <td colspan="11">No delta direction data yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <% } %>
+
+            <div class="rolling-demo-log-grid">
+                <% if (bShowRenkoSection) { %>
+                    <div class="app-panel rolling-demo-card rolling-renko-feed-card">
+                        <div class="rolling-demo-card-head">
+                            <div class="rolling-futures-indicator-head-row">
+                                <h2><%= (bIsDemoPage || bIsCoveredLivePage) ? "Delta Renko-Style Feed" : "Renko Feed" %></h2>
+                                <div class="rolling-renko-feed-header-badges">
+                                    <span class="rolling-renko-feed-status-badge off" id="rollingRenkoFeedStatus">OFF</span>
+                                    <span class="rolling-renko-feed-color-badge neutral" id="rollingRenkoCurrentBoxColor">-</span>
+                                </div>
+                            </div>
+                            <div class="rolling-demo-card-tools">
+                                <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingRenkoRefresh" title="<%= (bIsDemoPage || bIsCoveredLivePage) ? "Refresh Delta Renko feed" : "Refresh Renko feed" %>" aria-label="<%= (bIsDemoPage || bIsCoveredLivePage) ? "Refresh Delta Renko feed" : "Refresh Renko feed" %>">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                        <path d="M21 3v6h-6" />
+                                    </svg>
+                                </button>
+                                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingRenkoClear" title="<%= (bIsDemoPage || bIsCoveredLivePage) ? "Clear Delta Renko feed" : "Clear Renko feed" %>" aria-label="<%= (bIsDemoPage || bIsCoveredLivePage) ? "Clear Delta Renko feed" : "Clear Renko feed" %>">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M18 6 6 18" />
+                                        <path d="m6 6 12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="rolling-renko-feed-stack">
+                            <% if (bIsDemoPage || bIsCoveredLivePage) { %>
+                            <div class="rolling-renko-feed-grid rolling-renko-feed-grid-demo">
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="chkRollingFuturesRenkoFeedEnabled">Delta Renko Feed</label>
+                                    <div class="rolling-renko-feed-value-row">
+                                        <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoFeedEnabled">
+                                            <input type="checkbox" id="chkRollingFuturesRenkoFeedEnabled" <%= bIsCoveredLivePage ? 'checked' : '' %> />
+                                            <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
+                                            <span class="rolling-renko-feed-switch-text">Feed</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="txtRollingFuturesRenkoFeedPts">Point Size</label>
+                                    <input type="number" id="txtRollingFuturesRenkoFeedPts" min="1" step="1" value="<%= bIsCoveredLivePage ? '50' : '10' %>" />
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>From</label>
+                                    <div class="rolling-renko-feed-value-row">
+                                        <span class="rolling-renko-feed-value-badge" id="rollingRenkoFromPrice">--</span>
+                                    </div>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>Anchor</label>
+                                    <div class="rolling-renko-feed-value-row">
+                                        <span class="rolling-renko-feed-value-badge" id="rollingRenkoAnchorPrice">--</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="rolling-renko-feed-grid rolling-renko-feed-grid-demo-bottom">
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="ddlRollingFuturesRenkoFeedTimeframe">Timeframe</label>
+                                    <select id="ddlRollingFuturesRenkoFeedTimeframe">
+                                        <option value="5s" <%= bIsCoveredLivePage ? 'selected' : '' %>>5s</option>
+                                        <option value="1m">1m</option>
+                                        <option value="3m">3m</option>
+                                        <option value="5m" <%= bIsCoveredLivePage ? '' : 'selected' %>>5m</option>
+                                        <option value="15m">15m</option>
+                                        <option value="30m">30m</option>
+                                        <option value="1h">1h</option>
+                                    </select>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="ddlRollingFuturesRenkoFeedPriceSrc">Price Source</label>
+                                    <select id="ddlRollingFuturesRenkoFeedPriceSrc">
+                                        <option value="spot_price" <%= bIsCoveredLivePage ? '' : 'selected' %>>Spot Price</option>
+                                        <option value="mark_price" <%= bIsCoveredLivePage ? 'selected' : '' %>>Mark Price</option>
+                                        <option value="best_bid">Best Bid</option>
+                                        <option value="best_ask">Best Ask</option>
+                                    </select>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="txtRollingFuturesRenkoFeedManualPrice">Manual Anchor</label>
+                                    <input type="number" id="txtRollingFuturesRenkoFeedManualPrice" min="0" step="0.01" placeholder="Optional" />
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>&nbsp;</label>
+                                    <div class="rolling-renko-feed-action-row">
+                                        <button class="rolling-demo-btn warn" type="button" id="btnRollingRenkoManualRed">R</button>
+                                        <button class="rolling-demo-btn primary" type="button" id="btnRollingRenkoManualGreen">G</button>
+                                    </div>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>&nbsp;</label>
+                                    <button class="rolling-demo-btn success" type="button" id="btnRollingRenkoUpdate">Update</button>
+                                </div>
+                            </div>
+                            <% } else { %>
+                            <div class="rolling-renko-feed-grid">
+                                <div class="rolling-demo-field rolling-renko-feed-field switch-only">
+                                    <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoEnabled">
+                                        <input type="checkbox" id="chkRollingFuturesRenkoEnabled" />
+                                        <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
+                                        <span class="rolling-renko-feed-switch-text">Feed</span>
+                                    </label>
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="txtRollingFuturesRenkoBoxSize">Renko Box Size</label>
+                                    <input type="number" id="txtRollingFuturesRenkoBoxSize" min="1" step="1" value="100" />
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label for="txtRollingFuturesRenkoBaseValue">Base Value</label>
+                                    <input type="number" id="txtRollingFuturesRenkoBaseValue" min="0" step="0.01" placeholder="Enter base value" />
+                                </div>
+                                <div class="rolling-demo-field rolling-renko-feed-field">
+                                    <label>Spot Price</label>
+                                    <div class="rolling-renko-feed-value-row">
+                                        <span class="rolling-renko-feed-value-badge" id="rollingRenkoSpotPrice">--</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <% } %>
+                        </div>
+                        <div class="rolling-renko-feed-meta" id="rollingRenkoFeedMeta"><%= (bIsDemoPage || bIsCoveredLivePage) ? "Delta Renko feed is OFF. Save settings to begin tracking current signal changes." : "Turn the Renko feed ON to begin tracking live box color." %></div>
+                        <div class="rolling-demo-event-log" id="rollingRenkoHistoryLog">
+                            <div class="rolling-demo-event-empty"><%= (bIsDemoPage || bIsCoveredLivePage) ? "No Renko signals yet." : "No Renko color changes yet." %></div>
+                        </div>
+                    </div>
+                <% } %>
+
+                <% if (bShowTelegramAlertsSection) { %>
+                    <div class="app-panel rolling-demo-card">
+                        <div class="rolling-demo-card-head">
+                            <h2>Telegram Alerts</h2>
+                        </div>
+                        <p class="app-copy">Alert preferences can follow the same strategy-level model as the paper page while live execution wiring is added server-side.</p>
+                        <div class="rolling-demo-notice" id="rollingDualFuturesTelegramNotice">
+                            <% if (currentAccount?.telegramChatId) { %>
+                                Telegram Chat ID configured: <strong><%= currentAccount.telegramChatId %></strong>
+                            <% } else { %>
+                                Telegram Chat ID is not set on your profile yet. Add it in <a href="/account/profile">My Profile</a> to receive alerts.
+                            <% } %>
+                        </div>
+                        <div class="rolling-demo-event-prefs">
+                            <% for (const eventType of rollingTelegramEventTypes || []) { %>
+                                <label class="rolling-demo-check rolling-demo-check-wide" for="dual-live-pref-<%= eventType %>">
+                                    <input type="checkbox" class="rolling-demo-telegram-event" id="dual-live-pref-<%= eventType %>" value="<%= eventType %>" />
+                                    <span><%= String(eventType || '').split('_').join(' ') %></span>
+                                </label>
+                            <% } %>
+                        </div>
+                    </div>
+                <% } %>
+
+                <% if (bIsDemoPage || bIsCoveredLivePage) { %>
+                    <div class="app-panel rolling-demo-card rolling-rsi-feed-card">
+                        <div class="rolling-demo-card-head">
+                            <div class="rolling-futures-indicator-head-row">
+                                <h2>EMA Trigger</h2>
+                                <div class="rolling-renko-feed-header-badges">
+                                    <span class="rolling-renko-feed-status-badge off" id="rollingEmaFeedStatus">OFF</span>
+                                    <span class="rolling-renko-feed-color-badge neutral" id="rollingEmaCurrentValue">--</span>
+                                    <span class="rolling-renko-feed-color-badge neutral" id="rollingEmaSignalState">-</span>
+                                </div>
+                            </div>
+                            <div class="rolling-demo-card-tools">
+                                <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingEmaRefresh" title="Refresh EMA data" aria-label="Refresh EMA data">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                        <path d="M21 3v6h-6" />
+                                    </svg>
+                                </button>
+                                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingEmaClear" title="Clear EMA history" aria-label="Clear EMA history">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M18 6 6 18" />
+                                        <path d="m6 6 12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="rolling-renko-feed-grid rolling-renko-feed-grid-ema">
+                            <div class="rolling-demo-field rolling-renko-feed-field switch-only">
+                                <label class="rolling-renko-feed-switch" for="chkRollingFuturesRenkoEmaEnabled">
+                                    <input type="checkbox" id="chkRollingFuturesRenkoEmaEnabled" />
+                                    <span class="rolling-renko-feed-switch-track" aria-hidden="true"></span>
+                                    <span class="rolling-renko-feed-switch-text">EMA</span>
+                                </label>
+                            </div>
+                            <div class="rolling-demo-field rolling-renko-feed-field">
+                                <label for="txtRollingFuturesRenkoEmaLength">EMA Length</label>
+                                <input type="number" id="txtRollingFuturesRenkoEmaLength" min="1" step="1" value="<%= bIsCoveredLivePage ? '5' : '20' %>" />
+                            </div>
+                            <div class="rolling-demo-field rolling-renko-feed-field">
+                                <label>Current EMA</label>
+                                <div class="rolling-renko-feed-value-row">
+                                    <span class="rolling-renko-feed-value-badge" id="rollingRenkoEmaValue">--</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="rolling-renko-feed-meta" id="rollingEmaFeedMeta">EMA companion is linked to the Renko EMA settings above.</div>
+                        <div class="rolling-demo-event-log" id="rollingEmaHistoryLog">
+                            <div class="rolling-demo-event-empty">No EMA crossovers yet.</div>
+                        </div>
+                    </div>
+                <% } %>
+
+                <% if (bShowConfirmationSection) { %>
+                <div class="app-panel rolling-demo-card">
+                    <div class="rolling-demo-card-head">
+                        <h2><%= vConfirmationHeading %></h2>
+                        <label class="rolling-confirmation-beep-toggle" for="chkRollingFuturesConfirmationSound">
+                            <span>Beep</span>
+                            <input type="checkbox" role="switch" id="chkRollingFuturesConfirmationSound" checked />
+                            <span class="rolling-confirmation-beep-track" aria-hidden="true"></span>
+                        </label>
+                    </div>
+                    <label class="rolling-demo-check rolling-demo-check-wide" for="chkRollingFuturesAutoConfirmLiveActions" style="margin-bottom:12px;">
+                        <input type="checkbox" id="chkRollingFuturesAutoConfirmLiveActions" checked />
+                        <span><%= vConfirmationAutoText %></span>
+                    </label>
+                    <div class="rolling-demo-notice" id="rollingDualFuturesConfirmationEmpty">
+                        <%= vConfirmationEmpty %>
+                    </div>
+                    <div id="rollingDualFuturesConfirmationPanel" style="display:none;">
+                        <div class="rolling-demo-event-card">
+                            <div class="rolling-demo-event-header">
+                                <strong id="rollingDualFuturesConfirmationTitle">Pending Confirmation</strong>
+                                <span id="rollingDualFuturesConfirmationTime" class="rolling-demo-event-time"></span>
+                            </div>
+                            <div id="rollingDualFuturesConfirmationMessage" class="rolling-demo-event-message"></div>
+                        </div>
+                        <div class="rolling-live-modal-actions" style="justify-content:flex-start; margin-top:12px;">
+                            <button class="rolling-demo-btn primary" type="button" id="btnRollingDualFuturesConfirmAction">Confirm</button>
+                            <button class="rolling-demo-btn warn" type="button" id="btnRollingDualFuturesRejectAction">Reject</button>
+                        </div>
+                    </div>
+                </div>
+                <% } %>
+
+                <div class="app-panel rolling-demo-card">
+                    <div class="rolling-demo-card-head">
+                        <h2>Activity Log</h2>
+                        <div class="rolling-demo-card-tools">
+                            <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesRefreshEvents" title="Refresh activity log" aria-label="Refresh activity log">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                    <path d="M21 3v6h-6" />
+                                </svg>
+                            </button>
+                            <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClearEvents" title="Clear activity log" aria-label="Clear activity log">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M3 6h18" />
+                                    <path d="M8 6V4h8v2" />
+                                    <path d="M19 6l-1 14H6L5 6" />
+                                    <path d="M10 11v6" />
+                                    <path d="M14 11v6" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="rolling-demo-event-log" id="rollingDualFuturesEventLog">
+                        <div class="rolling-demo-event-empty"><%= vActivityEmpty %></div>
+                    </div>
+                </div>
+        </section>
+
+    </div>
+    <% if (bShowImportPositionsUi) { %>
+        <div class="rolling-live-overlay" id="rollingDualFuturesImportOverlay"></div>
+        <section class="app-panel rolling-live-modal" id="rollingDualFuturesImportModal" aria-hidden="true">
+            <div class="rolling-live-modal-head">
+                <div>
+                    <h2 class="rolling-live-modal-title">Import Existing Positions</h2>
+                    <p class="app-copy">Pick one or more open Delta Exchange option positions to mirror in the live grid.</p>
+                </div>
+                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesCloseImportModal" title="Close import dialog" aria-label="Close import dialog">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="rolling-live-status" id="rollingDualFuturesImportStatus"></div>
+            <div class="rolling-live-import-list" id="rollingDualFuturesImportList">
+                <div class="rolling-demo-event-empty">Select an API profile to load open live option positions.</div>
+            </div>
+            <div class="rolling-live-modal-actions">
+                <button class="rolling-demo-btn primary" type="button" id="btnRollingDualFuturesApplyImportedPositions">Import Selected</button>
+            </div>
+        </section>
+    <% } %>
+    <% if (bIsPaperDemoPage) { %>
+        <div class="rolling-live-overlay" id="rollingDualFuturesClosedEditOverlay"></div>
+        <section class="app-panel rolling-live-modal" id="rollingDualFuturesClosedEditModal" aria-hidden="true">
+            <div class="rolling-live-modal-head">
+                <div>
+                    <h2 class="rolling-live-modal-title">Edit Closed Position Qty</h2>
+                    <p class="app-copy" id="rollingDualFuturesClosedEditSymbol">Update the demo closed-position quantity only.</p>
+                </div>
+                <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesCloseClosedEditModal" title="Close edit dialog" aria-label="Close edit dialog">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="rolling-live-status" id="rollingDualFuturesClosedEditStatus"></div>
+            <div class="rolling-demo-field">
+                <label for="txtRollingDualFuturesClosedEditQty">Qty</label>
+                <input type="number" min="1" step="1" id="txtRollingDualFuturesClosedEditQty" />
+            </div>
+            <div class="rolling-live-modal-actions">
+                <button class="rolling-demo-btn primary" type="button" id="btnRollingDualFuturesSaveClosedEdit">Save Qty</button>
+            </div>
+        </section>
+    <% } %>
+    <script>
+        // Position Triggers tab switcher. Pure UI scaffolding — no inputs, no API calls.
+        (function () {
+            const triggers = Array.from(document.querySelectorAll("[data-pos-trg-tab-trigger]"));
+            const panels = Array.from(document.querySelectorAll("[data-pos-trg-tab-panel]"));
+            if (!triggers.length || !panels.length) {
+                return;
+            }
+
+            function activate(pKey) {
+                const vKey = String(pKey || "").trim().toLowerCase();
+                triggers.forEach((objBtn) => {
+                    const objIsActive = String(objBtn.dataset.posTrgTabTrigger || "").trim().toLowerCase() === vKey;
+                    objBtn.classList.toggle("is-active", objIsActive);
+                    objBtn.setAttribute("aria-selected", objIsActive ? "true" : "false");
+                    objBtn.setAttribute("tabindex", objIsActive ? "0" : "-1");
+                });
+                panels.forEach((objPanel) => {
+                    const objIsActive = String(objPanel.dataset.posTrgTabPanel || "").trim().toLowerCase() === vKey;
+                    objPanel.classList.toggle("is-active", objIsActive);
+                    if (objIsActive) {
+                        objPanel.removeAttribute("hidden");
+                    }
+                    else {
+                        objPanel.setAttribute("hidden", "");
+                    }
+                });
+            }
+
+            triggers.forEach((objBtn) => {
+                objBtn.addEventListener("click", () => activate(objBtn.dataset.posTrgTabTrigger));
+            });
+        })();
+﻿﻿// Position Triggers: live BTCUSD ticker + Save + combined Open/Queued list with auto-fire.
+// Polls BTCUSD mark + Pending list + Delta open orders every 3s while the BTC tab is active.
+// "Buy/Sell" -> /save: places on Delta when maker-valid; otherwise queues locally.
+// On each ticker tick, auto-fires any queued pending entry that became maker-valid.
+// The list shows both queued (Pending source) and open-on-Delta (Delta source) orders;
+// the X button cancels: DELETE /pending/:id for Pending, POST /open-orders/cancel for Delta.
+// The ticker only runs while the Auto Trader is ON; it stops as soon as Auto Trader is OFF.
+(function () {
+    var isPageAdmin = String((document.body && document.body.dataset && document.body.dataset.currentAccountAdmin) || "").trim().toLowerCase() === "true";
+    var buyBtn = document.getElementById("btnPosTrgBtcBuy");
+    var sellBtn = document.getElementById("btnPosTrgBtcSell");
+    var statusEl = document.getElementById("rollingPosTrgBtcStatus");
+    var qtyEl = document.getElementById("txtRollingBtcUsdQty");
+    var multiplierEl = document.getElementById("txtRollingFuturesStartQty");
+    var strikeEl = document.getElementById("txtPosTrgBtcBuyStrike");
+    var slEl = document.getElementById("txtPosTrgBtcSlPoints");
+    var tpEl = document.getElementById("txtPosTrgBtcTpPoints");
+    var tolEl = document.getElementById("txtPosTrgBtcTolerance");
+    var calcBtn = document.getElementById("btnRollingFuturesCalcStartQty");
+    var tickerBox = document.getElementById("rollingPosTrgBtcTicker");
+    var tickerPriceEl = tickerBox ? tickerBox.querySelector("[data-pos-trg-ticker-price]") : null;
+    var tickerVsEl = tickerBox ? tickerBox.querySelector("[data-pos-trg-ticker-vs]") : null;
+    var pendingSectionEl = document.getElementById("rollingPosTrgBtcPendingSection");
+    var pendingEmptyEl = document.getElementById("rollingPosTrgBtcPendingEmpty");
+    var pendingTableEl = document.getElementById("rollingPosTrgBtcPendingTable");
+    var pendingBodyEl = document.getElementById("rollingPosTrgBtcPendingBody");
+    var watcherBadgeEl = document.getElementById("rollingPosTrgWatcherBadge");
+    if (!buyBtn || !sellBtn || !statusEl || !qtyEl || !multiplierEl || !strikeEl || !slEl || !tpEl || !tolEl || !pendingSectionEl || !pendingEmptyEl || !pendingTableEl || !pendingBodyEl) {
+        return;
+    }
+
+    // ---- Admin-owned Position Trigger defaults (Multiplier / Tolerance / SL / TP) ----
+    // Everyone loads the shared global defaults; only admins may edit + save them
+    // via POST /api/crypto-scalper/position-triggers/defaults. Normal users get
+    // read-only inputs, and these values are never written into user profiles.
+    var posTrgSaving = false;
+    function applyPosTrgDefaults(d) {
+        if (!d) { return; }
+        if (d.posTrgMultiplier != null && multiplierEl) { multiplierEl.value = String(d.posTrgMultiplier); }
+        if (d.posTrgTolerance != null && tolEl) { tolEl.value = String(d.posTrgTolerance); }
+        if (d.posTrgSlPoints != null && slEl) { slEl.value = String(d.posTrgSlPoints); }
+        if (d.posTrgTpPoints != null && tpEl) { tpEl.value = String(d.posTrgTpPoints); }
+    }
+    function setPosTrgAdminMode() {
+        var governed = [multiplierEl, tolEl, slEl, tpEl];
+        governed.forEach(function (el) {
+            if (!el) { return; }
+            el.readOnly = !isPageAdmin;
+            el.disabled = !isPageAdmin;
+            el.title = isPageAdmin
+                ? "Admin default for all users. Changing it saves globally."
+                : "Set by admin. Only an admin can change this.";
+        });
+        if (calcBtn) {
+            calcBtn.style.display = isPageAdmin ? "" : "none";
+            calcBtn.disabled = !isPageAdmin;
+        }
+    }
+    async function loadPosTrgDefaults() {
+        setPosTrgAdminMode();
+        try {
+            var response = await fetch("/api/crypto-scalper/position-triggers/defaults", { credentials: "same-origin" });
+            var json = await response.json().catch(function () { return {}; });
+            if (!response.ok || !json || json.status !== "success" || !json.data) { return; }
+            if (typeof json.data.isAdmin !== "undefined") {
+                isPageAdmin = Boolean(json.data.isAdmin);
+                setPosTrgAdminMode();
+            }
+            applyPosTrgDefaults(json.data);
+        }
+        catch (e) { /* keep EJS fallback values */ }
+    }
+    var posTrgSaveTimer = null;
+    function queuePosTrgDefaultsSave() {
+        if (!isPageAdmin || posTrgSaving) { return; }
+        if (posTrgSaveTimer) { clearTimeout(posTrgSaveTimer); }
+        posTrgSaveTimer = setTimeout(savePosTrgDefaults, 800);
+    }
+    async function savePosTrgDefaults() {
+        if (!isPageAdmin || posTrgSaving) { return; }
+        posTrgSaving = true;
+        try {
+            var response = await fetch("/api/crypto-scalper/position-triggers/defaults", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    posTrgMultiplier: multiplierEl ? multiplierEl.value : "",
+                    posTrgTolerance: tolEl ? tolEl.value : "",
+                    posTrgSlPoints: slEl ? slEl.value : "",
+                    posTrgTpPoints: tpEl ? tpEl.value : ""
+                })
+            });
+            var result = await response.json().catch(function () { return {}; });
+            if (response.ok && result && result.status === "success" && result.data) {
+                applyPosTrgDefaults(result.data);
+            }
+        }
+        catch (e) { /* non-fatal; values still apply locally for this session */ }
+        finally { posTrgSaving = false; }
+    }
+    [multiplierEl, tolEl, slEl, tpEl].forEach(function (el) {
+        if (!el) { return; }
+        el.addEventListener("change", queuePosTrgDefaultsSave);
+        el.addEventListener("input", queuePosTrgDefaultsSave);
+    });
+    loadPosTrgDefaults();
+
+    var pollInterval = null;
+    var lastMarkPrice = null;
+    var currentSymbol = "BTC";
+    var autoTraderOn = false;
+    var btcTabActive = false;
+
+    function setStatus(message, tone) {
+        statusEl.textContent = String(message || "");
+        statusEl.className = "rolling-pos-trg-status show " + (tone || "");
+    }
+
+    function readNumber(el) {
+        var v = Number(el && el.value);
+        return Number.isFinite(v) ? v : null;
+    }
+
+    function readFormInputs() {
+        var vBaseQty = Math.max(1, Math.floor(readNumber(qtyEl) || 1));
+        var vMultiplier = Math.max(1, Math.floor(readNumber(multiplierEl) || 1));
+        return {
+            qty: vBaseQty * vMultiplier,
+            strike: readNumber(strikeEl),
+            slPoints: readNumber(slEl),
+            tpPoints: readNumber(tpEl),
+            tolerance: Math.max(1, Math.floor(readNumber(tolEl) || 20))
+        };
+    }
+
+    function validate(inp) {
+        if (!(inp.qty > 0)) { return "Enter a valid Qty (at least 1 contract)."; }
+        if (!(inp.strike > 0)) { return "Enter a valid Strike Price."; }
+        if (!(inp.slPoints > 0)) { return "Enter a valid SL Points value."; }
+        if (!(inp.tpPoints > 0)) { return "Enter a valid TP Points value."; }
+        if (!((inp.strike - inp.slPoints) > 0 && (inp.strike + inp.tpPoints) > 0)) {
+            return "Computed SL/TP prices would be non-positive. Reduce SL / TP Points or increase Strike Price.";
+        }
+        return null;
+    }
+
+    
+
+    function isValidMaker(side, strike, markPrice) {
+        var vMark = Number(markPrice);
+        if (!Number.isFinite(vMark)) { return false; }
+        if (side === "BUY") { return vMark > Number(strike); }
+        return vMark < Number(strike);
+    }
+
+    function statusToTone(s) {
+        if (s === "success") { return "success"; }
+        if (s === "warning") { return "warning"; }
+        return "danger";
+    }
+
+    function escapeHtml(s) {
+        return String(s == null ? "" : s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    async function fetchTicker(symbol) {
+        var response = await fetch("/api/crypto-scalper/position-triggers/ticker?symbol=" + encodeURIComponent(symbol), { credentials: "same-origin" });
+        var json = await response.json().catch(function () { return {}; });
+        if (!response.ok || !json || json.status !== "success" || !json.data) {
+            throw new Error((json && json.message) ? json.message : ("Ticker fetch failed (HTTP " + response.status + ")."));
+        }
+        return json.data;
+    }
+
+    function renderTicker(markPrice, strike) {
+        if (!tickerBox || !tickerPriceEl) { return; }
+        tickerPriceEl.textContent = Number.isFinite(markPrice) ? markPrice.toFixed(2) : "--";
+        tickerBox.classList.remove("above-strike", "below-strike");
+        if (tickerVsEl) { tickerVsEl.textContent = ""; }
+        if (!Number.isFinite(markPrice)) { return; }
+        if (Number.isFinite(strike) && strike > 0) {
+            var diff = markPrice - strike;
+            var sign = diff > 0 ? "above" : (diff < 0 ? "below" : "at");
+            tickerBox.classList.add(diff > 0 ? "above-strike" : (diff < 0 ? "below-strike" : ""));
+            tickerVsEl.textContent = sign + " strike by " + Math.abs(diff).toFixed(2);
+        }
+    }
+
+    function setTickerIdle(message) {
+        lastMarkPrice = null;
+        if (!tickerBox || !tickerPriceEl) { return; }
+        tickerPriceEl.textContent = "--";
+        tickerBox.classList.remove("above-strike", "below-strike");
+        if (tickerVsEl) { tickerVsEl.textContent = message || ""; }
+    }
+
+    async function saveOrder(inp) {
+        var response = await fetch("/api/crypto-scalper/position-triggers/save", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                symbol: "BTC",
+                side: inp.side,
+                qty: inp.qty,
+                limitPrice: inp.strike,
+                slPoints: inp.slPoints,
+                tpPoints: inp.tpPoints,
+                tolerance: inp.tolerance
+            })
+        });
+        var result = await response.json().catch(function () { return {}; });
+        return {
+            status: response.status,
+            body: result,
+            tone: statusToTone(result && result.status),
+            httpOk: response.ok
+        };
+    }
+
+    async function fetchPending() {
+        var response = await fetch("/api/crypto-scalper/position-triggers/pending", { credentials: "same-origin" });
+        var json = await response.json().catch(function () { return {}; });
+        if (!response.ok || !json || json.status !== "success" || !Array.isArray(json.data)) {
+            throw new Error((json && json.message) ? json.message : ("Pending list fetch failed (HTTP " + response.status + ")."));
+        }
+        return json.data;
+    }
+
+    async function fetchDeltaOpenOrders(symbol) {
+        var response = await fetch("/api/crypto-scalper/position-triggers/open-orders?symbol=" + encodeURIComponent(symbol), { credentials: "same-origin" });
+        var json = await response.json().catch(function () { return {}; });
+        if (!response.ok || !json || json.status !== "success" || !json.data) {
+            return { buy: [], sell: [] };
+        }
+        return json.data;
+    }
+
+    async function deletePending(id) {
+        var response = await fetch("/api/crypto-scalper/position-triggers/pending/" + encodeURIComponent(id), {
+            method: "DELETE",
+            credentials: "same-origin"
+        });
+        var json = await response.json().catch(function () { return {}; });
+        if (!response.ok) {
+            throw new Error((json && json.message) ? json.message : ("Delete pending failed (HTTP " + response.status + ")."));
+        }
+        return json;
+    }
+
+    async function cancelDeltaOrder(orderId, symbol) {
+        var response = await fetch("/api/crypto-scalper/position-triggers/open-orders/cancel", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ orderId: orderId, symbol: symbol || "BTC" })
+        });
+        var json = await response.json().catch(function () { return {}; });
+        if (!response.ok) {
+            throw new Error((json && json.message) ? json.message : ("Delta cancel failed (HTTP " + response.status + ")."));
+        }
+        return json;
+    }
+
+
+    function distanceForPending(pRecord, markPrice) {
+        var strike = Number(pRecord.strike || 0);
+        var tol = Math.max(1, Number(pRecord.tolerance || 1));
+        if (!Number.isFinite(markPrice) || !Number.isFinite(strike)) { return null; }
+        var absDist = Math.abs(markPrice - strike);
+        var direction = markPrice > strike ? "above" : (markPrice < strike ? "below" : "at");
+        var side = String(pRecord.side || "").toUpperCase();
+        var validMaker = isValidMaker(side, strike, markPrice);
+        return { absDist: absDist, direction: direction, ready: validMaker && absDist <= tol, withinTolerance: absDist <= tol };
+    }
+
+    function renderOrders(pPending, pDeltaBuy, pDeltaSell, markPrice) {
+        var arrRows = [];
+        var arrPending = Array.isArray(pPending) ? pPending : [];
+        for (var i = 0; i < arrPending.length; i++) {
+            var p = arrPending[i];
+            var side = String(p.side || "").toUpperCase();
+            var dist = distanceForPending(p, markPrice);
+            arrRows.push({
+                kind: "pending",
+                id: String(p.id || ""),
+                side: side,
+                strike: Number(p.strike || 0),
+                sizeLabel: String(p.qty || 1),
+                sltpLabel: ((Number(p.slPoints) || 0).toFixed(0) + " / " + (Number(p.tpPoints) || 0).toFixed(0)),
+                tolLabel: ((Number(p.tolerance) || 0).toFixed(0)),
+                source: "Pending",
+                distanceClass: dist && dist.ready ? "ready" : (dist && dist.direction === "above" ? "above-strike" : (dist && dist.direction === "below" ? "below-strike" : "")),
+                distanceText: dist ? (dist.direction === "at" ? "at strike" : (dist.absDist.toFixed(2) + " " + dist.direction)) : "--",
+                cancelTitle: "Cancel this pending trigger"
+            });
+        }
+        var arrBuy = Array.isArray(pDeltaBuy) ? pDeltaBuy : [];
+        for (var j = 0; j < arrBuy.length; j++) {
+            var o = arrBuy[j];
+            arrRows.push({
+                kind: "delta",
+                id: String(o.orderId || ""),
+                side: "BUY",
+                strike: Number(o.limitPrice || 0),
+                sizeLabel: ((Number(o.filledSize) || 0) + " / " + (Number(o.size) || 0)),
+                sltpLabel: "--",
+                tolLabel: "--",
+                source: "Delta",
+                distanceClass: "",
+                distanceText: "id " + String(o.orderId || "?").slice(0, 14),
+                cancelTitle: "Cancel this order on Delta Exchange"
+            });
+        }
+        var arrSell = Array.isArray(pDeltaSell) ? pDeltaSell : [];
+        for (var k = 0; k < arrSell.length; k++) {
+            var oo = arrSell[k];
+            arrRows.push({
+                kind: "delta",
+                id: String(oo.orderId || ""),
+                side: "SELL",
+                strike: Number(oo.limitPrice || 0),
+                sizeLabel: ((Number(oo.filledSize) || 0) + " / " + (Number(oo.size) || 0)),
+                sltpLabel: "--",
+                tolLabel: "--",
+                source: "Delta",
+                distanceClass: "",
+                distanceText: "id " + String(oo.orderId || "?").slice(0, 14),
+                cancelTitle: "Cancel this order on Delta Exchange"
+            });
+        }
+
+        if (arrRows.length === 0) {
+            pendingEmptyEl.hidden = false;
+            pendingTableEl.hidden = true;
+            return;
+        }
+        pendingEmptyEl.hidden = true;
+        pendingTableEl.hidden = false;
+        var html = arrRows.map(function (r) {
+            var sideCls = r.side === "SELL" ? "sell" : "buy";
+            var sourceCls = r.kind === "delta" ? "on-delta" : "pending-local";
+            var safeId = escapeHtml(r.id);
+            var cancelBtnHtml = '<button type="button" class="rolling-pos-trg-pending-cancel-btn" data-pos-trg-cancel-kind="' + escapeHtml(r.kind) + '" data-pos-trg-cancel-id="' + safeId + '" title="' + escapeHtml(r.cancelTitle) + '" aria-label="Cancel order">\u00d7</button>';
+            return ""
+                + "<tr data-pos-trg-row-kind=\"" + escapeHtml(r.kind) + "\" data-pos-trg-row-id=\"" + safeId + "\">"
+                + "<td class=\"rolling-pos-trg-pending-side " + sideCls + "\">" + escapeHtml(r.side) + "</td>"
+                + "<td>" + escapeHtml(r.sizeLabel) + "</td>"
+                + "<td>" + escapeHtml(r.strike.toFixed(2)) + "</td>"
+                + "<td>" + escapeHtml(r.sltpLabel) + "</td>"
+                + "<td>" + escapeHtml(r.tolLabel) + "</td>"
+                + "<td class=\"rolling-pos-trg-pending-distance " + (r.distanceClass || "") + "\">" + escapeHtml(r.distanceText) + "</td>"
+                + "<td class=\"rolling-pos-trg-pending-source " + sourceCls + "\">" + escapeHtml(r.source) + "</td>"
+                + "<td class=\"rolling-pos-trg-pending-cancel-col\">" + cancelBtnHtml + "</td>"
+                + "</tr>";
+        }).join("");
+        pendingBodyEl.innerHTML = html;
+    }
+
+    async function fetchWatcherStatus() {
+        var response = await fetch("/api/crypto-scalper/position-triggers/watcher-status", { credentials: "same-origin" });
+        var json = await response.json().catch(function () { return {}; });
+        if (!response.ok || !json || json.status !== "success" || !json.data) {
+            throw new Error((json && json.message) ? json.message : "Watcher status fetch failed.");
+        }
+        return json.data;
+    }
+
+    function renderWatcherBadge(status) {
+        if (!watcherBadgeEl) { return; }
+        var vRunning = Boolean(status && status.watcherRunning);
+        var vPending = Number((status && status.pendingCount) || 0);
+        watcherBadgeEl.className = "rolling-pos-trg-watcher-badge" + (vRunning ? " is-running" : " is-stopped");
+        watcherBadgeEl.textContent = vRunning
+            ? ("Server: watching (" + vPending + " queued)")
+            : "Server: stopped";
+        watcherBadgeEl.title = vRunning
+            ? ("Server-side watcher is running every " + Number(status.intervalMs || 0) + "ms. Queued orders auto-fire even if the browser is closed.")
+            : "Server-side watcher is not running. Turn Auto Trader ON to start it.";
+    }
+
+    async function refreshWatcherStatus() {
+        try {
+            renderWatcherBadge(await fetchWatcherStatus());
+        }
+        catch (e) {
+            if (watcherBadgeEl) {
+                watcherBadgeEl.className = "rolling-pos-trg-watcher-badge is-stopped";
+                watcherBadgeEl.textContent = "Server: unavailable";
+            }
+        }
+    }
+
+    async function refreshLists() {
+        var arrPending = [];
+        var objOpen = { buy: [], sell: [] };
+        try { arrPending = await fetchPending(); } catch (e) { /* ignore */ }
+        try { objOpen = await fetchDeltaOpenOrders(currentSymbol); } catch (e) { objOpen = { buy: [], sell: [] }; }
+        renderOrders(arrPending, objOpen && objOpen.buy, objOpen && objOpen.sell, lastMarkPrice);
+        return { pending: arrPending, open: objOpen };
+    }
+
+    async function tickOnce() {
+        try {
+            var t = await fetchTicker(currentSymbol);
+            var mp = Number(t.markPrice);
+            lastMarkPrice = Number.isFinite(mp) ? mp : null;
+            renderTicker(lastMarkPrice, readNumber(strikeEl));
+        }
+        catch (e) {
+            lastMarkPrice = null;
+        }
+
+        // NOTE: the auto-fire decision now lives on the server (Position Trigger
+        // watcher) so queued orders keep firing even when the browser is closed.
+        // The browser only refreshes and displays the list.
+        await refreshWatcherStatus();
+        await refreshLists();
+    }
+
+    function stopPolling() {
+        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+    }
+
+    function startPolling() {
+        stopPolling();
+        pollInterval = setInterval(tickOnce, 3000);
+    }
+
+    // The ticker (and the auto-fire loop that rides on it) only runs while the
+    // Auto Trader is ON and the BTC tab is the active tab.
+    function syncPollingState() {
+        if (autoTraderOn && btcTabActive) {
+            if (!pollInterval) {
+                setTickerIdle("");
+                tickOnce();
+                startPolling();
+            }
+        }
+        else {
+            stopPolling();
+            if (!autoTraderOn) {
+                setTickerIdle("Auto Trader OFF");
+                // Clear the distance hints since no live price is available.
+                if (tickerVsEl) { tickerVsEl.textContent = "Auto Trader OFF"; }
+            }
+        }
+    }
+
+    function applyAutoTraderState(enabled) {
+        var vNext = Boolean(enabled);
+        if (vNext === autoTraderOn) {
+            syncPollingState();
+            return;
+        }
+        autoTraderOn = vNext;
+        if (!autoTraderOn) {
+            setTickerIdle("Auto Trader OFF");
+            setStatus("Auto Trader is OFF. Ticker and auto-fire are paused.", "warning");
+        }
+        else {
+            setTickerIdle("");
+        }
+        syncPollingState();
+    }
+
+    // Listen for Auto Trader state broadcasts from the main page script.
+    window.addEventListener("optionyze:autotrader", function (ev) {
+        var d = ev && ev.detail ? ev.detail : {};
+        applyAutoTraderState(d.enabled);
+    });
+
+    async function executeSave(side, buttonEl) {
+        buttonEl.disabled = true;
+        setStatus("Saving " + (side === "BUY" ? "Buy" : "Sell") + " position trigger...", "info");
+        try {
+            var inp = readFormInputs();
+            inp.side = side;
+            var err = validate(inp);
+            if (err) {
+                setStatus(err, "warning");
+                return;
+            }
+            var resSave = await saveOrder(inp);
+            var msg = (resSave.body && resSave.body.message) ? resSave.body.message
+                : ("Save failed (HTTP " + resSave.status + ").");
+            setStatus(msg, resSave.tone);
+            if (resSave.httpOk) {
+                await refreshLists();
+            }
+        }
+        catch (objErr) {
+            setStatus(objErr && objErr.message ? objErr.message : String(objErr), "danger");
+        }
+        finally {
+            buttonEl.disabled = false;
+        }
+    }
+
+    buyBtn.addEventListener("click", function () { void executeSave("BUY", buyBtn); });
+    sellBtn.addEventListener("click", function () { void executeSave("SELL", sellBtn); });
+
+    pendingBodyEl.addEventListener("click", async function (ev) {
+        var t = ev.target;
+        if (!(t instanceof HTMLElement)) { return; }
+        if (!t.classList.contains("rolling-pos-trg-pending-cancel-btn")) { return; }
+        var vKind = t.getAttribute("data-pos-trg-cancel-kind") || "";
+        var vId = t.getAttribute("data-pos-trg-cancel-id") || "";
+        if (!vId) { return; }
+        t.disabled = true;
+        try {
+            if (vKind === "delta") {
+                await cancelDeltaOrder(vId, currentSymbol);
+                setStatus("Delta order " + vId + " cancelled.", "info");
+            }
+            else {
+                await deletePending(vId);
+                setStatus("Pending trigger removed: " + currentSymbol, "info");
+            }
+        }
+        catch (objErr) {
+            setStatus(objErr && objErr.message ? objErr.message : String(objErr), "warning");
+            t.disabled = false;
+            return;
+        }
+        await refreshLists();
+    });
+
+    var btcTabBtn = document.querySelector("[data-pos-trg-tab-trigger=btc]");
+    var otherTabBtns = Array.from(document.querySelectorAll("[data-pos-trg-tab-trigger]")).filter(function (b) { return b !== btcTabBtn; });
+    if (btcTabBtn) {
+        btcTabBtn.addEventListener("click", function () {
+            btcTabActive = true;
+            syncPollingState();
+        });
+    }
+    otherTabBtns.forEach(function (b) {
+        b.addEventListener("click", function () {
+            btcTabActive = false;
+            syncPollingState();
+        });
+    });
+    if (btcTabBtn && btcTabBtn.classList.contains("is-active")) {
+        btcTabActive = true;
+    }
+
+    // Initial Auto Trader state comes from the server runtime endpoint.
+    (async function initAutoTraderState() {
+        try {
+            var response = await fetch("/api/crypto-scalper/runtime", { credentials: "same-origin" });
+            var json = await response.json().catch(function () { return {}; });
+            if (response.ok && json && json.status === "success" && json.data) {
+                applyAutoTraderState(Boolean(json.data.autoTraderEnabled));
+            }
+        }
+        catch (e) {
+            // Runtime unavailable; leave the ticker stopped.
+        }
+    })();
+// Manual Settings collapse toggle
+    (function() {
+        var btn = document.getElementById('btnManualSettingsCollapse');
+        var body = document.getElementById('rollingManualSettingsBody');
+        if (!btn || !body) return;
+        btn.addEventListener('click', function() {
+            var collapsed = body.classList.toggle('is-collapsed');
+            btn.classList.toggle('is-collapsed', collapsed);
+            btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            btn.setAttribute('title', collapsed ? 'Expand Manual Settings' : 'Collapse Manual Settings');
+            btn.setAttribute('aria-label', collapsed ? 'Expand Manual Settings' : 'Collapse Manual Settings');
+        });
+    })();
+})();
+</script>
+    <script src="/js/crypto-scalper.js"></script>
+    <script src="/js/websocket-status.js"></script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
