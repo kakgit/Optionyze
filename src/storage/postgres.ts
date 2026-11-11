@@ -379,6 +379,11 @@ export async function ensurePostgresSchema(): Promise<void> {
     `);
 
     await objPool.query(`
+        ALTER TABLE optionyze_delta_api_profiles
+        ADD COLUMN IF NOT EXISTS exchange TEXT NOT NULL DEFAULT 'delta-exchange';
+    `);
+
+    await objPool.query(`
         CREATE INDEX IF NOT EXISTS idx_optionyze_delta_api_profiles_account_id
         ON optionyze_delta_api_profiles(account_id);
     `);
