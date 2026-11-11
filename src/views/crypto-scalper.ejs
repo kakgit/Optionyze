@@ -166,7 +166,7 @@
                             <span>BTCUSD</span>
                             <span class="rolling-pos-trg-ticker" id="rollingPosTrgBtcTicker">
                                 <span class="rolling-pos-trg-ticker-label">Mark</span>
-                                <strong data-pos-trg-ticker-price>ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â</strong>
+                                <strong data-pos-trg-ticker-price>ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â</strong>
                                 <span class="rolling-pos-trg-ticker-vs" data-pos-trg-ticker-vs></span>
                             </span>
                         </div>
@@ -217,7 +217,7 @@
                         <div class="rolling-pos-trg-pending-head">
                             <span>Open &amp; Queued Limit Orders</span>
                             <span class="rolling-pos-trg-watcher-badge" id="rollingPosTrgWatcherBadge" title="Server-side watcher status">Server: checking...</span>
-                            <span class="rolling-pos-trg-pending-hint">Pending = queued locally (auto-fires when mark crosses strike by Tolerance). Delta = live on the exchange. Click ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â auto-fires when mark crosses the strike by Tolerance.</span>
+                            <span class="rolling-pos-trg-pending-hint">Pending = queued locally (auto-fires when mark crosses strike by Tolerance). Delta = live on the exchange. Click ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â auto-fires when mark crosses the strike by Tolerance.</span>
                         </div>
                         <div class="rolling-pos-trg-pending-empty" id="rollingPosTrgBtcPendingEmpty">No open or queued orders. Use <strong>Buy / Sell</strong> above to place or queue one.</div>
                         <table class="rolling-pos-trg-pending-table" id="rollingPosTrgBtcPendingTable" hidden>
@@ -830,7 +830,7 @@
         </section>
     <% } %>
     <script>
-        // Position Triggers tab switcher. Pure UI scaffolding ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no inputs, no API calls.
+        // Position Triggers tab switcher. Pure UI scaffolding ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â no inputs, no API calls.
         (function () {
             const triggers = Array.from(document.querySelectorAll("[data-pos-trg-tab-trigger]"));
             const panels = Array.from(document.querySelectorAll("[data-pos-trg-tab-panel]"));
@@ -862,7 +862,7 @@
                 objBtn.addEventListener("click", () => activate(objBtn.dataset.posTrgTabTrigger));
             });
         })();
-ÃƒÂ¯Ã‚Â»Ã‚Â¿ÃƒÂ¯Ã‚Â»Ã‚Â¿// Position Triggers: live BTCUSD ticker + Save + combined Open/Queued list with auto-fire.
+// Position Triggers: live BTCUSD ticker + Save + combined Open/Queued list with auto-fire.
 // Polls BTCUSD mark + Pending list + Delta open orders every 3s while the BTC tab is active.
 // "Buy/Sell" -> /save: places on Delta when maker-valid; otherwise queues locally.
 // On each ticker tick, auto-fires any queued pending entry that became maker-valid.
