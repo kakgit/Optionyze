@@ -17,6 +17,7 @@ import { getAccountById } from "../storage/accounts-store";
 import { getSessionById, getSessionCookieName } from "../storage/sessions-store";
 import {
     renderCoveredOptionsPage,
+    renderCryptoScalperPage,
     renderRenkoOptionsPage,
     renderStrangleOptionsPage,
     renderOptionsDemoPage,
@@ -152,6 +153,7 @@ async function bootstrap(): Promise<void> {
     app.get("/arbitrage/bybit-delta", requireAuthPage, requireFreshPasswordPage, renderBybitDeltaPage);
     app.get("/arbitrage/coinswitch-delta", requireAuthPage, requireFreshPasswordPage, renderCoinSwitchDeltaPage);
     app.get("/covered-options", requireAuthPage, requireFreshPasswordPage, renderCoveredOptionsPage);
+    app.get("/crypto-scalper", requireAuthPage, requireFreshPasswordPage, renderCryptoScalperPage);
     app.get("/strangle-options", requireAuthPage, requireFreshPasswordPage, renderStrangleOptionsPage);
     app.get("/renko-options", requireAuthPage, requireFreshPasswordPage, renderRenkoOptionsPage);
     app.get("/options-demo", requireAuthPage, requireFreshPasswordPage, renderOptionsDemoPage);

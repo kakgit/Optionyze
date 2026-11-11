@@ -1,4 +1,4 @@
-import type { Request, Response } from "express";
+﻿import type { Request, Response } from "express";
 const DeltaRestClient = require("delta-rest-client");
 import {
     createDeltaApiProfile,
@@ -149,6 +149,7 @@ function getAccountId(req: Request): string {
 function readCreateInput(req: Request, pAccountId: string) {
     return {
         accountId: pAccountId,
+        exchange: String(req.body?.exchange || "delta-exchange").trim(),
         referenceName: String(req.body?.referenceName || "").trim(),
         apiKey: String(req.body?.apiKey || "").trim(),
         apiSecret: String(req.body?.apiSecret || "").trim()
@@ -158,19 +159,20 @@ function readCreateInput(req: Request, pAccountId: string) {
 function readUpdateInput(req: Request, pAccountId: string) {
     return {
         accountId: pAccountId,
+        exchange: String(req.body?.exchange || "delta-exchange").trim(),
         referenceName: String(req.body?.referenceName || "").trim(),
         apiKey: String(req.body?.apiKey || "").trim(),
         apiSecret: String(req.body?.apiSecret || "").trim()
     };
 }
 
-function validateCreateInput(pInput: { referenceName: string; apiKey: string; apiSecret: string }): void {
-    if (!pInput.referenceName || !pInput.apiKey || !pInput.apiSecret) {
-        throw new Error("Reference Name, API Key, and API Secret are required.");
+function validateCreateInput(pInput: { exchange: string; referenceName: string; apiKey: string; apiSecret: string }): void {
+    if (!pInput.exchange || !pInput.referenceName || !pInput.apiKey || !pInput.apiSecret) {
+        throw new Error("Exchange, Reference Name, API Key, and API Secret are required.");
     }
 }
 
-function validateUpdateInput(pInput: { referenceName: string; apiKey: string }): void {
+function validateUpdateInput(pInput: { exchange?: string; referenceName: string; apiKey: string; apiSecret?: string }): void {
     if (!pInput.referenceName || !pInput.apiKey) {
         throw new Error("Reference Name and API Key are required.");
     }
@@ -287,5 +289,12 @@ function getErrorMessage(pError: unknown, pFallback: string): string {
 
     return pFallback;
 }
+
+
+
+
+
+
+
 
 

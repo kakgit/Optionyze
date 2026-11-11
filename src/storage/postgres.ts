@@ -444,6 +444,31 @@ export async function ensurePostgresSchema(): Promise<void> {
         ON optionyze_cs_delta_open_positions(account_id);
     `);
 
+
+
+    await objPool.query(`
+        CREATE TABLE IF NOT EXISTS optionyze_position_trigger_pending (
+            id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL REFERENCES optionyze_accounts(account_id) ON DELETE CASCADE,
+            strategy_code TEXT NOT NULL,
+            exchange TEXT NOT NULL DEFAULT 'delta-exchange',
+            symbol TEXT NOT NULL,
+            contract_symbol TEXT NOT NULL,
+            side TEXT NOT NULL,
+            qty INTEGER NOT NULL,
+            strike NUMERIC NOT NULL,
+            sl_points NUMERIC NOT NULL,
+            tp_points NUMERIC NOT NULL,
+            tolerance NUMERIC NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    `);
+
+    await objPool.query(`
+        CREATE INDEX IF NOT EXISTS idx_optionyze_position_trigger_pending_account_strategy
+        ON optionyze_position_trigger_pending(account_id, strategy_code);
+    `);
     await objPool.query(`
         CREATE TABLE IF NOT EXISTS optionyze_cs_delta_imported_positions (
             import_id TEXT PRIMARY KEY,

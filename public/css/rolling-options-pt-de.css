@@ -149,7 +149,7 @@
     display:flex;
     align-items:center;
     gap:10px;
-    flex-wrap:wrap;
+    flex-wrap:nowrap;
 }
 
 .rolling-demo-manual-title {
@@ -161,7 +161,7 @@
     display:flex;
     align-items:center;
     gap:10px;
-    flex-wrap:wrap;
+    flex-wrap:nowrap;
 }
 
 .rolling-demo-badge {
@@ -637,7 +637,7 @@
     align-items:flex-end;
     justify-content:flex-end;
     gap:12px;
-    flex-wrap:wrap;
+    flex-wrap:nowrap;
 }
 
 .rolling-demo-filters-closed .rolling-demo-field {
@@ -837,3 +837,563 @@
         align-items:flex-start;
     }
 }
+
+
+/* Manual Settings: collapse button and collapsed state */
+.rolling-manual-settings-section .rolling-demo-card-head {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:14px;
+}
+
+.rolling-manual-settings-section .rolling-manual-settings-collapse-btn {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:32px;
+    height:32px;
+    background:rgba(255,255,255,0.08);
+    border:1px solid rgba(255,255,255,0.10);
+    border-radius:8px;
+    color:var(--app-muted);
+    cursor:pointer;
+    transition:all 0.2s;
+    flex-shrink:0;
+    padding:0;
+}
+
+.rolling-manual-settings-section .rolling-manual-settings-collapse-btn:hover {
+    background:rgba(255,255,255,0.15);
+    color:var(--app-text);
+}
+
+.rolling-manual-settings-section .rolling-manual-settings-collapse-btn.is-collapsed svg {
+    transform:rotate(-90deg);
+}
+
+
+/* Manual Settings: Connection Status label with inline refresh button */
+
+/* Manual Settings: connection grid layout - metrics side by side */
+.rolling-live-connection-grid {
+    display:flex;
+    flex-wrap:nowrap;
+    gap:12px;
+    align-items:flex-start;
+}
+
+.rolling-live-connection-grid .rolling-demo-metric {
+    flex:0 0 auto;
+    min-width:140px;
+    padding:10px;
+    box-sizing:border-box;
+}
+
+/* Manual Settings: API Name label with inline select (like Connection Status) */
+.api-name-label {
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:4px;
+    margin-bottom:0;
+}
+
+.api-name-label select {
+    width:100%;
+    min-height:44px;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,.08);
+    background:rgba(255,255,255,.03);
+    color:var(--app-text);
+    padding:0 12px;
+    font:inherit;
+}
+
+/* Manual Settings: bright collapse icon */
+.rolling-manual-settings-collapse-btn {
+    color:#9af0bb;
+    background:rgba(255,255,255,0.08);
+    border:1px solid rgba(255,255,255,0.10);
+    border-radius:8px;
+    width:32px;
+    height:32px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:0;
+    cursor:pointer;
+    transition:all 0.2s;
+}
+
+.rolling-manual-settings-collapse-btn:hover {
+    color:#fff;
+    background:rgba(255,255,255,0.15);
+}
+
+.rolling-manual-settings-collapse-btn.is-collapsed svg {
+    transform:rotate(-90deg);
+}
+.connection-status-label {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:0;
+}
+
+
+/* Manual Settings: Whitelist IP label with inline copy button */
+.rolling-live-ip-label {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:0;
+}
+
+.rolling-live-ip-label .rolling-live-copy-ip-btn {
+    flex-shrink:0;
+    padding:4px;
+}
+.connection-status-label .rolling-demo-icon-btn {
+    flex-shrink:0;
+    padding:4px;
+}
+
+.rolling-manual-settings-section .rolling-manual-settings-body.is-collapsed {
+    display:none;
+}
+
+/* Position Triggers section (added for crypto-scalper). Tabbed placeholder UI. */
+.rolling-pos-trg-section .rolling-pos-trg-title {
+    margin:0;
+    font-size:1.28rem;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-tab-trigger {
+    appearance:none;
+    border:1px solid rgba(255,255,255,0.10);
+    background:rgba(255,255,255,0.04);
+    color:var(--app-muted);
+    border-radius:999px;
+    padding:8px 14px;
+    font-size:.82rem;
+    font-weight:600;
+    letter-spacing:.04em;
+    text-transform:uppercase;
+    cursor:pointer;
+    transition:background .15s ease, border-color .15s ease, color .15s ease;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-tab-trigger:hover {
+    background:rgba(80,227,194,.10);
+    border-color:rgba(80,227,194,.35);
+    color:var(--app-text, #e8f1ee);
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-tab-trigger.is-active {
+    background:rgba(80,227,194,.18);
+    border-color:rgba(80,227,194,.55);
+    color:#9cf4df;
+    box-shadow:0 0 0 1px rgba(80,227,194,.18) inset;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-panels {
+    margin-top:4px;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-panel {
+    display:none;
+    padding:14px 16px;
+    border:1px dashed rgba(255,255,255,0.10);
+    border-radius:12px;
+    background:rgba(255,255,255,0.025);
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-panel.is-active {
+    display:block;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-panel-head {
+    font-size:1rem;
+    font-weight:700;
+    margin-bottom:6px;
+    color:var(--app-text, #e8f1ee);
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-panel-body {
+    font-size:.92rem;
+    color:var(--app-muted);
+}
+
+/* Position Triggers: 6-column grid (Side + Qty + Strike Price + SL Points + TP Points + Execute). */
+.rolling-pos-trg-section .rolling-pos-trg-fields {
+    grid-template-columns:repeat(6, minmax(0, 1fr));
+    gap:14px;
+}
+
+/* Execute button cell: an invisible label-size spacer on top keeps the button
+   vertically aligned with the input rows below the labels. */
+.rolling-pos-trg-section .rolling-pos-trg-spacer {
+    display:block;
+    margin-bottom:6px;
+    height:.82rem;
+    line-height:1;
+    color:transparent;
+    user-select:none;
+    pointer-events:none;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-execute-btn {
+    width:100%;
+    min-height:44px;
+    font-weight:700;
+    letter-spacing:.04em;
+}
+
+/* Trade-Side toggle for the BTCUSD trigger row.
+   Same visual language as .rolling-futures-three-way (radio + adjacent label). */
+.rolling-pos-trg-section .rolling-pos-trg-side-switch {
+    display:inline-flex;
+    align-items:stretch;
+    gap:2px;
+    padding:3px;
+    width:100%;
+    min-height:44px;
+    justify-content:center;
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:12px;
+    background:rgba(255,255,255,.03);
+    box-sizing:border-box;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-side-switch input {
+    position:absolute;
+    width:1px;
+    height:1px;
+    opacity:0;
+    pointer-events:none;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-side-switch label {
+    cursor:pointer;
+    user-select:none;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    flex:1 1 0;
+    min-height:36px;
+    padding:0 14px;
+    border:1px solid transparent;
+    border-radius:999px;
+    font-size:.82rem;
+    font-weight:700;
+    white-space:nowrap;
+    color:var(--app-muted);
+    transition:background .16s ease, color .16s ease, border-color .16s ease;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-side-switch label:hover {
+    color:var(--app-text);
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-side-switch input:checked + label {
+    background:rgba(80,227,194,.18);
+    border-color:rgba(80,227,194,.55);
+    color:#9cf4df;
+}
+
+/* Sell uses red (matches .rolling-live-status.danger palette). Higher specificity wins over the teal default above. */
+.rolling-pos-trg-section .rolling-pos-trg-side-switch input[value="sell"]:checked + label {
+    background:rgba(248,113,113,.18);
+    border-color:rgba(248,113,113,.55);
+    color:#ffb5b5;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-side-switch input:focus-visible + label {
+    box-shadow:0 0 0 2px rgba(96,165,250,.28);
+}
+
+@media (max-width:760px) {
+    .rolling-pos-trg-section .rolling-pos-trg-fields {
+        grid-template-columns:1fr;
+    }
+}
+
+/* Position Triggers: status banner (success / warning / error) shown below the field row. */
+.rolling-pos-trg-section .rolling-pos-trg-status {
+    display:none;
+    margin-top:10px;
+    padding:9px 12px;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,0.08);
+    background:rgba(255,255,255,0.03);
+    color:var(--app-muted);
+    font-size:.85rem;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-status.show {
+    display:block;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-status.success {
+    border-color:rgba(134,239,172,.28);
+    color:#9af0bb;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-status.warning {
+    border-color:rgba(242,182,90,.28);
+    color:#ffd397;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-status.danger,
+.rolling-pos-trg-section .rolling-pos-trg-status.error {
+    border-color:rgba(248,113,113,.28);
+    color:#ffb5b5;
+}
+/* Position Triggers: live ticker pill rendered next to the BTC/USD/XAUT panel heading. */
+.rolling-pos-trg-section .rolling-pos-trg-ticker {
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    margin-left:14px;
+    padding:4px 10px;
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,0.10);
+    background:rgba(255,255,255,0.03);
+    color:var(--app-muted);
+    font-size:.78rem;
+    font-weight:600;
+    letter-spacing:.04em;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-ticker-label {
+    text-transform:uppercase;
+    font-size:.68rem;
+    color:var(--app-muted);
+    letter-spacing:.06em;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-ticker strong {
+    color:var(--app-text, #e8f1ee);
+    font-variant-numeric:tabular-nums;
+    font-size:.92rem;
+    letter-spacing:.02em;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-ticker-vs {
+    color:var(--app-muted);
+    font-size:.72rem;
+    font-weight:500;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-ticker.above-strike {
+    border-color:rgba(80,227,194,0.45);
+    background:rgba(80,227,194,0.10);
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-ticker.below-strike {
+    border-color:rgba(248,113,113,0.45);
+    background:rgba(248,113,113,0.10);
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-ticker.watch-mode {
+    border-color:rgba(242,182,90,0.55);
+    background:rgba(242,182,90,0.12);
+    animation:rolling-pos-trg-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes rolling-pos-trg-pulse {
+    0%, 100% { opacity:1; }
+    50% { opacity:0.6; }
+}
+
+/* Execute-cell stacks Execute and Cancel buttons vertically when both are visible. */
+.rolling-pos-trg-section .rolling-pos-trg-execute-cell {
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-cancel-btn {
+    width:100%;
+    min-height:36px;
+    font-weight:600;
+    letter-spacing:.04em;
+}
+
+/* Hide the visible spacer if we are stacking both buttons; keeps layout tidy. */
+.rolling-pos-trg-section .rolling-pos-trg-execute-cell .rolling-pos-trg-spacer {
+    display:none;
+}
+/* Position Triggers: pending limit orders section (local queue, await maker-valid tick). */
+.rolling-pos-trg-section .rolling-pos-trg-pending-section {
+    margin-top:14px;
+    padding-top:12px;
+    border-top:1px dashed rgba(255,255,255,0.10);
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-head {
+    display:flex;
+    align-items:baseline;
+    gap:8px;
+    flex-wrap:nowrap;
+    margin-bottom:8px;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-head > span:first-child {
+    font-weight:700;
+    font-size:.92rem;
+    color:var(--app-text, #e8f1ee);
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-hint {
+    font-size:.74rem;
+    color:var(--app-muted);
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-empty {
+    padding:14px 16px;
+    border-radius:10px;
+    border:1px dashed rgba(255,255,255,0.10);
+    color:var(--app-muted);
+    font-size:.85rem;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-table {
+    width:100%;
+    border-collapse:collapse;
+    font-size:.82rem;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-table thead th {
+    text-align:left;
+    font-weight:700;
+    font-size:.7rem;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:var(--app-muted);
+    padding:6px 8px;
+    border-bottom:1px solid rgba(255,255,255,0.10);
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-table tbody td {
+    padding:8px;
+    border-bottom:1px solid rgba(255,255,255,0.06);
+    font-variant-numeric:tabular-nums;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-side.buy {
+    color:#9af0bb;
+    font-weight:700;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-side.sell {
+    color:#ffb5b5;
+    font-weight:700;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-distance.above-strike {
+    color:#9af0bb;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-distance.below-strike {
+    color:#ffb5b5;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-distance.ready {
+    color:#9cf4df;
+    font-weight:700;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-cancel-col {
+    width:32px;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-cancel-btn {
+    appearance:none;
+    border:1px solid rgba(248,113,113,0.45);
+    background:rgba(248,113,113,0.12);
+    color:#ffb5b5;
+    width:24px;
+    height:24px;
+    border-radius:50%;
+    cursor:pointer;
+    font-weight:700;
+    font-size:.78rem;
+    line-height:1;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:0;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-cancel-btn:hover {
+    background:rgba(248,113,113,0.32);
+    color:#ffd1d1;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-cancel-btn:disabled {
+    opacity:0.5;
+    cursor:not-allowed;
+}
+/* Position Triggers: Source column distinguishes locally queued vs live-on-exchange orders. */
+.rolling-pos-trg-section .rolling-pos-trg-pending-source {
+    white-space:nowrap;
+    font-weight:700;
+    font-size:.7rem;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-source.pending-local {
+    color:#ffd397;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-pending-source.on-delta {
+    color:#9af0bb;
+}
+/* Position Triggers: server-side watcher status badge. */
+.rolling-pos-trg-section .rolling-pos-trg-watcher-badge {
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    padding:3px 9px;
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,0.10);
+    background:rgba(255,255,255,0.03);
+    color:var(--app-muted);
+    font-size:.68rem;
+    font-weight:700;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+    white-space:nowrap;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-watcher-badge.is-running {
+    border-color:rgba(80,227,194,.50);
+    background:rgba(80,227,194,.12);
+    color:#9cf4df;
+}
+
+.rolling-pos-trg-section .rolling-pos-trg-watcher-badge.is-stopped {
+    border-color:rgba(242,182,90,.40);
+    background:rgba(242,182,90,.10);
+    color:#ffd397;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

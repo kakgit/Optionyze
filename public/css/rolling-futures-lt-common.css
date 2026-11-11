@@ -462,7 +462,7 @@ body[data-rolling-futures-live="covered"] .rolling-covered-row2-break-action-sel
 
 .rolling-live-connection-grid {
     display: grid;
-    grid-template-columns: minmax(240px, 1.2fr) repeat(2, minmax(0, 0.9fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 12px;
     margin-bottom: 14px;
 }
@@ -2146,3 +2146,4 @@ body[data-rolling-futures-live="covered"] .rolling-covered-pnl-value.total {
     cursor: help;
     vertical-align: middle;
 }
+

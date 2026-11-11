@@ -25,6 +25,16 @@ export function renderCoveredOptionsPage(req: Request, res: Response): void {
     });
 }
 
+export function renderCryptoScalperPage(req: Request, res: Response): void {
+    res.render("crypto-scalper", {
+        pageTitle: "Crypto Scalper - Live | Optionyze",
+        pageVariant: "live",
+        currentAccount: req.authAccount,
+        defaultUserId: req.authAccount?.accountId || "demo-paper",
+        rollingTelegramEventTypes: gRollingFuturesTelegramEventTypes
+    });
+}
+
 export function renderStrangleOptionsPage(req: Request, res: Response): void {
     res.render("covered-options", {
         pageTitle: "Strangle Options - Live | Optionyze",

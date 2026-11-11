@@ -133,7 +133,7 @@ export async function sendTelegramProfileTest(req: Request, res: Response): Prom
 
 export function renderDeltaExchangeApiPage(req: Request, res: Response): void {
     res.render("account-delta-api", {
-        pageTitle: "Delta Exchange API | Optionyze",
+        pageTitle: "Crypto Exchange API | Optionyze",
         currentAccount: req.authAccount,
         defaultUserId: req.authAccount?.accountId || ""
     });

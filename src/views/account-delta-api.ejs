@@ -13,7 +13,7 @@
     <div class="app-layout delta-layout">
         <%- include('partials/app-header', { currentAccount }) %>
         <section class="app-panel">
-            <h1 class="app-title">Delta Exchange API</h1>
+            <h1 class="app-title">Crypto Exchange API</h1>
             <p class="app-copy">Manage multiple Delta API credentials here. Each credential set gets its own <strong>Reference Name</strong>, and later your strategy pages will bind to one of these saved references instead of storing raw keys inside each strategy.</p>
             <div id="pageStatus" class="delta-status"></div>
             <div class="delta-toolbar">
@@ -31,6 +31,7 @@
                     <thead>
                         <tr>
                             <th>Reference Name</th>
+                            <th>Exchange</th>
                             <th>API Key</th>
                             <th>Secret</th>
                             <th>Updated</th>
@@ -38,7 +39,7 @@
                         </tr>
                     </thead>
                     <tbody id="profileTableBody">
-                        <tr><td colspan="5" class="delta-empty">Loading API credentials...</td></tr>
+                        <tr><td colspan="6" class="delta-empty">Loading API credentials...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -60,6 +61,13 @@
                 <div>
                     <label for="referenceName">Reference Name</label>
                     <input id="referenceName" name="referenceName" type="text" required />
+                </div>
+                <div>
+                    <label for="exchange">Exchange</label>
+                    <select id="exchange" name="exchange" required>
+                        <option value="delta-exchange">Delta Exchange</option>
+                        <option value="shark-exchange">Shark Exchange</option>
+                    </select>
                 </div>
                 <div>
                     <label for="apiKey">API Key</label>
@@ -120,7 +128,7 @@
             }
 
             if (!gState.profiles.length) {
-                objTableBody.innerHTML = '<tr><td colspan="5" class="delta-empty">No API credentials saved yet.</td></tr>';
+                objTableBody.innerHTML = '<tr><td colspan="6" class="delta-empty">No API credentials saved yet.</td></tr>';
                 return;
             }
 
@@ -132,6 +140,7 @@
                             <div class="delta-cell-title">${escapeHtml(objProfile.referenceName)}</div>
                             <div class="delta-cell-sub">Created ${escapeHtml(formatDate(objProfile.createdAt))}</div>
                         </td>
+                        <td>${escapeHtml(getExchangeLabel(objProfile.exchange))}</td>
                         <td>${escapeHtml(maskApiKey(objProfile.apiKey))}</td>
                         <td>${objProfile.hasSecret ? '<span class="delta-chip good">Saved</span>' : '<span class="delta-chip muted">Missing</span>'}</td>
                         <td>${escapeHtml(vUpdatedAt)}</td>
@@ -159,6 +168,7 @@
                 : "Create a reusable Delta credential reference for future strategy binding.");
             setValue("referenceName", pProfile?.referenceName || "");
             setValue("apiKey", pProfile?.apiKey || "");
+            setValue("exchange", pProfile?.exchange || "delta-exchange");
             setValue("apiSecret", "");
             setText("secretHint", gState.editingProfileId
                 ? "Leave API Secret blank to keep the current secret unchanged."
@@ -177,6 +187,7 @@
             objEvent.preventDefault();
             const objPayload = {
                 referenceName: getValue("referenceName"),
+                exchange: getValue("exchange"),
                 apiKey: getValue("apiKey"),
                 apiSecret: getValue("apiSecret")
             };
@@ -336,6 +347,14 @@
             }
             objStatus.textContent = "";
             objStatus.className = "delta-status";
+        }
+
+        function getExchangeLabel(pExchange) {
+            const vExchange = String(pExchange || "").trim();
+            if (vExchange === "shark-exchange") {
+                return "Shark Exchange";
+            }
+            return "Delta Exchange";
         }
 
         function maskApiKey(pApiKey) {

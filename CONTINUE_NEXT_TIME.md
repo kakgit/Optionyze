@@ -1,4 +1,4 @@
-# Continue Next Time
+﻿# Continue Next Time
 
 ## Run
 
@@ -173,3 +173,43 @@ Next time, do this first:
 - `npm run build` passes
 - current page route is `/strategyfogreeks`
 - if `DATABASE_URL` is missing, app falls back to JSON files
+
+## Next refinement: auto-cancel pending orders when TP is reached before entry
+
+When a queued (Pending) limit order's take-profit level is reached before the order ever fills on Delta, auto-cancel it instead of leaving it queued forever.
+
+### Rule (evaluated on the 3s ticker poll, per pending row)
+
+- BUY pending: `tpLevel = strike + tpPoints`. If `mark >= tpLevel` and the order was never placed on Delta, delete the pending row.
+- SELL pending: `tpLevel = strike - tpPoints`. If `mark <= tpLevel` and the order was never placed on Delta, delete the pending row.
+- The TP check runs **before** the fire check, so an order can never be placed after its TP has already printed (covers the "gapped straight through strike to TP" case).
+- Applies only to Pending rows. Rows already live on Delta (Source = Delta) are untouched - those are real positions managed by the bracket SL/TP attached on Delta.
+
+### Implementation sketch
+
+- Extend `DELETE /api/crypto-scalper/position-triggers/pending/:id` to accept an optional `?reason=` param (default `user_cancelled`). When `reason=tp_reached`, log "Pending Auto-Cancelled (TP Reached)" with strike and TP level so the events feed shows why it vanished.
+- In `tickOnce` (crypto-scalper.ejs), compute `tpLevel` per pending record. If hit, call delete with the reason, show a warning banner ("Pending {side} @ {strike} auto-cancelled - TP {tpLevel} reached before entry"), and `continue` (skip the fire path for that row).
+
+### Superseded by the server-side watcher (implemented)
+
+The auto-fire / TP-cancel logic now runs **server-side** in the Position Trigger
+watcher (`src/api/controllers/rolling-futures-lt-controller.ts`):
+
+- `startPositionTriggerWatcher(userId, "crypto-scalper")` starts a 3s server interval.
+- Started when the Auto Trader is enabled, stopped when it is disabled (manually or by the profit-close auto-off rule).
+- Resumed automatically after a server restart via `recoverRollingFuturesLtAutoTraderCycles`.
+- `GET /crypto-scalper/position-triggers/watcher-status` reports `watcherRunning`, `autoTraderEnabled`, `pendingCount`, `intervalMs`.
+- The browser no longer fires orders - it only polls and displays the list, so a closed browser no longer stops pending orders from firing.
+- Because the watcher is server-side, the TP auto-cancel rule above can now be implemented in `runPositionTriggerWatcherCycle` (same tick, before the fire check) without depending on an open tab.
+
+### Deferred on purpose
+
+- SL-based auto-cancel is intentionally left out: for BUY, hitting SL means the buy got *cheaper*, which some traders want to keep, so the semantics differ per side and should not be bundled without a decision.
+- Like auto-fire, TP-cancel runs on the client poll while the tab is open. If enforcement with the browser closed is needed later, add a small server-side worker that polls the ticker per account and applies the same rule.
+
+### Related context
+
+- Position Triggers section lives in `src/views/crypto-scalper.ejs` (BTCUSD / ETHUSD / XAUTUSD tabs).
+- Pending queue storage: `src/storage/position-trigger-pending-store.ts` (table `optionyze_position_trigger_pending`).
+- Endpoints: `POST /crypto-scalper/position-triggers/save`, `GET .../pending`, `DELETE .../pending/:id`, `GET .../open-orders`, `POST .../open-orders/cancel`, `GET .../ticker`, `POST .../execute`.
+- Delta `cancelOrder` must be called with the nested shape `cancelOrder({ order: { id, product_symbol } })` - a flat `{ id }` is rejected with "Required parameter order is not provided".
