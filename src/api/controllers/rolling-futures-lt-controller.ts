@@ -1,4 +1,4 @@
-﻿import type { Request, Response } from "express";
+import type { Request, Response } from "express";
 import crypto from "node:crypto";
 import path from "node:path";
 import { readJsonFile, writeJsonFileAtomic } from "../../storage/json-store";
@@ -22766,6 +22766,7 @@ async function fetchOpenDeltaOrdersForSymbol(pClient: any, pContractName: string
             const vFilled = Number(objRow.reduced_size || 0);
             return {
                 orderId: vId,
+                productId: Number((objRow as any)?.product_id) > 0 ? Number((objRow as any).product_id) : null,
                 symbol: vContract,
                 side: vSide,
                 limitPrice: Number(objRow.limit_price || 0),
@@ -22859,14 +22860,24 @@ export async function cancelCryptoScalperOpenOrder(req: Request, res: Response):
             return;
         }
         const { client } = await getDeltaClientForAccountId(vUserId, vSelectedApiProfileId);
+        let vCancelProductId = Number(req.body?.productId ?? req.query?.productId);
+        if (!(vCancelProductId > 0)) {
+            try {
+                const objLookup = await client.apis.Orders.getOrders({ state: 'open', page_size: 200 });
+                const arrLookup = ((): Array<any> => { try { const p = readResponsePayload(objLookup); return Array.isArray((p as any)?.result) ? (p as any).result : []; } catch (_e) { return []; } })();
+                const objFound = arrLookup.find((o: any) => String(o?.id ?? o?.order_id ?? '').trim() === vOrderId);
+                const vFoundPid = Number((objFound as any)?.product_id);
+                if (vFoundPid > 0) { vCancelProductId = vFoundPid; }
+            } catch (_lookupErr) { /* fall through to product-symbol cancel below */ }
+        }
         try {
             const vCancelContract = getContractNameForSymbol(vSymbol);
-            await client.apis.Orders.cancelOrder({
-                order: {
-                    id: Number.isFinite(Number(vOrderId)) ? Number(vOrderId) : vOrderId,
-                    product_symbol: vCancelContract
-                }
-            });
+            const vCancelIdNum = Number(vOrderId);
+            const vCancelPayload: Record<string, unknown> = { id: Number.isFinite(vCancelIdNum) ? vCancelIdNum : vOrderId };
+            // Delta DeleteOrderRequest accepts id + product_id only (no product_symbol field).
+            if (vCancelProductId > 0) { vCancelPayload.product_id = vCancelProductId; }
+            else { (vCancelPayload as any).product_symbol = vCancelContract; }
+            await client.apis.Orders.cancelOrder({ order: vCancelPayload });
         }
         catch (objCancelErr) {
             const vMsg = getErrorMessage(objCancelErr, `Delta rejected the cancel request for order ${vOrderId}.`);
