@@ -297,6 +297,10 @@
     let previousOpenPositionLtps = new Map();
     let runtimeStatus = "idle";
     let autoTraderEnabled = false;
+    let cryptoScalperStopDrainRequested = false;
+    let cryptoScalperStopDrainRequestedAt = "";
+    let cryptoScalperStopDrainNextCheckAt = "";
+    let cryptoScalperStopDrainPollTimer = null;
     let manualFutureOrderInFlight = false;
     let manualOptionOrderInFlight = false;
     let execStrategyInFlight = false;
@@ -2483,6 +2487,7 @@
     }
 
     function setButtonsEnabled() {
+        const bCryptoStopDrain = isCryptoScalperStopDrainActive();
         [
             ids.importButton,
             ids.refreshOpenPositionsButton,
@@ -2503,14 +2508,20 @@
         }
         [ids.sellFutureButton, ids.buyFutureButton].forEach(function (button) {
             if (button instanceof HTMLButtonElement) {
-                button.disabled = manualFutureOrderInFlight || !canUseLiveActions();
+                button.disabled = manualFutureOrderInFlight || !canUseLiveActions() || (bCryptoStopDrain && isCryptoScalperPage);
+                if (bCryptoStopDrain && isCryptoScalperPage) {
+                    button.title = "Auto Trader stop is in progress. Manual orders resume after Delta confirms flat.";
+                }
             }
         });
         getSupportedOptionRowIndexes().forEach(function (rowIndex) {
             const nodes = getOptionRowNodes(rowIndex);
             [nodes.sellPeButton, nodes.sellCeButton, nodes.buyCeButton, nodes.buyPeButton].forEach(function (button) {
                 if (button instanceof HTMLButtonElement) {
-                    button.disabled = manualOptionOrderInFlight || !canUseLiveActions();
+                    button.disabled = manualOptionOrderInFlight || !canUseLiveActions() || (bCryptoStopDrain && isCryptoScalperPage);
+                    if (bCryptoStopDrain && isCryptoScalperPage) {
+                        button.title = "Auto Trader stop is in progress. Manual orders resume after Delta confirms flat.";
+                    }
                 }
             });
         });
@@ -2824,24 +2835,85 @@
         setButtonsEnabled();
     }
 
+    function isCryptoScalperStopDrainActive() {
+        return Boolean(isCryptoScalperPage && cryptoScalperStopDrainRequested);
+    }
+
+    function broadcastCryptoScalperAutoTraderState() {
+        if (!isCryptoScalperPage || typeof window.dispatchEvent !== "function") {
+            return;
+        }
+        window.dispatchEvent(new CustomEvent("optionyze:autotrader", {
+            detail: {
+                enabled: Boolean(autoTraderEnabled),
+                effectiveEnabled: Boolean(autoTraderEnabled && !cryptoScalperStopDrainRequested),
+                stopping: Boolean(cryptoScalperStopDrainRequested),
+                status: runtimeStatus,
+                stopRequestedAt: cryptoScalperStopDrainRequestedAt,
+                nextCheckAt: cryptoScalperStopDrainNextCheckAt
+            }
+        }));
+    }
+
+    function stopCryptoScalperStopDrainPolling() {
+        if (cryptoScalperStopDrainPollTimer) {
+            window.clearInterval(cryptoScalperStopDrainPollTimer);
+            cryptoScalperStopDrainPollTimer = null;
+        }
+    }
+
+    function startCryptoScalperStopDrainPolling() {
+        if (!isCryptoScalperPage || cryptoScalperStopDrainPollTimer) {
+            return;
+        }
+        cryptoScalperStopDrainPollTimer = window.setInterval(function () {
+            void loadRuntimeStatus().catch(function () { return undefined; });
+        }, 10000);
+    }
+
     function applyRuntimeStatus(runtime) {
         const objRuntime = runtime || {};
         runtimeStatus = String(objRuntime.status || "idle").trim() || "idle";
         autoTraderEnabled = Boolean(objRuntime.autoTraderEnabled);
+        cryptoScalperStopDrainRequested = Boolean(isCryptoScalperPage
+            && (objRuntime?.state?.cryptoScalperStopDrain?.requested
+                || (autoTraderEnabled && runtimeStatus === "paused")));
+        cryptoScalperStopDrainRequestedAt = String(objRuntime?.state?.cryptoScalperStopDrain?.requestedAt || "").trim();
+        cryptoScalperStopDrainNextCheckAt = String(objRuntime?.state?.cryptoScalperStopDrain?.nextCheckAt || "").trim();
         pendingLiveConfirmation = objRuntime?.state?.pendingCoveredLiveConfirmation || null;
         profitClosePending = objRuntime?.state?.profitClosePending || null;
         const closedPositionsRefreshAt = String(objRuntime?.state?.closedPositionsRefreshAt || "").trim();
         if (ids.engineStatus) {
-            ids.engineStatus.textContent = runtimeStatus.charAt(0).toUpperCase() + runtimeStatus.slice(1);
+            ids.engineStatus.textContent = isCryptoScalperStopDrainActive()
+                ? "Stopping"
+                : (runtimeStatus.charAt(0).toUpperCase() + runtimeStatus.slice(1));
         }
         if (ids.openRenkoSignal) {
             ids.openRenkoSignal.textContent = modeLabel;
         }
         if (ids.autoTraderButton instanceof HTMLButtonElement) {
-            ids.autoTraderButton.textContent = autoTraderEnabled ? "Auto Trader - ON" : "Auto Trader - OFF";
-            ids.autoTraderButton.classList.toggle("success", autoTraderEnabled);
-            ids.autoTraderButton.classList.toggle("warn", !autoTraderEnabled);
+            if (isCryptoScalperStopDrainActive()) {
+                ids.autoTraderButton.textContent = "Auto Trader - STOPPING";
+                ids.autoTraderButton.classList.remove("success");
+                ids.autoTraderButton.classList.add("warn");
+                ids.autoTraderButton.disabled = true;
+                ids.autoTraderButton.title = "Stop requested. Waiting for Delta to confirm all live positions and unfilled entry orders are closed.";
+            }
+            else {
+                ids.autoTraderButton.textContent = autoTraderEnabled ? "Auto Trader - ON" : "Auto Trader - OFF";
+                ids.autoTraderButton.classList.toggle("success", autoTraderEnabled);
+                ids.autoTraderButton.classList.toggle("warn", !autoTraderEnabled);
+                ids.autoTraderButton.disabled = false;
+                ids.autoTraderButton.title = "Toggle Auto Trader";
+            }
         }
+        if (isCryptoScalperStopDrainActive()) {
+            startCryptoScalperStopDrainPolling();
+        }
+        else {
+            stopCryptoScalperStopDrainPolling();
+        }
+        broadcastCryptoScalperAutoTraderState();
         const objRuntimeRecoveryMetrics = mergeRuntimeRecoveryMetrics(objRuntime.state);
         if (objRuntimeRecoveryMetrics) {
             applyRecoveryMetrics(objRuntimeRecoveryMetrics);
@@ -4301,6 +4373,9 @@
     }
 
     async function toggleAutoTrader() {
+        if (isCryptoScalperStopDrainActive()) {
+            throw new Error("Auto Trader stop is already in progress. Wait for Delta to confirm flat before changing it again.");
+        }
         const url = autoTraderEnabled
             ? `${endpointBase}/auto-trader/stop`
             : `${endpointBase}/auto-trader/start`;
@@ -6309,8 +6384,14 @@ ids.closedAltFromDate?.addEventListener("change", function () {
                 loadAccountSummary().catch(function () { return undefined; }),
                 loadEvents().catch(function () { return undefined; })
             ]);
-        }).then(function () {
-            setStatus(ids.pageStatus, autoTraderEnabled ? "Live auto trader enabled." : "Live auto trader disabled.", "success");
+        }).then(function (objResponses) {
+            const objToggleResult = Array.isArray(objResponses) ? objResponses[0] : null;
+            const objMessage = String(objToggleResult?.message || "").trim();
+            if (objMessage) {
+                setStatus(ids.pageStatus, objMessage, isCryptoScalperStopDrainActive() ? "warning" : "success");
+                return;
+            }
+            setStatus(ids.pageStatus, autoTraderEnabled ? "Live auto trader enabled." : (isCryptoScalperStopDrainActive() ? "Auto Trader stop requested. Waiting for Delta to confirm flat." : "Live auto trader disabled."), isCryptoScalperStopDrainActive() ? "warning" : "success");
         }).catch(function (error) {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to change live auto trader state.", "danger");
         });
@@ -7303,4 +7384,5 @@ ids.closedAltPositionsBody?.addEventListener("click", function (event) {
 
     startConnectionPolling();
     startConfirmationPolling();
+    broadcastCryptoScalperAutoTraderState();
 })();

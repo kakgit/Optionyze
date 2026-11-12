@@ -166,7 +166,7 @@
                             <span>BTCUSD</span>
                             <span class="rolling-pos-trg-ticker" id="rollingPosTrgBtcTicker">
                                 <span class="rolling-pos-trg-ticker-label">Mark</span>
-                                <strong data-pos-trg-ticker-price>ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â</strong>
+                                <strong data-pos-trg-ticker-price>--</strong>
                                 <span class="rolling-pos-trg-ticker-vs" data-pos-trg-ticker-vs></span>
                             </span>
                         </div>
@@ -217,7 +217,7 @@
                         <div class="rolling-pos-trg-pending-head">
                             <span>Open &amp; Queued Limit Orders</span>
                             <span class="rolling-pos-trg-watcher-badge" id="rollingPosTrgWatcherBadge" title="Server-side watcher status">Server: checking...</span>
-                            <span class="rolling-pos-trg-pending-hint">Pending = queued locally (auto-fires when mark crosses strike by Tolerance). Delta = live on the exchange. Click ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â auto-fires when mark crosses the strike by Tolerance.</span>
+                            <span class="rolling-pos-trg-pending-hint">Pending = queued locally (auto-fires when mark crosses strike by Tolerance). Delta = live on the exchange. Click × to cancel a row.</span>
                         </div>
                         <div class="rolling-pos-trg-pending-empty" id="rollingPosTrgBtcPendingEmpty">No open or queued orders. Use <strong>Buy / Sell</strong> above to place or queue one.</div>
                         <table class="rolling-pos-trg-pending-table" id="rollingPosTrgBtcPendingTable" hidden>
@@ -238,12 +238,108 @@
                     </div>
                     </div>
                     <div class="rolling-pos-trg-panel" id="rollingPosTrgPanelEth" data-pos-trg-tab-panel="eth" role="tabpanel" aria-label="ETHUSD position triggers" hidden>
-                        <div class="rolling-pos-trg-panel-head">ETHUSD</div>
-                        <div class="rolling-pos-trg-panel-body">Position triggers for ETHUSD will appear here.</div>
+                        <div class="rolling-pos-trg-panel-head">
+                            <span>ETHUSD</span>
+                            <span class="rolling-pos-trg-ticker" id="rollingPosTrgEthTicker">
+                                <span class="rolling-pos-trg-ticker-label">Mark</span>
+                                <strong data-pos-trg-ticker-price>--</strong>
+                                <span class="rolling-pos-trg-ticker-vs" data-pos-trg-ticker-vs></span>
+                            </span>
+                        </div>
+                        <div class="rolling-demo-grid rolling-pos-trg-fields">
+                            <div class="rolling-demo-field">
+                                <label>Multiplier</label>
+                                <input class="rolling-futures-start-qty" type="number" min="1" max="1000" step="1" value="1" data-pos-trg-multiplier readonly disabled title="Multiplier is shared with the BTCUSD tab." aria-label="Multiplier (shared with BTCUSD tab)" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgEthTolerance">Tolerance</label>
+                                <input type="number" id="txtPosTrgEthTolerance" min="1" step="1" value="20" title="Auto-watch fires when current price is within this many points of the Strike Price." placeholder="e.g. 20" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgEthBuyStrike">Strike Price</label>
+                                <input type="number" id="txtPosTrgEthBuyStrike" step="any" inputmode="decimal" placeholder="e.g. 3500" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgEthSlPoints">SL Points</label>
+                                <input type="number" id="txtPosTrgEthSlPoints" step="any" inputmode="decimal" value="300" placeholder="e.g. 300" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgEthTpPoints">TP Points</label>
+                                <input type="number" id="txtPosTrgEthTpPoints" step="any" inputmode="decimal" value="400" placeholder="e.g. 400" />
+                            </div>
+                            <div class="rolling-demo-field rolling-pos-trg-execute-cell">
+                                <label>Action</label>
+                                <div style="display:flex; gap:8px;">
+                                    <button id="btnPosTrgEthBuy" class="rolling-demo-btn buy" type="button" style="flex:1; min-height:44px;" title="Place a BUY maker-only limit order at the Strike Price with attached SL/TP points.">Buy</button>
+                                    <button id="btnPosTrgEthSell" class="rolling-demo-btn sell" type="button" style="flex:1; min-height:44px;" title="Place a SELL maker-only limit order at the Strike Price with attached SL/TP points.">Sell</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="rollingPosTrgEthStatus" class="rolling-pos-trg-status" aria-live="polite"></div>
+                        <div class="rolling-pos-trg-pending-section" id="rollingPosTrgEthPendingSection">
+                            <div class="rolling-pos-trg-pending-head">
+                                <span>Open &amp; Queued Limit Orders</span>
+                                <span class="rolling-pos-trg-watcher-badge" id="rollingPosTrgEthWatcherBadge" title="Server-side watcher status">Server: checking...</span>
+                                <span class="rolling-pos-trg-pending-hint">Pending = queued locally. Delta = live on the exchange. Click × to cancel a row.</span>
+                            </div>
+                            <div class="rolling-pos-trg-pending-empty" id="rollingPosTrgEthPendingEmpty">No open or queued orders. Use <strong>Buy / Sell</strong> above to place or queue one.</div>
+                            <table class="rolling-pos-trg-pending-table" id="rollingPosTrgEthPendingTable" hidden>
+                                <thead><tr><th>Side</th><th>Qty</th><th>Strike</th><th>SL/TP</th><th>Tol</th><th>Distance</th><th>Source</th><th class="rolling-pos-trg-pending-cancel-col" aria-label="Cancel"></th></tr></thead>
+                                <tbody id="rollingPosTrgEthPendingBody"></tbody>
+                            </table>
+                        </div>
                     </div>
                     <div class="rolling-pos-trg-panel" id="rollingPosTrgPanelXaut" data-pos-trg-tab-panel="xaut" role="tabpanel" aria-label="XAUTUSD position triggers" hidden>
-                        <div class="rolling-pos-trg-panel-head">XAUTUSD</div>
-                        <div class="rolling-pos-trg-panel-body">Position triggers for XAUTUSD will appear here.</div>
+                        <div class="rolling-pos-trg-panel-head">
+                            <span>XAUTUSD</span>
+                            <span class="rolling-pos-trg-ticker" id="rollingPosTrgXautTicker">
+                                <span class="rolling-pos-trg-ticker-label">Mark</span>
+                                <strong data-pos-trg-ticker-price>--</strong>
+                                <span class="rolling-pos-trg-ticker-vs" data-pos-trg-ticker-vs></span>
+                            </span>
+                        </div>
+                        <div class="rolling-demo-grid rolling-pos-trg-fields">
+                            <div class="rolling-demo-field">
+                                <label>Multiplier</label>
+                                <input class="rolling-futures-start-qty" type="number" min="1" max="1000" step="1" value="1" data-pos-trg-multiplier readonly disabled title="Multiplier is shared with the BTCUSD tab." aria-label="Multiplier (shared with BTCUSD tab)" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgXautTolerance">Tolerance</label>
+                                <input type="number" id="txtPosTrgXautTolerance" min="1" step="1" value="20" title="Auto-watch fires when current price is within this many points of the Strike Price." placeholder="e.g. 5" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgXautBuyStrike">Strike Price</label>
+                                <input type="number" id="txtPosTrgXautBuyStrike" step="any" inputmode="decimal" placeholder="e.g. 2900" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgXautSlPoints">SL Points</label>
+                                <input type="number" id="txtPosTrgXautSlPoints" step="any" inputmode="decimal" value="300" placeholder="e.g. 30" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgXautTpPoints">TP Points</label>
+                                <input type="number" id="txtPosTrgXautTpPoints" step="any" inputmode="decimal" value="400" placeholder="e.g. 40" />
+                            </div>
+                            <div class="rolling-demo-field rolling-pos-trg-execute-cell">
+                                <label>Action</label>
+                                <div style="display:flex; gap:8px;">
+                                    <button id="btnPosTrgXautBuy" class="rolling-demo-btn buy" type="button" style="flex:1; min-height:44px;" title="Place a BUY maker-only limit order at the Strike Price with attached SL/TP points.">Buy</button>
+                                    <button id="btnPosTrgXautSell" class="rolling-demo-btn sell" type="button" style="flex:1; min-height:44px;" title="Place a SELL maker-only limit order at the Strike Price with attached SL/TP points.">Sell</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="rollingPosTrgXautStatus" class="rolling-pos-trg-status" aria-live="polite"></div>
+                        <div class="rolling-pos-trg-pending-section" id="rollingPosTrgXautPendingSection">
+                            <div class="rolling-pos-trg-pending-head">
+                                <span>Open &amp; Queued Limit Orders</span>
+                                <span class="rolling-pos-trg-watcher-badge" id="rollingPosTrgXautWatcherBadge" title="Server-side watcher status">Server: checking...</span>
+                                <span class="rolling-pos-trg-pending-hint">Pending = queued locally. Delta = live on the exchange. Click × to cancel a row.</span>
+                            </div>
+                            <div class="rolling-pos-trg-pending-empty" id="rollingPosTrgXautPendingEmpty">No open or queued orders. Use <strong>Buy / Sell</strong> above to place or queue one.</div>
+                            <table class="rolling-pos-trg-pending-table" id="rollingPosTrgXautPendingTable" hidden>
+                                <thead><tr><th>Side</th><th>Qty</th><th>Strike</th><th>SL/TP</th><th>Tol</th><th>Distance</th><th>Source</th><th class="rolling-pos-trg-pending-cancel-col" aria-label="Cancel"></th></tr></thead>
+                                <tbody id="rollingPosTrgXautPendingBody"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -830,7 +926,7 @@
         </section>
     <% } %>
     <script>
-        // Position Triggers tab switcher. Pure UI scaffolding ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â no inputs, no API calls.
+        // Position Triggers tab switcher. Pure UI scaffolding — no inputs, no API calls.
         (function () {
             const triggers = Array.from(document.querySelectorAll("[data-pos-trg-tab-trigger]"));
             const panels = Array.from(document.querySelectorAll("[data-pos-trg-tab-panel]"));
@@ -862,35 +958,52 @@
                 objBtn.addEventListener("click", () => activate(objBtn.dataset.posTrgTabTrigger));
             });
         })();
-// Position Triggers: live BTCUSD ticker + Save + combined Open/Queued list with auto-fire.
-// Polls BTCUSD mark + Pending list + Delta open orders every 3s while the BTC tab is active.
-// "Buy/Sell" -> /save: places on Delta when maker-valid; otherwise queues locally.
-// On each ticker tick, auto-fires any queued pending entry that became maker-valid.
+// Position Triggers: live ticker + Save + combined Open/Queued list per symbol tab.
+// Polls mark + Pending list + Delta open orders every 3s while a symbol tab is active.
+// "Buy/Sell" -> POST /save: places on Delta when maker-valid; otherwise queues locally.
 // The list shows both queued (Pending source) and open-on-Delta (Delta source) orders;
 // the X button cancels: DELETE /pending/:id for Pending, POST /open-orders/cancel for Delta.
 // The ticker only runs while the Auto Trader is ON; it stops as soon as Auto Trader is OFF.
 (function () {
+    var SYMBOL_TABS = [
+        { key: "btc", symbol: "BTC", qtyId: "txtRollingBtcUsdQty" },
+        { key: "eth", symbol: "ETH", qtyId: "txtRollingEthUsdQty" },
+        { key: "xaut", symbol: "XAUT", qtyId: "txtRollingXautUsdQty" }
+    ];
+    function capKey(pKey) { return String(pKey || "btc").replace(/^./, function (c) { return c.toUpperCase(); }); }
     var isPageAdmin = String((document.body && document.body.dataset && document.body.dataset.currentAccountAdmin) || "").trim().toLowerCase() === "true";
-    var buyBtn = document.getElementById("btnPosTrgBtcBuy");
-    var sellBtn = document.getElementById("btnPosTrgBtcSell");
-    var statusEl = document.getElementById("rollingPosTrgBtcStatus");
-    var qtyEl = document.getElementById("txtRollingBtcUsdQty");
-    var multiplierEl = document.getElementById("txtRollingFuturesStartQty");
-    var strikeEl = document.getElementById("txtPosTrgBtcBuyStrike");
-    var slEl = document.getElementById("txtPosTrgBtcSlPoints");
-    var tpEl = document.getElementById("txtPosTrgBtcTpPoints");
-    var tolEl = document.getElementById("txtPosTrgBtcTolerance");
-    var calcBtn = document.getElementById("btnRollingFuturesCalcStartQty");
-    var tickerBox = document.getElementById("rollingPosTrgBtcTicker");
-    var tickerPriceEl = tickerBox ? tickerBox.querySelector("[data-pos-trg-ticker-price]") : null;
-    var tickerVsEl = tickerBox ? tickerBox.querySelector("[data-pos-trg-ticker-vs]") : null;
-    var pendingSectionEl = document.getElementById("rollingPosTrgBtcPendingSection");
-    var pendingEmptyEl = document.getElementById("rollingPosTrgBtcPendingEmpty");
-    var pendingTableEl = document.getElementById("rollingPosTrgBtcPendingTable");
-    var pendingBodyEl = document.getElementById("rollingPosTrgBtcPendingBody");
-    var watcherBadgeEl = document.getElementById("rollingPosTrgWatcherBadge");
-    if (!buyBtn || !sellBtn || !statusEl || !qtyEl || !multiplierEl || !strikeEl || !slEl || !tpEl || !tolEl || !pendingSectionEl || !pendingEmptyEl || !pendingTableEl || !pendingBodyEl) {
-        return;
+    var autoTraderOn = false;
+    var autoTraderStopping = false;
+    var activeTabKey = "btc";
+    var sharedMultiplierEl = document.getElementById("txtRollingFuturesStartQty");
+    var sharedCalcBtn = document.getElementById("btnRollingFuturesCalcStartQty");
+    var arrTabCtls = [];
+
+    // ---- Shared global state: Auto Trader ON/OFF/stopping + active tab ----
+    function getActiveTabCtl() {
+        for (var i = 0; i < arrTabCtls.length; i++) {
+            if (arrTabCtls[i] && arrTabCtls[i].key === activeTabKey) { return arrTabCtls[i]; }
+        }
+        return arrTabCtls[0] || null;
+    }
+    function syncAllPolling() {
+        for (var i = 0; i < arrTabCtls.length; i++) {
+            if (arrTabCtls[i] && typeof arrTabCtls[i].syncPollingState === "function") { arrTabCtls[i].syncPollingState(); }
+        }
+    }
+    function applyAutoTraderState(enabled, stopping) {
+        var vNext = Boolean(enabled);
+        var vStopping = Boolean(stopping);
+        if (vNext === autoTraderOn && vStopping === autoTraderStopping) {
+            syncAllPolling();
+            return;
+        }
+        autoTraderOn = vNext;
+        autoTraderStopping = vStopping && autoTraderOn;
+        for (var i = 0; i < arrTabCtls.length; i++) {
+            if (arrTabCtls[i] && typeof arrTabCtls[i].onAutoTraderState === "function") { arrTabCtls[i].onAutoTraderState(); }
+        }
+        syncAllPolling();
     }
 
     // ---- Admin-owned Position Trigger defaults (Multiplier / Tolerance / SL / TP) ----
@@ -900,24 +1013,39 @@
     var posTrgSaving = false;
     function applyPosTrgDefaults(d) {
         if (!d) { return; }
-        if (d.posTrgMultiplier != null && multiplierEl) { multiplierEl.value = String(d.posTrgMultiplier); }
-        if (d.posTrgTolerance != null && tolEl) { tolEl.value = String(d.posTrgTolerance); }
-        if (d.posTrgSlPoints != null && slEl) { slEl.value = String(d.posTrgSlPoints); }
-        if (d.posTrgTpPoints != null && tpEl) { tpEl.value = String(d.posTrgTpPoints); }
+        if (d.posTrgMultiplier != null && sharedMultiplierEl) { sharedMultiplierEl.value = String(d.posTrgMultiplier); }
+        syncSharedMultiplierToTabs();
+        for (var i = 0; i < arrTabCtls.length; i++) {
+            var ctl = arrTabCtls[i];
+            if (!ctl) { continue; }
+            if (d.posTrgTolerance != null && ctl.tolEl) { ctl.tolEl.value = String(d.posTrgTolerance); }
+            if (d.posTrgSlPoints != null && ctl.slEl) { ctl.slEl.value = String(d.posTrgSlPoints); }
+            if (d.posTrgTpPoints != null && ctl.tpEl) { ctl.tpEl.value = String(d.posTrgTpPoints); }
+        }
     }
     function setPosTrgAdminMode() {
-        var governed = [multiplierEl, tolEl, slEl, tpEl];
-        governed.forEach(function (el) {
+        function govern(el) {
             if (!el) { return; }
             el.readOnly = !isPageAdmin;
             el.disabled = !isPageAdmin;
             el.title = isPageAdmin
                 ? "Admin default for all users. Changing it saves globally."
                 : "Set by admin. Only an admin can change this.";
-        });
-        if (calcBtn) {
-            calcBtn.style.display = isPageAdmin ? "" : "none";
-            calcBtn.disabled = !isPageAdmin;
+            if (el.getAttribute("data-pos-trg-multiplier") !== null) {
+                el.title = "Multiplier is shared with the BTCUSD tab.";
+            }
+        }
+        govern(sharedMultiplierEl);
+        for (var i = 0; i < arrTabCtls.length; i++) {
+            var ctl = arrTabCtls[i];
+            if (!ctl) { continue; }
+            govern(ctl.tolEl);
+            govern(ctl.slEl);
+            govern(ctl.tpEl);
+        }
+        if (sharedCalcBtn) {
+            sharedCalcBtn.style.display = isPageAdmin ? "" : "none";
+            sharedCalcBtn.disabled = !isPageAdmin;
         }
     }
     async function loadPosTrgDefaults() {
@@ -944,15 +1072,16 @@
         if (!isPageAdmin || posTrgSaving) { return; }
         posTrgSaving = true;
         try {
+            var ctl0 = arrTabCtls[0] || null;
             var response = await fetch("/api/crypto-scalper/position-triggers/defaults", {
                 method: "POST",
                 credentials: "same-origin",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    posTrgMultiplier: multiplierEl ? multiplierEl.value : "",
-                    posTrgTolerance: tolEl ? tolEl.value : "",
-                    posTrgSlPoints: slEl ? slEl.value : "",
-                    posTrgTpPoints: tpEl ? tpEl.value : ""
+                    posTrgMultiplier: sharedMultiplierEl ? sharedMultiplierEl.value : "",
+                    posTrgTolerance: ctl0 && ctl0.tolEl ? ctl0.tolEl.value : "",
+                    posTrgSlPoints: ctl0 && ctl0.slEl ? ctl0.slEl.value : "",
+                    posTrgTpPoints: ctl0 && ctl0.tpEl ? ctl0.tpEl.value : ""
                 })
             });
             var result = await response.json().catch(function () { return {}; });
@@ -963,39 +1092,46 @@
         catch (e) { /* non-fatal; values still apply locally for this session */ }
         finally { posTrgSaving = false; }
     }
-    [multiplierEl, tolEl, slEl, tpEl].forEach(function (el) {
+    [sharedMultiplierEl].forEach(function (el) {
         if (!el) { return; }
         el.addEventListener("change", queuePosTrgDefaultsSave);
-        el.addEventListener("input", queuePosTrgDefaultsSave);
+        el.addEventListener("input", function () { syncSharedMultiplierToTabs(); queuePosTrgDefaultsSave(); });
     });
-    loadPosTrgDefaults();
-
-    var pollInterval = null;
-    var lastMarkPrice = null;
-    var currentSymbol = "BTC";
-    var autoTraderOn = false;
-    var btcTabActive = false;
-
-    function setStatus(message, tone) {
-        statusEl.textContent = String(message || "");
-        statusEl.className = "rolling-pos-trg-status show " + (tone || "");
+    function syncSharedMultiplierToTabs() {
+        if (!sharedMultiplierEl) { return; }
+        for (var i = 0; i < arrTabCtls.length; i++) {
+            var mctl = arrTabCtls[i];
+            if (mctl && mctl.multiplierEl && mctl.multiplierEl !== sharedMultiplierEl) {
+                mctl.multiplierEl.value = sharedMultiplierEl.value;
+            }
+        }
     }
-
+    function bindDefaultsInputsForCtl(ctl) {
+        if (!ctl) { return; }
+        [ctl.tolEl, ctl.slEl, ctl.tpEl].forEach(function (el) {
+            if (!el) { return; }
+            el.addEventListener("change", queuePosTrgDefaultsSave);
+            el.addEventListener("input", queuePosTrgDefaultsSave);
+        });
+    }
     function readNumber(el) {
         var v = Number(el && el.value);
         return Number.isFinite(v) ? v : null;
     }
 
-    function readFormInputs() {
-        var vBaseQty = Math.max(1, Math.floor(readNumber(qtyEl) || 1));
-        var vMultiplier = Math.max(1, Math.floor(readNumber(multiplierEl) || 1));
-        return {
-            qty: vBaseQty * vMultiplier,
-            strike: readNumber(strikeEl),
-            slPoints: readNumber(slEl),
-            tpPoints: readNumber(tpEl),
-            tolerance: Math.max(1, Math.floor(readNumber(tolEl) || 20))
-        };
+    function statusToTone(s) {
+        if (s === "success") { return "success"; }
+        if (s === "warning") { return "warning"; }
+        return "danger";
+    }
+
+    function escapeHtml(s) {
+        return String(s == null ? "" : s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
     }
 
     function validate(inp) {
@@ -1018,23 +1154,8 @@
         return vMark < Number(strike);
     }
 
-    function statusToTone(s) {
-        if (s === "success") { return "success"; }
-        if (s === "warning") { return "warning"; }
-        return "danger";
-    }
-
-    function escapeHtml(s) {
-        return String(s == null ? "" : s)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#39;");
-    }
-
-    async function fetchTicker(symbol) {
-        var response = await fetch("/api/crypto-scalper/position-triggers/ticker?symbol=" + encodeURIComponent(symbol), { credentials: "same-origin" });
+    async function fetchTicker(pSymbol) {
+        var response = await fetch("/api/crypto-scalper/position-triggers/ticker?symbol=" + encodeURIComponent(pSymbol), { credentials: "same-origin" });
         var json = await response.json().catch(function () { return {}; });
         if (!response.ok || !json || json.status !== "success" || !json.data) {
             throw new Error((json && json.message) ? json.message : ("Ticker fetch failed (HTTP " + response.status + ")."));
@@ -1042,7 +1163,65 @@
         return json.data;
     }
 
-    function renderTicker(markPrice, strike) {
+    function createPosTrgTabCtl(tabKey, symbol, qtyId) {
+    var tabCap = capKey(tabKey);
+    var buyBtn = document.getElementById("btnPosTrg" + tabCap + "Buy");
+    var sellBtn = document.getElementById("btnPosTrg" + tabCap + "Sell");
+    var statusEl = document.getElementById("rollingPosTrg" + tabCap + "Status");
+    var qtyEl = document.getElementById(qtyId);
+    var multiplierEl = document.querySelector('#rollingPosTrgPanel' + tabCap + ' [data-pos-trg-multiplier]') || sharedMultiplierEl;
+    var strikeEl = document.getElementById("txtPosTrg" + tabCap + "BuyStrike");
+    var slEl = document.getElementById("txtPosTrg" + tabCap + "SlPoints");
+    var tpEl = document.getElementById("txtPosTrg" + tabCap + "TpPoints");
+    var tolEl = document.getElementById("txtPosTrg" + tabCap + "Tolerance");
+    var tickerBox = document.getElementById("rollingPosTrg" + tabCap + "Ticker");
+    var tickerPriceEl = tickerBox ? tickerBox.querySelector("[data-pos-trg-ticker-price]") : null;
+    var tickerVsEl = tickerBox ? tickerBox.querySelector("[data-pos-trg-ticker-vs]") : null;
+    var pendingEmptyEl = document.getElementById("rollingPosTrg" + tabCap + "PendingEmpty");
+    var pendingTableEl = document.getElementById("rollingPosTrg" + tabCap + "PendingTable");
+    var pendingBodyEl = document.getElementById("rollingPosTrg" + tabCap + "PendingBody");
+    var watcherBadgeEl = document.getElementById("rollingPosTrg" + tabCap + "WatcherBadge");
+    if (!buyBtn || !sellBtn || !statusEl || !qtyEl || !strikeEl || !slEl || !tpEl || !tolEl || !pendingEmptyEl || !pendingTableEl || !pendingBodyEl) {
+        return null;
+    }
+    bindDefaultsInputsForCtl({ tolEl: tolEl, slEl: slEl, tpEl: tpEl });
+    var ctl = {
+        key: tabKey, symbol: symbol, tabCap: tabCap,
+        tolEl: tolEl, slEl: slEl, tpEl: tpEl, multiplierEl: multiplierEl,
+        pollInterval: null, lastMarkPrice: null,
+        setStatus: null, readFormInputs: null, validate: null,
+        renderTicker: null, setTickerIdle: null,
+        refreshLists: null, tickOnce: null,
+        syncPollingState: null, onAutoTraderState: null, syncManualTriggerButtons: null,
+        executeSave: null
+    };
+    ctl.isTabActive = function () { return activeTabKey === tabKey; };
+    ctl.setStatus = function (message, tone) {
+        statusEl.textContent = String(message || "");
+        statusEl.className = "rolling-pos-trg-status show " + (tone || "");
+    };
+    ctl.readFormInputs = function () {
+        var vBaseQty = Math.max(1, Math.floor(readNumber(qtyEl) || 1));
+        var vMultiplier = Math.max(1, Math.floor(readNumber(sharedMultiplierEl) || readNumber(multiplierEl) || 1));
+        return {
+            qty: vBaseQty * vMultiplier,
+            strike: readNumber(strikeEl),
+            slPoints: readNumber(slEl),
+            tpPoints: readNumber(tpEl),
+            tolerance: Math.max(1, Math.floor(readNumber(tolEl) || 20))
+        };
+    };
+    ctl.validate = function (inp) {
+        if (!(inp.qty > 0)) { return "Enter a valid Qty (at least 1 contract)."; }
+        if (!(inp.strike > 0)) { return "Enter a valid Strike Price."; }
+        if (!(inp.slPoints > 0)) { return "Enter a valid SL Points value."; }
+        if (!(inp.tpPoints > 0)) { return "Enter a valid TP Points value."; }
+        if (!((inp.strike - inp.slPoints) > 0 && (inp.strike + inp.tpPoints) > 0)) {
+            return "Computed SL/TP prices would be non-positive. Reduce SL / TP Points or increase Strike Price.";
+        }
+        return null;
+    };
+    ctl.renderTicker = function (markPrice, strike) {
         if (!tickerBox || !tickerPriceEl) { return; }
         tickerPriceEl.textContent = Number.isFinite(markPrice) ? markPrice.toFixed(2) : "--";
         tickerBox.classList.remove("above-strike", "below-strike");
@@ -1056,21 +1235,21 @@
         }
     }
 
-    function setTickerIdle(message) {
-        lastMarkPrice = null;
+    ctl.setTickerIdle = function (message) {
+        ctl.lastMarkPrice = null;
         if (!tickerBox || !tickerPriceEl) { return; }
         tickerPriceEl.textContent = "--";
         tickerBox.classList.remove("above-strike", "below-strike");
         if (tickerVsEl) { tickerVsEl.textContent = message || ""; }
     }
 
-    async function saveOrder(inp) {
+    ctl.saveOrder = async function (inp) {
         var response = await fetch("/api/crypto-scalper/position-triggers/save", {
             method: "POST",
             credentials: "same-origin",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                symbol: "BTC",
+                symbol: symbol,
                 side: inp.side,
                 qty: inp.qty,
                 limitPrice: inp.strike,
@@ -1088,7 +1267,7 @@
         };
     }
 
-    async function fetchPending() {
+    ctl.fetchPending = async function () {
         var response = await fetch("/api/crypto-scalper/position-triggers/pending", { credentials: "same-origin" });
         var json = await response.json().catch(function () { return {}; });
         if (!response.ok || !json || json.status !== "success" || !Array.isArray(json.data)) {
@@ -1097,7 +1276,7 @@
         return json.data;
     }
 
-    async function fetchDeltaOpenOrders(symbol) {
+    ctl.fetchDeltaOpenOrders = async function (symbol) {
         var response = await fetch("/api/crypto-scalper/position-triggers/open-orders?symbol=" + encodeURIComponent(symbol), { credentials: "same-origin" });
         var json = await response.json().catch(function () { return {}; });
         if (!response.ok || !json || json.status !== "success" || !json.data) {
@@ -1106,7 +1285,7 @@
         return json.data;
     }
 
-    async function deletePending(id) {
+    ctl.deletePending = async function (id) {
         var response = await fetch("/api/crypto-scalper/position-triggers/pending/" + encodeURIComponent(id), {
             method: "DELETE",
             credentials: "same-origin"
@@ -1118,7 +1297,7 @@
         return json;
     }
 
-    async function cancelDeltaOrder(orderId, symbol, productId) {
+    ctl.cancelDeltaOrder = async function (orderId, symbol, productId) {
         var response = await fetch("/api/crypto-scalper/position-triggers/open-orders/cancel", {
             method: "POST",
             credentials: "same-origin",
@@ -1133,7 +1312,7 @@
     }
 
 
-    function distanceForPending(pRecord, markPrice) {
+    ctl.distanceForPending = function (pRecord, markPrice) {
         var strike = Number(pRecord.strike || 0);
         var tol = Math.max(1, Number(pRecord.tolerance || 1));
         if (!Number.isFinite(markPrice) || !Number.isFinite(strike)) { return null; }
@@ -1144,13 +1323,13 @@
         return { absDist: absDist, direction: direction, ready: validMaker && absDist <= tol, withinTolerance: absDist <= tol };
     }
 
-    function renderOrders(pPending, pDeltaBuy, pDeltaSell, markPrice) {
+    ctl.renderOrders = function (pPending, pDeltaBuy, pDeltaSell, markPrice) {
         var arrRows = [];
         var arrPending = Array.isArray(pPending) ? pPending : [];
         for (var i = 0; i < arrPending.length; i++) {
             var p = arrPending[i];
             var side = String(p.side || "").toUpperCase();
-            var dist = distanceForPending(p, markPrice);
+            var dist = ctl.distanceForPending(p, markPrice);
             arrRows.push({
                 kind: "pending",
                 id: String(p.id || ""),
@@ -1230,7 +1409,7 @@
         pendingBodyEl.innerHTML = html;
     }
 
-    async function fetchWatcherStatus() {
+    ctl.fetchWatcherStatus = async function () {
         var response = await fetch("/api/crypto-scalper/position-triggers/watcher-status", { credentials: "same-origin" });
         var json = await response.json().catch(function () { return {}; });
         if (!response.ok || !json || json.status !== "success" || !json.data) {
@@ -1239,22 +1418,25 @@
         return json.data;
     }
 
-    function renderWatcherBadge(status) {
+    ctl.renderWatcherBadge = function (status) {
         if (!watcherBadgeEl) { return; }
-        var vRunning = Boolean(status && status.watcherRunning);
+        var vStopping = Boolean(status && status.cryptoScalperStopRequested);
+        var vRunning = Boolean(status && status.watcherRunning) && !vStopping;
         var vPending = Number((status && status.pendingCount) || 0);
         watcherBadgeEl.className = "rolling-pos-trg-watcher-badge" + (vRunning ? " is-running" : " is-stopped");
-        watcherBadgeEl.textContent = vRunning
-            ? ("Server: watching (" + vPending + " queued)")
-            : "Server: stopped";
-        watcherBadgeEl.title = vRunning
-            ? ("Server-side watcher is running every " + Number(status.intervalMs || 0) + "ms. Queued orders auto-fire even if the browser is closed.")
-            : "Server-side watcher is not running. Turn Auto Trader ON to start it.";
+        watcherBadgeEl.textContent = vStopping
+            ? "Server: stopping (waiting for flat)"
+            : (vRunning ? ("Server: watching (" + vPending + " queued)") : "Server: stopped");
+        watcherBadgeEl.title = vStopping
+            ? "Auto Trader stop was requested. No new strategy orders will be placed. Server checks Delta every 3 minutes until positions and unfilled entry orders are flat."
+            : (vRunning
+                ? ("Server-side watcher is running every " + Number(status.intervalMs || 0) + "ms. Queued orders auto-fire even if the browser is closed.")
+                : "Server-side watcher is not running. Turn Auto Trader ON to start it.");
     }
 
-    async function refreshWatcherStatus() {
+    ctl.refreshWatcherStatus = async function () {
         try {
-            renderWatcherBadge(await fetchWatcherStatus());
+            ctl.renderWatcherBadge(await ctl.fetchWatcherStatus());
         }
         catch (e) {
             if (watcherBadgeEl) {
@@ -1264,114 +1446,137 @@
         }
     }
 
-    async function refreshLists() {
+    ctl.pendingMatchesSymbol = function (pRow) {
+        var vSym = String((pRow && (pRow.symbol || pRow.contractSymbol)) || "").trim().toUpperCase();
+        if (vSym === symbol || vSym === symbol + "USD") { return true; }
+        return false;
+    };
+    ctl.refreshLists = async function () {
         var arrPending = [];
         var objOpen = { buy: [], sell: [] };
-        try { arrPending = await fetchPending(); } catch (e) { /* ignore */ }
-        try { objOpen = await fetchDeltaOpenOrders(currentSymbol); } catch (e) { objOpen = { buy: [], sell: [] }; }
-        renderOrders(arrPending, objOpen && objOpen.buy, objOpen && objOpen.sell, lastMarkPrice);
+        try {
+            var arrAll = await ctl.fetchPending();
+            arrPending = (Array.isArray(arrAll) ? arrAll : []).filter(function (r) { return ctl.pendingMatchesSymbol(r); });
+        } catch (e) { /* ignore */ }
+        try { objOpen = await ctl.fetchDeltaOpenOrders(symbol); } catch (e) { objOpen = { buy: [], sell: [] }; }
+        ctl.renderOrders(arrPending, objOpen && objOpen.buy, objOpen && objOpen.sell, ctl.lastMarkPrice);
         return { pending: arrPending, open: objOpen };
     }
 
-    async function tickOnce() {
+    ctl.tickOnce = async function () {
         try {
-            var t = await fetchTicker(currentSymbol);
+            var t = await fetchTicker(symbol);
             var mp = Number(t.markPrice);
-            lastMarkPrice = Number.isFinite(mp) ? mp : null;
-            renderTicker(lastMarkPrice, readNumber(strikeEl));
+            ctl.lastMarkPrice = Number.isFinite(mp) ? mp : null;
+            ctl.renderTicker(ctl.lastMarkPrice, readNumber(strikeEl));
         }
         catch (e) {
-            lastMarkPrice = null;
+            ctl.lastMarkPrice = null;
         }
 
         // NOTE: the auto-fire decision now lives on the server (Position Trigger
         // watcher) so queued orders keep firing even when the browser is closed.
         // The browser only refreshes and displays the list.
-        await refreshWatcherStatus();
-        await refreshLists();
+        await ctl.refreshWatcherStatus();
+        await ctl.refreshLists();
     }
 
-    function stopPolling() {
-        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+    ctl.stopPolling = function () {
+        if (ctl.pollInterval) { clearInterval(ctl.pollInterval); ctl.pollInterval = null; }
     }
 
-    function startPolling() {
-        stopPolling();
-        pollInterval = setInterval(tickOnce, 3000);
+    ctl.startPolling = function () {
+        ctl.stopPolling();
+        ctl.pollInterval = setInterval(ctl.tickOnce, 3000);
     }
 
-    // The ticker (and the auto-fire loop that rides on it) only runs while the
-    // Auto Trader is ON and the BTC tab is the active tab.
-    function syncPollingState() {
-        if (autoTraderOn && btcTabActive) {
-            if (!pollInterval) {
-                setTickerIdle("");
-                tickOnce();
-                startPolling();
+    // The ticker only runs while the Auto Trader is actively ON and the BTC tab
+    // is the active tab. A requested stop immediately pauses the ticker too.
+    ctl.syncPollingState = function () {
+        if (autoTraderOn && !autoTraderStopping && ctl.isTabActive()) {
+            if (!ctl.pollInterval) {
+                ctl.setTickerIdle("");
+                void ctl.tickOnce();
+                ctl.startPolling();
             }
         }
         else {
-            stopPolling();
-            if (!autoTraderOn) {
-                setTickerIdle("Auto Trader OFF");
+            ctl.stopPolling();
+            if (autoTraderStopping) {
+                ctl.setTickerIdle("Auto Trader STOPPING");
+                if (tickerVsEl) { tickerVsEl.textContent = "Auto Trader STOPPING"; }
+            }
+            else if (!autoTraderOn) {
+                ctl.setTickerIdle("Auto Trader OFF");
                 // Clear the distance hints since no live price is available.
                 if (tickerVsEl) { tickerVsEl.textContent = "Auto Trader OFF"; }
             }
         }
     }
 
-    function applyAutoTraderState(enabled) {
-        var vNext = Boolean(enabled);
-        if (vNext === autoTraderOn) {
-            syncPollingState();
-            return;
+    ctl.onAutoTraderState = function () {
+        if (autoTraderStopping) {
+            ctl.setTickerIdle("Auto Trader STOPPING");
+            ctl.setStatus("Auto Trader stop requested. Ticker paused; waiting for Delta to confirm flat. No new strategy orders will be placed.", "warning");
+            ctl.syncManualTriggerButtons();
         }
-        autoTraderOn = vNext;
-        if (!autoTraderOn) {
-            setTickerIdle("Auto Trader OFF");
-            setStatus("Auto Trader is OFF. Ticker and auto-fire are paused.", "warning");
+        else if (!autoTraderOn) {
+            ctl.setTickerIdle("Auto Trader OFF");
+            ctl.setStatus("Auto Trader is OFF. Ticker and auto-fire are paused.", "warning");
+            ctl.syncManualTriggerButtons();
         }
         else {
-            setTickerIdle("");
+            ctl.setTickerIdle("");
+            ctl.syncManualTriggerButtons();
         }
-        syncPollingState();
+    };
+
+
+    ctl.syncManualTriggerButtons = function () {
+        var vDisabled = Boolean(autoTraderStopping);
+        [buyBtn, sellBtn].forEach(function (btn) {
+            if (btn) {
+                if (!btn.getAttribute("data-pos-trg-original-title")) {
+                    btn.setAttribute("data-pos-trg-original-title", btn.title || "");
+                }
+                btn.disabled = vDisabled;
+                btn.title = vDisabled
+                    ? "Auto Trader stop is in progress. Buttons resume after Delta confirms flat."
+                    : (btn.getAttribute("data-pos-trg-original-title") || "");
+            }
+        });
     }
 
-    // Listen for Auto Trader state broadcasts from the main page script.
-    window.addEventListener("optionyze:autotrader", function (ev) {
-        var d = ev && ev.detail ? ev.detail : {};
-        applyAutoTraderState(d.enabled);
-    });
 
-    async function executeSave(side, buttonEl) {
+    ctl.executeSave = async function (side, buttonEl) {
         buttonEl.disabled = true;
-        setStatus("Saving " + (side === "BUY" ? "Buy" : "Sell") + " position trigger...", "info");
+        ctl.setStatus("Saving " + (side === "BUY" ? "Buy" : "Sell") + " position trigger...", "info");
         try {
-            var inp = readFormInputs();
+            var inp = ctl.readFormInputs();
             inp.side = side;
-            var err = validate(inp);
+            var err = ctl.validate(inp);
             if (err) {
-                setStatus(err, "warning");
+                ctl.setStatus(err, "warning");
                 return;
             }
-            var resSave = await saveOrder(inp);
+            var resSave = await ctl.saveOrder(inp);
             var msg = (resSave.body && resSave.body.message) ? resSave.body.message
                 : ("Save failed (HTTP " + resSave.status + ").");
-            setStatus(msg, resSave.tone);
+            ctl.setStatus(msg, resSave.tone);
             if (resSave.httpOk) {
-                await refreshLists();
+                await ctl.refreshLists();
             }
         }
         catch (objErr) {
-            setStatus(objErr && objErr.message ? objErr.message : String(objErr), "danger");
+            ctl.setStatus(objErr && objErr.message ? objErr.message : String(objErr), "danger");
         }
         finally {
-            buttonEl.disabled = false;
+            ctl.syncManualTriggerButtons();
         }
     }
 
-    buyBtn.addEventListener("click", function () { void executeSave("BUY", buyBtn); });
-    sellBtn.addEventListener("click", function () { void executeSave("SELL", sellBtn); });
+    buyBtn.addEventListener("click", function () { void ctl.executeSave("BUY", buyBtn); });
+    sellBtn.addEventListener("click", function () { void ctl.executeSave("SELL", sellBtn); });
 
     pendingBodyEl.addEventListener("click", async function (ev) {
         var t = ev.target;
@@ -1383,39 +1588,55 @@
         t.disabled = true;
         try {
             if (vKind === "delta") {
-                await cancelDeltaOrder(vId, currentSymbol, t.getAttribute("data-pos-trg-cancel-pid") || null);
-                setStatus("Delta order " + vId + " cancelled.", "info");
+                await ctl.cancelDeltaOrder(vId, symbol, t.getAttribute("data-pos-trg-cancel-pid") || null);
+                ctl.setStatus("Delta order " + vId + " cancelled.", "info");
             }
             else {
-                await deletePending(vId);
-                setStatus("Pending trigger removed: " + currentSymbol, "info");
+                await ctl.deletePending(vId);
+                ctl.setStatus("Pending trigger removed: " + symbol, "info");
             }
         }
         catch (objErr) {
-            setStatus(objErr && objErr.message ? objErr.message : String(objErr), "warning");
+            ctl.setStatus(objErr && objErr.message ? objErr.message : String(objErr), "warning");
             t.disabled = false;
             return;
         }
-        await refreshLists();
+        await ctl.refreshLists();
     });
 
-    var btcTabBtn = document.querySelector("[data-pos-trg-tab-trigger=btc]");
-    var otherTabBtns = Array.from(document.querySelectorAll("[data-pos-trg-tab-trigger]")).filter(function (b) { return b !== btcTabBtn; });
-    if (btcTabBtn) {
-        btcTabBtn.addEventListener("click", function () {
-            btcTabActive = true;
-            syncPollingState();
-        });
+    return ctl;
     }
-    otherTabBtns.forEach(function (b) {
-        b.addEventListener("click", function () {
-            btcTabActive = false;
-            syncPollingState();
+
+    // ---- Instantiate all symbol tabs (BTC / ETH / XAUT) ----
+    arrTabCtls = SYMBOL_TABS.map(function (t) { return createPosTrgTabCtl(t.key, t.symbol, t.qtyId); }).filter(Boolean);
+
+    // Tab switching: set the active tab key, then re-sync polling across all
+    // tabs so only the visible tab polls the ticker while Auto Trader is ON.
+    Array.prototype.forEach.call(document.querySelectorAll("[data-pos-trg-tab-trigger]"), function (btn) {
+        btn.addEventListener("click", function () {
+            activeTabKey = String(btn.getAttribute("data-pos-trg-tab-trigger") || "btc").toLowerCase();
+            syncAllPolling();
         });
     });
-    if (btcTabBtn && btcTabBtn.classList.contains("is-active")) {
-        btcTabActive = true;
+    var vInitialActiveTab = document.querySelector("[data-pos-trg-tab-trigger].is-active");
+    if (vInitialActiveTab) {
+        activeTabKey = String(vInitialActiveTab.getAttribute("data-pos-trg-tab-trigger") || "btc").toLowerCase();
     }
+
+    // Listen for Auto Trader state broadcasts from the main page script (single
+    // global listener). The raw enabled flag stays true while paused for the
+    // stop-drain, so use the effective flag for the ticker and the raw flag for
+    // the stopping label.
+    window.addEventListener("optionyze:autotrader", function (ev) {
+        var d = ev && ev.detail ? ev.detail : {};
+        var vStopping = Boolean(d.stopping);
+        var vEffectiveEnabled = ("effectiveEnabled" in d) ? Boolean(d.effectiveEnabled) : Boolean(d.enabled);
+        applyAutoTraderState(vEffectiveEnabled || (vStopping && Boolean(d.enabled)), vStopping);
+    });
+
+    // Load admin-owned defaults now that all tab controls exist, then sync.
+    loadPosTrgDefaults();
+    syncAllPolling();
 
     // Initial Auto Trader state comes from the server runtime endpoint.
     (async function initAutoTraderState() {
@@ -1423,7 +1644,8 @@
             var response = await fetch("/api/crypto-scalper/runtime", { credentials: "same-origin" });
             var json = await response.json().catch(function () { return {}; });
             if (response.ok && json && json.status === "success" && json.data) {
-                applyAutoTraderState(Boolean(json.data.autoTraderEnabled));
+                var vStopping = Boolean(json.data.state && json.data.state.cryptoScalperStopDrain && json.data.state.cryptoScalperStopDrain.requested);
+                applyAutoTraderState(Boolean(json.data.autoTraderEnabled), vStopping);
             }
         }
         catch (e) {

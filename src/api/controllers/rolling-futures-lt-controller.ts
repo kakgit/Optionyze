@@ -1649,11 +1649,26 @@ function getTotalBalanceUsd(pRow: DeltaWalletBalanceRow | null): number {
 }
 
 function getContractNameForSymbol(pSymbol: string): string {
-    return String(pSymbol || "").trim().toUpperCase() === "ETH" ? "ETHUSD" : "BTCUSD";
+    const vSymbol = String(pSymbol || "").trim().toUpperCase();
+    if (vSymbol === "ETH" || vSymbol === "ETHUSD") { return "ETHUSD"; }
+    if (vSymbol === "XAUT" || vSymbol === "XAUTUSD") { return "XAUTUSD"; }
+    return "BTCUSD";
 }
 
 function getLotSizeForSymbol(pSymbol: string): number {
-    return String(pSymbol || "").trim().toUpperCase() === "ETH" ? 0.01 : 0.001;
+    const vSymbol = String(pSymbol || "").trim().toUpperCase();
+    // Delta contract values: BTCUSD 0.001 BTC, ETHUSD 0.01 ETH, XAUTUSD 0.001 XAUT.
+    if (vSymbol === "ETH" || vSymbol === "ETHUSD") { return 0.01; }
+    return 0.001;
+}
+
+export type CryptoScalperPosTrgSymbol = "BTC" | "ETH" | "XAUT";
+
+export function normalizeCryptoScalperPosTrgSymbol(pValue: unknown): CryptoScalperPosTrgSymbol {
+    const vRaw = String(pValue || "BTC").trim().toUpperCase();
+    if (vRaw === "ETH" || vRaw === "ETHUSD") { return "ETH"; }
+    if (vRaw === "XAUT" || vRaw === "XAUTUSD") { return "XAUT"; }
+    return "BTC";
 }
 
 function resolveTrackedPositionTradingLotSize(
@@ -1782,6 +1797,59 @@ function resolveRollingFuturesExpiryDateByMode(pExpiryMode: string): string {
 function normalizeRollingFuturesExpiryDate(pExpiryMode: string, pExpiryDate: unknown): string {
     const vExplicitExpiryDate = normalizeIsoDateOnly(pExpiryDate);
     return vExplicitExpiryDate || resolveRollingFuturesExpiryDateByMode(pExpiryMode);
+}
+
+function isCryptoScalperStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
+    return String(pStrategyCode || "").trim() === "crypto-scalper";
+}
+
+function readCryptoScalperRuntimeState(pRuntime: { state?: unknown } | null): Record<string, unknown> {
+    if (!pRuntime || !pRuntime.state || typeof pRuntime.state !== "object") {
+        return {};
+    }
+    return pRuntime.state as Record<string, unknown>;
+}
+
+function getCryptoScalperStopDrainState(pRuntime: { state?: unknown } | null): {
+    requested: boolean;
+    requestedAt: string;
+    nextCheckAt: string;
+} {
+    const objState = readCryptoScalperRuntimeState(pRuntime);
+    const objDrain = objState.cryptoScalperStopDrain && typeof objState.cryptoScalperStopDrain === "object"
+        ? objState.cryptoScalperStopDrain as Record<string, unknown>
+        : {};
+    return {
+        requested: Boolean(objDrain.requested),
+        requestedAt: String(objDrain.requestedAt || "").trim(),
+        nextCheckAt: String(objDrain.nextCheckAt || "").trim()
+    };
+}
+
+function buildRuntimeStateWithCryptoScalperStopDrain(
+    pRuntime: { state?: unknown } | null,
+    pDrain: { requested: boolean; requestedAt?: string; nextCheckAt?: string } | null
+): Record<string, unknown> {
+    const objState = { ...(readCryptoScalperRuntimeState(pRuntime)) };
+    if (!pDrain || !pDrain.requested) {
+        delete objState.cryptoScalperStopDrain;
+        return objState;
+    }
+    objState.cryptoScalperStopDrain = {
+        requested: true,
+        requestedAt: String(pDrain.requestedAt || "").trim() || new Date().toISOString(),
+        nextCheckAt: String(pDrain.nextCheckAt || "").trim()
+    };
+    return objState;
+}
+
+function isCryptoScalperStopDrainRuntime(pRuntime: RollingFuturesLtRuntimeRecord | null): boolean {
+    if (!pRuntime || !isCryptoScalperStrategy(pRuntime.strategyCode)) {
+        return false;
+    }
+    return getCryptoScalperStopDrainState(pRuntime).requested
+        && Boolean(pRuntime.autoTraderEnabled)
+        && String(pRuntime.status || "").trim().toLowerCase() === "paused";
 }
 
 function getManualFutureOrderLockKey(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): string {
@@ -5198,7 +5266,7 @@ function getDeltaErrorPayload(pError: unknown): { error?: { code?: string; conte
 
 function getFriendlyDeltaPlaceOrderError(
     pError: unknown,
-    pMeta: { side: "buy" | "sell"; strike: number; symbol: "BTC" | "ETH" }
+    pMeta: { side: "buy" | "sell"; strike: number; symbol: CryptoScalperPosTrgSymbol }
 ): { status: string; message: string; data: { errorCode: string | null } } {
     const vCode = String(getDeltaErrorPayload(pError)?.error?.code || "").trim().toLowerCase();
     const vRawMessage = getErrorMessage(pError, "").trim();
@@ -7328,10 +7396,10 @@ function getRestartCloseProtectionUntil(pRuntime: RollingFuturesLtRuntimeRecord 
 }
 
 function buildRuntimeStateWithRestartCloseProtection(
-    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pRuntime: { state?: unknown } | null,
     pUntil = ""
 ): Record<string, unknown> {
-    const objState = { ...((pRuntime?.state || {}) as Record<string, unknown>) };
+    const objState = { ...(readCryptoScalperRuntimeState(pRuntime)) };
     if (!pUntil) {
         delete objState.restartCloseProtection;
         return objState;
@@ -17003,6 +17071,12 @@ export async function recoverRollingFuturesLtAutoTraderCycles(): Promise<void> {
     for (const objRuntime of arrRuntimeRows) {
         const vUserId = String(objRuntime.userId || "").trim();
         const vStrategyCode = objRuntime.strategyCode;
+        if (isCryptoScalperStopDrainRuntime(objRuntime)) {
+            stopAutoTraderCycle(vUserId, vStrategyCode);
+            stopPositionTriggerWatcher(vUserId, vStrategyCode);
+            await runCryptoScalperStopDrainCycle(vUserId, false);
+            continue;
+        }
         const vStatus = String(objRuntime.status || "").trim().toLowerCase();
         const vSelectedApiProfileId = String(objRuntime.selectedApiProfileId || "").trim();
         const bShouldResume = Boolean(objRuntime.autoTraderEnabled)
@@ -17040,7 +17114,11 @@ export async function recoverRollingFuturesLtAutoTraderCycles(): Promise<void> {
         });
         startAutoTraderCycle(vUserId, vStrategyCode);
         // Resume the server-side Position Trigger watcher after a restart.
-        startPositionTriggerWatcher(vUserId, vStrategyCode);
+        // A Crypto Scalper stop-drain intentionally stays out of this path: no
+        // strategy polling and no pending-trigger firing while it is draining.
+        if (!isCryptoScalperStrategy(vStrategyCode) || !getCryptoScalperStopDrainState(objRuntime).requested) {
+            startPositionTriggerWatcher(vUserId, vStrategyCode);
+        }
     }
 }
 
@@ -17054,6 +17132,9 @@ export async function recoverRollingFuturesLtAutoTraderCycles(): Promise<void> {
 const gPositionTriggerWatcherIntervals = new Map<string, NodeJS.Timeout>();
 const gPositionTriggerWatcherLocks = new Set<string>();
 const gPositionTriggerWatcherIntervalMs = 3000;
+const gCryptoScalperStopDrainIntervalMs = 3 * 60 * 1000;
+const gCryptoScalperStopDrainTimeouts = new Map<string, NodeJS.Timeout>();
+const gCryptoScalperStopDrainLocks = new Set<string>();
 
 function getPositionTriggerWatcherKey(pUserId: string, pStrategyCode: string): string {
     return `${String(pUserId || "").trim()}::${String(pStrategyCode || "").trim()}::position-trigger-watcher`;
@@ -17067,6 +17148,221 @@ function stopPositionTriggerWatcher(pUserId: string, pStrategyCode: string): voi
         gPositionTriggerWatcherIntervals.delete(vKey);
     }
     gPositionTriggerWatcherLocks.delete(vKey);
+}
+
+function getCryptoScalperStopDrainKey(pUserId: string, pStrategyCode: string): string {
+    return `${String(pUserId || "").trim()}::${String(pStrategyCode || "").trim()}::crypto-scalper-stop-drain`;
+}
+
+function stopCryptoScalperStopDrainTimerOnly(pUserId: string, pStrategyCode: string): void {
+    const vKey = getCryptoScalperStopDrainKey(pUserId, pStrategyCode);
+    const objTimer = gCryptoScalperStopDrainTimeouts.get(vKey);
+    if (objTimer) {
+        clearTimeout(objTimer);
+        gCryptoScalperStopDrainTimeouts.delete(vKey);
+    }
+    gCryptoScalperStopDrainLocks.delete(vKey);
+}
+
+function scheduleCryptoScalperStopDrainCheck(pUserId: string): void {
+    const vStrategyCode: RollingFuturesLtStrategyCode = "crypto-scalper";
+    stopCryptoScalperStopDrainTimerOnly(pUserId, vStrategyCode);
+    gCryptoScalperStopDrainTimeouts.set(
+        getCryptoScalperStopDrainKey(pUserId, vStrategyCode),
+        setTimeout(() => {
+            gCryptoScalperStopDrainTimeouts.delete(getCryptoScalperStopDrainKey(pUserId, vStrategyCode));
+            void runCryptoScalperStopDrainCycle(pUserId, true);
+        }, gCryptoScalperStopDrainIntervalMs)
+    );
+}
+
+function startCryptoScalperStopDrain(pUserId: string): void {
+    const vStrategyCode: RollingFuturesLtStrategyCode = "crypto-scalper";
+    stopAutoTraderCycle(pUserId, vStrategyCode);
+    stopPositionTriggerWatcher(pUserId, vStrategyCode);
+    scheduleCryptoScalperStopDrainCheck(pUserId);
+}
+
+async function buildCryptoScalperStopDrainSnapshot(
+    pUserId: string,
+    pProfileId: string
+): Promise<{
+    openPositions: RollingFuturesLtImportedPositionRecord[];
+    openEntryOrderCount: number;
+}> {
+    const { client } = await getDeltaClientForAccountId(pUserId, pProfileId);
+    const arrPositions: RollingFuturesLtImportedPositionRecord[] = [];
+    for (const vSymbol of ["BTC", "ETH"] as Array<"BTC" | "ETH">) {
+        const arrSymbolPositions = await fetchLiveFuturePositions(pUserId, "crypto-scalper", pProfileId, vSymbol, true);
+        for (const objPosition of arrSymbolPositions) {
+            if (objPosition && Number(objPosition.qty || 0) > 0) {
+                arrPositions.push(objPosition);
+            }
+        }
+    }
+    const objOrdersApi = client.apis?.Orders as {
+        getOrders?: (pParams: Record<string, unknown>) => Promise<unknown>;
+    } | undefined;
+    if (typeof objOrdersApi?.getOrders !== "function") {
+        throw new Error("Delta open orders API is not available in the installed client.");
+    }
+    const objResponse = await objOrdersApi.getOrders({ state: "open", page_size: 200 });
+    const objPayload = readResponsePayload(objResponse);
+    const arrRows = Array.isArray(objPayload.result)
+        ? objPayload.result as Array<Record<string, unknown>>
+        : [];
+    const vOpenEntryOrderCount = arrRows.filter((objRow) => {
+        if (Boolean(objRow?.reduce_only)) {
+            return false;
+        }
+        const vState = String(objRow?.state || objRow?.status || "").trim().toLowerCase();
+        if (vState === "filled" || vState === "cancelled" || vState === "canceled" || vState === "rejected" || vState === "expired") {
+            return false;
+        }
+        const vContract = String(objRow?.product_symbol || "").trim().toUpperCase();
+        const vSide = String(objRow?.side || "").trim().toLowerCase();
+        const vOrderType = String(objRow?.order_type || "").trim().toLowerCase();
+        const vUnfilledSize = Number(objRow?.unfilled_size ?? objRow?.size ?? 0);
+        return Boolean(vContract)
+            && (vSide === "buy" || vSide === "sell")
+            && (vOrderType === "limit_order" || vOrderType === "market_order")
+            && vUnfilledSize > 0;
+    }).length;
+    return { openPositions: arrPositions, openEntryOrderCount: vOpenEntryOrderCount };
+}
+
+function describeCryptoScalperStopDrainForResponse(
+    pRuntime: RollingFuturesLtRuntimeRecord | null,
+    pOpenPositions: RollingFuturesLtImportedPositionRecord[],
+    pOpenEntryOrderCount: number
+): string {
+    const vPositionCount = Array.isArray(pOpenPositions) ? pOpenPositions.length : 0;
+    const vOrderCount = Math.max(0, Math.floor(Number(pOpenEntryOrderCount || 0)));
+    const arrReasons: string[] = [];
+    if (vPositionCount > 0) {
+        arrReasons.push(`${vPositionCount} live position${vPositionCount === 1 ? "" : "s"}`);
+    }
+    if (vOrderCount > 0) {
+        arrReasons.push(`${vOrderCount} unfilled entry order${vOrderCount === 1 ? "" : "s"}`);
+    }
+    const vNext = String(getCryptoScalperStopDrainState(pRuntime).nextCheckAt || "").trim();
+    const vNextText = vNext ? ` Next Delta check: ${vNext}.` : "";
+    if (!arrReasons.length) {
+        return "Auto Trader is flat. Completing shutdown.";
+    }
+    return `Auto Trader stop requested. Waiting for ${arrReasons.join(" and ")} to clear before switching fully OFF. No new strategy orders will be placed.${vNextText}`;
+}
+
+async function finalizeCryptoScalperStopDrain(
+    pUserId: string,
+    pReason: "flat" | "restart",
+    pProfileId = ""
+): Promise<RollingFuturesLtRuntimeRecord | null> {
+    const vStrategyCode: RollingFuturesLtStrategyCode = "crypto-scalper";
+    const objRuntime = await loadRollingFuturesLtRuntime(pUserId, vStrategyCode);
+    if (!isCryptoScalperStopDrainRuntime(objRuntime)) {
+        stopCryptoScalperStopDrainTimerOnly(pUserId, vStrategyCode);
+        stopAutoTraderCycle(pUserId, vStrategyCode);
+        stopPositionTriggerWatcher(pUserId, vStrategyCode);
+        return objRuntime;
+    }
+    const vProfileId = String(pProfileId || objRuntime?.selectedApiProfileId || "").trim();
+    const vSymbol = String(objRuntime?.currentSymbol || "BTC").trim() || "BTC";
+    stopCryptoScalperStopDrainTimerOnly(pUserId, vStrategyCode);
+    stopAutoTraderCycle(pUserId, vStrategyCode);
+    stopPositionTriggerWatcher(pUserId, vStrategyCode);
+    const objSavedRuntime = await saveRollingFuturesLtRuntime({
+        ...(objRuntime || getDefaultRollingFuturesLtRuntime(pUserId, vStrategyCode)),
+        userId: pUserId,
+        strategyCode: vStrategyCode,
+        status: "stopped",
+        autoTraderEnabled: false,
+        selectedApiProfileId: vProfileId,
+        currentSymbol: vSymbol,
+        lastError: "",
+        state: buildRuntimeStateWithRestartCloseProtection(
+            { ...(objRuntime || null), state: buildRuntimeStateWithCryptoScalperStopDrain(objRuntime, null) },
+            ""
+        )
+    });
+    await logFuturesEvent(pUserId, vStrategyCode, "engine_stopped", "info", "Crypto Scalper Auto Trader Stopped", "Stop-drain confirmed Delta is flat, so Auto Trader was switched fully OFF.", { symbol: objSavedRuntime.currentSymbol || "", reason: pReason });
+    return objSavedRuntime;
+}
+
+async function runCryptoScalperStopDrainCycle(pUserId: string, pFromTimer: boolean): Promise<void> {
+    const vStrategyCode: RollingFuturesLtStrategyCode = "crypto-scalper";
+    const vKey = getCryptoScalperStopDrainKey(pUserId, vStrategyCode);
+    if (gCryptoScalperStopDrainLocks.has(vKey)) {
+        return;
+    }
+    gCryptoScalperStopDrainLocks.add(vKey);
+    try {
+        const objRuntime = await loadRollingFuturesLtRuntime(pUserId, vStrategyCode);
+        if (!isCryptoScalperStopDrainRuntime(objRuntime)) {
+            stopCryptoScalperStopDrainTimerOnly(pUserId, vStrategyCode);
+            return;
+        }
+        if (pFromTimer) {
+            const vNextCheckMs = new Date(getCryptoScalperStopDrainState(objRuntime).nextCheckAt).getTime();
+            if (Number.isFinite(vNextCheckMs) && vNextCheckMs > Date.now()) {
+                scheduleCryptoScalperStopDrainCheck(pUserId);
+                return;
+            }
+        }
+        const vProfileId = String(objRuntime?.selectedApiProfileId || "").trim();
+        const vRequestedAt = getCryptoScalperStopDrainState(objRuntime).requestedAt;
+        if (!vProfileId) {
+            await saveRollingFuturesLtRuntime({
+                ...(objRuntime || getDefaultRollingFuturesLtRuntime(pUserId, vStrategyCode)),
+                userId: pUserId,
+                strategyCode: vStrategyCode,
+                lastError: "Crypto Scalper stop-drain needs a Delta API profile before checking positions.",
+                state: buildRuntimeStateWithCryptoScalperStopDrain(
+                    objRuntime,
+                    { requested: true, requestedAt: vRequestedAt, nextCheckAt: new Date(Date.now() + gCryptoScalperStopDrainIntervalMs).toISOString() }
+                )
+            });
+            scheduleCryptoScalperStopDrainCheck(pUserId);
+            return;
+        }
+        let objSnapshot: { openPositions: RollingFuturesLtImportedPositionRecord[]; openEntryOrderCount: number };
+        try {
+            objSnapshot = await buildCryptoScalperStopDrainSnapshot(pUserId, vProfileId);
+        }
+        catch (objError) {
+            const vMessage = getErrorMessage(objError, "Unable to verify live Delta positions during stop-drain.");
+            await saveRollingFuturesLtRuntime({
+                ...(objRuntime || getDefaultRollingFuturesLtRuntime(pUserId, vStrategyCode)),
+                userId: pUserId,
+                strategyCode: vStrategyCode,
+                lastError: vMessage,
+                state: buildRuntimeStateWithCryptoScalperStopDrain(
+                    objRuntime,
+                    { requested: true, requestedAt: vRequestedAt, nextCheckAt: new Date(Date.now() + gCryptoScalperStopDrainIntervalMs).toISOString() }
+                )
+            });
+            scheduleCryptoScalperStopDrainCheck(pUserId);
+            return;
+        }
+        if (objSnapshot.openPositions.length > 0 || objSnapshot.openEntryOrderCount > 0) {
+            await saveRollingFuturesLtRuntime({
+                ...(objRuntime || getDefaultRollingFuturesLtRuntime(pUserId, vStrategyCode)),
+                userId: pUserId,
+                strategyCode: vStrategyCode,
+                lastError: "",
+                state: buildRuntimeStateWithCryptoScalperStopDrain(
+                    objRuntime,
+                    { requested: true, requestedAt: vRequestedAt, nextCheckAt: new Date(Date.now() + gCryptoScalperStopDrainIntervalMs).toISOString() }
+                )
+            });
+            scheduleCryptoScalperStopDrainCheck(pUserId);
+            return;
+        }
+        await finalizeCryptoScalperStopDrain(pUserId, "flat", vProfileId);
+    }
+    finally {
+        gCryptoScalperStopDrainLocks.delete(vKey);
+    }
 }
 
 // Evaluates one queued pending order against the live mark price.
@@ -17126,7 +17422,7 @@ async function runPositionTriggerWatcherCycle(
         }
 
         for (const [vSymbolRaw, arrRecords] of arrBySymbol.entries()) {
-            const vSymbol: "BTC" | "ETH" = (vSymbolRaw === "ETH" || vSymbolRaw === "ETHUSD") ? "ETH" : "BTC";
+            const vSymbol: CryptoScalperPosTrgSymbol = normalizeCryptoScalperPosTrgSymbol(vSymbolRaw);
             let vMarkPrice = 0;
             try {
                 const objSnapshot = await getLiveMarketSnapshot({ symbol: vSymbol, contractName: getContractNameForSymbol(vSymbol) } as unknown as Parameters<typeof getLiveMarketSnapshot>[0]);
@@ -17329,10 +17625,16 @@ async function enableAutoTraderInternal(req: Request, res: Response, pStrategyCo
         selectedApiProfileId: vSelectedApiProfileId,
         currentSymbol: String(getMergedUiState(objProfile).symbol || ""),
         lastError: "",
-        state: {
-            ...buildRuntimeStateWithRestartCloseProtection(objExistingRuntime || null, ""),
-            engineMode: String(req.body?.engineMode || "").trim().toLowerCase() === "futures" ? "futures" : "options"
-        }
+        state: buildRuntimeStateWithCryptoScalperStopDrain(
+            {
+                ...(objExistingRuntime || null),
+                state: {
+                    ...buildRuntimeStateWithRestartCloseProtection(objExistingRuntime || null, ""),
+                    engineMode: String(req.body?.engineMode || "").trim().toLowerCase() === "futures" ? "futures" : "options"
+                }
+            },
+            null
+        )
     });
 
     await logFuturesEvent(
@@ -17360,6 +17662,10 @@ async function enableAutoTraderInternal(req: Request, res: Response, pStrategyCo
 }
 
 async function disableAutoTraderInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
+    if (isCryptoScalperStrategy(pStrategyCode)) {
+        await disableCryptoScalperAutoTraderWithStopDrain(req, res);
+        return;
+    }
     const vUserId = getAccountId(req);
     const objProfile = await readLiveProfile(vUserId, pStrategyCode);
     const objExistingRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
@@ -17396,6 +17702,78 @@ async function disableAutoTraderInternal(req: Request, res: Response, pStrategyC
         message: "Live auto trader disabled.",
         data: objSavedRuntime
     });
+}
+
+async function disableCryptoScalperAutoTraderWithStopDrain(req: Request, res: Response): Promise<void> {
+    const pStrategyCode: RollingFuturesLtStrategyCode = "crypto-scalper";
+    const vUserId = getAccountId(req);
+    const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+    const objExistingRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
+    const vProfileId = String(objProfile.selectedApiProfileId || "").trim();
+    if (!vProfileId) {
+        res.status(400).json({ status: "warning", message: "Select an API profile before stopping the live auto trader." });
+        return;
+    }
+    if (isCryptoScalperStopDrainRuntime(objExistingRuntime)) {
+        stopAutoTraderCycle(vUserId, pStrategyCode);
+        stopPositionTriggerWatcher(vUserId, pStrategyCode);
+        scheduleCryptoScalperStopDrainCheck(vUserId);
+        const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
+        res.json({ status: "success", message: "Stop already requested. Waiting for Delta to confirm flat.", data: objRuntime });
+        return;
+    }
+    let objSnapshot: { openPositions: RollingFuturesLtImportedPositionRecord[]; openEntryOrderCount: number };
+    try {
+        objSnapshot = await buildCryptoScalperStopDrainSnapshot(vUserId, vProfileId);
+    }
+    catch (objError) {
+        const vMessage = getErrorMessage(objError, "Unable to verify live Delta positions before stopping.");
+        res.status(502).json({ status: "danger", message: vMessage });
+        return;
+    }
+    const vSymbol = String(getMergedUiState(objProfile).symbol || objExistingRuntime?.currentSymbol || "BTC").trim() || "BTC";
+    if (objSnapshot.openPositions.length === 0 && objSnapshot.openEntryOrderCount === 0) {
+        stopCryptoScalperStopDrainTimerOnly(vUserId, pStrategyCode);
+        stopAutoTraderCycle(vUserId, pStrategyCode);
+        stopPositionTriggerWatcher(vUserId, pStrategyCode);
+        const objSavedRuntime = await saveRollingFuturesLtRuntime({
+            ...(objExistingRuntime || getDefaultRollingFuturesLtRuntime(vUserId, pStrategyCode)),
+            userId: vUserId,
+            strategyCode: pStrategyCode,
+            status: "stopped",
+            autoTraderEnabled: false,
+            selectedApiProfileId: vProfileId,
+            currentSymbol: vSymbol,
+            lastError: "",
+            state: buildRuntimeStateWithRestartCloseProtection(
+                { ...(objExistingRuntime || null), state: buildRuntimeStateWithCryptoScalperStopDrain(objExistingRuntime, null) },
+                ""
+            )
+        });
+        await logFuturesEvent(vUserId, pStrategyCode, "engine_stopped", "info", "Live Auto Trader Stopped", "Server-side live auto trader stopped.", { symbol: objSavedRuntime.currentSymbol || "", reason: "engine_stopped" });
+        res.json({ status: "success", message: "Live auto trader disabled.", data: objSavedRuntime });
+        return;
+    }
+    stopAutoTraderCycle(vUserId, pStrategyCode);
+    stopPositionTriggerWatcher(vUserId, pStrategyCode);
+    const vRequestedAt = new Date().toISOString();
+    const objDrainRuntime = await saveRollingFuturesLtRuntime({
+        ...(objExistingRuntime || getDefaultRollingFuturesLtRuntime(vUserId, pStrategyCode)),
+        userId: vUserId,
+        strategyCode: pStrategyCode,
+        status: "paused",
+        autoTraderEnabled: true,
+        selectedApiProfileId: vProfileId,
+        currentSymbol: vSymbol,
+        lastError: "",
+        state: buildRuntimeStateWithCryptoScalperStopDrain(
+            objExistingRuntime,
+            { requested: true, requestedAt: vRequestedAt, nextCheckAt: new Date(Date.now() + gCryptoScalperStopDrainIntervalMs).toISOString() }
+        )
+    });
+    startCryptoScalperStopDrain(vUserId);
+    await logFuturesEvent(vUserId, pStrategyCode, "engine_stopped", "info", "Live Auto Trader Stop Requested", describeCryptoScalperStopDrainForResponse(objDrainRuntime, objSnapshot.openPositions, objSnapshot.openEntryOrderCount), { symbol: objDrainRuntime.currentSymbol || "", reason: "crypto_scalper_stop_requested", openPositions: objSnapshot.openPositions.length, openEntryOrders: objSnapshot.openEntryOrderCount });
+    res.json({ status: "success", message: describeCryptoScalperStopDrainForResponse(objDrainRuntime, objSnapshot.openPositions, objSnapshot.openEntryOrderCount), data: objDrainRuntime });
 }
 
 async function getAccountSummaryInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
@@ -18530,6 +18908,14 @@ async function executeManualFutureInternal(req: Request, res: Response, pStrateg
         return;
     }
 
+    if (isCryptoScalperStopDrainRuntime(await loadRollingFuturesLtRuntime(vUserId, pStrategyCode))) {
+        res.status(400).json({
+            status: "warning",
+            message: "Auto Trader stop is in progress. Manual futures are paused until Delta confirms flat."
+        });
+        return;
+    }
+
     const objCheck = await performRollingFuturesLtConnectionCheck(vUserId, pStrategyCode, vSelectedApiProfileId);
     if (objCheck.profile.connectionStatus.state !== "connected") {
         res.status(400).json({
@@ -18736,6 +19122,13 @@ async function saveCryptoScalperPositionTriggerInternal(
     const vUserId = getAccountId(req);
 
     const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
+    if (isCryptoScalperStopDrainRuntime(objRuntime)) {
+        res.status(400).json({
+            status: "warning",
+            message: "Auto Trader stop is in progress. New position triggers are paused until Delta confirms flat."
+        });
+        return;
+    }
     if (!objRuntime
         || !objRuntime.autoTraderEnabled
         || String(objRuntime.status || "").trim().toLowerCase() !== "running") {
@@ -18746,8 +19139,7 @@ async function saveCryptoScalperPositionTriggerInternal(
         return;
     }
 
-    const vSymbolRaw = String(req.body?.symbol || "BTC").trim().toUpperCase();
-    const vSymbol: "BTC" | "ETH" = (vSymbolRaw === "ETH" || vSymbolRaw === "ETHUSD") ? "ETH" : "BTC";
+    const vSymbol: CryptoScalperPosTrgSymbol = normalizeCryptoScalperPosTrgSymbol(req.body?.symbol);
     const vSideRaw = String(req.body?.side || req.body?.action || "").trim().toUpperCase();
     const vSide: "" | "buy" | "sell" = vSideRaw === "SELL"
         ? "sell"
@@ -19036,6 +19428,13 @@ async function executePositionTriggerInternal(req: Request, res: Response, pStra
     const vUserId = getAccountId(req);
 
     const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
+    if (isCryptoScalperStopDrainRuntime(objRuntime)) {
+        res.status(400).json({
+            status: "warning",
+            message: "Auto Trader stop is in progress. New position triggers are paused until Delta confirms flat."
+        });
+        return;
+    }
     if (!objRuntime
         || !objRuntime.autoTraderEnabled
         || String(objRuntime.status || "").trim().toLowerCase() !== "running") {
@@ -19046,8 +19445,7 @@ async function executePositionTriggerInternal(req: Request, res: Response, pStra
         return;
     }
 
-    const vSymbolRaw = String(req.body?.symbol || "BTC").trim().toUpperCase();
-    const vSymbol: "BTC" | "ETH" = (vSymbolRaw === "ETH" || vSymbolRaw === "ETHUSD") ? "ETH" : "BTC";
+    const vSymbol: CryptoScalperPosTrgSymbol = normalizeCryptoScalperPosTrgSymbol(req.body?.symbol);
     const vSideRaw = String(req.body?.side || req.body?.action || "").trim().toUpperCase();
     const vSide: "" | "buy" | "sell" = vSideRaw === "SELL"
         ? "sell"
@@ -19321,6 +19719,15 @@ async function executeManualOptionInternal(req: Request, res: Response, pStrateg
             });
             return;
         }
+    }
+
+    if (isCryptoScalperStrategy(pStrategyCode)
+        && isCryptoScalperStopDrainRuntime(await loadRollingFuturesLtRuntime(vUserId, pStrategyCode))) {
+        res.status(400).json({
+            status: "warning",
+            message: "Auto Trader stop is in progress. Manual option orders are paused until Delta confirms flat."
+        });
+        return;
     }
 
     const vAction = String(req.body?.action || "").trim().toLowerCase();
@@ -19710,6 +20117,13 @@ async function executeStrategyInternal(req: Request, res: Response, pStrategyCod
     }
 
     const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
+    if (isCryptoScalperStopDrainRuntime(objRuntime)) {
+        res.status(400).json({
+            status: "warning",
+            message: "Auto Trader stop is in progress. Strategy execution is paused until Delta confirms flat."
+        });
+        return;
+    }
     if (!objRuntime?.autoTraderEnabled || String(objRuntime.status || "").trim().toLowerCase() !== "running") {
         res.status(400).json({
             status: "warning",
@@ -22685,8 +23099,7 @@ export async function executeCryptoScalperManualFuture(req: Request, res: Respon
 
 export async function getCryptoScalperPositionTriggerTicker(req: Request, res: Response): Promise<void> {
     const vUserId = getAccountId(req);
-    const vSymbolRaw = String(req.query?.symbol || req.body?.symbol || "BTC").trim().toUpperCase();
-    const vSymbol: "BTC" | "ETH" = (vSymbolRaw === "ETH" || vSymbolRaw === "ETHUSD") ? "ETH" : "BTC";
+    const vSymbol: CryptoScalperPosTrgSymbol = normalizeCryptoScalperPosTrgSymbol(req.query?.symbol ?? req.body?.symbol);
     try {
         const objSnapshot = await getLiveMarketSnapshot({ symbol: vSymbol, contractName: getContractNameForSymbol(vSymbol) } as unknown as Parameters<typeof getLiveMarketSnapshot>[0]);
         const vMarkPrice = Number(objSnapshot.futuresPrice || objSnapshot.spotPrice || 0);
@@ -22801,6 +23214,9 @@ export async function getCryptoScalperPositionTriggerWatcherStatus(req: Request,
             watcherRunning: bWatcherRunning,
             autoTraderEnabled: Boolean(objRuntime?.autoTraderEnabled),
             runtimeStatus: String(objRuntime?.status || "idle").trim(),
+            cryptoScalperStopRequested: isCryptoScalperStopDrainRuntime(objRuntime),
+            cryptoScalperStopRequestedAt: getCryptoScalperStopDrainState(objRuntime).requestedAt,
+            cryptoScalperNextCheckAt: getCryptoScalperStopDrainState(objRuntime).nextCheckAt,
             pendingCount: arrPending.length,
             intervalMs: gPositionTriggerWatcherIntervalMs
         }
@@ -22809,8 +23225,7 @@ export async function getCryptoScalperPositionTriggerWatcherStatus(req: Request,
 
 export async function listCryptoScalperOpenOrders(req: Request, res: Response): Promise<void> {
     const vUserId = getAccountId(req);
-    const vSymbolRaw = String(req.query?.symbol || req.body?.symbol || "BTC").trim().toUpperCase();
-    const vSymbol: "BTC" | "ETH" = (vSymbolRaw === "ETH" || vSymbolRaw === "ETHUSD") ? "ETH" : "BTC";
+    const vSymbol: CryptoScalperPosTrgSymbol = normalizeCryptoScalperPosTrgSymbol(req.query?.symbol ?? req.body?.symbol);
     try {
         const objProfile = await readLiveProfile(vUserId, "crypto-scalper");
         const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
@@ -22840,8 +23255,7 @@ export async function listCryptoScalperOpenOrders(req: Request, res: Response): 
 export async function cancelCryptoScalperOpenOrder(req: Request, res: Response): Promise<void> {
     const vUserId = getAccountId(req);
     const vOrderId = String(req.body?.orderId || req.query?.orderId || "").trim();
-    const vSymbolRaw = String(req.body?.symbol || req.query?.symbol || "BTC").trim().toUpperCase();
-    const vSymbol: "BTC" | "ETH" = (vSymbolRaw === "ETH" || vSymbolRaw === "ETHUSD") ? "ETH" : "BTC";
+    const vSymbol: CryptoScalperPosTrgSymbol = normalizeCryptoScalperPosTrgSymbol(req.body?.symbol ?? req.query?.symbol);
     if (!vOrderId) {
         res.status(400).json({ status: "warning", message: "orderId is required." });
         return;
