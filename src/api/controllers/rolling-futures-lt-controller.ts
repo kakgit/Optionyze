@@ -1333,6 +1333,8 @@ const gCryptoScalperPosTrgAdminFields = [
     "posTrgTpPoints"
 ] as const;
 
+const gCryptoScalperPosTrgSymbols = ["BTC", "ETH", "XAUT"] as const;
+
 function getCryptoScalperPosTrgDefaultsFallback(): Record<string, string> {
     return {
         posTrgMultiplier: "2",
@@ -1342,7 +1344,7 @@ function getCryptoScalperPosTrgDefaultsFallback(): Record<string, string> {
     };
 }
 
-function normalizeCryptoScalperPosTrgDefaults(pRaw: unknown): Record<string, string> {
+function normalizeCryptoScalperPosTrgSymbolDefaults(pRaw: unknown): Record<string, string> {
     const objFallback = getCryptoScalperPosTrgDefaultsFallback();
     const objSrc = (pRaw && typeof pRaw === "object" ? pRaw : {}) as Record<string, unknown>;
     const vNum = (pKey: string, pMin: number, pFallback: string): string => {
@@ -1361,7 +1363,24 @@ function normalizeCryptoScalperPosTrgDefaults(pRaw: unknown): Record<string, str
     };
 }
 
-async function readCryptoScalperPosTrgDefaults(): Promise<Record<string, string>> {
+// Accepts the per-symbol shape { BTC:{...}, ETH:{...}, XAUT:{...} } or the legacy
+// flat shape { posTrgMultiplier, ... } (migrated to every symbol so existing admin
+// settings carry over). Always returns the per-symbol shape.
+function normalizeCryptoScalperPosTrgDefaults(pRaw: unknown): Record<string, Record<string, string>> {
+    const objSrc = (pRaw && typeof pRaw === "object" ? pRaw : {}) as Record<string, unknown>;
+    const bLegacyFlat = gCryptoScalperPosTrgAdminFields.some((pKey) => objSrc[pKey] != null);
+    const objLegacyFlat = bLegacyFlat ? normalizeCryptoScalperPosTrgSymbolDefaults(objSrc) : null;
+    const objOut: Record<string, Record<string, string>> = {};
+    for (const vSymbol of gCryptoScalperPosTrgSymbols) {
+        const objSymRaw = objSrc[vSymbol];
+        objOut[vSymbol] = normalizeCryptoScalperPosTrgSymbolDefaults(
+            (objSymRaw && typeof objSymRaw === "object") ? objSymRaw : (objLegacyFlat || {})
+        );
+    }
+    return objOut;
+}
+
+async function readCryptoScalperPosTrgDefaults(): Promise<Record<string, Record<string, string>>> {
     try {
         if (isPostgresConfigured()) {
             const objPool = getPostgresPool();
@@ -1376,11 +1395,11 @@ async function readCryptoScalperPosTrgDefaults(): Promise<Record<string, string>
         return normalizeCryptoScalperPosTrgDefaults(objRaw);
     }
     catch (_objErr) {
-        return getCryptoScalperPosTrgDefaultsFallback();
+        return normalizeCryptoScalperPosTrgDefaults({});
     }
 }
 
-async function writeCryptoScalperPosTrgDefaults(pRaw: unknown): Promise<Record<string, string>> {
+async function writeCryptoScalperPosTrgDefaults(pRaw: unknown): Promise<Record<string, Record<string, string>>> {
     const objNormalized = normalizeCryptoScalperPosTrgDefaults(pRaw);
     if (isPostgresConfigured()) {
         const objPool = getPostgresPool();
@@ -23136,7 +23155,7 @@ export async function saveCryptoScalperPositionTrigger(req: Request, res: Respon
 export async function getCryptoScalperPosTrgDefaults(req: Request, res: Response): Promise<void> {
     try {
         const objDefaults = await readCryptoScalperPosTrgDefaults();
-        res.json({ status: "success", data: { ...objDefaults, isAdmin: Boolean(req.authAccount?.isAdmin) } });
+        res.json({ status: "success", data: { bySymbol: objDefaults, isAdmin: Boolean(req.authAccount?.isAdmin) } });
     }
     catch (objError) {
         res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to load position trigger defaults.") });
@@ -23150,8 +23169,9 @@ export async function saveCryptoScalperPosTrgDefaults(req: Request, res: Respons
     }
     try {
         const objBody = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
-        const objSaved = await writeCryptoScalperPosTrgDefaults(objBody);
-        res.json({ status: "success", message: "Position Trigger defaults saved for all users.", data: objSaved });
+        const objInput = (objBody.bySymbol && typeof objBody.bySymbol === "object" ? objBody.bySymbol : objBody) as Record<string, unknown>;
+        const objSaved = await writeCryptoScalperPosTrgDefaults(objInput);
+        res.json({ status: "success", message: "Position Trigger defaults saved for all users.", data: { bySymbol: objSaved } });
     }
     catch (objError) {
         res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to save position trigger defaults.") });

@@ -249,7 +249,7 @@
                         <div class="rolling-demo-grid rolling-pos-trg-fields">
                             <div class="rolling-demo-field">
                                 <label>Multiplier</label>
-                                <input class="rolling-futures-start-qty" type="number" min="1" max="1000" step="1" value="1" data-pos-trg-multiplier readonly disabled title="Multiplier is shared with the BTCUSD tab." aria-label="Multiplier (shared with BTCUSD tab)" />
+                                <input class="rolling-futures-start-qty" type="number" min="1" max="1000" step="1" value="2" id="txtPosTrgEthMultiplier" data-pos-trg-multiplier title="Admin default Multiplier for ETHUSD. Changing it saves globally." aria-label="ETHUSD Multiplier" />
                             </div>
                             <div class="rolling-demo-field">
                                 <label for="txtPosTrgEthTolerance">Tolerance</label>
@@ -301,7 +301,7 @@
                         <div class="rolling-demo-grid rolling-pos-trg-fields">
                             <div class="rolling-demo-field">
                                 <label>Multiplier</label>
-                                <input class="rolling-futures-start-qty" type="number" min="1" max="1000" step="1" value="1" data-pos-trg-multiplier readonly disabled title="Multiplier is shared with the BTCUSD tab." aria-label="Multiplier (shared with BTCUSD tab)" />
+                                <input class="rolling-futures-start-qty" type="number" min="1" max="1000" step="1" value="2" id="txtPosTrgXautMultiplier" data-pos-trg-multiplier title="Admin default Multiplier for XAUTUSD. Changing it saves globally." aria-label="XAUTUSD Multiplier" />
                             </div>
                             <div class="rolling-demo-field">
                                 <label for="txtPosTrgXautTolerance">Tolerance</label>
@@ -1011,13 +1011,13 @@
     // via POST /api/crypto-scalper/position-triggers/defaults. Normal users get
     // read-only inputs, and these values are never written into user profiles.
     var posTrgSaving = false;
-    function applyPosTrgDefaults(d) {
-        if (!d) { return; }
-        if (d.posTrgMultiplier != null && sharedMultiplierEl) { sharedMultiplierEl.value = String(d.posTrgMultiplier); }
-        syncSharedMultiplierToTabs();
+    function applyPosTrgDefaults(bySymbol) {
+        if (!bySymbol || typeof bySymbol !== "object") { return; }
         for (var i = 0; i < arrTabCtls.length; i++) {
             var ctl = arrTabCtls[i];
             if (!ctl) { continue; }
+            var d = bySymbol[ctl.symbol] || {};
+            if (d.posTrgMultiplier != null && ctl.multiplierEl) { ctl.multiplierEl.value = String(d.posTrgMultiplier); }
             if (d.posTrgTolerance != null && ctl.tolEl) { ctl.tolEl.value = String(d.posTrgTolerance); }
             if (d.posTrgSlPoints != null && ctl.slEl) { ctl.slEl.value = String(d.posTrgSlPoints); }
             if (d.posTrgTpPoints != null && ctl.tpEl) { ctl.tpEl.value = String(d.posTrgTpPoints); }
@@ -1031,14 +1031,11 @@
             el.title = isPageAdmin
                 ? "Admin default for all users. Changing it saves globally."
                 : "Set by admin. Only an admin can change this.";
-            if (el.getAttribute("data-pos-trg-multiplier") !== null) {
-                el.title = "Multiplier is shared with the BTCUSD tab.";
-            }
         }
-        govern(sharedMultiplierEl);
         for (var i = 0; i < arrTabCtls.length; i++) {
             var ctl = arrTabCtls[i];
             if (!ctl) { continue; }
+            govern(ctl.multiplierEl);
             govern(ctl.tolEl);
             govern(ctl.slEl);
             govern(ctl.tpEl);
@@ -1058,7 +1055,7 @@
                 isPageAdmin = Boolean(json.data.isAdmin);
                 setPosTrgAdminMode();
             }
-            applyPosTrgDefaults(json.data);
+            applyPosTrgDefaults(json.data.bySymbol);
         }
         catch (e) { /* keep EJS fallback values */ }
     }
@@ -1072,43 +1069,34 @@
         if (!isPageAdmin || posTrgSaving) { return; }
         posTrgSaving = true;
         try {
-            var ctl0 = arrTabCtls[0] || null;
+            var bySymbol = {};
+            for (var i = 0; i < arrTabCtls.length; i++) {
+                var ctl = arrTabCtls[i];
+                if (!ctl) { continue; }
+                bySymbol[ctl.symbol] = {
+                    posTrgMultiplier: ctl.multiplierEl ? ctl.multiplierEl.value : "",
+                    posTrgTolerance: ctl.tolEl ? ctl.tolEl.value : "",
+                    posTrgSlPoints: ctl.slEl ? ctl.slEl.value : "",
+                    posTrgTpPoints: ctl.tpEl ? ctl.tpEl.value : ""
+                };
+            }
             var response = await fetch("/api/crypto-scalper/position-triggers/defaults", {
                 method: "POST",
                 credentials: "same-origin",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    posTrgMultiplier: sharedMultiplierEl ? sharedMultiplierEl.value : "",
-                    posTrgTolerance: ctl0 && ctl0.tolEl ? ctl0.tolEl.value : "",
-                    posTrgSlPoints: ctl0 && ctl0.slEl ? ctl0.slEl.value : "",
-                    posTrgTpPoints: ctl0 && ctl0.tpEl ? ctl0.tpEl.value : ""
-                })
+                body: JSON.stringify({ bySymbol: bySymbol })
             });
             var result = await response.json().catch(function () { return {}; });
             if (response.ok && result && result.status === "success" && result.data) {
-                applyPosTrgDefaults(result.data);
+                applyPosTrgDefaults(result.data.bySymbol);
             }
         }
         catch (e) { /* non-fatal; values still apply locally for this session */ }
         finally { posTrgSaving = false; }
     }
-    [sharedMultiplierEl].forEach(function (el) {
-        if (!el) { return; }
-        el.addEventListener("change", queuePosTrgDefaultsSave);
-        el.addEventListener("input", function () { syncSharedMultiplierToTabs(); queuePosTrgDefaultsSave(); });
-    });
-    function syncSharedMultiplierToTabs() {
-        if (!sharedMultiplierEl) { return; }
-        for (var i = 0; i < arrTabCtls.length; i++) {
-            var mctl = arrTabCtls[i];
-            if (mctl && mctl.multiplierEl && mctl.multiplierEl !== sharedMultiplierEl) {
-                mctl.multiplierEl.value = sharedMultiplierEl.value;
-            }
-        }
-    }
     function bindDefaultsInputsForCtl(ctl) {
         if (!ctl) { return; }
-        [ctl.tolEl, ctl.slEl, ctl.tpEl].forEach(function (el) {
+        [ctl.multiplierEl, ctl.tolEl, ctl.slEl, ctl.tpEl].forEach(function (el) {
             if (!el) { return; }
             el.addEventListener("change", queuePosTrgDefaultsSave);
             el.addEventListener("input", queuePosTrgDefaultsSave);
@@ -1184,7 +1172,7 @@
     if (!buyBtn || !sellBtn || !statusEl || !qtyEl || !strikeEl || !slEl || !tpEl || !tolEl || !pendingEmptyEl || !pendingTableEl || !pendingBodyEl) {
         return null;
     }
-    bindDefaultsInputsForCtl({ tolEl: tolEl, slEl: slEl, tpEl: tpEl });
+    bindDefaultsInputsForCtl({ multiplierEl: multiplierEl, tolEl: tolEl, slEl: slEl, tpEl: tpEl });
     var ctl = {
         key: tabKey, symbol: symbol, tabCap: tabCap,
         tolEl: tolEl, slEl: slEl, tpEl: tpEl, multiplierEl: multiplierEl,
@@ -1202,7 +1190,7 @@
     };
     ctl.readFormInputs = function () {
         var vBaseQty = Math.max(1, Math.floor(readNumber(qtyEl) || 1));
-        var vMultiplier = Math.max(1, Math.floor(readNumber(sharedMultiplierEl) || readNumber(multiplierEl) || 1));
+        var vMultiplier = Math.max(1, Math.floor(readNumber(multiplierEl) || 1));
         return {
             qty: vBaseQty * vMultiplier,
             strike: readNumber(strikeEl),
