@@ -5363,6 +5363,7 @@
     }
 
     function renderClosedPositions(rows) {
+        console.log("DEBUG renderClosedPositions: rows=" + (Array.isArray(rows) ? rows.length : 0) + " symbols=" + (Array.isArray(rows) ? rows.map(function (r) { return String(r.symbol || "-"); }).join(",") : "N/A"));
         closedPositions = Array.isArray(rows)
             ? rows.slice().sort(function (left, right) {
                 return new Date(String(right?.startAt || right?.endAt || "")).getTime()
