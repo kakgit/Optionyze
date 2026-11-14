@@ -5562,6 +5562,7 @@ function renderClosedAltPositions(rows) {
         }
         const query = new URLSearchParams();
         const vFinalSymbol = String(pSymbol || vCurrentClosedPositionsSymbol || "BTC").trim().toUpperCase();
+        console.log("DEBUG loadClosedPositions ENTRY: arg=" + String(pSymbol) + " currentSymbol=" + vCurrentClosedPositionsSymbol + " finalSymbol=" + vFinalSymbol);
         query.set("symbol", vFinalSymbol);
         if (ids.closedFromDate instanceof HTMLInputElement && ids.closedFromDate.value) {
             query.set("fromDate", ids.closedFromDate.value);
@@ -5570,6 +5571,7 @@ function renderClosedAltPositions(rows) {
             query.set("toDate", ids.closedToDate.value);
         }
         const objResult = await getJson(`${endpointBase}/closed-positions?${query.toString()}`);
+        console.log("DEBUG loadClosedPositions RESPONSE: symbol=" + vFinalSymbol + " status=" + (objResult && objResult.status) + " count=" + (Array.isArray(objResult?.data?.positions) ? objResult.data.positions.length : 0));
         const arrRows = Array.isArray(objResult?.data?.positions) ? objResult.data.positions : [];
         if (objResult?.data?.recoveryMetrics) {
             applyRecoveryMetrics(objResult.data.recoveryMetrics);
