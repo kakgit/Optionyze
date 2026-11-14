@@ -5562,6 +5562,7 @@ function renderClosedAltPositions(rows) {
         }
         const query = new URLSearchParams();
         const vFinalSymbol = String(pSymbol || vCurrentClosedPositionsSymbol || "BTC").trim().toUpperCase();
+        console.log("DEBUG loadClosedPositions: symbol=" + vFinalSymbol + " (arg=" + String(pSymbol) + ", current=" + vCurrentClosedPositionsSymbol + ")");
         query.set("symbol", vFinalSymbol);
         if (ids.closedFromDate instanceof HTMLInputElement && ids.closedFromDate.value) {
             query.set("fromDate", ids.closedFromDate.value);
@@ -6276,6 +6277,7 @@ ids.closedAltFromDate?.addEventListener("change", function () {
             });
             var vSymbol = vSymbolMap[vTrigger] || "BTC";
             vCurrentClosedPositionsSymbol = vSymbol;
+            console.log("DEBUG setActiveTab: trigger=" + vTrigger + " symbol=" + vSymbol + " currentSymbol=" + vCurrentClosedPositionsSymbol);
             void loadClosedPositions(vSymbol).catch(function () { return undefined; });
         }
         arrTabBtns.forEach(function (btn) {
