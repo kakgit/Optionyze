@@ -3919,8 +3919,6 @@
                     return String(checkbox.value || "").trim();
                 }).filter(Boolean)
                 : [],
-            closedFromDate: String(ids.closedFromDate?.value || "").trim(),
-            closedToDate: String(ids.closedToDate?.value || "").trim()
         };
         getSupportedOptionRowIndexes().forEach(function (rowIndex) {
             Object.assign(state, readOptionRowState(rowIndex));
@@ -4027,8 +4025,12 @@
             setRenkoEmaDisplay(getRenkoEmaValueForSymbol(getCurrentSelectedSymbol()), getRenkoEmaEnabled());
             renderEmaFeedFromCurrentState();
             setCheckboxValue(ids.autoConfirmLiveActions, isPaperDemoVariant ? true : objUiState.autoConfirmLiveActions);
-            setInputValue(ids.closedFromDate, String(objUiState.closedFromDate || "").trim());
-            setInputValue(ids.closedToDate, String(objUiState.closedToDate || "").trim());
+            try {
+                setInputValue(ids.closedFromDate, String(localStorage.getItem("cryptoScalperClosedFromDate") || "").trim());
+            } catch (e) { /* localStorage unavailable */ }
+            try {
+                setInputValue(ids.closedToDate, String(localStorage.getItem("cryptoScalperClosedToDate") || "").trim());
+            } catch (e) { /* localStorage unavailable */ }
             closedFiltersChanged = previousClosedFromDate !== String(ids.closedFromDate?.value || "").trim()
                 || previousClosedToDate !== String(ids.closedToDate?.value || "").trim();
             if (supportsTelegramAlerts) {
@@ -5551,13 +5553,16 @@ function renderClosedAltPositions(rows) {
         }
     }
 
-    async function loadClosedPositions() {
+    var vCurrentClosedPositionsSymbol = "BTC";
+
+    async function loadClosedPositions(pSymbol) {
         if (!canUseLiveActions()) {
             renderClosedPositions([]);
             return [];
         }
         const query = new URLSearchParams();
-        query.set("symbol", String(ids.symbol?.value || "BTC").trim().toUpperCase());
+        const vFinalSymbol = String(pSymbol || vCurrentClosedPositionsSymbol || "BTC").trim().toUpperCase();
+        query.set("symbol", vFinalSymbol);
         if (ids.closedFromDate instanceof HTMLInputElement && ids.closedFromDate.value) {
             query.set("fromDate", ids.closedFromDate.value);
         }
@@ -6195,23 +6200,16 @@ async function loadClosedAltPositions() {
         checkbox.addEventListener("change", queueProfileSave);
     });
     ids.closedFromDate?.addEventListener("change", function () {
-        void saveProfile().then(function () {
-            return Promise.all([
-                loadClosedPositions().catch(function () { return undefined; }),
-                loadSavedOpenPositions().catch(function () { return undefined; }),
-                loadRuntimeStatus().catch(function () { return undefined; }),
-                loadEvents().catch(function () { return undefined; })
-            ]);
-        }).catch(function (error) {
-            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to update Closed Positions start date.", "danger");
-        });
+        try {
+            localStorage.setItem("cryptoScalperClosedFromDate", String(ids.closedFromDate.value || "").trim());
+        } catch (e) { /* localStorage unavailable */ }
+        void loadClosedPositions().catch(function () { return undefined; });
     });
     ids.closedToDate?.addEventListener("change", function () {
-        void saveProfile().then(function () {
-            return loadClosedPositions();
-        }).catch(function (error) {
-            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to filter closed positions.", "danger");
-        });
+        try {
+            localStorage.setItem("cryptoScalperClosedToDate", String(ids.closedToDate.value || "").trim());
+        } catch (e) { /* localStorage unavailable */ }
+        void loadClosedPositions();
     });
 ids.closedAltFromDate?.addEventListener("change", function () {
         void loadClosedAltPositions().catch(function (error) {
@@ -6258,6 +6256,38 @@ ids.closedAltFromDate?.addEventListener("change", function () {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to clear closed positions.", "danger");
         });
     });
+
+    // Position Triggers tab switching: filter Closed Positions by the active tab's symbol
+    (function initPosTrgTabSwitching() {
+        var arrTabBtns = Array.from(document.querySelectorAll('[data-pos-trg-tab-trigger]'));
+        if (!arrTabBtns.length) { return; }
+        var vSymbolMap = { btc: "BTC", eth: "ETH", xaut: "XAUT" };
+        function setActiveTab(vTrigger) {
+            arrTabBtns.forEach(function (btn) {
+                var bIsActive = String(btn.getAttribute("data-pos-trg-tab-trigger") || "") === vTrigger;
+                btn.classList.toggle("is-active", bIsActive);
+                btn.setAttribute("aria-selected", String(bIsActive));
+                btn.tabIndex = bIsActive ? 0 : -1;
+            });
+            document.querySelectorAll('[data-pos-trg-tab-panel]').forEach(function (panel) {
+                var bIsPanel = String(panel.getAttribute("data-pos-trg-tab-panel") || "") === vTrigger;
+                panel.hidden = !bIsPanel;
+                panel.classList.toggle("is-active", bIsPanel);
+            });
+            var vSymbol = vSymbolMap[vTrigger] || "BTC";
+            vCurrentClosedPositionsSymbol = vSymbol;
+            void loadClosedPositions(vSymbol).catch(function () { return undefined; });
+        }
+        arrTabBtns.forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var vTrigger = String(btn.getAttribute("data-pos-trg-tab-trigger") || "btc");
+                setActiveTab(vTrigger);
+            });
+        });
+        // Initialize with the default active tab (BTC)
+        setActiveTab("btc");
+    })();
+
     [ids.brok2Rec, ids.yet2Recover].forEach(function (node) {
         node?.addEventListener("change", function () {
             void saveRecoveryMetricsOverride().then(function (objResult) {

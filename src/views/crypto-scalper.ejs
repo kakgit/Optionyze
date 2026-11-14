@@ -189,7 +189,7 @@
                             </div>
                             <div class="rolling-demo-field">
                                 <label for="txtPosTrgBtcTolerance">Tolerance</label>
-                                <input type="number" id="txtPosTrgBtcTolerance" name="txtPosTrgBtcTolerance" min="1" step="1" value="20" title="Auto-watch fires when current price is within this many points of the Strike Price." placeholder="e.g. 20" />
+                                <input type="number" id="txtPosTrgBtcTolerance" name="txtPosTrgBtcTolerance" min="0" step="any" inputmode="decimal" value="20" title="Auto-watch fires when current price is within this many points of the Strike Price." placeholder="e.g. 0.50" />
                             </div>
                             <div class="rolling-demo-field">
                                 <label for="txtPosTrgBtcBuyStrike">Strike Price</label>
@@ -253,7 +253,7 @@
                             </div>
                             <div class="rolling-demo-field">
                                 <label for="txtPosTrgEthTolerance">Tolerance</label>
-                                <input type="number" id="txtPosTrgEthTolerance" min="1" step="1" value="20" title="Auto-watch fires when current price is within this many points of the Strike Price." placeholder="e.g. 20" />
+                                <input type="number" id="txtPosTrgEthTolerance" min="0" step="any" inputmode="decimal" value="20" title="Auto-watch fires when current price is within this many points of the Strike Price." placeholder="e.g. 0.50" />
                             </div>
                             <div class="rolling-demo-field">
                                 <label for="txtPosTrgEthBuyStrike">Strike Price</label>
@@ -305,7 +305,7 @@
                             </div>
                             <div class="rolling-demo-field">
                                 <label for="txtPosTrgXautTolerance">Tolerance</label>
-                                <input type="number" id="txtPosTrgXautTolerance" min="1" step="1" value="20" title="Auto-watch fires when current price is within this many points of the Strike Price." placeholder="e.g. 5" />
+                                <input type="number" id="txtPosTrgXautTolerance" min="0" step="any" inputmode="decimal" value="20" title="Auto-watch fires when current price is within this many points of the Strike Price." placeholder="e.g. 0.50" />
                             </div>
                             <div class="rolling-demo-field">
                                 <label for="txtPosTrgXautBuyStrike">Strike Price</label>
@@ -1196,7 +1196,7 @@
             strike: readNumber(strikeEl),
             slPoints: readNumber(slEl),
             tpPoints: readNumber(tpEl),
-            tolerance: Math.max(1, Math.floor(readNumber(tolEl) || 20))
+            tolerance: Math.max(0, readNumber(tolEl) || 20)
         };
     };
     ctl.validate = function (inp) {
@@ -1302,7 +1302,7 @@
 
     ctl.distanceForPending = function (pRecord, markPrice) {
         var strike = Number(pRecord.strike || 0);
-        var tol = Math.max(1, Number(pRecord.tolerance || 1));
+        var tol = Math.max(0, Number(pRecord.tolerance || 1));
         if (!Number.isFinite(markPrice) || !Number.isFinite(strike)) { return null; }
         var absDist = Math.abs(markPrice - strike);
         var direction = markPrice > strike ? "above" : (markPrice < strike ? "below" : "at");

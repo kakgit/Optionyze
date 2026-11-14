@@ -1350,14 +1350,14 @@ function normalizeCryptoScalperPosTrgSymbolDefaults(pRaw: unknown): Record<strin
     const vNum = (pKey: string, pMin: number, pFallback: string): string => {
         const vRaw = Number(objSrc[pKey] ?? objFallback[pKey] ?? pFallback);
         if (!Number.isFinite(vRaw)) { return pFallback; }
-        if (pKey === "posTrgMultiplier" || pKey === "posTrgTolerance") {
+        if (pKey === "posTrgMultiplier") {
             return String(Math.max(pMin, Math.floor(vRaw)));
         }
         return String(vRaw > 0 ? vRaw : Number(pFallback));
     };
     return {
         posTrgMultiplier: vNum("posTrgMultiplier", 1, objFallback.posTrgMultiplier),
-        posTrgTolerance: vNum("posTrgTolerance", 1, objFallback.posTrgTolerance),
+        posTrgTolerance: vNum("posTrgTolerance", 0, objFallback.posTrgTolerance),
         posTrgSlPoints: vNum("posTrgSlPoints", 1, objFallback.posTrgSlPoints),
         posTrgTpPoints: vNum("posTrgTpPoints", 1, objFallback.posTrgTpPoints)
     };
@@ -17392,7 +17392,7 @@ function isPositionTriggerReadyToFire(pRecord: { side: string; strike: number; t
     }
     const vSide = String(pRecord.side || "").trim().toUpperCase();
     const vStrike = Number(pRecord.strike);
-    const vTolerance = Math.max(1, Number(pRecord.tolerance || 1));
+    const vTolerance = Math.max(0, Number(pRecord.tolerance || 1));
     // Maker-valid means the limit would rest on the book instead of crossing it.
     const bMakerValid = vSide === "BUY"
         ? pMarkPrice > vStrike
@@ -19167,7 +19167,7 @@ async function saveCryptoScalperPositionTriggerInternal(
     const vLimitPrice = Number(req.body?.limitPrice);
     const vSlPoints = Number(req.body?.slPoints);
     const vTpPoints = Number(req.body?.tpPoints);
-    const vTolerance = Math.max(1, Math.floor(Number(req.body?.tolerance || 20)));
+    const vTolerance = Math.max(0, Number(req.body?.tolerance || 20));
 
     if (vSide !== "buy" && vSide !== "sell") {
         res.status(400).json({ status: "warning", message: "Select a valid side (Buy or Sell) before saving the position trigger." });
@@ -20397,7 +20397,8 @@ async function getClosedPositionsInternal(req: Request, res: Response, pStrategy
     try {
         const objProfile = await readLiveProfile(getAccountId(req), pStrategyCode);
         const objUiState = getMergedUiState(objProfile);
-        const vSelectedSymbol = normalizeSymbolValue(req.query?.symbol || req.body?.symbol || objUiState.symbol);
+        const vRawSymbol = String(req.query?.symbol || req.body?.symbol || objUiState.symbol).trim().toUpperCase();
+        const vSelectedSymbol = (vRawSymbol === "XAUT" || vRawSymbol === "XAUTUSD") ? "XAUT" : normalizeSymbolValue(vRawSymbol);
         const vFromDate = String(req.query?.fromDate || req.body?.fromDate || "").trim();
         const { client, profile } = await getDeltaClientForAccountId(getAccountId(req), vProfileId);
         if (isCoveredOptionsStrategy(pStrategyCode) && !vFromDate) {

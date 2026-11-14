@@ -58,7 +58,7 @@ function mapRowToRecord(pRow: PositionTriggerPendingRow): PositionTriggerPending
         strike: Number(pRow.strike),
         slPoints: Number(pRow.sl_points),
         tpPoints: Number(pRow.tp_points),
-        tolerance: Math.max(1, Math.floor(Number(pRow.tolerance))),
+        tolerance: Math.max(0, Number(pRow.tolerance || 0)),
         createdAt: new Date(pRow.created_at).toISOString(),
         updatedAt: new Date(pRow.updated_at).toISOString()
     };
@@ -82,7 +82,7 @@ export async function createPositionTriggerPendingRecord(
         strike: Number(pInput.strike),
         slPoints: Number(pInput.slPoints),
         tpPoints: Number(pInput.tpPoints),
-        tolerance: Math.max(1, Math.floor(Number(pInput.tolerance)))
+        tolerance: Math.max(0, Number(pInput.tolerance || 0))
     };
     if (isPostgresConfigured()) {
         const objPool = getPostgresPool();
