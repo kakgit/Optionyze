@@ -234,7 +234,7 @@
         updateRecoveryTotalsCheckbox: document.getElementById(`chk${idPrefix}UpdateRecoveryTotals`),
         clearClosedPositionsButton: document.getElementById(`btn${idPrefix}ClearClosedPositions`),
         refreshClosedPositionsButton: document.getElementById(`btn${idPrefix}RefreshClosedPositions`),
-        closedPositionsBody: document.getElementById(`${prefix}ClosedPositionsBody`),
+        closedPositionsBody: document.getElementById("rollingDualFuturesClosedAltClosedPositionsBody"),
         closedPrevPageButton: document.getElementById(`btn${idPrefix}ClosedPrevPage`),
         closedNextPageButton: document.getElementById(`btn${idPrefix}ClosedNextPage`),
         closedPageInfo: document.getElementById(`${prefix}ClosedPositionsPageInfo`),
