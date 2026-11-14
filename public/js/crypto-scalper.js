@@ -5562,7 +5562,6 @@ function renderClosedAltPositions(rows) {
         }
         const query = new URLSearchParams();
         const vFinalSymbol = String(pSymbol || vCurrentClosedPositionsSymbol || "BTC").trim().toUpperCase();
-        console.log("DEBUG loadClosedPositions ENTRY: arg=" + String(pSymbol) + " currentSymbol=" + vCurrentClosedPositionsSymbol + " finalSymbol=" + vFinalSymbol);
         query.set("symbol", vFinalSymbol);
         if (ids.closedFromDate instanceof HTMLInputElement && ids.closedFromDate.value) {
             query.set("fromDate", ids.closedFromDate.value);
