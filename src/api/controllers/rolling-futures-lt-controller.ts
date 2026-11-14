@@ -3038,7 +3038,7 @@ function hasTrackedOptionLeg(
 
 function isTrackedContractForSymbol(pContractName: unknown, pSymbol: string): boolean {
     const vContract = String(pContractName || "").trim().toUpperCase();
-    const vSymbol = normalizeSymbolValue(pSymbol);
+    const vSymbol = String(pSymbol || "").trim().toUpperCase();
     return (isFutureContractSymbol(vContract) && vContract.startsWith(vSymbol))
         || (isOptionContractSymbol(vContract) && (
             vContract.startsWith(`C-${vSymbol}-`)
@@ -20371,7 +20371,8 @@ async function getClosedPositionsInternal(req: Request, res: Response, pStrategy
         const vUserId = getAccountId(req);
         const objProfile = await readLiveProfile(vUserId, pStrategyCode);
         const objUiState = getMergedUiState(objProfile);
-        const vSelectedSymbol = normalizeSymbolValue(req.query?.symbol || req.body?.symbol || objUiState.symbol);
+        const vRawSymbol = String(req.query?.symbol || req.body?.symbol || objUiState.symbol).trim().toUpperCase();
+        const vSelectedSymbol = (vRawSymbol === "XAUT" || vRawSymbol === "XAUTUSD") ? "XAUT" : normalizeSymbolValue(vRawSymbol);
         const vFromDate = String(req.query?.fromDate || req.body?.fromDate || "").trim();
         const vToDate = String(req.query?.toDate || req.body?.toDate || "").trim();
         const arrRows = filterPaperClosedPositionsByRange(
