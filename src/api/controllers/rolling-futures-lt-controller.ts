@@ -20373,6 +20373,7 @@ async function getClosedPositionsInternal(req: Request, res: Response, pStrategy
         const objUiState = getMergedUiState(objProfile);
         const vRawSymbol = String(req.query?.symbol || req.body?.symbol || objUiState.symbol).trim().toUpperCase();
         const vSelectedSymbol = (vRawSymbol === "XAUT" || vRawSymbol === "XAUTUSD") ? "XAUT" : normalizeSymbolValue(vRawSymbol);
+        console.log("DEBUG server getClosedPositionsInternal paper: strategy=" + pStrategyCode + " rawSymbol=" + vRawSymbol + " selectedSymbol=" + vSelectedSymbol);
         const vFromDate = String(req.query?.fromDate || req.body?.fromDate || "").trim();
         const vToDate = String(req.query?.toDate || req.body?.toDate || "").trim();
         const arrRows = filterPaperClosedPositionsByRange(
@@ -20381,6 +20382,7 @@ async function getClosedPositionsInternal(req: Request, res: Response, pStrategy
             vFromDate,
             vToDate
         ).map(mapOptionsScalperPaperClosedPosition);
+        console.log("DEBUG server getClosedPositionsInternal paper response: strategy=" + pStrategyCode + " selectedSymbol=" + vSelectedSymbol + " count=" + arrRows.length);
         res.json({
             status: "success",
             data: {
@@ -20400,6 +20402,7 @@ async function getClosedPositionsInternal(req: Request, res: Response, pStrategy
         const objUiState = getMergedUiState(objProfile);
         const vRawSymbol = String(req.query?.symbol || req.body?.symbol || objUiState.symbol).trim().toUpperCase();
         const vSelectedSymbol = (vRawSymbol === "XAUT" || vRawSymbol === "XAUTUSD") ? "XAUT" : normalizeSymbolValue(vRawSymbol);
+        console.log("DEBUG server getClosedPositionsInternal live: strategy=" + pStrategyCode + " rawSymbol=" + vRawSymbol + " selectedSymbol=" + vSelectedSymbol);
         const vFromDate = String(req.query?.fromDate || req.body?.fromDate || "").trim();
         const { client, profile } = await getDeltaClientForAccountId(getAccountId(req), vProfileId);
         if (isCoveredOptionsStrategy(pStrategyCode) && !vFromDate) {
@@ -20466,6 +20469,7 @@ async function getClosedPositionsInternal(req: Request, res: Response, pStrategy
             await saveRecoveredTotalPnl(getAccountId(req), pStrategyCode, vClosedTotalPnl);
             objOpenPositions = await buildOpenPositionsPayload(getAccountId(req), pStrategyCode);
         }
+        console.log("DEBUG server getClosedPositionsInternal live response: strategy=" + pStrategyCode + " selectedSymbol=" + vSelectedSymbol + " count=" + arrClosedPositions.length);
         res.json({
             status: "success",
             data: {
