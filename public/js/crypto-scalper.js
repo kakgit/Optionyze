@@ -6288,6 +6288,65 @@ ids.closedAltFromDate?.addEventListener("change", function () {
         setActiveTab("btc");
     })();
 
+    // Helper function to read number from an element
+    function readNumber(el) {
+        var v = Number(el && el.value);
+        return Number.isFinite(v) ? v : null;
+    }
+
+    // Refresh mark price button handler for Position Triggers tickers
+    (function initPosTrgRefreshButtons() {
+        var refreshBtns = Array.from(document.querySelectorAll('.rolling-pos-trg-refresh-btn'));
+        if (!refreshBtns.length) { return; }
+        
+        refreshBtns.forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var tickerId = btn.getAttribute("data-pos-trg-ticker-id");
+                var tickerBox = document.getElementById(tickerId);
+                if (!tickerBox) { return; }
+                
+                var symbol = tickerId.replace("rollingPosTrg", "").replace("Ticker", "").toLowerCase();
+                var tickerPriceEl = tickerBox.querySelector("[data-pos-trg-ticker-price]");
+                var tickerVsEl = tickerBox.querySelector("[data-pos-trg-ticker-vs]");
+                
+                // Fetch fresh ticker mark price
+                fetch("/api/crypto-scalper/position-triggers/ticker?symbol=" + encodeURIComponent(symbol), { credentials: "same-origin" })
+                    .then(function (response) { return response.json(); })
+                    .then(function (json) {
+                        if (json && json.status === "success" && json.data) {
+                            var markPrice = json.data.markPrice;
+                            var strike = readNumber(tickerPriceEl ? tickerPriceEl.previousElementSibling : null);
+                            
+                            // Update ticker display
+                            if (tickerPriceEl) {
+                                tickerPriceEl.textContent = Number.isFinite(markPrice) ? markPrice.toFixed(2) : "--";
+                            }
+                            tickerBox.classList.remove("above-strike", "below-strike");
+                            if (tickerVsEl) { tickerVsEl.textContent = ""; }
+                            
+                            if (Number.isFinite(markPrice)) {
+                                var diff = markPrice - (Number.isFinite(strike) ? strike : 0);
+                                var sign = diff > 0 ? "above" : (diff < 0 ? "below" : "at");
+                                tickerBox.classList.add(diff > 0 ? "above-strike" : (diff < 0 ? "below-strike" : ""));
+                                if (tickerVsEl) {
+                                    tickerVsEl.textContent = sign + " strike by " + Math.abs(diff).toFixed(2);
+                                }
+                            }
+                            
+                            // Restart polling to start fetching live rates
+                            if (window.ctl && window.ctl.pollInterval) {
+                                clearInterval(window.ctl.pollInterval);
+                            }
+                            window.ctl.pollInterval = setInterval(window.ctl.tickOnce, 3000);
+                        }
+                    })
+                    .catch(function (error) {
+                        console.error("Failed to refresh ticker:", error);
+                    });
+            });
+        });
+    })();
+
     [ids.brok2Rec, ids.yet2Recover].forEach(function (node) {
         node?.addEventListener("change", function () {
             void saveRecoveryMetricsOverride().then(function (objResult) {
