@@ -309,7 +309,12 @@ import {
     recalculateCryptoScalperRecoveryTotalPnl,
     reconcileCryptoScalperOpenPositions,
     saveCryptoScalperOpenPositions,
-    saveCryptoScalperProfile
+    saveCryptoScalperProfile,
+    saveOptionsDemoPositionTrigger,
+    listOptionsDemoPositionTriggerPending,
+    deleteOptionsDemoPositionTriggerPending,
+    getOptionsDemoPositionTriggerWatcherStatus,
+    executeOptionsDemoPositionTrigger
 } from "../controllers/rolling-futures-lt-controller";
 import {
     createDeltaApiProfileController,
@@ -968,6 +973,18 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/options-demo/closed-positions/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await updateOptionsScalperClosedPosition(req, res);
+    });
+    objRouter.post("/options-demo/position-triggers/save", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await saveOptionsDemoPositionTrigger(req, res);
+    });
+    objRouter.get("/options-demo/position-triggers/pending", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await listOptionsDemoPositionTriggerPending(req, res);
+    });
+    objRouter.delete("/options-demo/position-triggers/pending/:id", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await deleteOptionsDemoPositionTriggerPending(req, res);
+    });
+    objRouter.get("/options-demo/position-triggers/watcher-status", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsDemoPositionTriggerWatcherStatus(req, res);
     });
     objRouter.get("/options-demo/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getOptionsScalperEvents(req, res);

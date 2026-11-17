@@ -2891,6 +2891,7 @@ function getDefaultManualTraderUiState(
         manualBtcQty: "1",
         manualEthQty: "1",
         manualXautQty: "1",
+        posTrgBtcMultiplier: "1",
         futuresLadderStepPoints: String(gFuturesScalperTriggerStepPoints),
         futuresLadderGridOffsetPoints: String(gFuturesScalperGridOffsetPoints),
         futuresLadderOrderOffsetPoints: String(gFuturesScalperOrderOffsetPoints),
@@ -5636,6 +5637,7 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         manualBtcQty: normalizeQtyLikeValue(objUiState.manualBtcQty, objDefaults.manualBtcQty),
         manualEthQty: normalizeQtyLikeValue(objUiState.manualEthQty, objDefaults.manualEthQty),
         manualXautQty: normalizeQtyLikeValue(objUiState.manualXautQty, objDefaults.manualXautQty),
+        posTrgBtcMultiplier: normalizeQtyLikeValue(objUiState.posTrgBtcMultiplier, "1"),
         futuresLadderStepPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderStepPoints, gFuturesScalperTriggerStepPoints, 1, 1000000)
             : String(gFuturesScalperTriggerStepPoints),
@@ -6092,6 +6094,7 @@ function normalizeProfileSaveInput(
         manualBtcQty: normalizeQtyLikeValue(objUiState.manualBtcQty, objDefaults.manualBtcQty),
         manualEthQty: normalizeQtyLikeValue(objUiState.manualEthQty, objDefaults.manualEthQty),
         manualXautQty: normalizeQtyLikeValue(objUiState.manualXautQty, objDefaults.manualXautQty),
+        posTrgBtcMultiplier: normalizeQtyLikeValue(objUiState.posTrgBtcMultiplier, "1"),
         futuresLadderStepPoints: false
             ? normalizeFuturesScalperPointsString(objUiState.futuresLadderStepPoints, gFuturesScalperTriggerStepPoints, 1, 1000000)
             : String(gFuturesScalperTriggerStepPoints),
@@ -10774,7 +10777,8 @@ async function buildOptionsScalperPaperOptionOpen(
     const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
     const vTakeProfitDelta = Math.max(0, Number(pInput.takeProfitDelta ?? objOptionMetadata.takeProfitDelta ?? objRowState.tpD ?? 0.25));
     const vStopLossDelta = Math.max(0, Number(pInput.stopLossDelta ?? objOptionMetadata.stopLossDelta ?? objRowState.slD ?? 0.65));
-    if (!bIsReEntryOpen && true) {
+    const bIsPositionTriggerOpen = vOpenedReason === "position_trigger";
+    if (!bIsReEntryOpen && !bIsPositionTriggerOpen && true) {
         const objImmediateRuleDecision = shouldTriggerTrackedOption(
             pInput.action.toUpperCase(),
             vAbsoluteDelta,
@@ -12544,6 +12548,12 @@ async function findTriggeredTrackedOptions(
             continue;
         }
         if (isTrackedPositionInactive(objPosition)) {
+            continue;
+        }
+        // Position Trigger positions use premium-based TP/SL tracked client-side;
+        // skip them from the server-side delta-based TP/SL monitor.
+        const vPositionOpenedReason = String(getTrackedOptionMetadata(objPosition)?.openedReason || "").trim().toLowerCase();
+        if (vPositionOpenedReason === "position_trigger") {
             continue;
         }
         const vResolvedExpiryDate = getTrackedOptionResolvedExpiryDate(objPosition);
@@ -17459,6 +17469,12 @@ async function runPositionTriggerWatcherCycle(
                     continue;
                 }
                 try {
+                    if (pStrategyCode === "options-scalper") {
+                        // Options Demo is paper-only: the browser client watches the
+                        // ticker and opens the paper position via /manual/option.
+                        // Server only persists the queue; do not place live orders here.
+                        continue;
+                    }
                     const vPlaced = await placeQueuedPositionTriggerOnDelta(pUserId, pStrategyCode, objRecord);
                     if (!vPlaced) {
                         continue;
@@ -17587,7 +17603,7 @@ async function placeQueuedPositionTriggerOnDelta(
 }
 
 function startPositionTriggerWatcher(pUserId: string, pStrategyCode: RollingFuturesLtStrategyCode): void {
-    if (pStrategyCode !== "crypto-scalper") {
+    if (pStrategyCode !== "crypto-scalper" && pStrategyCode !== "options-scalper") {
         return;
     }
     const vKey = getPositionTriggerWatcherKey(pUserId, pStrategyCode);
@@ -19411,6 +19427,161 @@ async function saveCryptoScalperPositionTriggerInternal(
                 currentMark: vNumericMark,
                 expectedFireWhenMark: vExpectedFireWhen,
                 cancelled: arrCancelledCount
+            }
+        });
+    }
+    catch (objError) {
+        const vErrorMsg = getErrorMessage(objError, "Unable to save position trigger.");
+        await logFuturesEvent(
+            vUserId,
+            pStrategyCode,
+            "manual_action",
+            "error",
+            "Position Trigger Save Failed",
+            vErrorMsg,
+            { reason: "position_trigger_save_error" }
+        );
+        res.status(500).json({
+            status: "danger",
+            message: vErrorMsg
+        });
+    }
+    finally {
+        gManualFutureOrderLocks.delete(vLockKey);
+    }
+}
+
+async function saveOptionsDemoPositionTriggerInternal(
+    req: Request,
+    res: Response,
+    pStrategyCode: RollingFuturesLtStrategyCode
+): Promise<void> {
+    if (pStrategyCode !== "options-scalper") {
+        res.status(400).json({
+            status: "warning",
+            message: "Position triggers are only supported on the Options Demo strategy."
+        });
+        return;
+    }
+    const vUserId = getAccountId(req);
+    const objRuntime = await loadRollingFuturesLtRuntime(vUserId, pStrategyCode);
+    if (!objRuntime
+        || !objRuntime.autoTraderEnabled
+        || String(objRuntime.status || "").trim().toLowerCase() !== "running") {
+        res.status(400).json({
+            status: "warning",
+            message: "Turn Auto Trader ON before saving position triggers."
+        });
+        return;
+    }
+    const vSymbolRaw = String(req.body?.symbol || "BTC").trim().toUpperCase();
+    const vSymbol = vSymbolRaw === "ETH" || vSymbolRaw === "ETHUSD" ? "ETH" : (vSymbolRaw === "XAUT" || vSymbolRaw === "XAUTUSD" ? "XAUT" : "BTC");
+    const vSideRaw = String(req.body?.side || req.body?.action || "").trim().toUpperCase();
+    const vSide: "" | "buy" | "sell" = vSideRaw === "SELL" || vSideRaw === "SHORT" ? "sell" : (vSideRaw === "BUY" || vSideRaw === "LONG" ? "buy" : "");
+    const vQty = Math.max(1, Math.floor(Number(req.body?.qty || 1)));
+    const vStrike = Number(req.body?.strike);
+    const vTolerance = Math.max(0, Number(req.body?.tolerance ?? 20));
+    const vSlPct = Math.max(0, Number(req.body?.slPct || 0));
+    const vTpPct = Math.max(0, Number(req.body?.tpPct || 0));
+    const vTriggerSide = String(req.body?.triggerSide || req.body?.posTrgSide || "").trim().toLowerCase();
+    if (vSide !== "buy" && vSide !== "sell") {
+        res.status(400).json({ status: "warning", message: "Select a valid side (Long or Short) before saving the position trigger." });
+        return;
+    }
+    if (!(vQty > 0)) {
+        res.status(400).json({ status: "warning", message: "Enter a valid Qty before saving the position trigger." });
+        return;
+    }
+    if (!(vStrike > 0) || !Number.isFinite(vStrike)) {
+        res.status(400).json({ status: "warning", message: "Enter a valid Strike Price before saving the position trigger." });
+        return;
+    }
+    const vAction: "buy" | "sell" = String(req.body?.posTrgAction || req.body?.rowAction || "sell").trim().toLowerCase() === "buy" ? "buy" : "sell";
+    const vLegSide: "ce" | "pe" = vSide === "sell"
+        ? (vAction === "sell" ? "pe" : "ce")
+        : (vAction === "sell" ? "ce" : "pe");
+    const vLockKey = getManualFutureOrderLockKey(vUserId, pStrategyCode);
+    if (gManualFutureOrderLocks.has(vLockKey)) {
+        res.status(409).json({
+            status: "warning",
+            message: "A position trigger is already being processed. Please wait for it to finish."
+        });
+        return;
+    }
+    gManualFutureOrderLocks.add(vLockKey);
+    try {
+        const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+        const vSelectedApiProfileId = String(objProfile.selectedApiProfileId || "").trim();
+        if (!vSelectedApiProfileId) {
+            res.status(400).json({ status: "warning", message: "Select an API profile before saving the position trigger." });
+            return;
+        }
+        const objCheck = await performRollingFuturesLtConnectionCheck(vUserId, pStrategyCode, vSelectedApiProfileId);
+        if (objCheck.profile.connectionStatus.state !== "connected") {
+            res.status(400).json({
+                status: "warning",
+                message: objCheck.profile.connectionStatus.message || "Delta connection is not healthy.",
+                data: objCheck.profile
+            });
+            return;
+        }
+        const vContractName = getContractNameForSymbol(vSymbol);
+        await deletePositionTriggerPendingByContent(vUserId, pStrategyCode, { symbol: vSymbol, side: vSide });
+        const objRecord = await createPositionTriggerPendingRecord({
+            accountId: vUserId,
+            strategyCode: pStrategyCode,
+            exchange: "delta-exchange",
+            symbol: vSymbol,
+            contractSymbol: vContractName,
+            side: vSide,
+            qty: vQty,
+            strike: vStrike,
+            slPoints: 0,
+            tpPoints: 0,
+            tolerance: vTolerance
+        });
+        startPositionTriggerWatcher(vUserId, pStrategyCode);
+        await logFuturesEvent(
+            vUserId,
+            pStrategyCode,
+            "manual_action",
+            "info",
+            "Position Trigger Queued",
+            `Saved ${vSide.toUpperCase()} ${vContractName} x${vQty} @ ${vStrike} to pending (id ${objRecord.id}); will auto-place when mark crosses strike by ${vTolerance} pts.`,
+            {
+                reason: "position_trigger_queue",
+                symbol: vSymbol,
+                contractName: vContractName,
+                qty: vQty,
+                strike: vStrike,
+                tolerance: vTolerance,
+                pendingId: objRecord.id,
+                triggerSide: vTriggerSide,
+                action: vAction,
+                legSide: vLegSide,
+                slPct: vSlPct,
+                tpPct: vTpPct
+            }
+        );
+        res.json({
+            status: "queued",
+            message: `${vSide.toUpperCase()} ${vContractName} queued @ ${vStrike} with tolerance ${vTolerance}. Saved to pending; will auto-place when mark crosses strike.`,
+            data: {
+                kind: "queued",
+                id: objRecord.id,
+                side: vSide,
+                symbol: vSymbol,
+                contractName: vContractName,
+                qty: vQty,
+                strike: vStrike,
+                slPoints: 0,
+                tpPoints: 0,
+                tolerance: vTolerance,
+                triggerSide: vTriggerSide,
+                action: vAction,
+                legSide: vLegSide,
+                slPct: vSlPct,
+                tpPct: vTpPct
             }
         });
     }
@@ -23365,6 +23536,70 @@ export async function deleteCryptoScalperPositionTriggerPending(req: Request, re
     }
     catch (objError) {
         res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to cancel pending position trigger.") });
+    }
+}
+
+export async function executeOptionsDemoPositionTrigger(req: Request, res: Response): Promise<void> {
+    res.status(400).json({ status: "warning", message: "Options Demo triggers fire automatically when price crosses strike by Tolerance. No manual fire needed." });
+}
+
+export async function saveOptionsDemoPositionTrigger(req: Request, res: Response): Promise<void> {
+    await saveOptionsDemoPositionTriggerInternal(req, res, "options-scalper");
+}
+
+export async function listOptionsDemoPositionTriggerPending(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const arrRecords = await listPositionTriggerPendingRecords(vUserId, "options-scalper");
+        res.json({ status: "success", data: arrRecords });
+    }
+    catch (objError) {
+        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to list pending position triggers.") });
+    }
+}
+
+export async function deleteOptionsDemoPositionTriggerPending(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    const vId = String(req.params.id || "").trim();
+    if (!vId) {
+        res.status(400).json({ status: "warning", message: "Pending id is required." });
+        return;
+    }
+    try {
+        const objRemoved = await deletePositionTriggerPendingRecord(vUserId, vId);
+        if (!objRemoved) {
+            res.status(404).json({ status: "warning", message: "Pending trigger not found." });
+            return;
+        }
+        await logFuturesEvent(
+            vUserId,
+            "options-scalper",
+            "manual_action",
+            "info",
+            "Pending Position Trigger Cancelled",
+            `Pending ${objRemoved.side.toUpperCase()} ${objRemoved.contractSymbol} trigger @ ${objRemoved.strike} removed without placing.`,
+            { reason: "pending_cancelled", side: objRemoved.side, strike: objRemoved.strike, pendingId: objRemoved.id }
+        );
+        res.json({ status: "success", message: `Pending ${objRemoved.side.toUpperCase()} ${objRemoved.contractSymbol} trigger @ ${objRemoved.strike} cancelled.` });
+    }
+    catch (objError) {
+        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to cancel pending position trigger.") });
+    }
+}
+
+export async function getOptionsDemoPositionTriggerWatcherStatus(req: Request, res: Response): Promise<void> {
+    try {
+        const vUserId = getAccountId(req);
+        const vKey = getPositionTriggerWatcherKey(vUserId, "options-scalper");
+        const bWatcherRunning = gPositionTriggerWatcherIntervals.has(vKey);
+        const arrRecords = await listPositionTriggerPendingRecords(vUserId, "options-scalper");
+        res.json({
+            status: "success",
+            data: { pendingCount: arrRecords.length, watcherRunning: bWatcherRunning }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({ status: "danger", message: getErrorMessage(objError, "Unable to get watcher status.") });
     }
 }
 

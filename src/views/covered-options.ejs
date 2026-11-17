@@ -67,6 +67,7 @@
     <div class="app-layout rolling-demo-layout">
         <%- include('partials/app-header', { currentAccount }) %>
 
+        <% if (!bIsDemoPage) { %>
         <section class="rolling-demo-hero">
             <div class="app-panel rolling-demo-card">
                 <h1 class="rolling-demo-title"><%= vPageHeading %></h1>
@@ -262,7 +263,273 @@
                 <div class="rolling-live-status" id="rollingDualFuturesPageStatus"></div>
             </div>
         </section>
+        <% } %>
+        <% if (bIsDemoPage) { %>
+        <section class="rolling-demo-section rolling-manual-settings-section">
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <h2 class="rolling-manual-settings-title">Manual Settings</h2>
+                    <div class="rolling-demo-card-tools" aria-label="Manual Settings">
+                        <% if (currentAccount?.isVerifier) { %>
+                            <div class="rolling-live-admin-target-head">
+                                <div class="rolling-demo-field rolling-live-admin-target-field">
+                                    <select id="ddlRollingDualAdminTargetUser">
+                                        <option value="">Loading running users...</option>
+                                    </select>
+                                </div>
+                                <div class="rolling-live-admin-target-meta" id="rollingDualAdminTargetMeta">Select a running <%= vStrategyLabel %> user to load settings and positions.</div>
+                            </div>
+                        <% } %>
+                        
+                    <button class="rolling-demo-btn warn" type="button" id="btnRollingFuturesDemoAutoTrader" title="Toggle Auto Trader" aria-label="Toggle Auto Trader" style="width:auto">Auto Trader</button>
+                    <button class="rolling-manual-settings-collapse-btn" type="button" id="btnManualSettingsCollapse" title="Collapse Manual Settings" aria-label="Collapse Manual Settings" aria-expanded="false">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M7 9l5 5 5-5" />
+                        </svg>
+                    </button>
+                    </div>
+                </div>
+                <div class="rolling-manual-settings-body is-collapsed" id="rollingManualSettingsBody">
+                    <div class="rolling-live-status" id="rollingDualFuturesConnectionStatus"></div>
+<div class="rolling-live-status" id="rollingDualFuturesPageStatus"></div>
+                    <div class="rolling-live-connection-grid">
+    <div class="rolling-demo-metric">
+        <div class="rolling-demo-metric-label api-name-label">
+    API Name
+    <select id="ddlRollingDualFuturesApiProfile">
+        <option value="">Select API profile</option>
+    </select>
+</div>
+    </div>
+    <div class="rolling-demo-metric">
+        <div class="rolling-demo-metric-label connection-status-label">
+    Connection Status
+    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesCheckConnection" title="Check Delta connection" aria-label="Check Delta connection">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+            <path d="M21 3v6h-6" />
+        </svg>
+    </button>
+</div>
+<div class="rolling-demo-metric-value" id="rollingDualFuturesConnectionStateValue">Not Selected</div>
+    </div>
+    <div class="rolling-demo-metric">
+        <div class="rolling-demo-metric-label rolling-live-ip-label">
+    Whitelist IP
+    <button class="rolling-live-copy-ip-btn" type="button" id="btnRollingDualFuturesCopyWhitelistIp" title="Copy this server IP for Delta Exchange whitelist" aria-label="Copy this server IP for Delta Exchange whitelist">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 9h10v12H9z" />
+            <path d="M5 15V5h10" />
+        </svg>
+    </button>
+</div>
+<div class="rolling-demo-metric-value" id="rollingDualFuturesWhitelistIpValue">-</div>
+</div>
+    <div class="rolling-demo-metric">
+        <div class="rolling-demo-metric-label">Total Balance</div>
+        <div class="rolling-demo-metric-value" id="rollingDualFuturesTotalBalanceValue">-</div>
+    </div>
+</div>
+    <div class="rolling-demo-grid" style="grid-template-columns:repeat(3, minmax(0, 1fr)); margin-top:14px;">
+        <div class="rolling-demo-field">
+            <label for="txtRollingBtcUsdQty">BTCUSD Qty</label>
+            <input type="number" id="txtRollingBtcUsdQty" name="txtRollingBtcUsdQty" min="1" step="1" value="1" title="Number of contracts (Delta size). 1 contract = 0.001 BTC for BTCUSD." placeholder="e.g. 1" />
+        </div>
+        <div class="rolling-demo-field">
+            <label for="txtRollingEthUsdQty">ETHUSD Qty</label>
+            <input type="number" id="txtRollingEthUsdQty" name="txtRollingEthUsdQty" min="1" step="1" value="1" title="Number of contracts (Delta size). 1 contract = 0.01 ETH for ETHUSD." placeholder="e.g. 1" />
+        </div>
+        <div class="rolling-demo-field">
+            <label for="txtRollingXautUsdQty">XAUTUSD Qty</label>
+            <input type="number" id="txtRollingXautUsdQty" name="txtRollingXautUsdQty" min="1" step="1" value="1" title="Number of contracts (Delta size). 1 contract = 0.01 XAUT for XAUTUSD." placeholder="e.g. 1" />
+        </div>
+    </div>
+            </div>
+                </div>
+        </section>
+        <section class="rolling-demo-section rolling-pos-trg-section">
+            <div class="app-panel rolling-demo-card">
+                <div class="rolling-demo-card-head">
+                    <h2 class="rolling-pos-trg-title">Position Triggers</h2>
+                    <div class="rolling-demo-card-tools" aria-label="Position Triggers symbol tabs">
+                        <button type="button" class="rolling-pos-trg-tab-trigger is-active" data-pos-trg-tab-trigger="btc" aria-controls="rollingPosTrgPanelBtc" aria-selected="true">BTCUSD</button>
+                        <button type="button" class="rolling-pos-trg-tab-trigger" data-pos-trg-tab-trigger="eth" aria-controls="rollingPosTrgPanelEth" aria-selected="false" tabindex="-1">ETHUSD</button>
+                        <button type="button" class="rolling-pos-trg-tab-trigger" data-pos-trg-tab-trigger="xaut" aria-controls="rollingPosTrgPanelXaut" aria-selected="false" tabindex="-1">XAUTUSD</button>
+                    </div>
+                </div>
+                <div class="rolling-pos-trg-panels">
+                    <div class="rolling-pos-trg-panel is-active" id="rollingPosTrgPanelBtc" data-pos-trg-tab-panel="btc" role="tabpanel" aria-label="BTCUSD position triggers">
+                        <div class="rolling-pos-trg-panel-head">
+                            <span>BTCUSD</span>
+                            <span class="rolling-pos-trg-ticker" id="rollingPosTrgBtcTicker">
+                                <span class="rolling-pos-trg-ticker-label">Mark</span>
+                                <strong data-pos-trg-ticker-price>--</strong>
+                                <span class="rolling-pos-trg-ticker-vs" data-pos-trg-ticker-vs></span>
+                            </span>
+                        </div>
+                        <div class="rolling-demo-grid rolling-pos-trg-fields">
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgBtcMultiplier">Multiplier</label>
+                                <input class="rolling-futures-start-qty" type="number" min="1" max="1000" step="1" id="txtPosTrgBtcMultiplier" value="1" data-pos-trg-multiplier title="Trigger qty = BTCUSD Qty x Multiplier." aria-label="BTCUSD Position Trigger Multiplier" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgBtcTolerance">Tolerance</label>
+                                <input type="number" id="txtPosTrgBtcTolerance" name="txtPosTrgBtcTolerance" min="0" step="any" inputmode="decimal" value="20" title="Auto-watch fires when current price is within this many points of the Strike Price." placeholder="e.g. 0.50" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgBtcBuyStrike">Strike Price</label>
+                                <input type="number" id="txtPosTrgBtcBuyStrike" name="txtPosTrgBtcBuyStrike" step="any" inputmode="decimal" placeholder="e.g. 95000" />
 
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgBtcSlPoints">SL Points</label>
+                                <input type="number" id="txtPosTrgBtcSlPoints" name="txtPosTrgBtcSlPoints" step="any" inputmode="decimal" value="300" placeholder="e.g. 300" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgBtcTpPoints">TP Points</label>
+                                <input type="number" id="txtPosTrgBtcTpPoints" name="txtPosTrgBtcTpPoints" step="any" inputmode="decimal" value="400" placeholder="e.g. 400" />
+                            </div>
+                            <div class="rolling-demo-field rolling-pos-trg-execute-cell">
+                                <label>Action</label>
+                                <div style="display:flex; gap:8px;">
+                                    <button id="btnPosTrgBtcBuy" class="rolling-demo-btn buy" type="button" style="flex:1; min-height:44px;" title="Place a BUY maker-only limit order at the Strike Price with attached SL/TP points. Places on Delta when maker-valid; otherwise queues locally and auto-places when the mark crosses Strike Price by Tolerance." aria-label="Place a BUY maker-only limit order at the Strike Price">Long</button>
+                                    <button id="btnPosTrgBtcSell" class="rolling-demo-btn sell" type="button" style="flex:1; min-height:44px;" title="Place a SELL maker-only limit order at the Strike Price with attached SL/TP points. Places on Delta when maker-valid; otherwise queues locally and auto-places when the mark crosses Strike Price by Tolerance." aria-label="Place a SELL maker-only limit order at the Strike Price">Short</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="rollingPosTrgBtcStatus" class="rolling-pos-trg-status" aria-live="polite"></div>
+                    <div class="rolling-pos-trg-pending-section" id="rollingPosTrgBtcPendingSection">
+                        <div class="rolling-pos-trg-pending-head">
+                            <span>Open &amp; Queued Limit Orders</span>
+                            <span class="rolling-pos-trg-watcher-badge" id="rollingPosTrgWatcherBadge" title="Server-side watcher status">Server: checking...</span>
+                            <span class="rolling-pos-trg-pending-hint">Pending = queued locally (auto-fires when mark crosses strike by Tolerance). Delta = live on the exchange. Click × to cancel a row.</span>
+                        </div>
+                        <div class="rolling-pos-trg-pending-empty" id="rollingPosTrgBtcPendingEmpty">No open or queued orders. Use <strong>Buy / Sell</strong> above to place or queue one.</div>
+                        <table class="rolling-pos-trg-pending-table" id="rollingPosTrgBtcPendingTable" hidden>
+                            <thead>
+                                <tr>
+                                    <th>Side</th>
+                                    <th>Qty</th>
+                                    <th>Strike</th>
+                                    <th>SL/TP</th>
+                                    <th>Tol</th>
+                                    <th>Distance</th>
+                                    <th>Source</th>
+                                    <th class="rolling-pos-trg-pending-cancel-col" aria-label="Cancel"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="rollingPosTrgBtcPendingBody"></tbody>
+                        </table>
+                    </div>
+                    </div>
+                    <div class="rolling-pos-trg-panel" id="rollingPosTrgPanelEth" data-pos-trg-tab-panel="eth" role="tabpanel" aria-label="ETHUSD position triggers" hidden>
+                        <div class="rolling-pos-trg-panel-head">
+                            <span>ETHUSD</span>
+                            <span class="rolling-pos-trg-ticker" id="rollingPosTrgEthTicker">
+                                <span class="rolling-pos-trg-ticker-label">Mark</span>
+                                <strong data-pos-trg-ticker-price>--</strong>
+                                <span class="rolling-pos-trg-ticker-vs" data-pos-trg-ticker-vs></span>
+                            </span>
+                        </div>
+                        <div class="rolling-demo-grid rolling-pos-trg-fields">
+                            <div class="rolling-demo-field">
+                                <label>Multiplier</label>
+                                <input class="rolling-futures-start-qty" type="number" min="1" max="1000" step="1" value="2" id="txtPosTrgEthMultiplier" data-pos-trg-multiplier title="Admin default Multiplier for ETHUSD. Changing it saves globally." aria-label="ETHUSD Multiplier" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgEthTolerance">Tolerance</label>
+                                <input type="number" id="txtPosTrgEthTolerance" min="0" step="any" inputmode="decimal" value="20" title="Auto-watch fires when current price is within this many points of the Strike Price." placeholder="e.g. 0.50" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgEthBuyStrike">Strike Price</label>
+                                <input type="number" id="txtPosTrgEthBuyStrike" step="any" inputmode="decimal" placeholder="e.g. 3500" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgEthSlPoints">SL Points</label>
+                                <input type="number" id="txtPosTrgEthSlPoints" step="any" inputmode="decimal" value="300" placeholder="e.g. 300" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgEthTpPoints">TP Points</label>
+                                <input type="number" id="txtPosTrgEthTpPoints" step="any" inputmode="decimal" value="400" placeholder="e.g. 400" />
+                            </div>
+                            <div class="rolling-demo-field rolling-pos-trg-execute-cell">
+                                <label>Action</label>
+                                <div style="display:flex; gap:8px;">
+                                    <button id="btnPosTrgEthBuy" class="rolling-demo-btn buy" type="button" style="flex:1; min-height:44px;" title="Place a BUY maker-only limit order at the Strike Price with attached SL/TP points.">Long</button>
+                                    <button id="btnPosTrgEthSell" class="rolling-demo-btn sell" type="button" style="flex:1; min-height:44px;" title="Place a SELL maker-only limit order at the Strike Price with attached SL/TP points.">Short</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="rollingPosTrgEthStatus" class="rolling-pos-trg-status" aria-live="polite"></div>
+                        <div class="rolling-pos-trg-pending-section" id="rollingPosTrgEthPendingSection">
+                            <div class="rolling-pos-trg-pending-head">
+                                <span>Open &amp; Queued Limit Orders</span>
+                                <span class="rolling-pos-trg-watcher-badge" id="rollingPosTrgEthWatcherBadge" title="Server-side watcher status">Server: checking...</span>
+                                <span class="rolling-pos-trg-pending-hint">Pending = queued locally. Delta = live on the exchange. Click × to cancel a row.</span>
+                            </div>
+                            <div class="rolling-pos-trg-pending-empty" id="rollingPosTrgEthPendingEmpty">No open or queued orders. Use <strong>Buy / Sell</strong> above to place or queue one.</div>
+                            <table class="rolling-pos-trg-pending-table" id="rollingPosTrgEthPendingTable" hidden>
+                                <thead><tr><th>Side</th><th>Qty</th><th>Strike</th><th>SL/TP</th><th>Tol</th><th>Distance</th><th>Source</th><th class="rolling-pos-trg-pending-cancel-col" aria-label="Cancel"></th></tr></thead>
+                                <tbody id="rollingPosTrgEthPendingBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="rolling-pos-trg-panel" id="rollingPosTrgPanelXaut" data-pos-trg-tab-panel="xaut" role="tabpanel" aria-label="XAUTUSD position triggers" hidden>
+                        <div class="rolling-pos-trg-panel-head">
+                            <span>XAUTUSD</span>
+                            <span class="rolling-pos-trg-ticker" id="rollingPosTrgXautTicker">
+                                <span class="rolling-pos-trg-ticker-label">Mark</span>
+                                <strong data-pos-trg-ticker-price>--</strong>
+                                <span class="rolling-pos-trg-ticker-vs" data-pos-trg-ticker-vs></span>
+                            </span>
+                        </div>
+                        <div class="rolling-demo-grid rolling-pos-trg-fields">
+                            <div class="rolling-demo-field">
+                                <label>Multiplier</label>
+                                <input class="rolling-futures-start-qty" type="number" min="1" max="1000" step="1" value="2" id="txtPosTrgXautMultiplier" data-pos-trg-multiplier title="Admin default Multiplier for XAUTUSD. Changing it saves globally." aria-label="XAUTUSD Multiplier" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgXautTolerance">Tolerance</label>
+                                <input type="number" id="txtPosTrgXautTolerance" min="0" step="any" inputmode="decimal" value="20" title="Auto-watch fires when current price is within this many points of the Strike Price." placeholder="e.g. 0.50" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgXautBuyStrike">Strike Price</label>
+                                <input type="number" id="txtPosTrgXautBuyStrike" step="any" inputmode="decimal" placeholder="e.g. 2900" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgXautSlPoints">SL Points</label>
+                                <input type="number" id="txtPosTrgXautSlPoints" step="any" inputmode="decimal" value="300" placeholder="e.g. 30" />
+                            </div>
+                            <div class="rolling-demo-field">
+                                <label for="txtPosTrgXautTpPoints">TP Points</label>
+                                <input type="number" id="txtPosTrgXautTpPoints" step="any" inputmode="decimal" value="400" placeholder="e.g. 40" />
+                            </div>
+                            <div class="rolling-demo-field rolling-pos-trg-execute-cell">
+                                <label>Action</label>
+                                <div style="display:flex; gap:8px;">
+                                    <button id="btnPosTrgXautBuy" class="rolling-demo-btn buy" type="button" style="flex:1; min-height:44px;" title="Place a BUY maker-only limit order at the Strike Price with attached SL/TP points.">Long</button>
+                                    <button id="btnPosTrgXautSell" class="rolling-demo-btn sell" type="button" style="flex:1; min-height:44px;" title="Place a SELL maker-only limit order at the Strike Price with attached SL/TP points.">Short</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="rollingPosTrgXautStatus" class="rolling-pos-trg-status" aria-live="polite"></div>
+                        <div class="rolling-pos-trg-pending-section" id="rollingPosTrgXautPendingSection">
+                            <div class="rolling-pos-trg-pending-head">
+                                <span>Open &amp; Queued Limit Orders</span>
+                                <span class="rolling-pos-trg-watcher-badge" id="rollingPosTrgXautWatcherBadge" title="Server-side watcher status">Server: checking...</span>
+                                <span class="rolling-pos-trg-pending-hint">Pending = queued locally. Delta = live on the exchange. Click × to cancel a row.</span>
+                            </div>
+                            <div class="rolling-pos-trg-pending-empty" id="rollingPosTrgXautPendingEmpty">No open or queued orders. Use <strong>Buy / Sell</strong> above to place or queue one.</div>
+                            <table class="rolling-pos-trg-pending-table" id="rollingPosTrgXautPendingTable" hidden>
+                                <thead><tr><th>Side</th><th>Qty</th><th>Strike</th><th>SL/TP</th><th>Tol</th><th>Distance</th><th>Source</th><th class="rolling-pos-trg-pending-cancel-col" aria-label="Cancel"></th></tr></thead>
+                                <tbody id="rollingPosTrgXautPendingBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <% } %>
         <section class="rolling-demo-section rolling-futures-card-stack">
             <div class="app-panel rolling-demo-card">
                 <div class="rolling-demo-card-head">
@@ -345,11 +612,11 @@
                         <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD1" value="<%= bIsCoveredLivePage ? '0.27' : '0.33' %>" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-tpd">
-                        <label for="txtRollingFuturesTpD1">TP D</label>
+                        <label for="txtRollingFuturesTpD1">TP %</label>
                         <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD1" value="<%= bIsCoveredLivePage ? '0.14' : '0.10' %>" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-sld">
-                        <label for="txtRollingFuturesSlD1">SL D</label>
+                        <label for="txtRollingFuturesSlD1">SL %</label>
                         <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD1" value="<%= bIsCoveredLivePage ? '0.54' : (bIsStrangleLikePage ? '0.55' : '0.50') %>" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-reenter">
@@ -429,11 +696,11 @@
                         <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD2" value="<%= bIsCoveredLivePage ? '0.27' : (bIsStrangleLikePage ? '0.33' : '0.13') %>" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-tpd">
-                        <label for="txtRollingFuturesTpD2">TP D</label>
+                        <label for="txtRollingFuturesTpD2">TP %</label>
                         <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD2" value="<%= bIsCoveredLivePage ? '0.14' : (bIsStrangleLikePage ? '0.10' : '1.00') %>" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-sld">
-                        <label for="txtRollingFuturesSlD2">SL D</label>
+                        <label for="txtRollingFuturesSlD2">SL %</label>
                         <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD2" value="<%= bIsCoveredLivePage ? '0.54' : (bIsStrangleLikePage ? '0.55' : '0.05') %>" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-reenter">
@@ -685,7 +952,7 @@
                             <thead>
                                 <tr>
                                     <th>Delta</th>
-                                    <th>Theta</th>
+                                    <th>SL / TP</th>
                                     <th>Symbol</th>
                                     <th>Side</th>
                                     <th>Lot Sz</th>
@@ -715,7 +982,7 @@
                             <thead>
                                 <tr>
                                     <th>Delta</th>
-                                    <th>Theta</th>
+                                    <th>SL / TP</th>
                                     <th>Symbol</th>
                                     <th>Side</th>
                                     <th>Lot Sz</th>
@@ -742,7 +1009,7 @@
                         <thead>
                             <tr>
                                 <th>Delta</th>
-                                <th>Theta</th>
+                                <th>SL / TP</th>
                                 <th>Symbol</th>
                                 <th>Side</th>
                                 <th>Lot Sz</th>
@@ -778,95 +1045,6 @@
                     </button>
                 </div>
                 <% } %>
-            </div>
-
-            <div class="app-panel rolling-demo-card">
-                <div class="rolling-demo-card-head">
-                    <h2>Temp Closed Positions</h2>
-                    <div class="rolling-demo-card-tools">
-                        <div class="rolling-demo-filters rolling-live-filters rolling-demo-filters-closed">
-                            <div class="rolling-demo-field">
-                                <input type="datetime-local" id="txtRollingDualFuturesClosedFromDate" title="Filter closed positions from this date and time" aria-label="Filter closed positions from this date and time" />
-                            </div>
-                            <div class="rolling-demo-field">
-                                <input type="datetime-local" id="txtRollingDualFuturesClosedToDate" title="Filter closed positions up to this date and time" aria-label="Filter closed positions up to this date and time" />
-                            </div>
-                            <div class="rolling-demo-field">
-                                <div class="rolling-demo-check-wrap">
-                                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClearClosedFilters" title="Clear closed-position date filters" aria-label="Clear closed-position date filters">
-                                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                                            <path d="M18 6 6 18" />
-                                            <path d="m6 6 12 12" />
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="rolling-demo-field">
-                                <div class="rolling-demo-check-wrap rolling-demo-check-wrap-compact">
-                                    <label class="rolling-futures-neutral-mode" for="chkRollingDualFuturesUpdateRecoveryTotals">
-                                        <input type="checkbox" id="chkRollingDualFuturesUpdateRecoveryTotals" />
-                                        <span>Update Total Charges and PnL</span>
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="rolling-demo-field">
-                                <div class="rolling-demo-check-wrap">
-                                    <% if (bIsPaperDemoPage) { %>
-                                        <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClearClosedPositions" title="<%= vClearClosedPositionsTitle %>" aria-label="<%= vClearClosedPositionsTitle %>">
-                                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                                <path d="M18 6 6 18" />
-                                                <path d="m6 6 12 12" />
-                                            </svg>
-                                        </button>
-                                    <% } %>
-                                    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesRefreshClosedPositions" title="<%= vRefreshClosedTitle %>" aria-label="<%= vRefreshClosedTitle %>">
-                                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                                            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-                                            <path d="M21 3v6h-6" />
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="rolling-demo-table-wrap">
-                    <table class="rolling-demo-table rolling-demo-table-closed">
-                        <thead>
-                            <tr>
-                                <th>Executed DT</th>
-                                <th>Symbol</th>
-                                <th>Side</th>
-                                <th>Lot Sz</th>
-                                <th>Qty</th>
-                                <th>Buy Price</th>
-                                <th>Sell Price</th>
-                                <th>Charges</th>
-                                <th>P &amp; L</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="rollingDualFuturesClosedPositionsBody">
-                            <tr>
-                                <td colspan="10" class="rolling-demo-empty"><%= vClosedPositionsEmpty %></td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-                <div class="rolling-demo-card-tools rolling-live-pagination">
-                    <div class="rolling-live-open-signal" id="rollingDualFuturesClosedPositionsPageInfo">Page 0 of 0</div>
-                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClosedPrevPage" title="Previous closed-positions page" aria-label="Previous closed-positions page">
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="m15 18-6-6 6-6" />
-                        </svg>
-                    </button>
-                    <div class="rolling-live-page-numbers" id="rollingDualFuturesClosedPageNumbers"></div>
-                    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesClosedNextPage" title="Next closed-positions page" aria-label="Next closed-positions page">
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="m9 6 6 6-6 6" />
-                        </svg>
-                    </button>
-                </div>
             </div>
             <div class="app-panel rolling-demo-card">
                 <div class="rolling-demo-card-head">
@@ -1294,7 +1472,7 @@
             </div>
         </section>
     <% } %>
-    <script src="/js/rolling-futures-lt.js"></script>
+    <script src="/js/rolling-futures-lt.js?v=20261117d"></script>
     <script src="/js/websocket-status.js"></script>
 </body>
 </html>

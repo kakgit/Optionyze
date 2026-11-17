@@ -272,6 +272,16 @@
         saveClosedEditButton: document.getElementById(`btn${idPrefix}SaveClosedEdit`),
         savedProfilePanel: document.getElementById("rollingFuturesSavedProfilePanel"),
         savedProfileBody: document.getElementById("rollingFuturesSavedProfileBody"),
+        manualSettingsCollapseButton: document.getElementById("btnManualSettingsCollapse"),
+        manualSettingsBody: document.getElementById("rollingManualSettingsBody"),
+        posTrgBtcTicker: document.getElementById("rollingPosTrgBtcTicker"),
+        posTrgBtcQty: document.getElementById("txtRollingBtcUsdQty"),
+        posTrgBtcMultiplier: document.getElementById("txtPosTrgBtcMultiplier"),
+        btnPosTrgBtcBuy: document.getElementById("btnPosTrgBtcBuy"),
+        btnPosTrgBtcSell: document.getElementById("btnPosTrgBtcSell"),
+        rollingPosTrgBtcPendingBody: document.getElementById("rollingPosTrgBtcPendingBody"),
+        rollingPosTrgBtcPendingEmpty: document.getElementById("rollingPosTrgBtcPendingEmpty"),
+        rollingPosTrgBtcPendingTable: document.getElementById("rollingPosTrgBtcPendingTable"),
     };
 
     let selectedApiProfileId = "";
@@ -352,6 +362,13 @@
     let renkoFeedSocket = null;
     let renkoFeedSocketReconnectTimer = null;
     let renkoFeedSocketSymbol = "";
+    let posTrgBtcTickerSocket = null;
+    let posTrgBtcTickerReconnectTimer = null;
+    const posTrgBtcTickerReconnectInterval = 120000; // 2 minutes
+    let posTrgBtcQty = null;
+    let posTrgQueue = [];
+    let posTrgActivePositions = new Map();
+    let posTrgNextCloseId = 1;
     let renkoBaseValuesBySymbol = { BTC: "", ETH: "" };
     let renkoEmaValuesBySymbol = { BTC: "", ETH: "" };
     let emaStateBySymbol = {
@@ -1316,6 +1333,111 @@
         };
     }
 
+    function disconnectPosTrgBtcTickerSocket() {
+        if (posTrgBtcTickerReconnectTimer) {
+            clearTimeout(posTrgBtcTickerReconnectTimer);
+            posTrgBtcTickerReconnectTimer = null;
+        }
+        if (posTrgBtcTickerSocket) {
+            try {
+                posTrgBtcTickerSocket.onopen = null;
+                posTrgBtcTickerSocket.onmessage = null;
+                posTrgBtcTickerSocket.onclose = null;
+                posTrgBtcTickerSocket.onerror = null;
+                posTrgBtcTickerSocket.close();
+            }
+            catch (_error) {
+            }
+        }
+        posTrgBtcTickerSocket = null;
+    }
+
+    function schedulePosTrgBtcTickerReconnect() {
+        if (posTrgBtcTickerReconnectTimer || !autoTraderEnabled) {
+            return;
+        }
+        posTrgBtcTickerReconnectTimer = setTimeout(function () {
+            posTrgBtcTickerReconnectTimer = null;
+            connectPosTrgBtcTickerSocket();
+        }, posTrgBtcTickerReconnectInterval);
+    }
+
+    function connectPosTrgBtcTickerSocket() {
+        if (!autoTraderEnabled) {
+            return;
+        }
+        if (posTrgBtcTickerSocket && (posTrgBtcTickerSocket.readyState === WebSocket.OPEN || posTrgBtcTickerSocket.readyState === WebSocket.CONNECTING)) {
+            return;
+        }
+        disconnectPosTrgBtcTickerSocket();
+        const socket = new WebSocket("wss://public-socket.india.delta.exchange");
+        posTrgBtcTickerSocket = socket;
+
+        socket.onopen = function () {
+            if (posTrgBtcTickerSocket !== socket) {
+                return;
+            }
+            socket.send(JSON.stringify({
+                type: "subscribe",
+                payload: {
+                    channels: [{
+                        name: "ticker",
+                        symbols: ["BTCUSD"]
+                    }]
+                }
+            }));
+            socket.send(JSON.stringify({ type: "enable_heartbeat" }));
+        };
+
+        socket.onmessage = function (event) {
+            try {
+                const message = JSON.parse(String(event.data || ""));
+                const messageType = String(message?.type || "").trim().toLowerCase();
+                if (messageType === "heartbeat" || messageType === "ping") {
+                    return;
+                }
+                if (messageType !== "ticker") {
+                    return;
+                }
+                const rows = Array.isArray(message?.d) ? message.d : [];
+                if (!rows.length && (message.s || message.symbol)) {
+                    rows.push(message);
+                }
+                rows.forEach(function (row) {
+                    const symbol = String(row?.s || row?.symbol || "").trim().toUpperCase();
+                    if (symbol !== "BTCUSD") {
+                        return;
+                    }
+                    const markPrice = Number(row?.m ?? row?.mark_price);
+                    if (Number.isFinite(markPrice)) {
+                        const priceEl = ids.posTrgBtcTicker?.querySelector("[data-pos-trg-ticker-price]");
+                        const vsEl = ids.posTrgBtcTicker?.querySelector("[data-pos-trg-ticker-vs]");
+                        if (priceEl) {
+                            priceEl.textContent = markPrice.toFixed(2);
+                        }
+                        if (vsEl) {
+                            vsEl.textContent = "";
+                        }
+                        posTrgCheckQueueTriggers(markPrice);
+                    }
+                });
+            }
+            catch (_error) {
+            }
+        };
+
+        socket.onclose = function () {
+            if (posTrgBtcTickerSocket === socket) {
+                posTrgBtcTickerSocket = null;
+                schedulePosTrgBtcTickerReconnect();
+            }
+        };
+
+        socket.onerror = function () {
+            schedulePosTrgBtcTickerReconnect();
+        };
+    }
+
     function getRenkoEmaMetaText(symbol) {
         if (!getRenkoEmaEnabled()) {
             return "EMA OFF";
@@ -2115,7 +2237,9 @@
                 ]
                 : [],
             closedFromDate: "",
-            closedToDate: ""
+            closedToDate: "",
+            manualBtcQty: "1",
+            posTrgBtcMultiplier: "1"
         };
         getSupportedOptionRowIndexes().forEach(function (rowIndex) {
             const keys = getOptionRowStateKeys(rowIndex);
@@ -2301,6 +2425,15 @@
 
     async function getJson(url) {
         const objResponse = await fetch(withTargetUrl(url), { credentials: "same-origin" });
+        const objPayload = await objResponse.json().catch(function () { return {}; });
+        if (!objResponse.ok) {
+            throw new Error(String(objPayload?.message || `Request failed with status ${objResponse.status}`));
+        }
+        return objPayload;
+    }
+
+    async function deleteJson(url) {
+        const objResponse = await fetch(withTargetUrl(url), { method: "DELETE", credentials: "same-origin" });
         const objPayload = await objResponse.json().catch(function () { return {}; });
         if (!objResponse.ok) {
             throw new Error(String(objPayload?.message || `Request failed with status ${objResponse.status}`));
@@ -2826,6 +2959,13 @@
             ids.autoTraderButton.textContent = autoTraderEnabled ? "Auto Trader - ON" : "Auto Trader - OFF";
             ids.autoTraderButton.classList.toggle("success", autoTraderEnabled);
             ids.autoTraderButton.classList.toggle("warn", !autoTraderEnabled);
+        }
+        if (autoTraderEnabled) {
+            connectPosTrgBtcTickerSocket();
+            void posTrgLoadQueueFromServer();
+        }
+        else {
+            disconnectPosTrgBtcTickerSocket();
         }
         const objRuntimeRecoveryMetrics = mergeRuntimeRecoveryMetrics(objRuntime.state);
         if (objRuntimeRecoveryMetrics) {
@@ -3826,7 +3966,11 @@
                 }).filter(Boolean)
                 : [],
             closedFromDate: String(ids.closedFromDate?.value || "").trim(),
-            closedToDate: String(ids.closedToDate?.value || "").trim()
+            closedToDate: String(ids.closedToDate?.value || "").trim(),
+            // Server normalizes/persists this as manualBtcQty for all
+            // strategies, so the options-demo BTCUSD qty survives refresh.
+            manualBtcQty: getInputValue(ids.posTrgBtcQty, "1"),
+            posTrgBtcMultiplier: getInputValue(ids.posTrgBtcMultiplier, "1")
         };
         getSupportedOptionRowIndexes().forEach(function (rowIndex) {
             Object.assign(state, readOptionRowState(rowIndex));
@@ -3857,6 +4001,8 @@
                 setInputValue(ids.futuresTradeSide, normalizeFuturesScalperTradeSideValue(objUiState.futuresTradeSide));
             }
             setInputValue(ids.bsFutQty, objUiState.bsFutQty);
+            setInputValue(ids.posTrgBtcQty, objUiState.manualBtcQty || "1");
+            setInputValue(ids.posTrgBtcMultiplier, objUiState.posTrgBtcMultiplier || "1");
             if (false) {
                 setInputValue(ids.futuresLadderStepPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderStepPoints, 200, 1));
                 setInputValue(ids.futuresLadderGridOffsetPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderGridOffsetPoints, 50, 0));
@@ -4503,7 +4649,7 @@
         }
     }
 
-    async function placeManualOption(action, legSide, rowIndex, openedReason) {
+    async function placeManualOption(action, legSide, rowIndex, openedReason, pTakeProfitDelta, pStopLossDelta, pQtyOverride) {
         const optionRowIndex = normalizeOptionRowIndex(rowIndex);
         const rowNodes = getOptionRowNodes(optionRowIndex);
         const vAction = String(action || "").trim().toLowerCase();
@@ -4530,7 +4676,10 @@
         const vBaseQty = Math.max(1, Math.floor(Number(rowNodes.qty?.value || 1)));
         const vTargetDelta = Math.max(0, Number(rowNodes.newD?.value || 0.53));
         const vSymbol = String(ids.symbol?.value || "BTC").trim().toUpperCase();
-        const vQty = resolveCoveredTradeQty(vAction, vLegSide, vBaseQty, vSymbol);
+        const vQtyOverride = Math.max(1, Math.floor(Number(pQtyOverride || 0)));
+        const vQty = Number(pQtyOverride) > 0
+            ? vQtyOverride
+            : resolveCoveredTradeQty(vAction, vLegSide, vBaseQty, vSymbol);
 
         if (!vExpiryDate) {
             throw new Error("Select an expiry date before placing a live option order.");
@@ -4542,6 +4691,18 @@
         manualOptionOrderInFlight = true;
         setButtonsEnabled();
         try {
+            var vTpInputEl = document.getElementById("txtRollingFuturesTpD1");
+            var vSlInputEl = document.getElementById("txtRollingFuturesSlD1");
+            var vTpRaw = pTakeProfitDelta;
+            if (vTpRaw == null && vTpInputEl) {
+                vTpRaw = vTpInputEl.value;
+            }
+            var vSlRaw = pStopLossDelta;
+            if (vSlRaw == null && vSlInputEl) {
+                vSlRaw = vSlInputEl.value;
+            }
+            const vTpDelta = Number(vTpRaw || 0);
+            const vSlDelta = Number(vSlRaw || 0);
             return await postJson(`${endpointBase}/manual/option`, {
                 rowIndex: optionRowIndex,
                 action: vAction,
@@ -4551,6 +4712,8 @@
                 expiryDate: vExpiryDate,
                 qty: vQty,
                 targetDelta: vTargetDelta,
+                takeProfitDelta: vTpDelta,
+                stopLossDelta: vSlDelta,
                 openedReason: String(openedReason || "").trim() || "manual_option_open"
             });
         }
@@ -4862,6 +5025,7 @@
         const bNewOpenPositionAdded = isCoveredLivePageMode() && arrRows.length > vPreviousOpenCount;
         previousOpenPositionCount = arrRows.length;
         displayedPositions = arrRows;
+        posTrgCheckSlTpFromRows(arrRows);
         if (bNewOpenPositionAdded) {
             scheduleRefreshAfterNewOpenPosition();
         }
@@ -4935,6 +5099,24 @@
         setButtonsEnabled();
     }
 
+    function renderPosTrgSlTpCell(importId, row) {
+        const vKey = String(importId || "").trim();
+        if (vKey && posTrgActivePositions.has(vKey)) {
+            const objActive = posTrgActivePositions.get(vKey);
+            const slText = Number.isFinite(Number(objActive.slTrigger)) ? fmt(Number(objActive.slTrigger), 2) : "-";
+            const tpText = Number.isFinite(Number(objActive.tpTrigger)) ? fmt(Number(objActive.tpTrigger), 2) : "-";
+            return `<div class="rolling-demo-field-value">SL ${escapeHtml(slText)}</div><div class="rolling-demo-field-value">TP ${escapeHtml(tpText)}</div>`;
+        }
+        const objMeta = row && typeof row.metadata === "object" ? row.metadata : {};
+        const vMetaSl = Number(objMeta.posTrgSlTrigger ?? objMeta.slTrigger);
+        const vMetaTp = Number(objMeta.posTrgTpTrigger ?? objMeta.tpTrigger);
+        const vIsPosTrg = String(objMeta.openedReason || "").trim().toLowerCase() === "position_trigger";
+        if (vIsPosTrg && Number.isFinite(vMetaSl) && Number.isFinite(vMetaTp)) {
+            return `<div class="rolling-demo-field-value">SL ${escapeHtml(fmt(vMetaSl, 2))}</div><div class="rolling-demo-field-value">TP ${escapeHtml(fmt(vMetaTp, 2))}</div>`;
+        }
+        return "<span>-</span>";
+    }
+
     function buildOpenPositionRowHtml(row, nextLtps) {
             const side = String(row.side || "-").trim().toUpperCase();
             const contractName = String(row.contractName || "-");
@@ -4975,7 +5157,7 @@
                         ),
                         2
                     )}</td>
-                    <td>${renderGreekCell(greeks.thetaDisplayTotal ?? greeks.thetaTotal, greeks.thetaBaseDisplayTotal ?? greeks.thetaTotal, 4)}</td>
+                    <td>${renderPosTrgSlTpCell(importId, row)}</td>
                     <td>${escapeHtml(contractName)}</td>
                     <td>${renderPositionSide(side)}</td>
                     <td>${escapeHtml(fmt(row.lotSize || lotSize, 3))}</td>
@@ -5031,7 +5213,7 @@
                     ),
                     2
                 )}</td>
-                <td>${renderGreekCell(objTotals.totalThetaDisplay ?? objTotals.totalTheta, objTotals.totalThetaBaseDisplay ?? objTotals.totalTheta, 4)}</td>
+                <td>-</td>
                 <td><strong>TOTAL</strong></td>
                 <td>-</td>
                 <td>-</td>
@@ -5880,6 +6062,22 @@ async function loadClosedAltPositions() {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : `Unable to calculate ${isCoveredMode ? "Multiplier" : "Start Qty"}.`, "danger");
         });
     });
+    ids.manualSettingsCollapseButton?.addEventListener("click", function () {
+        const isCollapsed = ids.manualSettingsBody?.classList.contains("is-collapsed") === true;
+        if (isCollapsed) {
+            ids.manualSettingsBody?.classList.remove("is-collapsed");
+            ids.manualSettingsCollapseButton?.classList.remove("is-collapsed");
+            ids.manualSettingsCollapseButton?.setAttribute("aria-expanded", "true");
+            ids.manualSettingsCollapseButton?.setAttribute("title", "Expand Manual Settings");
+            ids.manualSettingsCollapseButton?.setAttribute("aria-label", "Expand Manual Settings");
+        } else {
+            ids.manualSettingsBody?.classList.add("is-collapsed");
+            ids.manualSettingsCollapseButton?.classList.add("is-collapsed");
+            ids.manualSettingsCollapseButton?.setAttribute("aria-expanded", "false");
+            ids.manualSettingsCollapseButton?.setAttribute("title", "Collapse Manual Settings");
+            ids.manualSettingsCollapseButton?.setAttribute("aria-label", "Collapse Manual Settings");
+        }
+    });
     ids.futureOrderType?.addEventListener("change", queueProfileSave);
     ids.futuresTradeSide?.addEventListener("change", queueProfileSave);
     ids.onlyDeltaNeutral?.addEventListener("change", function () {
@@ -5899,6 +6097,8 @@ async function loadClosedAltPositions() {
     });
     [
         ids.bsFutQty,
+        ids.posTrgBtcQty,
+        ids.posTrgBtcMultiplier,
         ids.futuresLadderStepPoints,
         ids.futuresLadderGridOffsetPoints,
         ids.futuresLadderOrderOffsetPoints,
@@ -6263,9 +6463,14 @@ ids.closedAltFromDate?.addEventListener("change", function () {
         });
     });
     ids.autoTraderButton?.addEventListener("click", function () {
+        const vProfileId = String(ids.apiProfile?.value || "").trim();
+        if (!vProfileId) {
+            setStatus(ids.pageStatus, "Please select an API Name before turning Auto Trader ON.", "danger");
+            return;
+        }
         void checkConnection().then(function () {
             if (!canUseLiveActions()) {
-                throw new Error("Delta connection is not healthy enough to change live auto trader state.");
+                throw new Error("Delta connection check failed for the selected API Name. Auto Trader remains OFF.");
             }
             return toggleAutoTrader();
         }).then(function () {
@@ -6277,7 +6482,7 @@ ids.closedAltFromDate?.addEventListener("change", function () {
         }).then(function () {
             setStatus(ids.pageStatus, autoTraderEnabled ? "Live auto trader enabled." : "Live auto trader disabled.", "success");
         }).catch(function (error) {
-            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to change live auto trader state.", "danger");
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to change live auto trader state. Auto Trader remains OFF.", "danger");
         });
     });
     ids.sellFutureButton?.addEventListener("click", function () {
@@ -7280,6 +7485,564 @@ ids.closedAltPositionsBody?.addEventListener("click", function (event) {
             error instanceof Error ? error.message : (isCoveredMode ? "Unable to load covered options page." : "Unable to load live futures page."),
             "danger"
         );
+    });
+
+    /* ===== Position Triggers: Queue & SL/TP Tracking ===== */
+
+    function posTrgGetAutoLeg(vAction, vTriggerSide) {
+        const vActionLower = String(vAction || "").trim().toLowerCase();
+        const vSideLower = String(vTriggerSide || "").trim().toLowerCase();
+        if (vSideLower === "long") {
+            return vActionLower === "sell" ? "pe" : "ce";
+        }
+        if (vSideLower === "short") {
+            return vActionLower === "sell" ? "ce" : "pe";
+        }
+        return "pe";
+    }
+
+    function posTrgCalcSlTp(vAction, vEntryPremium, vTpPct, vSlPct) {
+        const vActionLower = String(vAction || "").trim().toLowerCase();
+        const vPremium = Number(vEntryPremium || 0);
+        const vTp = Number(vTpPct || 0) / 100;
+        const vSl = Number(vSlPct || 0) / 100;
+        if (vActionLower === "sell") {
+            return {
+                slTrigger: vPremium + vPremium * vSl,
+                tpTrigger: vPremium - vPremium * vTp
+            };
+        }
+        return {
+            slTrigger: vPremium - vPremium * vSl,
+            tpTrigger: vPremium + vPremium * vTp
+        };
+    }
+
+    function posTrgRenderQueue() {
+        const tbody = ids.rollingPosTrgBtcPendingBody;
+        const emptyDiv = ids.rollingPosTrgBtcPendingEmpty;
+        const table = ids.rollingPosTrgBtcPendingTable;
+        if (!tbody) {
+            return;
+        }
+        if (!posTrgQueue.length) {
+            tbody.innerHTML = "";
+            if (table) {
+                table.hidden = true;
+            }
+            if (emptyDiv) {
+                emptyDiv.hidden = false;
+            }
+            return;
+        }
+        if (table) {
+            table.hidden = false;
+        }
+        if (emptyDiv) {
+            emptyDiv.hidden = true;
+        }
+        const currentPrice = Number(ids.posTrgBtcTicker?.querySelector("[data-pos-trg-ticker-price]")?.textContent || "NaN");
+        tbody.innerHTML = posTrgQueue.map(function (entry) {
+            const distance = Number.isFinite(currentPrice) && Number.isFinite(entry.strike)
+                ? Math.abs(currentPrice - entry.strike).toFixed(2)
+                : "-";
+            const distanceHtml = Number.isFinite(currentPrice) ? `<span class="rolling-demo-field-value">${escapeHtml(distance)}</span>` : "<span>-</span>";
+            const statusClass = entry.status === "triggered" ? "rolling-demo-status-triggered" : (entry.status === "filled" ? "rolling-demo-status-filled" : "rolling-demo-status-queued");
+            const cancelHtml = entry.status === "queued"
+                ? `<button class="rolling-demo-icon-btn warn rolling-pos-trg-cancel-queue" type="button" data-queue-index="${escapeHtml(entry.queueIndex)}" title="Cancel queued trigger" aria-label="Cancel queued trigger">&#215;</button>`
+                : "";
+            return `<tr data-queue-index="${escapeHtml(entry.queueIndex)}">
+                <td><span class="rolling-demo-field-value">${entry.side === "long" ? "Long" : "Short"}</span></td>
+                <td><span class="rolling-demo-field-value">${escapeHtml(fmt(entry.qty || 1, 0))}</span></td>
+                <td><span class="rolling-demo-field-value">${escapeHtml(fmt(entry.strike, 2))}</span></td>
+                <td><div class="rolling-demo-field-value">TP ${entry.tpTrigger ? fmt(entry.tpTrigger, 2) : "-"}</div><div class="rolling-demo-field-value">SL ${entry.slTrigger ? fmt(entry.slTrigger, 2) : "-"}</div></td>
+                <td><span class="rolling-demo-field-value">${escapeHtml(fmt(entry.tolerance, 2))}</span></td>
+                <td>${distanceHtml}</td>
+                <td><span class="rolling-demo-field-value ${statusClass}">${escapeHtml(entry.status)}</span></td>
+                <td>${cancelHtml}</td>
+            </tr>`;
+        }).join("");
+    }
+
+    function posTrgFindQueueIndex(queueIndex) {
+        return posTrgQueue.findIndex(function (entry) {
+            return String(entry.queueIndex || "") === String(queueIndex || "");
+        });
+    }
+
+    function posTrgIsOptionsDemoPage() {
+        return Boolean(isPaperDemoVariant) && String(endpointBase || "").trim().toLowerCase().indexOf("/options-demo") >= 0;
+    }
+
+    function posTrgResolvedQty() {
+        const vBaseQty = Math.max(1, Math.floor(Number(ids.posTrgBtcQty?.value || 1)));
+        const vMultiplierRaw = Number(ids.posTrgBtcMultiplier?.value);
+        const vMultiplier = Number.isFinite(vMultiplierRaw) && vMultiplierRaw > 0 ? Math.floor(vMultiplierRaw) : 1;
+        return Math.max(1, vBaseQty * vMultiplier);
+    }
+
+    async function posTrgSaveQueueToServer(vSide, vSymbol, vStrike, vTolerance, vQty, vAction) {
+        const vRowAction = String(vAction || "sell").trim().toLowerCase() === "buy" ? "buy" : "sell";
+        const objBody = {
+            symbol: String(vSymbol || "BTC").trim().toUpperCase() || "BTC",
+            side: vSide === "long" ? "BUY" : "SELL",
+            action: vSide === "long" ? "BUY" : "SELL",
+            triggerSide: vSide,
+            posTrgSide: vSide,
+            posTrgAction: vRowAction,
+            rowAction: vRowAction,
+            qty: Math.max(1, Math.floor(Number(vQty || 1))),
+            strike: Number(vStrike),
+            tolerance: Math.max(0, Number(vTolerance || 0)),
+            slPct: 0,
+            tpPct: 0,
+            slPoints: 0,
+            tpPoints: 0
+        };
+        return postJson(`${endpointBase}/position-triggers/save`, objBody);
+    }
+
+    async function posTrgDeleteQueueFromServer(vPendingId) {
+        if (!vPendingId) {
+            return null;
+        }
+        return deleteJson(`${endpointBase}/position-triggers/pending/${encodeURIComponent(String(vPendingId))}`);
+    }
+
+    function posTrgUpdateServerBadge(vCount) {
+        try {
+            const elBadge = document.getElementById("rollingPosTrgWatcherBadge");
+            if (elBadge) {
+                elBadge.textContent = "Server: " + vCount + " queued";
+            }
+        } catch (_badgeErr) { }
+    }
+
+    async function posTrgLoadQueueFromServer() {
+        if (!posTrgIsOptionsDemoPage()) {
+            return posTrgQueue;
+        }
+        try {
+            const objResult = await getJson(`${endpointBase}/position-triggers/pending`);
+            const arrRecords = Array.isArray(objResult?.data) ? objResult.data : (Array.isArray(objResult?.data?.positions) ? objResult.data.positions : []);
+            const arrMapped = arrRecords.map(function (row) {
+                const vRawSide = String(row?.side || "").trim().toLowerCase();
+                const vSide = vRawSide === "sell" || vRawSide === "short" ? "short" : "long";
+                return {
+                    queueIndex: String(row?.id || ""),
+                    pendingId: String(row?.id || ""),
+                    side: vSide,
+                    strike: Number(row?.strike || 0),
+                    tolerance: Math.max(0, Number(row?.tolerance || 0)),
+                    qty: Math.max(1, Math.floor(Number(row?.qty || 1))),
+                    status: "queued",
+                    entryPremium: null,
+                    positionId: null,
+                    slTrigger: null,
+                    tpTrigger: null
+                };
+            }).filter(function (entry) {
+                return entry.queueIndex && Number.isFinite(entry.strike) && entry.strike > 0;
+            });
+            const objLong = arrMapped.find(function (entry) { return entry.side === "long"; });
+            const objShort = arrMapped.find(function (entry) { return entry.side === "short"; });
+            const arrKept = [];
+            if (objLong) { arrKept.push(objLong); }
+            if (objShort) { arrKept.push(objShort); }
+            posTrgQueue = arrKept;
+            posTrgRenderQueue();
+            posTrgUpdateServerBadge(arrKept.length);
+            if (typeof console !== "undefined" && console.info) { console.info("[posTrg] queue loaded from server:", arrKept.length, JSON.stringify(arrKept)); }
+            return posTrgQueue;
+        }
+        catch (objErr) {
+            if (typeof console !== "undefined" && console.warn) { console.warn("[posTrg] queue load failed:", objErr instanceof Error ? objErr.message : objErr); }
+            return [];
+        }
+    }
+
+    function posTrgRehydrateActivePositions(arrRows) {
+        const rows = Array.isArray(arrRows) ? arrRows : [];
+        if (!rows.length) {
+            return;
+        }
+        rows.forEach(function (row) {
+            const objMeta = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+            const vOpenedReason = String(objMeta.openedReason || row?.openedReason || "").trim().toLowerCase();
+            if (vOpenedReason !== "position_trigger") {
+                return;
+            }
+            const vSlRaw = objMeta.posTrgSlTrigger !== undefined ? objMeta.posTrgSlTrigger : objMeta.slTrigger;
+            const vTpRaw = objMeta.posTrgTpTrigger !== undefined ? objMeta.posTrgTpTrigger : objMeta.tpTrigger;
+            if (!Number.isFinite(Number(vSlRaw)) || !Number.isFinite(Number(vTpRaw))) {
+                return;
+            }
+            if (!(Number(vSlRaw) > 0) || !(Number(vTpRaw) > 0)) {
+                return;
+            }
+            const vPositionId = String(row?.importId || row?.contractName || "").trim();
+            if (!vPositionId) {
+                return;
+            }
+            if (posTrgActivePositions.has(vPositionId)) {
+                return;
+            }
+            const vEntryPremium = Number(row?.entryPrice || row?.markPrice || row?.ltpPrice || 0);
+            posTrgActivePositions.set(vPositionId, {
+                side: String(objMeta.triggerSide || objMeta.posTrgSide || "").trim().toLowerCase() === "short" ? "short" : "long",
+                action: String(objMeta.action || "sell").trim().toLowerCase(),
+                legSide: String(objMeta.legSide || "pe").trim().toLowerCase(),
+                entryPremium: vEntryPremium,
+                slTrigger: Number(vSlRaw),
+                tpTrigger: Number(vTpRaw),
+                positionId: vPositionId
+            });
+        });
+    }
+
+    async function posTrgExecuteQueuedEntry(entry) {
+        try {
+            const vAction = String(document.getElementById("ddlRollingFuturesAction1")?.value || "sell").trim().toLowerCase();
+            const vLegSide = posTrgGetAutoLeg(vAction, entry.side);
+            const vNewD = Number(document.getElementById("txtRollingFuturesNewD1")?.value || 0);
+            const vExpiryDate = String(document.getElementById("txtRollingFuturesExpiry1")?.value || "").trim();
+            if (!vExpiryDate) {
+                setStatus(ids.pageStatus, "Select an expiry date in Manual Trader Row 1 before triggering position.", "danger");
+                return;
+            }
+            if (!(vNewD > 0)) {
+                setStatus(ids.pageStatus, "Enter a valid New D in Manual Trader Row 1 before triggering position.", "danger");
+                return;
+            }
+            const vQty = posTrgResolvedQty();
+            const vTpPct = Number(document.getElementById("txtRollingFuturesTpD1")?.value || 0);
+            const vSlPct = Number(document.getElementById("txtRollingFuturesSlD1")?.value || 0);
+            // Send takeProfitDelta=0 and stopLossDelta=0 to bypass server-side delta-based TP/SL guard.
+            // All TP/SL monitoring is done client-side based on premium amount.
+            // Position qty = Manual Settings BTCUSD Qty x Position Triggers Multiplier.
+            if (typeof console !== "undefined" && console.info) { console.info("[posTrg] executing with qty:", vQty); }
+            const objResult = await placeManualOption(vAction, vLegSide, 1, "position_trigger", 0, 0, vQty);
+            const arrTracked = Array.isArray(objResult?.data?.trackedOpenPositions?.positions) ? objResult.data.trackedOpenPositions.positions : (Array.isArray(objResult?.trackedOpenPositions) ? objResult.trackedOpenPositions : []);
+            let arrNewPositions = arrTracked.filter(function (row) {
+                const vMetaOpened = String(row?.metadata?.openedReason || "").trim().toLowerCase();
+                const vTopOpened = String(row?.openedReason || "").trim().toLowerCase();
+                return vMetaOpened === "position_trigger" || vTopOpened === "position_trigger";
+            });
+            if (!arrNewPositions.length && arrTracked.length) {
+                arrNewPositions = [arrTracked[arrTracked.length - 1]];
+            }
+            if (arrNewPositions.length) {
+                const objNewPos = arrNewPositions[arrNewPositions.length - 1];
+                const vEntryPremium = Number(objNewPos.entryPrice || objNewPos.ltpPrice || 0);
+                const objSlTp = posTrgCalcSlTp(vAction, vEntryPremium, vTpPct, vSlPct);
+                const vPositionId = String(objNewPos.importId || objNewPos.contractName || "pos_trg_" + Date.now());
+                entry.status = "filled";
+                entry.positionId = vPositionId;
+                entry.entryPremium = vEntryPremium;
+                entry.slTrigger = objSlTp.slTrigger;
+                entry.tpTrigger = objSlTp.tpTrigger;
+                posTrgActivePositions.set(vPositionId, {
+                    side: entry.side,
+                    action: vAction,
+                    legSide: vLegSide,
+                    entryPremium: vEntryPremium,
+                    qty: vQty,
+                    slTrigger: objSlTp.slTrigger,
+                    tpTrigger: objSlTp.tpTrigger,
+                    positionId: vPositionId
+                });
+                setStatus(ids.pageStatus, "Position Trigger " + entry.side + " executed: " + vAction.toUpperCase() + " " + vLegSide.toUpperCase() + " x" + vQty + " at premium " + fmt(vEntryPremium, 2) + ". SL=" + fmt(objSlTp.slTrigger, 2) + " TP=" + fmt(objSlTp.tpTrigger, 2), "success");
+                // Fire succeeded: drop the served queue row so it does not fire
+                // again (or reappear as queued) after refresh.
+                try {
+                    const vServedPendingId = String(entry.pendingId || entry.queueIndex || "").trim();
+                    if (posTrgIsOptionsDemoPage() && vServedPendingId) {
+                        await posTrgDeleteQueueFromServer(vServedPendingId);
+                    }
+                    entry.pendingId = "";
+                    entry.queueIndex = "";
+                } catch (_posServedDelErr) { /* refreshed queue load will overwrite */ }
+                // Persist SL/TP into the open position record so the column and
+                // monitoring survive page refresh / browser restart. The save
+                // endpoint replaces the full list, so fetch current rows first
+                // and re-save with metadata merged into the matching row.
+                try {
+                    const objList = await getJson(`${endpointBase}/open-positions`);
+                    const arrOpen = Array.isArray(objList?.data?.positions) ? objList.data.positions : [];
+                    const arrMerged = arrOpen.map(function (row) {
+                        const vId = String(row?.importId || row?.contractName || "").trim();
+                        if (vId !== vPositionId) {
+                            return row;
+                        }
+                        const objMeta = row?.metadata && typeof row.metadata === "object" ? { ...row.metadata } : {};
+                        objMeta.triggerSide = entry.side;
+                        objMeta.action = vAction;
+                        objMeta.legSide = vLegSide;
+                        objMeta.entryPremium = vEntryPremium;
+                        objMeta.posTrgSlTrigger = objSlTp.slTrigger;
+                        objMeta.posTrgTpTrigger = objSlTp.tpTrigger;
+                        objMeta.slTrigger = objSlTp.slTrigger;
+                        objMeta.tpTrigger = objSlTp.tpTrigger;
+                        objMeta.rowIndex = 1;
+                        objMeta.openedReason = objMeta.openedReason || "position_trigger";
+                        return Object.assign({}, row, { metadata: objMeta });
+                    });
+                    await postJson(`${endpointBase}/open-positions`, { positions: arrMerged });
+                } catch (_posMetaErr) { /* best-effort: in-memory Map still drives this session */ }
+            }
+            await posTrgLoadQueueFromServer().catch(function () { return []; });
+            posTrgRenderQueue();
+            await loadSavedOpenPositions().catch(function () { return undefined; });
+        }
+        catch (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Position trigger execution failed.", "danger");
+        }
+    }
+
+    async function posTrgClosePosition(positionId, vCloseReason) {
+        const objActive = posTrgActivePositions.get(positionId);
+        if (!objActive) {
+            return;
+        }
+        try {
+            await posTrgAppendToClosed(objActive, vCloseReason || "SL/TP hit");
+            await deleteSavedOpenPosition(positionId).catch(function () { return undefined; });
+            posTrgActivePositions.delete(positionId);
+            setStatus(ids.pageStatus, "Position closed (" + (vCloseReason || "SL/TP") + ") and moved to Closed Positions.", "success");
+        }
+        catch (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to close triggered position.", "danger");
+        }
+        posTrgRenderQueue();
+        await loadSavedOpenPositions().catch(function () { return undefined; });
+        await loadClosedPositions().catch(function () { return undefined; });
+    }
+
+    async function posTrgAppendToClosed(objActive, vReason) {
+        try {
+            const objCloseRow = {
+                closeId: String(posTrgNextCloseId++),
+                contractName: objActive.legSide.toUpperCase() + " Option",
+                symbol: "BTCUSD",
+                side: objActive.action === "sell" ? "SELL" : "BUY",
+                qty: Math.max(1, Math.floor(Number(objActive.qty || posTrgResolvedQty()))),
+                entryPrice: objActive.entryPremium,
+                exitPrice: objActive.entryPremium,
+                pnl: 0,
+                charges: 0,
+                openedAt: new Date().toISOString(),
+                closedAt: new Date().toISOString(),
+                closeReason: vReason,
+                source: "position_trigger",
+                metadata: {
+                    rowIndex: 1,
+                    triggerSide: objActive.side,
+                    slTrigger: objActive.slTrigger,
+                    tpTrigger: objActive.tpTrigger
+                }
+            };
+            const objResult = await postJson(`${endpointBase}/closed-positions`, { positions: [objCloseRow] });
+            return objResult;
+        }
+        catch (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to append to Closed Positions.", "danger");
+        }
+    }
+
+    function posTrgCheckQueueTriggers(vCurrentPrice) {
+        if (!Number.isFinite(vCurrentPrice)) {
+            return;
+        }
+        posTrgQueue.forEach(function (entry) {
+            if (entry.status !== "queued") {
+                return;
+            }
+            const vStrike = Number(entry.strike || 0);
+            const vTolerance = Math.abs(Number(entry.tolerance || 0));
+            if (!Number.isFinite(vStrike) || !Number.isFinite(vTolerance)) {
+                return;
+            }
+            // Fire only when price is within +/- tolerance of the strike.
+            const bTriggered = Math.abs(vCurrentPrice - vStrike) <= vTolerance;
+            if (bTriggered) {
+                entry.status = "triggered";
+                posTrgExecuteQueuedEntry(entry);
+            }
+        });
+        posTrgRenderQueue();
+    }
+
+    function posTrgCheckSlTpFromRows(arrRows) {
+        const rows = Array.isArray(arrRows) ? arrRows : [];
+        if (!rows.length) {
+            return;
+        }
+        rows.forEach(function (row) {
+            const vPositionId = String(row?.importId || row?.contractName || "").trim();
+            if (!vPositionId) {
+                return;
+            }
+            let objActive = posTrgActivePositions.get(vPositionId);
+            if (!objActive) {
+                // Rehydrate from server-persisted metadata after refresh/reload.
+                const objMeta = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+                const vMetaSl = Number(objMeta.posTrgSlTrigger ?? objMeta.slTrigger);
+                const vMetaTp = Number(objMeta.posTrgTpTrigger ?? objMeta.tpTrigger);
+                if (!Number.isFinite(vMetaSl) || !Number.isFinite(vMetaTp)) {
+                    return;
+                }
+                const vOpenedReason = String(objMeta.openedReason || "").trim().toLowerCase();
+                if (vOpenedReason !== "position_trigger") {
+                    return;
+                }
+                objActive = {
+                    side: String(objMeta.triggerSide || objMeta.posTrgSide || "long").trim().toLowerCase() === "short" ? "short" : "long",
+                    action: String(objMeta.action || "sell").trim().toLowerCase(),
+                    legSide: String(objMeta.legSide || "pe").trim().toLowerCase(),
+                    entryPremium: Number(objMeta.entryPremium || row?.entryPrice || row?.markPrice || 0),
+                    slTrigger: vMetaSl,
+                    tpTrigger: vMetaTp,
+                    positionId: vPositionId
+                };
+                posTrgActivePositions.set(vPositionId, objActive);
+                posTrgRenderQueue();
+            }
+            const vLtp = Number(row?.ltpPrice ?? row?.markPrice);
+            if (!Number.isFinite(vLtp)) {
+                return;
+            }
+            var bHit = false;
+            var vReason = "";
+            if (objActive.action === "sell") {
+                if (vLtp >= objActive.slTrigger) {
+                    bHit = true;
+                    vReason = "SL";
+                }
+                else if (vLtp <= objActive.tpTrigger) {
+                    bHit = true;
+                    vReason = "TP";
+                }
+            }
+            else {
+                if (vLtp <= objActive.slTrigger) {
+                    bHit = true;
+                    vReason = "SL";
+                }
+                else if (vLtp >= objActive.tpTrigger) {
+                    bHit = true;
+                    vReason = "TP";
+                }
+            }
+            if (bHit) {
+                posTrgActivePositions.delete(vPositionId);
+                window.setTimeout(function () {
+                    posTrgClosePosition(vPositionId, vReason);
+                }, 0);
+            }
+        });
+    }
+
+    ids.btnPosTrgBtcBuy?.addEventListener("click", function () {
+        if (!autoTraderEnabled) {
+            setStatus(ids.pageStatus, "Turn Auto Trader ON before placing Position Triggers.", "danger");
+            return;
+        }
+        const vStrike = Number(document.getElementById("txtPosTrgBtcBuyStrike")?.value || 0);
+        const vTolerance = Number(document.getElementById("txtPosTrgBtcTolerance")?.value || 0);
+        if (!vStrike || vStrike <= 0) {
+            setStatus(ids.pageStatus, "Enter a valid Strike Price for BTCUSD Position Trigger.", "danger");
+            return;
+        }
+        const vQty = posTrgResolvedQty();
+        const vAction = String(document.getElementById("ddlRollingFuturesAction1")?.value || "sell").trim().toLowerCase();
+        setStatus(ids.pageStatus, "Saving Long trigger...", "info");
+        if (typeof console !== "undefined" && console.info) { console.info("[posTrg] saving long:", JSON.stringify({ strike: vStrike, tolerance: vTolerance, qty: vQty, action: vAction })); }
+        void posTrgSaveQueueToServer("long", "BTC", vStrike, vTolerance, vQty, vAction).then(function (objSaved) {
+            if (typeof console !== "undefined" && console.info) { console.info("[posTrg] save response:", JSON.stringify(objSaved && objSaved.data ? objSaved.data : objSaved)); }
+            return posTrgLoadQueueFromServer();
+        }).then(function () {
+            setStatus(ids.pageStatus, "Long trigger queued for BTCUSD. Saved server-side; survives refresh and restarts.", "success");
+        }).catch(function (err) {
+            if (typeof console !== "undefined" && console.warn) { console.warn("[posTrg] save failed:", err instanceof Error ? err.message : err); }
+            setStatus(ids.pageStatus, err instanceof Error ? err.message : "Unable to save Long trigger.", "danger");
+        });
+    });
+
+    ids.btnPosTrgBtcSell?.addEventListener("click", function () {
+        if (!autoTraderEnabled) {
+            setStatus(ids.pageStatus, "Turn Auto Trader ON before placing Position Triggers.", "danger");
+            return;
+        }
+        const vStrike = Number(document.getElementById("txtPosTrgBtcBuyStrike")?.value || 0);
+        const vTolerance = Number(document.getElementById("txtPosTrgBtcTolerance")?.value || 0);
+        if (!vStrike || vStrike <= 0) {
+            setStatus(ids.pageStatus, "Enter a valid Strike Price for BTCUSD Position Trigger.", "danger");
+            return;
+        }
+        const vQty = posTrgResolvedQty();
+        const vAction = String(document.getElementById("ddlRollingFuturesAction1")?.value || "sell").trim().toLowerCase();
+        setStatus(ids.pageStatus, "Saving Short trigger...", "info");
+        if (typeof console !== "undefined" && console.info) { console.info("[posTrg] saving short:", JSON.stringify({ strike: vStrike, tolerance: vTolerance, qty: vQty, action: vAction })); }
+        void posTrgSaveQueueToServer("short", "BTC", vStrike, vTolerance, vQty, vAction).then(function (objSaved) {
+            if (typeof console !== "undefined" && console.info) { console.info("[posTrg] save response:", JSON.stringify(objSaved && objSaved.data ? objSaved.data : objSaved)); }
+            return posTrgLoadQueueFromServer();
+        }).then(function () {
+            setStatus(ids.pageStatus, "Short trigger queued for BTCUSD. Saved server-side; survives refresh and restarts.", "success");
+        }).catch(function (err) {
+            if (typeof console !== "undefined" && console.warn) { console.warn("[posTrg] save failed:", err instanceof Error ? err.message : err); }
+            setStatus(ids.pageStatus, err instanceof Error ? err.message : "Unable to save Short trigger.", "danger");
+        });
+    });
+
+    ids.rollingPosTrgBtcPendingBody?.addEventListener("click", function (event) {
+        const target = event.target instanceof Element ? event.target.closest(".rolling-pos-trg-cancel-queue") : null;
+        if (!target) {
+            return;
+        }
+        const vQueueIndex = String(target.dataset.queueIndex || "").trim();
+        const vIndex = posTrgFindQueueIndex(vQueueIndex);
+        if (vIndex < 0) {
+            return;
+        }
+        const vPendingId = String(posTrgQueue[vIndex].pendingId || posTrgQueue[vIndex].queueIndex || "").trim();
+        if (!vPendingId) {
+            posTrgQueue.splice(vIndex, 1);
+            posTrgRenderQueue();
+            setStatus(ids.pageStatus, "Queued position trigger cancelled.", "info");
+            return;
+        }
+        void deletePositionTriggerPendingRecord(vPendingId)
+            .then(function () {
+                return posTrgLoadQueueFromServer();
+            })
+            .then(function () {
+                setStatus(ids.pageStatus, "Queued position trigger cancelled on server.", "success");
+            })
+            .catch(function (err) {
+                setStatus(ids.pageStatus, err instanceof Error ? err.message : "Unable to cancel queued trigger.", "danger");
+            });
+        function deletePositionTriggerPendingRecord(pendingId) {
+            return posTrgDeleteQueueFromServer(pendingId);
+        }
+    });
+
+    void posTrgLoadQueueFromServer().then(function (arrLoaded) {
+        try {
+            const vCount = Array.isArray(arrLoaded) ? arrLoaded.length : 0;
+            const elBadge = document.getElementById("rollingPosTrgWatcherBadge");
+            if (elBadge) {
+                elBadge.textContent = "Server: " + vCount + " queued";
+            }
+            // eslint-disable-next-line no-console
+            if (typeof console !== "undefined" && console.info) { console.info("[posTrg] queue loaded from server:", vCount); }
+        } catch (_badgeErr) { }
+        return loadSavedOpenPositions().catch(function () { return undefined; });
+    }).then(function (arrRows) {
+        posTrgRehydrateActivePositions(Array.isArray(arrRows) ? arrRows : (Array.isArray(displayedPositions) ? displayedPositions : []));
+        posTrgRenderQueue();
+    }).catch(function (err) {
+        // eslint-disable-next-line no-console
+        if (typeof console !== "undefined" && console.warn) { console.warn("[posTrg] queue reload failed:", err instanceof Error ? err.message : err); }
     });
 
     startConnectionPolling();
