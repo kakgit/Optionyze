@@ -24846,9 +24846,15 @@ export async function restoreCalendarSpreadClosedPosition(req: Request, res: Res
         const vQty = Math.max(1, Math.floor(Number(objClosed.qty || 0)));
         const objProfile = await readLiveProfile(vUserId, "calendar-spread");
         const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, "calendar-spread");
-        if (arrExisting.some((objRow) => String(objRow.contractName || "").trim() === vContractName && !isTrackedPositionInactive(objRow))) {
-            res.status(409).json({ status: "warning", message: `${vContractName} is already active in Open Positions.` });
-            return;
+        const arrActiveSameContract = arrExisting.filter((objRow) => String(objRow.contractName || "").trim() === vContractName && !isTrackedPositionInactive(objRow));
+        // The contract may linger as an active row that is hidden from the UI
+        // (e.g. a paper marker left behind by an earlier close). Restore must
+        // bring exactly one live row back, so drop any such row first. The
+        // closed record (history + SL/TP) stays intact until the restore below
+        // deletes it after the fresh row is persisted.
+        let arrBase = arrExisting;
+        if (arrActiveSameContract.length) {
+            arrBase = arrExisting.filter((objRow) => !(String(objRow.contractName || "").trim() === vContractName && !isTrackedPositionInactive(objRow)));
         }
         const bIsFuture = isFutureContractSymbol(vContractName);
         const objTicker = await getLiveOptionTicker(vContractName);
@@ -24923,7 +24929,22 @@ export async function restoreCalendarSpreadClosedPosition(req: Request, res: Res
             };
         }
         // __RESTORE_SAVE__
-        const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, "calendar-spread", [...arrExisting, objRestored]);
+        const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, "calendar-spread", [...arrBase, objRestored]);
+        // Defensive: confirm nothing else vanished in the write. If the
+        // persisted set is smaller than expected, re-read storage and merge any
+        // missing rows back instead of silently dropping positions.
+        const arrVerify = await listRollingFuturesLtImportedPositions(vUserId, "calendar-spread");
+        const setVerifyIds = new Set(arrVerify.map((objRow) => String(objRow.importId || "").trim()));
+        const arrMissing = [...arrBase, objRestored].filter((objRow) => !setVerifyIds.has(String(objRow.importId || "").trim()));
+        let arrFinal = arrSaved;
+        if (arrMissing.length) {
+            arrFinal = await replaceRollingFuturesLtImportedPositions(vUserId, "calendar-spread", [...arrVerify, ...arrMissing]);
+            await logFuturesEvent(
+                vUserId, "calendar-spread", "engine_warning", "warning", "Restore Row Reconciled",
+                `Restore of ${vContractName} re-added ${arrMissing.length} missing open row(s).`,
+                { contractName: vContractName, closeId: vCloseId, reason: "closed_restore_reconcile" }
+            );
+        }
         await deleteOptionsScalperPaperClosedPosition(vUserId, "calendar-spread", vCloseId);
         await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(vUserId, await readLiveProfile(vUserId, "calendar-spread"));
         await logFuturesEvent(
@@ -24939,7 +24960,7 @@ export async function restoreCalendarSpreadClosedPosition(req: Request, res: Res
             message: `${vContractName} restored to Open Positions.`,
             data: {
                 importId: objRestored.importId,
-                trackedOpenPositions: await buildOpenPositionsPayload(vUserId, "calendar-spread", arrSaved)
+                trackedOpenPositions: await buildOpenPositionsPayload(vUserId, "calendar-spread", arrFinal)
             }
         });
     }

@@ -5686,19 +5686,6 @@
         return postJson(`${endpointBase}/open-positions/delete`, { importId: importId });
     }
 
-    // Calendar Spread Futures section: remove only futures rows locally.
-    async function closeCalendarSpreadFuturesLocally() {
-        const arrRemaining = (Array.isArray(displayedPositions) ? displayedPositions : [])
-            .filter(function (row) { return !isCalendarSpreadFutureRow(row); });
-        displayedPositions = arrRemaining;
-        lastOpenPositionsPayload = {
-            ...(lastOpenPositionsPayload || {}),
-            positions: arrRemaining.slice()
-        };
-        await postJson(`${endpointBase}/open-positions`, { positions: arrRemaining });
-        renderOpenPositions(lastOpenPositionsPayload);
-    }
-
     async function clearSavedOpenPositions() {
         return postJson(`${endpointBase}/open-positions/clear`, {});
     }
@@ -7061,13 +7048,24 @@ ids.closedAltFromDate?.addEventListener("change", function () {
         });
     });
     ids.futuresClearButton?.addEventListener("click", function () {
-        const confirmed = window.confirm("Clear all futures open positions from this section only? No Delta Exchange order will be placed.");
+        const arrFutures = (Array.isArray(lastOpenPositionsPayload?.positions)
+            ? lastOpenPositionsPayload.positions
+            : displayedPositions
+        ).filter(isCalendarSpreadFutureRow);
+        if (!arrFutures.length) {
+            setStatus(ids.pageStatus, "No futures open positions to clear.", "info");
+            return;
+        }
+        const confirmed = window.confirm(`Clear all ${arrFutures.length} futures open position${arrFutures.length === 1 ? "" : "s"} locally? No Delta Exchange order will be placed. Options stay untouched.`);
         if (!confirmed) {
             return;
         }
-        void closeCalendarSpreadFuturesLocally().then(function () {
+        void Promise.all(arrFutures.map(function (row) {
+            return deleteSavedOpenPosition(String(row?.importId || "").trim()).catch(function () { return undefined; });
+        })).then(function () {
             setStatus(ids.pageStatus, "Futures open positions cleared locally.", "success");
             return Promise.all([
+                loadSavedOpenPositions().catch(function () { return undefined; }),
                 loadAccountSummary().catch(function () { return undefined; }),
                 loadEvents().catch(function () { return undefined; })
             ]);
@@ -7779,17 +7777,20 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
     });
     const handleOpenPositionsBodyClick = function (event) {
         const target = event.target instanceof Element ? event.target : null;
+        // Calendar Spread: futures rows live outside displayedPositions (options
+        // only), so resolve every action against the full payload first.
+        const arrAllOpenRows = Array.isArray(lastOpenPositionsPayload?.positions)
+            ? lastOpenPositionsPayload.positions
+            : displayedPositions;
+        const findOpenRowByImportId = function (importId) {
+            return arrAllOpenRows.find(function (item) {
+                return String(item?.importId || "").trim() === importId;
+            });
+        };
         const editButton = target ? target.closest(".rolling-live-edit-open-position") : null;
         if (editButton instanceof HTMLButtonElement) {
             const importId = String(editButton.dataset.importId || "").trim();
-            // Calendar Spread: futures rows live in the Futures section, so search
-            // the full payload instead of the options-only displayedPositions.
-            const arrAllRows = Array.isArray(lastOpenPositionsPayload?.positions)
-                ? lastOpenPositionsPayload.positions
-                : displayedPositions;
-            const row = arrAllRows.find(function (item) {
-                return String(item?.importId || "").trim() === importId;
-            });
+            const row = findOpenRowByImportId(importId);
             if (!row) {
                 setStatus(ids.pageStatus, "Unable to find the selected open position.", "danger");
                 return;
@@ -7800,9 +7801,7 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
         const reenterButton = target ? target.closest(".rolling-live-reenter-open-position") : null;
         if (reenterButton instanceof HTMLButtonElement) {
             const importId = String(reenterButton.dataset.importId || "").trim();
-            const row = displayedPositions.find(function (item) {
-                return String(item?.importId || "").trim() === importId;
-            });
+            const row = findOpenRowByImportId(importId);
             if (!row) {
                 setStatus(ids.pageStatus, "Unable to find the selected open position.", "danger");
                 return;
@@ -7834,9 +7833,7 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
         const swapButton = target ? target.closest(".rolling-live-swap-open-position") : null;
         if (swapButton instanceof HTMLButtonElement) {
             const importId = String(swapButton.dataset.importId || "").trim();
-            const row = displayedPositions.find(function (item) {
-                return String(item?.importId || "").trim() === importId;
-            });
+            const row = findOpenRowByImportId(importId);
             if (!row) {
                 setStatus(ids.pageStatus, "Unable to find the selected imported live position.", "danger");
                 return;
@@ -7879,9 +7876,7 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
         const closeButton = target ? target.closest(".rolling-live-close-open-position") : null;
         if (closeButton instanceof HTMLButtonElement) {
             const importId = String(closeButton.dataset.importId || "").trim();
-            const row = displayedPositions.find(function (item) {
-                return String(item?.importId || "").trim() === importId;
-            });
+            const row = findOpenRowByImportId(importId);
             if (!row) {
                 setStatus(ids.pageStatus, "Unable to find the selected imported live position.", "danger");
                 return;
@@ -7902,10 +7897,15 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
                     renderOpenPositions(trackedPayload);
                 }
                 else {
-                    const remaining = displayedPositions.filter(function (item) {
+                    // Calendar Spread: keep futures rows too — filter the full
+                    // payload, not the options-only displayedPositions.
+                    const arrRemaining = (Array.isArray(lastOpenPositionsPayload?.positions)
+                        ? lastOpenPositionsPayload.positions
+                        : displayedPositions
+                    ).filter(function (item) {
                         return String(item?.importId || "").trim() !== importId;
                     });
-                    renderOpenPositions(remaining);
+                    renderOpenPositions(arrRemaining);
                 }
                 return Promise.all([
                     loadAccountSummary(),
@@ -7913,8 +7913,10 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
                     refreshImportablePositionsSilently().catch(function () { return undefined; }),
                     loadEvents().catch(function () { return undefined; }),
                     // Closed on this page moves the row server-side already; refresh
-                    // Closed Positions so it appears there immediately.
-                    loadClosedPositions().catch(function () { return undefined; })
+                    // the visible Closed Positions card (and legacy list) so it
+                    // appears there immediately.
+                    loadClosedPositions().catch(function () { return undefined; }),
+                    loadClosedAltPositions().catch(function () { return undefined; })
                 ]);
             }).catch(function (error) {
                 setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to close imported live position.", "danger");
@@ -7962,7 +7964,7 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
             return;
         }
         const closeId = String(deleteButton.dataset.closeId || "").trim();
-        const row = closedPositions.find(function (item) {
+        const row = closedPositions.concat(closedAltPositions).find(function (item) {
             return String(item?.closeId || item?.rowId || "").trim() === closeId;
         });
         if (!row) {
@@ -8003,10 +8005,14 @@ ids.closedAltPositionsBody?.addEventListener("click", function (event) {
         }
         const deleteButton = target ? target.closest(".rolling-live-delete-closed-position") : null;
         if (!(deleteButton instanceof HTMLButtonElement)) {
+            const restoreAltButton = target ? target.closest(".rolling-live-restore-closed-position") : null;
+            if (restoreAltButton instanceof HTMLButtonElement) {
+                handleClosedRestoreClick(restoreAltButton.dataset.closeId);
+            }
             return;
         }
         const closeId = String(deleteButton.dataset.closeId || "").trim();
-        const row = closedAltPositions.find(function (item) {
+        const row = closedAltPositions.concat(closedPositions).find(function (item) {
             return String(item?.closeId || item?.rowId || "").trim() === closeId;
         });
         if (!row) {
@@ -8029,11 +8035,6 @@ ids.closedAltPositionsBody?.addEventListener("click", function (event) {
         }).catch(function (error) {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to delete closed position.", "danger");
         });
-        const restoreAltButton = target ? target.closest(".rolling-live-restore-closed-position") : null;
-        if (restoreAltButton instanceof HTMLButtonElement) {
-            handleClosedRestoreClick(restoreAltButton.dataset.closeId);
-            return;
-        }
     });
     async function loadPageForCurrentTarget() {
         displayedPositions = [];
