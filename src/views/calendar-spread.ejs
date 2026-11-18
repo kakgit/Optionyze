@@ -299,7 +299,7 @@
                 </div>
                 <div class="rolling-futures-demo-grid row">
                     <div class="rolling-demo-field">
-                        <label for="ddlRollingFuturesAction1"><%= (bIsDemoPage || bIsCoveredLivePage) ? 'Green Action' : 'Action' %></label>
+                        <label for="ddlRollingFuturesAction1">Action</label>
                         <select id="ddlRollingFuturesAction1">
                             <option value="none">None</option>
                             <option value="buy">Buy</option>
@@ -346,12 +346,12 @@
                         <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD1" value="<%= bIsCoveredLivePage ? '0.27' : '0.33' %>" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-tpd">
-                        <label for="txtRollingFuturesTpD1">TP D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD1" value="<%= bIsCoveredLivePage ? '0.14' : '0.10' %>" />
+                        <label for="txtRollingFuturesTpD1">% TP of Premium</label>
+                        <input type="number" min="1" max="100" step="1" id="txtRollingFuturesTpD1" value="10" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-sld">
-                        <label for="txtRollingFuturesSlD1">SL D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD1" value="<%= bIsCoveredLivePage ? '0.54' : (bIsStrangleLikePage ? '0.55' : '0.50') %>" />
+                        <label for="txtRollingFuturesSlD1">% SL of Premium</label>
+                        <input type="number" min="1" max="100" step="1" id="txtRollingFuturesSlD1" value="20" />
                     </div>
                     <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-reenter">
                         <label for="chkRollingFuturesReEnter1">
@@ -381,92 +381,26 @@
                     </div>
                 </div>
 
-                <div class="rolling-futures-demo-grid row">
-                    <div class="rolling-demo-field">
-                        <label for="ddlRollingFuturesAction2"><%= (bIsDemoPage || bIsCoveredLivePage) ? 'Red Action' : 'Action' %></label>
-                        <select id="ddlRollingFuturesAction2">
-                            <option value="none">None</option>
-                            <option value="buy" <%= (!bIsStrangleLikePage && !bIsCoveredLivePage) ? 'selected' : '' %>>Buy</option>
-                            <option value="sell" <%= (bIsStrangleLikePage || bIsCoveredLivePage) ? 'selected' : '' %>>Sell</option>
-                        </select>
+                <div class="rolling-futures-demo-grid row calendar-spread-futures-row">
+                    <div class="rolling-demo-field calendar-spread-futures-qty">
+                        <label for="txtCalendarSpreadFutQty">Fut Qty</label>
+                        <input type="number" min="1" step="1" id="txtCalendarSpreadFutQty" value="1" />
                     </div>
                     <div class="rolling-demo-field">
-                        <label for="ddlRollingFuturesLegs2">Legs</label>
-                        <select id="ddlRollingFuturesLegs2">
-                            <option value="both" <%= (!bIsStrangleLikePage && !bIsCoveredLivePage) ? 'selected' : '' %>>Both</option>
-                            <option value="ce" <%= bIsCoveredLivePage ? 'selected' : '' %>>CE</option>
-                            <option value="pe" <%= bIsStrangleLikePage ? 'selected' : '' %>>PE</option>
-                        </select>
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn buy" type="button" id="btnCalendarSpreadBuyFut">BUY FUT</button>
                     </div>
                     <div class="rolling-demo-field">
-                        <label for="ddlRollingFuturesExpiryType2">Expiry Type</label>
-                        <select id="ddlRollingFuturesExpiryType2">
-                            <option value="1" <%= (!bIsStrangleLikePage && !bIsCoveredLivePage) ? 'selected' : '' %>>DAILY T+1</option>
-                            <option value="2">DAILY T+2</option>
-                            <option value="4">WEEKLY</option>
-                            <option value="5">BI-WEEKLY</option>
-                            <option value="6" <%= (bIsStrangleLikePage || bIsCoveredLivePage) ? 'selected' : '' %>>MONTHLY</option>
-                            <option value="7">BI-MONTHLY</option>
-                        </select>
-                    </div>
-                    <div class="rolling-demo-field">
-                        <label for="txtRollingFuturesExpiry2">Select Expiry</label>
-                        <input type="date" id="txtRollingFuturesExpiry2" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-qty">
-                        <label for="txtRollingFuturesQty2">Qty</label>
-                        <input type="number" min="1" id="txtRollingFuturesQty2" value="1" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-inline-action rolling-covered-row2-inline-action-buyce">
                         <label>&nbsp;</label>
-                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesBuyCe2">BUY CE</button>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-inline-action rolling-covered-row2-inline-action-buype">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesBuyPe2">BUY PE</button>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-newd">
-                        <label for="txtRollingFuturesNewD2">New D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD2" value="<%= bIsCoveredLivePage ? '0.27' : (bIsStrangleLikePage ? '0.33' : '0.13') %>" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-tpd">
-                        <label for="txtRollingFuturesTpD2">TP D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesTpD2" value="<%= bIsCoveredLivePage ? '0.14' : (bIsStrangleLikePage ? '0.10' : '1.00') %>" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-sld">
-                        <label for="txtRollingFuturesSlD2">SL D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesSlD2" value="<%= bIsCoveredLivePage ? '0.54' : (bIsStrangleLikePage ? '0.55' : '0.05') %>" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-break rolling-covered-row2-break-reenter">
-                        <label for="chkRollingFuturesReEnter2">
-                            Re-Enter
-                            <span class="rolling-futures-help-icon-wrap">
-                                <button type="button" class="rolling-futures-help-trigger" aria-label="Show row 2 re-enter help">
-                                    ?
-                                </button>
-                                <span class="rolling-futures-help-popout floating">
-                                    When enabled, if this row closes because of <code>SL</code> or <code>TP</code>, it reopens from the same row using the same action, leg, quantity, and <code>New D</code>. This re-entry does not use or increase the fresh-trade lot increment.
-                                </span>
-                            </span>
-                        </label>
-                        <div class="rolling-futures-help-inline-top">
-                            <label class="rolling-futures-help-check compact" for="chkRollingFuturesReEnter2">
-                                <input type="checkbox" id="chkRollingFuturesReEnter2" checked />
-                            </label>
-                        </div>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-break-action rolling-covered-row2-break-action-sellpe">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesSellPe2">SELL PE</button>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row2-break-action rolling-covered-row2-break-action-sellce">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesSellCe2">SELL CE</button>
+                        <button class="rolling-demo-btn sell" type="button" id="btnCalendarSpreadSellFut">SELL FUT</button>
                     </div>
                 </div>
 
-                <% if (!bIsStrangleDemoPage) { %>
-                <div class="rolling-futures-demo-grid actions-row rolling-futures-actions-row-with-gate">
+                <!-- Removed: Row-2 Manual Trader grid (calendar-spread cleanup). Row-1 retained. -->
+                <!-- Removed: Row-2 fields (calendar-spread cleanup). -->
+
+                <% if (!bIsStrangleDemoPage && !bIsDemoPage) { %>
+                <div class="rolling-futures-demo-grid actions-row rolling-futures-actions-row-with-gate calendar-spread-removed-gates" style="display:none;" aria-hidden="true">
                     <div class="rolling-demo-field rolling-futures-buy-gate-field">
                         <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
                             <% if (bIsStrangleLikePage) { %>
@@ -488,78 +422,16 @@
                                     </span>
                                 </div>
                             <% } else { %>
-                                <div class="rolling-futures-buy-gate-row">
-                                    <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesBuyHedgeSellPremiumGate">
-                                        <input type="checkbox" id="chkRollingFuturesBuyHedgeSellPremiumGate" <%= bIsCoveredLivePage ? '' : 'checked' %> />
-                                    </label>
-                                    <div class="rolling-futures-buy-gate-text">Increment by X no of lots on every new Trade</div>
-                                    <div class="rolling-demo-field rolling-futures-help-input-field">
-                                        <input type="number" id="txtRollingFuturesBuyHedgeSellPremiumPct" min="0" step="1" value="1" />
-                                    </div>
-                                    <span class="rolling-futures-help-icon-wrap">
-                                        <button type="button" class="rolling-futures-help-trigger" aria-label="Show trade lot increment help">
-                                            ?
-                                        </button>
-                                        <span class="rolling-futures-help-popout floating">
-                                            When enabled, each new CE or PE trade uses the Manual Trader row quantity plus <code>X</code> extra lots for every already-active open position on the same side. CE and PE are tracked separately.
-                                        </span>
-                                    </span>
-                                </div>
+                                <!-- Removed block 1 (calendar-spread cleanup). -->
                             <% } %>
-                            <div class="rolling-futures-buy-gate-row">
-                                <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesLinkRowQtyToMultiplier">
-                                    <input type="checkbox" id="chkRollingFuturesLinkRowQtyToMultiplier" checked />
-                                </label>
-                                <div class="rolling-futures-buy-gate-text">Link Row Qty to Multiplier</div>
-                                <span class="rolling-futures-help-icon-wrap">
-                                    <button type="button" class="rolling-futures-help-trigger" aria-label="Show row quantity link help">
-                                        ?
-                                    </button>
-                                    <span class="rolling-futures-help-popout floating">
-                                        When enabled, changing the <code>Multiplier</code> sets the <code>Qty</code> for both Leg 1 and Leg 2. Turn it off to set each Row's <code>Qty</code> independently.
-                                    </span>
-                                </span>
-                            </div>
+                            <!-- Removed block 2 (calendar-spread cleanup). -->
                         </div>
                     </div>
                     <div class="rolling-demo-field rolling-futures-buy-gate-field">
-                        <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
-                            <div class="rolling-futures-buy-gate-row">
-                                <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesAutoRolloverT2BuyEnabled">
-                                    <input type="checkbox" id="chkRollingFuturesAutoRolloverT2BuyEnabled" checked />
-                                </label>
-                                <div class="rolling-futures-buy-gate-text">Auto-roll DAILY T+2 buy positions</div>
-                                <span class="rolling-futures-help-icon-wrap">
-                                    <button type="button" class="rolling-futures-help-trigger" aria-label="Show T+2 rollover help">
-                                        ?
-                                    </button>
-                                    <span class="rolling-futures-help-popout floating">
-                                        Delta Exchange settles all options at <code>5:30 PM IST</code>. One hour before that, any open <code>DAILY T+2</code> buy position is closed and immediately reopened as a fresh T+2 contract using the <code>Row 2</code> Manual Trader settings.
-                                    </span>
-                                </span>
-                            </div>
-                        </div>
+                        <!-- Removed block 3 (calendar-spread cleanup). -->
                     </div>
                     <div class="rolling-demo-field rolling-futures-buy-gate-field">
-                        <div class="rolling-futures-help-inline-main rolling-futures-buy-gate-card">
-                            <div class="rolling-futures-buy-gate-row">
-                                <label class="rolling-futures-help-check compact rolling-futures-buy-gate-check" for="chkRollingFuturesAutoReenterOnLossEnabled">
-                                    <input type="checkbox" id="chkRollingFuturesAutoReenterOnLossEnabled" />
-                                </label>
-                                <div class="rolling-futures-buy-gate-text">Close &amp; re-enter when loss crosses</div>
-                                <div class="rolling-demo-field rolling-futures-help-input-field">
-                                    <input type="number" id="txtRollingFuturesLossReenterThreshold" min="1" step="1" value="1000" />
-                                </div>
-                                <span class="rolling-futures-help-icon-wrap">
-                                    <button type="button" class="rolling-futures-help-trigger" aria-label="Show loss limit re-entry help">
-                                        ?
-                                    </button>
-                                    <span class="rolling-futures-help-popout floating">
-                                        When enabled, any open position whose live loss reaches the given amount in USD is closed and immediately re-entered using the Manual Trader settings of the <code>Row</code> that opened it.
-                                    </span>
-                                </span>
-                            </div>
-                        </div>
+                        <!-- Removed block 4 (calendar-spread cleanup). -->
                     </div>
                 </div>
                 <% } %>
@@ -575,7 +447,7 @@
             <div class="app-panel rolling-demo-card" id="calendarSpreadOpenPositions">
                 <div class="rolling-demo-card-head rolling-live-open-head">
                     <div class="rolling-live-open-title-group">
-                        <h2>Open Positions</h2>
+                        <h2>Options Open Positions</h2>
                         <% if (bIsPaperDemoPage || bIsCoveredLivePage) { %>
                             <input type="number" min="1" step="1" value="120" id="txtRollingDualFuturesProfitCloseTimerSecs" class="rolling-live-open-timer-input" title="Close timer in seconds" aria-label="Close timer in seconds" />
                         <% } %>
@@ -687,12 +559,12 @@
                             <tr>
                                 <th>Delta</th>
                                 <th>Symbol</th>
-                                <th>Side</th>
                                 <th>Lot Sz</th>
                                 <th>Qty</th>
                                 <th>Buy Price</th>
                                 <th>Sell Price</th>
                                 <th>LTP</th>
+                                <th>SL / TP</th>
                                 <th>Charges</th>
                                 <th>P &amp; L</th>
                                 <th>Start DT</th>
@@ -723,95 +595,46 @@
                 <% } %>
             </div>
 
-            <div class="app-panel rolling-demo-card">
-                <div class="rolling-demo-card-head">
-                    <h2>Temp Closed Positions</h2>
+            <div class="app-panel rolling-demo-card" id="calendarSpreadFuturesOpenPositions">
+                <div class="rolling-demo-card-head rolling-live-open-head">
+                    <div class="rolling-live-open-title-group">
+                        <h2>Futures Open Positions</h2>
+                    </div>
                     <div class="rolling-demo-card-tools">
-                        <div class="rolling-demo-filters rolling-live-filters rolling-demo-filters-closed">
-                            <div class="rolling-demo-field">
-                                <input type="datetime-local" id="txtRollingDualFuturesClosedFromDate" title="Filter closed positions from this date and time" aria-label="Filter closed positions from this date and time" />
-                            </div>
-                            <div class="rolling-demo-field">
-                                <input type="datetime-local" id="txtRollingDualFuturesClosedToDate" title="Filter closed positions up to this date and time" aria-label="Filter closed positions up to this date and time" />
-                            </div>
-                            <div class="rolling-demo-field">
-                                <div class="rolling-demo-check-wrap">
-                                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClearClosedFilters" title="Clear closed-position date filters" aria-label="Clear closed-position date filters">
-                                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                                            <path d="M18 6 6 18" />
-                                            <path d="m6 6 12 12" />
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="rolling-demo-field">
-                                <div class="rolling-demo-check-wrap rolling-demo-check-wrap-compact">
-                                    <label class="rolling-futures-neutral-mode" for="chkRollingDualFuturesUpdateRecoveryTotals">
-                                        <input type="checkbox" id="chkRollingDualFuturesUpdateRecoveryTotals" />
-                                        <span>Update Total Charges and PnL</span>
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="rolling-demo-field">
-                                <div class="rolling-demo-check-wrap">
-                                    <% if (bIsPaperDemoPage) { %>
-                                        <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClearClosedPositions" title="<%= vClearClosedPositionsTitle %>" aria-label="<%= vClearClosedPositionsTitle %>">
-                                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                                <path d="M18 6 6 18" />
-                                                <path d="m6 6 12 12" />
-                                            </svg>
-                                        </button>
-                                    <% } %>
-                                    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesRefreshClosedPositions" title="<%= vRefreshClosedTitle %>" aria-label="<%= vRefreshClosedTitle %>">
-                                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                                            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-                                            <path d="M21 3v6h-6" />
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
+                        <button class="rolling-demo-icon-btn warn" type="button" id="btnCalendarSpreadFuturesClear" title="Clear all calendar spread futures open positions locally" aria-label="Clear all calendar spread futures open positions locally">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7z" /><path d="M4 7h16M9 7V5h6v2" /></svg>
+                        </button>
+                        <button class="rolling-demo-icon-btn primary" type="button" id="btnCalendarSpreadFuturesRefresh" title="Refresh futures open positions" aria-label="Refresh futures open positions">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5a7 7 0 1 1-6.32 4" /><path d="M5 3v5h5" /></svg>
+                        </button>
                     </div>
                 </div>
                 <div class="rolling-demo-table-wrap">
-                    <table class="rolling-demo-table rolling-demo-table-closed">
+                    <table class="rolling-demo-table rolling-demo-table-open">
                         <thead>
                             <tr>
-                                <th>Executed DT</th>
-                                <th>Symbol</th>
+                                <th>Contract</th>
                                 <th>Side</th>
-                                <th>Lot Sz</th>
                                 <th>Qty</th>
-                                <th>Buy Price</th>
-                                <th>Sell Price</th>
+                                <th>Entry</th>
+                                <th>Mark</th>
                                 <th>Charges</th>
-                                <th>P &amp; L</th>
+                                <th>PnL</th>
+                                <th>Opened</th>
+                                <th>Updated</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="rollingDualFuturesClosedPositionsBody">
+                        <tbody id="calendarSpreadFuturesOpenPositionsBody">
                             <tr>
-                                <td colspan="10" class="rolling-demo-empty"><%= vClosedPositionsEmpty %></td>
+                                <td colspan="10" class="rolling-demo-empty">No calendar spread futures positions are currently shown.</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
-                <div class="rolling-demo-card-tools rolling-live-pagination">
-                    <div class="rolling-live-open-signal" id="rollingDualFuturesClosedPositionsPageInfo">Page 0 of 0</div>
-                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClosedPrevPage" title="Previous closed-positions page" aria-label="Previous closed-positions page">
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="m15 18-6-6 6-6" />
-                        </svg>
-                    </button>
-                    <div class="rolling-live-page-numbers" id="rollingDualFuturesClosedPageNumbers"></div>
-                    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesClosedNextPage" title="Next closed-positions page" aria-label="Next closed-positions page">
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="m9 6 6 6-6 6" />
-                        </svg>
-                    </button>
-                </div>
             </div>
-            <div class="app-panel rolling-demo-card">
+
+            <div class="app-panel rolling-demo-card" id="calendarSpreadClosedPositions">
                 <div class="rolling-demo-card-head">
                     <h2>Closed Positions</h2>
                     <div class="rolling-demo-card-tools">
@@ -834,14 +657,12 @@
                             </div>
                             <div class="rolling-demo-field">
                                 <div class="rolling-demo-check-wrap">
-                                    <% if (bIsPaperDemoPage) { %>
-                                        <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClosedAltClear" title="<%= vClearClosedPositionsTitle %>" aria-label="<%= vClearClosedPositionsTitle %>">
-                                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                                <path d="M18 6 6 18" />
-                                                <path d="m6 6 12 12" />
-                                            </svg>
-                                        </button>
-                                    <% } %>
+                                    <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesClosedAltClear" title="<%= vClearClosedPositionsTitle %>" aria-label="<%= vClearClosedPositionsTitle %>">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M18 6 6 18" />
+                                            <path d="m6 6 12 12" />
+                                        </svg>
+                                    </button>
                                     <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesClosedAltRefresh" title="<%= vRefreshClosedTitle %>" aria-label="<%= vRefreshClosedTitle %>">
                                         <svg viewBox="0 0 24 24" aria-hidden="true">
                                             <path d="M21 12a9 9 0 1 1-2.64-6.36" />
@@ -884,7 +705,7 @@
                         </svg>
                     </button>
                     <div class="rolling-live-page-numbers" id="rollingDualFuturesClosedAltClosedPageNumbers"></div>
-                    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesClosedAltNextPage" title="Next closed-positions page" aria-label="Next closed-positions page">
+                    <button class="rolling-demo-icon-btn primary" type="button" id="btnRollingDualFuturesClosedAltNextPage" title="Next closed-positions page">
                         <svg viewBox="0 0 24 24" aria-hidden="true">
                             <path d="m9 6 6 6-6 6" />
                         </svg>
@@ -892,6 +713,7 @@
                 </div>
             </div>
 
+            <!-- Removed: Temp Closed Positions section (calendar-spread cleanup). -->
             <% if (!bIsPaperDemoPage && !bIsCoveredLivePage) { %>
             <div class="app-panel rolling-demo-card rolling-futures-hidden rolling-futures-indicator-card" id="cardRollingFuturesDeltaDirec">
                 <div class="rolling-demo-card-head rolling-futures-indicator-head-row">
@@ -1039,7 +861,7 @@
         <section class="app-panel rolling-live-modal" id="rollingDualFuturesOpenEditModal" aria-hidden="true">
             <div class="rolling-live-modal-head">
                 <div>
-                    <h2 class="rolling-live-modal-title">Edit Open Position Qty</h2>
+                    <h2 class="rolling-live-modal-title">Edit Open Position</h2>
                     <p class="app-copy" id="rollingDualFuturesOpenEditSymbol">Update the quantity of this open position.</p>
                 </div>
                 <button class="rolling-demo-icon-btn warn" type="button" id="btnRollingDualFuturesCloseOpenEditModal" title="Close edit dialog" aria-label="Close edit dialog">
@@ -1054,8 +876,20 @@
                 <label for="txtRollingDualFuturesOpenEditQty">Qty</label>
                 <input type="number" min="1" step="1" id="txtRollingDualFuturesOpenEditQty" />
             </div>
+            <div class="rolling-demo-field">
+                <label for="txtRollingDualFuturesOpenEditEntry">Entry Price</label>
+                <input type="number" min="0" step="any" id="txtRollingDualFuturesOpenEditEntry" />
+            </div>
+            <div class="rolling-demo-field" id="rollingDualFuturesOpenEditTpWrap">
+                <label for="txtRollingDualFuturesOpenEditTpPct">TP % of Premium</label>
+                <input type="number" min="1" max="100" step="1" id="txtRollingDualFuturesOpenEditTpPct" />
+            </div>
+            <div class="rolling-demo-field" id="rollingDualFuturesOpenEditSlWrap">
+                <label for="txtRollingDualFuturesOpenEditSlPct">SL % of Premium</label>
+                <input type="number" min="1" max="100" step="1" id="txtRollingDualFuturesOpenEditSlPct" />
+            </div>
             <div class="rolling-live-modal-actions">
-                <button class="rolling-demo-btn primary" type="button" id="btnRollingDualFuturesSaveOpenEdit">Save Qty</button>
+                <button class="rolling-demo-btn primary" type="button" id="btnRollingDualFuturesSaveOpenEdit">Save</button>
             </div>
         </section>
         <div class="rolling-live-overlay" id="rollingDualFuturesClosedEditOverlay"></div>

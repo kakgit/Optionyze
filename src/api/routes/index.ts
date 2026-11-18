@@ -202,6 +202,7 @@ import {
     recalculateCalendarSpreadRecoveryTotalPnl,
     reconcileCalendarSpreadOpenPositions,
     reenterCalendarSpreadOpenPosition,
+    restoreCalendarSpreadClosedPosition,
     updateCalendarSpreadOpenPositionQty,
     saveCalendarSpreadOpenPositions,
     saveCalendarSpreadProfile,
@@ -1112,6 +1113,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/calendar-spread/closed-positions/update", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await updateCalendarSpreadClosedPosition(req, res);
+    });
+    objRouter.post("/calendar-spread/closed-positions/restore", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await restoreCalendarSpreadClosedPosition(req, res);
     });
     objRouter.get("/calendar-spread/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getCalendarSpreadEvents(req, res);

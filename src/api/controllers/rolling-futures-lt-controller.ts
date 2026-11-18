@@ -629,6 +629,10 @@ function normalizeOptionRowIndex(
     pStrategyCode: RollingFuturesLtStrategyCode,
     pValue: unknown
 ): 1 | 2 {
+    // Calendar-spread page exposes Row-1 only; force every row reference to 1.
+    if (pStrategyCode === "calendar-spread") {
+        return 1;
+    }
     return isCoveredLikeStrategy(pStrategyCode) && Number(pValue) === 2 ? 2 : 1;
 }
 
@@ -890,7 +894,9 @@ async function runCoveredExecStrategyBatchPlacement(
             "manual_action",
             "info",
             "Exec Strategy Settings Snapshot",
-            `Server will execute Covered strategy with Row 1 ${String(objUiState.action1 || "").toUpperCase()} ${String(objUiState.legs1 || "").toUpperCase()} TP ${Number(objUiState.tpD1 || 0).toFixed(2)} SL ${Number(objUiState.slD1 || 0).toFixed(2)}, Row 2 ${String(objUiState.action2 || "").toUpperCase()} ${String(objUiState.legs2 || "").toUpperCase()} TP ${Number(objUiState.tpD2 || 0).toFixed(2)} SL ${Number(objUiState.slD2 || 0).toFixed(2)}.`,
+            isCalendarSpreadPremiumTpStrategy(pStrategyCode)
+                ? `Server will execute Calendar Spread strategy with Row 1 ${String(objUiState.action1 || "").toUpperCase()} ${String(objUiState.legs1 || "").toUpperCase()} TP ${Number(objUiState.tpD1 || 0)}% / SL ${Number(objUiState.slD1 || 0)}% of premium.`
+                : `Server will execute Covered strategy with Row 1 ${String(objUiState.action1 || "").toUpperCase()} ${String(objUiState.legs1 || "").toUpperCase()} TP ${Number(objUiState.tpD1 || 0).toFixed(2)} SL ${Number(objUiState.slD1 || 0).toFixed(2)}, Row 2 ${String(objUiState.action2 || "").toUpperCase()} ${String(objUiState.legs2 || "").toUpperCase()} TP ${Number(objUiState.tpD2 || 0).toFixed(2)} SL ${Number(objUiState.slD2 || 0).toFixed(2)}.`,
             {
                 reason: "exec_strategy_settings_snapshot",
                 row1: {
@@ -2770,8 +2776,8 @@ function getDefaultOptionRowUiState(
         objDefaults.expiryMode = "6";
         objDefaults.newD = pStrategyCode === "covered-options" ? "0.27" : "0.33";
         objDefaults.reD = objDefaults.newD;
-        objDefaults.tpD = pStrategyCode === "covered-options" ? "0.14" : "0.10";
-        objDefaults.slD = pStrategyCode === "covered-options" ? "0.54" : "0.50";
+        objDefaults.tpD = pStrategyCode === "covered-options" ? "0.14" : (pStrategyCode === "calendar-spread" ? "10" : "0.10");
+        objDefaults.slD = pStrategyCode === "covered-options" ? "0.54" : (pStrategyCode === "calendar-spread" ? "20" : "0.50");
     }
     if (isCoveredLikeStrategy(pStrategyCode) && vRowIndex === 2) {
         objDefaults.action = pStrategyCode === "covered-options" ? "sell" : "buy";
@@ -2828,8 +2834,12 @@ function getNormalizedOptionRowUiState(
         reD: (isStrangleOptionsStrategy(pStrategyCode) || usesOptionsDemoManualTraderSettings(pStrategyCode))
             ? normalizeStringValue(pUiState[objKeys.newD], String(objDefaults.newD))
             : normalizeStringValue(pUiState[objKeys.reD], String(objDefaults.reD)),
-        tpD: normalizeStringValue(pUiState[objKeys.tpD], String(objDefaults.tpD)),
-        slD: normalizeStringValue(pUiState[objKeys.slD], String(objDefaults.slD)),
+        tpD: isCalendarSpreadPremiumTpStrategy(pStrategyCode)
+            ? String(normalizeCalendarSpreadTpPctValue(pUiState[objKeys.tpD] ?? objDefaults.tpD) ?? normalizeCalendarSpreadTpPctValue(objDefaults.tpD) ?? "10")
+            : normalizeStringValue(pUiState[objKeys.tpD], String(objDefaults.tpD)),
+        slD: isCalendarSpreadPremiumTpStrategy(pStrategyCode)
+            ? String(normalizeCalendarSpreadSlPctValue(pUiState[objKeys.slD] ?? objDefaults.slD) ?? normalizeCalendarSpreadSlPctValue(objDefaults.slD) ?? "20")
+            : normalizeStringValue(pUiState[objKeys.slD], String(objDefaults.slD)),
         reEnter: (supportsRenkoFeedStrategy(pStrategyCode) && !usesOptionsDemoManualTraderSettings(pStrategyCode))
             ? false
             : normalizeBooleanValue(pUiState[objKeys.reEnter], Boolean(objDefaults.reEnter))
@@ -2888,6 +2898,8 @@ function getDefaultManualTraderUiState(
         symbol: "BTC",
         manualFutOrderType: "market_order",
         bsFutQty: "1",
+        // Calendar Spread Futures qty (calendar-spread page only, persisted like other controls).
+        calendarSpreadFutQty: "1",
         manualBtcQty: "1",
         manualEthQty: "1",
         manualXautQty: "1",
@@ -4441,14 +4453,86 @@ function getLiveOptionRuleMetadataFromUiState(
     pRowIndex: unknown = 1
 ): RollingFuturesLtOptionMetadata {
     const objRowState = getNormalizedOptionRowUiState(pUiState, pStrategyCode, pRowIndex);
+    // Calendar Spread: TP D is a premium percent (1-100), persisted in tpD.
+    const vTpPct = isCalendarSpreadPremiumTpStrategy(pStrategyCode)
+        ? normalizeCalendarSpreadTpPctValue(objRowState.tpD)
+        : null;
+    // Calendar Spread: SL D is a premium percent (1-100), persisted in slD.
+    const vSlPct = isCalendarSpreadPremiumTpStrategy(pStrategyCode)
+        ? normalizeCalendarSpreadSlPctValue(objRowState.slD)
+        : null;
     return {
         rowIndex: objRowState.rowIndex,
-        takeProfitDelta: Math.max(0, Number(objRowState.tpD || 0.25)),
-        stopLossDelta: Math.max(0, Number(objRowState.slD || 0.65)),
+        takeProfitDelta: vTpPct !== null ? vTpPct : Math.max(0, Number(objRowState.tpD || 0.25)),
+        stopLossDelta: vSlPct !== null ? vSlPct : Math.max(0, Number(objRowState.slD || 0.65)),
         reEntryDelta: Math.max(0, Number(objRowState.reD || 0.53)),
         reEnterEnabled: Boolean(objRowState.reEnter),
         openedReason: pReason
     };
+}
+
+function normalizeCalendarSpreadTpPctValue(pValue: unknown): number | null {
+    // Calendar Spread "% TP of Premium": whole percents 1-100.
+    const vRaw = Number(pValue);
+    if (!Number.isFinite(vRaw) || vRaw < 1 || vRaw > 100) {
+        return null;
+    }
+    return Math.round(vRaw);
+}
+
+function isCalendarSpreadPremiumTpStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
+    return pStrategyCode === "calendar-spread";
+}
+
+// Calendar Spread SELL TP: close when LTP falls to (or below)
+// sellPrice * (1 - tpPct / 100). BUY side keeps delta tracking.
+function shouldTriggerCalendarSpreadPremiumTp(
+    pSide: string,
+    pEntryPrice: number,
+    pLivePrice: number,
+    pTpPct: number | null
+): boolean {
+    if (String(pSide || "").trim().toUpperCase() !== "SELL") {
+        return false;
+    }
+    if (pTpPct === null || !(pTpPct >= 1) || !(pTpPct <= 100)) {
+        return false;
+    }
+    if (!(pEntryPrice > 0) || !(pLivePrice > 0)) {
+        return false;
+    }
+    const vTarget = pEntryPrice * (1 - pTpPct / 100);
+    return pLivePrice <= vTarget;
+}
+
+// Calendar Spread SELL SL: close when LTP rises to (or above)
+// sellPrice * (1 + slPct / 100). BUY side keeps delta tracking.
+function normalizeCalendarSpreadSlPctValue(pValue: unknown): number | null {
+    // Calendar Spread "% SL of Premium": whole percents 1-100.
+    const vRaw = Number(pValue);
+    if (!Number.isFinite(vRaw) || vRaw < 1 || vRaw > 100) {
+        return null;
+    }
+    return Math.round(vRaw);
+}
+
+function shouldTriggerCalendarSpreadPremiumSl(
+    pSide: string,
+    pEntryPrice: number,
+    pLivePrice: number,
+    pSlPct: number | null
+): boolean {
+    if (String(pSide || "").trim().toUpperCase() !== "SELL") {
+        return false;
+    }
+    if (pSlPct === null || !(pSlPct >= 1) || !(pSlPct <= 100)) {
+        return false;
+    }
+    if (!(pEntryPrice > 0) || !(pLivePrice > 0)) {
+        return false;
+    }
+    const vTarget = pEntryPrice * (1 + pSlPct / 100);
+    return pLivePrice >= vTarget;
 }
 
 function shouldTriggerTrackedOption(
@@ -5634,6 +5718,7 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         symbol: vSymbol,
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
+        calendarSpreadFutQty: normalizeStringValue((objUiState as Record<string, unknown>).calendarSpreadFutQty ?? objUiState.bsFutQty, String((objDefaults as Record<string, unknown>).calendarSpreadFutQty ?? "1")),
         manualBtcQty: normalizeQtyLikeValue(objUiState.manualBtcQty, objDefaults.manualBtcQty),
         manualEthQty: normalizeQtyLikeValue(objUiState.manualEthQty, objDefaults.manualEthQty),
         manualXautQty: normalizeQtyLikeValue(objUiState.manualXautQty, objDefaults.manualXautQty),
@@ -5687,23 +5772,20 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         closePosPnlAboveBrokerage: normalizeBooleanValue(objUiState.closePosPnlAboveBrokerage, Boolean(objDefaults.closePosPnlAboveBrokerage)),
         closePosPnlAboveBrokerageX: normalizeStringValue(objUiState.closePosPnlAboveBrokerageX, String(objDefaults.closePosPnlAboveBrokerageX)),
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
-        autoRolloverT2BuyEnabled: pProfile.strategyCode === "calendar-spread"
-            ? normalizeBooleanValue(objUiState.autoRolloverT2BuyEnabled, Boolean(objDefaults.autoRolloverT2BuyEnabled))
-            : false,
+        // Calendar-spread blocks removed from the page: force off so stale saved
+        // profiles cannot re-enable T+2 rollover, qty linking, loss re-entry or
+        // lot increment. Other strategies keep their existing behaviour.
+        autoRolloverT2BuyEnabled: false,
         linkRowQtyToMultiplier: pProfile.strategyCode === "calendar-spread"
-            ? normalizeBooleanValue(objUiState.linkRowQtyToMultiplier, Boolean(objDefaults.linkRowQtyToMultiplier))
+            ? false
             : true,
-        autoReenterOnLossEnabled: pProfile.strategyCode === "calendar-spread"
-            ? normalizeBooleanValue(objUiState.autoReenterOnLossEnabled, Boolean(objDefaults.autoReenterOnLossEnabled))
-            : false,
-        lossReenterThreshold: pProfile.strategyCode === "calendar-spread"
-            ? normalizeLossReenterThresholdString(objUiState.lossReenterThreshold ?? objDefaults.lossReenterThreshold)
-            : "1000",
-        buyHedgeSellPremiumGate: isStrangleOptionsStrategy(pProfile.strategyCode)
+        autoReenterOnLossEnabled: false,
+        lossReenterThreshold: "1000",
+        buyHedgeSellPremiumGate: (isStrangleOptionsStrategy(pProfile.strategyCode) || pProfile.strategyCode === "calendar-spread")
             ? false
             : normalizeBooleanValue(objUiState.buyHedgeSellPremiumGate, Boolean(objDefaults.buyHedgeSellPremiumGate)),
-        buyHedgeSellPremiumPct: isStrangleOptionsStrategy(pProfile.strategyCode)
-            ? "2"
+        buyHedgeSellPremiumPct: (isStrangleOptionsStrategy(pProfile.strategyCode) || pProfile.strategyCode === "calendar-spread")
+            ? "1"
             : normalizeStringValue(objUiState.buyHedgeSellPremiumPct, String(objDefaults.buyHedgeSellPremiumPct)),
         strangleDeltaDiffReplaceEnabled: isStrangleOptionsStrategy(pProfile.strategyCode)
             ? normalizeBooleanValue(objUiState.strangleDeltaDiffReplaceEnabled, Boolean(objDefaults.strangleDeltaDiffReplaceEnabled))
@@ -5796,7 +5878,7 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         closedFromDate: String(objUiState.closedFromDate || "").trim(),
         closedToDate: String(objUiState.closedToDate || "").trim()
     };
-    [1, ...(isCoveredLikeStrategy(pProfile.strategyCode) ? [2] : [])].forEach((vRowIndex) => {
+    [1, ...((isCoveredLikeStrategy(pProfile.strategyCode) && pProfile.strategyCode !== "calendar-spread") ? [2] : [])].forEach((vRowIndex) => {
         const objRowState = getNormalizedOptionRowUiState(objUiState, pProfile.strategyCode, vRowIndex);
         const objKeys = getOptionRowStateKeys(pProfile.strategyCode, vRowIndex);
         objMergedUiState[objKeys.action] = objRowState.action;
@@ -6091,6 +6173,7 @@ function normalizeProfileSaveInput(
         symbol: vSymbol,
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
+        calendarSpreadFutQty: normalizeStringValue((objUiState as Record<string, unknown>).calendarSpreadFutQty ?? objUiState.bsFutQty, String((objDefaults as Record<string, unknown>).calendarSpreadFutQty ?? "1")),
         manualBtcQty: normalizeQtyLikeValue(objUiState.manualBtcQty, objDefaults.manualBtcQty),
         manualEthQty: normalizeQtyLikeValue(objUiState.manualEthQty, objDefaults.manualEthQty),
         manualXautQty: normalizeQtyLikeValue(objUiState.manualXautQty, objDefaults.manualXautQty),
@@ -6144,23 +6227,20 @@ function normalizeProfileSaveInput(
         closePosPnlAboveBrokerage: normalizeBooleanValue(objUiState.closePosPnlAboveBrokerage, Boolean(objDefaults.closePosPnlAboveBrokerage)),
         closePosPnlAboveBrokerageX: normalizeStringValue(objUiState.closePosPnlAboveBrokerageX, String(objDefaults.closePosPnlAboveBrokerageX)),
         reEnterBlock: normalizeBooleanValue(objUiState.reEnterBlock, Boolean(objDefaults.reEnterBlock)),
-        autoRolloverT2BuyEnabled: pStrategyCode === "calendar-spread"
-            ? normalizeBooleanValue(objUiState.autoRolloverT2BuyEnabled, Boolean(objDefaults.autoRolloverT2BuyEnabled))
-            : false,
+        // Calendar-spread blocks removed from the page: force off so stale saved
+        // profiles cannot re-enable T+2 rollover, qty linking, loss re-entry or
+        // lot increment. Other strategies keep their existing behaviour.
+        autoRolloverT2BuyEnabled: false,
         linkRowQtyToMultiplier: pStrategyCode === "calendar-spread"
-            ? normalizeBooleanValue(objUiState.linkRowQtyToMultiplier, Boolean(objDefaults.linkRowQtyToMultiplier))
+            ? false
             : true,
-        autoReenterOnLossEnabled: pStrategyCode === "calendar-spread"
-            ? normalizeBooleanValue(objUiState.autoReenterOnLossEnabled, Boolean(objDefaults.autoReenterOnLossEnabled))
-            : false,
-        lossReenterThreshold: pStrategyCode === "calendar-spread"
-            ? normalizeLossReenterThresholdString(objUiState.lossReenterThreshold ?? objDefaults.lossReenterThreshold)
-            : "1000",
-        buyHedgeSellPremiumGate: isStrangleOptionsStrategy(pStrategyCode)
+        autoReenterOnLossEnabled: false,
+        lossReenterThreshold: "1000",
+        buyHedgeSellPremiumGate: (isStrangleOptionsStrategy(pStrategyCode) || pStrategyCode === "calendar-spread")
             ? false
             : normalizeBooleanValue(objUiState.buyHedgeSellPremiumGate, Boolean(objDefaults.buyHedgeSellPremiumGate)),
-        buyHedgeSellPremiumPct: isStrangleOptionsStrategy(pStrategyCode)
-            ? "2"
+        buyHedgeSellPremiumPct: (isStrangleOptionsStrategy(pStrategyCode) || pStrategyCode === "calendar-spread")
+            ? "1"
             : normalizeStringValue(objUiState.buyHedgeSellPremiumPct, String(objDefaults.buyHedgeSellPremiumPct)),
         strangleDeltaDiffReplaceEnabled: isStrangleOptionsStrategy(pStrategyCode)
             ? normalizeBooleanValue(objUiState.strangleDeltaDiffReplaceEnabled, Boolean(objDefaults.strangleDeltaDiffReplaceEnabled))
@@ -6286,7 +6366,7 @@ function normalizeProfileSaveInput(
         closedFromDate: String(objUiState.closedFromDate || "").trim(),
         closedToDate: String(objUiState.closedToDate || "").trim()
     };
-    [1, ...(isCoveredLikeStrategy(pStrategyCode) ? [2] : [])].forEach((vRowIndex) => {
+    [1, ...((isCoveredLikeStrategy(pStrategyCode) && pStrategyCode !== "calendar-spread") ? [2] : [])].forEach((vRowIndex) => {
         const objRowState = getNormalizedOptionRowUiState(objUiState, pStrategyCode, vRowIndex);
         const objKeys = getOptionRowStateKeys(pStrategyCode, vRowIndex);
         objNormalizedUiState[objKeys.action] = objRowState.action;
@@ -10199,12 +10279,16 @@ async function executeStrategyPlacement(
             }
 
             const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
-            const objImmediateRuleDecision = shouldTriggerTrackedOption(
-                pInput.action.toUpperCase(),
-                vAbsoluteDelta,
-                Number(objOptionMetadata.takeProfitDelta || 0.25),
-                Number(objOptionMetadata.stopLossDelta || 0.65)
-            );
+            // Calendar Spread uses premium % TP/SL (LTP vs sell price), so a delta
+            // immediate-rule check would wrongly block execution. Skip it there.
+            const objImmediateRuleDecision = isCalendarSpreadPremiumTpStrategy(pStrategyCode)
+                ? { shouldAct: false as const, reason: "" as const }
+                : shouldTriggerTrackedOption(
+                    pInput.action.toUpperCase(),
+                    vAbsoluteDelta,
+                    Number(objOptionMetadata.takeProfitDelta || 0.25),
+                    Number(objOptionMetadata.stopLossDelta || 0.65)
+                );
             if (objImmediateRuleDecision.shouldAct) {
                 throw new Error(`The selected ${vOptionSide} contract delta ${vAbsoluteDelta.toFixed(2)} already violates the configured ${objImmediateRuleDecision.reason.toUpperCase()} rule for row ${vRowIndex}. Adjust New D / SL / TP before executing.`);
             }
@@ -10778,7 +10862,9 @@ async function buildOptionsScalperPaperOptionOpen(
     const vTakeProfitDelta = Math.max(0, Number(pInput.takeProfitDelta ?? objOptionMetadata.takeProfitDelta ?? objRowState.tpD ?? 0.25));
     const vStopLossDelta = Math.max(0, Number(pInput.stopLossDelta ?? objOptionMetadata.stopLossDelta ?? objRowState.slD ?? 0.65));
     const bIsPositionTriggerOpen = vOpenedReason === "position_trigger";
-    if (!bIsReEntryOpen && !bIsPositionTriggerOpen && true) {
+    // Calendar Spread uses premium % TP/SL (LTP vs sell price), so a delta
+    // immediate-rule check would wrongly block execution. Skip it there.
+    if (!bIsReEntryOpen && !bIsPositionTriggerOpen && !isCalendarSpreadPremiumTpStrategy(pStrategyCode) && true) {
         const objImmediateRuleDecision = shouldTriggerTrackedOption(
             pInput.action.toUpperCase(),
             vAbsoluteDelta,
@@ -11303,7 +11389,10 @@ async function openTrackedOptionReEntry(
     }
 
     const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
-    const bBypassImmediateRuleCheck = pReason === "sl" || pReason === "tp" || pReason === "expiry_cutoff" || pReason === "delta_diff_replace";
+    const bBypassImmediateRuleCheck = pReason === "sl" || pReason === "tp" || pReason === "expiry_cutoff" || pReason === "delta_diff_replace"
+        // Calendar Spread uses premium % TP/SL (LTP vs sell price); a delta
+        // immediate-rule check would wrongly block re-entry. Skip it there.
+        || isCalendarSpreadPremiumTpStrategy(pStrategyCode);
     if (!bBypassImmediateRuleCheck) {
         if (shouldTriggerTrackedOption(
             vOrderAction.toUpperCase(),
@@ -11984,6 +12073,13 @@ async function applyTriggeredOptionRule(
     );
     const vAppliedTakeProfitDelta = Math.max(0, Number(objRuleRowState.tpD || getTrackedOptionMetadata(pPosition).takeProfitDelta || 0.25));
     const vAppliedStopLossDelta = Math.max(0, Number(objRuleRowState.slD || getTrackedOptionMetadata(pPosition).stopLossDelta || 0.65));
+    // Calendar Spread confirmation copy shows premium % instead of delta TP/SL.
+    const vCalendarTpPct = isCalendarSpreadPremiumTpStrategy(pStrategyCode)
+        ? normalizeCalendarSpreadTpPctValue(objRuleRowState.tpD ?? getTrackedOptionMetadata(pPosition).takeProfitDelta ?? 10)
+        : null;
+    const vCalendarSlPct = isCalendarSpreadPremiumTpStrategy(pStrategyCode)
+        ? normalizeCalendarSpreadSlPctValue(objRuleRowState.slD ?? getTrackedOptionMetadata(pPosition).stopLossDelta ?? 20)
+        : null;
     if (isCoveredOptionsStrategy(pStrategyCode) && !pSkipConfirmation) {
         const vConfirmationResult = await requestCoveredLiveConfirmation(pUserId, objProfile, {
             kind: "option_rule_close",
@@ -11994,7 +12090,9 @@ async function applyTriggeredOptionRule(
                     : "Confirm Expiry Close"),
             message: pReason === "expiry_cutoff"
                 ? `${vStrategyLabel} option ${pPosition.contractName} is on its expiry date. Confirm to swap it into the next expiry.`
-                : `${vStrategyLabel} option ${String(pPosition.side || "").trim().toUpperCase()} ${pPosition.contractName} on row ${objRuleRowState.rowIndex} hit ${pReason.toUpperCase()} at delta ${Math.abs(Number(pCurrentDelta || 0)).toFixed(3)} (TP ${vAppliedTakeProfitDelta.toFixed(3)}, SL ${vAppliedStopLossDelta.toFixed(3)}). Confirm to close it.`,
+                : (vCalendarTpPct !== null
+                    ? `${vStrategyLabel} option ${String(pPosition.side || "").trim().toUpperCase()} ${pPosition.contractName} on row ${objRuleRowState.rowIndex} hit ${pReason.toUpperCase()} at LTP ${Number(pCurrentMarkPrice || 0).toFixed(2)} (TP ${vCalendarTpPct}% / SL ${vCalendarSlPct ?? 20}% of premium). Confirm to close it.`
+                    : `${vStrategyLabel} option ${String(pPosition.side || "").trim().toUpperCase()} ${pPosition.contractName} on row ${objRuleRowState.rowIndex} hit ${pReason.toUpperCase()} at delta ${Math.abs(Number(pCurrentDelta || 0)).toFixed(3)} (TP ${vAppliedTakeProfitDelta.toFixed(3)}, SL ${vAppliedStopLossDelta.toFixed(3)}). Confirm to close it.`),
             payload: {
                 importId: pPosition.importId,
                 contractName: pPosition.contractName,
@@ -12082,7 +12180,9 @@ async function applyTriggeredOptionRule(
             pReason === "sl" ? "sl_triggered" : "tp_triggered",
             pReason === "sl" ? "warning" : "info",
             pReason === "sl" ? "Option SL Triggered" : "Option TP Triggered",
-            `Closed option ${pPosition.contractName} after ${pReason.toUpperCase()} hit at delta ${Math.abs(Number(pCurrentDelta || 0)).toFixed(3)} using row ${objRuleRowState.rowIndex} TP ${vAppliedTakeProfitDelta.toFixed(3)} and SL ${vAppliedStopLossDelta.toFixed(3)}.`,
+            vCalendarTpPct !== null && (pReason === "tp" || pReason === "sl")
+                ? `Closed option ${pPosition.contractName} after ${pReason.toUpperCase()} hit at LTP ${Number(pCurrentMarkPrice || 0).toFixed(2)} using row ${objRuleRowState.rowIndex} TP ${vCalendarTpPct}% / SL ${vCalendarSlPct ?? 20}% of premium.`
+                : `Closed option ${pPosition.contractName} after ${pReason.toUpperCase()} hit at delta ${Math.abs(Number(pCurrentDelta || 0)).toFixed(3)} using row ${objRuleRowState.rowIndex} TP ${vAppliedTakeProfitDelta.toFixed(3)} and SL ${vAppliedStopLossDelta.toFixed(3)}.`,
             {
                 contractName: pPosition.contractName,
                 qty: pPosition.qty,
@@ -12581,6 +12681,61 @@ async function findTriggeredTrackedOptions(
         const objRowState = getNormalizedOptionRowUiState(pUiState, objPosition.strategyCode, vRowIndex);
         const vLiveTakeProfitDelta = Number(objRowState.tpD);
         const vLiveStopLossDelta = Number(objRowState.slD);
+        // Calendar Spread SELL TP/SL are premium-based.
+        // TP: close when LTP <= sellPrice * (1 - tpPct / 100).
+        // SL: close when LTP >= sellPrice * (1 + slPct / 100).
+        // BUY side keeps delta tracking.
+        if (isCalendarSpreadPremiumTpStrategy(objPosition.strategyCode)
+            && String(objPosition.side || "").trim().toUpperCase() === "SELL") {
+            const vTpPct = normalizeCalendarSpreadTpPctValue(
+                Number.isFinite(vLiveTakeProfitDelta) && vLiveTakeProfitDelta > 0
+                    ? vLiveTakeProfitDelta
+                    : Number(objMetadata.takeProfitDelta ?? 10)
+            ) ?? normalizeCalendarSpreadTpPctValue(objMetadata.takeProfitDelta ?? 10);
+            const vSlPct = normalizeCalendarSpreadSlPctValue(
+                Number.isFinite(vLiveStopLossDelta) && vLiveStopLossDelta > 0
+                    ? vLiveStopLossDelta
+                    : Number(objMetadata.stopLossDelta ?? 20)
+            ) ?? normalizeCalendarSpreadSlPctValue(objMetadata.stopLossDelta ?? 20);
+            const vSellPrice = Number(objPosition.entryPrice || 0);
+            const vLiveLtp = resolveTrackedOptionLivePrice(
+                objPosition.side,
+                objTicker,
+                Number(objPosition.markPrice || objPosition.entryPrice || 0)
+            );
+            if (shouldTriggerCalendarSpreadPremiumTp(objPosition.side, vSellPrice, vLiveLtp, vTpPct)) {
+                arrTriggered.push({
+                    position: objPosition,
+                    currentDelta: vCurrentDelta,
+                    currentMarkPrice: vLiveLtp,
+                    reason: "tp",
+                    ruleAudit: {
+                        rowIndex: vRowIndex,
+                        takeProfitDelta: vTpPct ?? 10,
+                        stopLossDelta: vSlPct ?? 20
+                    }
+                });
+                continue;
+            }
+            if (shouldTriggerCalendarSpreadPremiumSl(objPosition.side, vSellPrice, vLiveLtp, vSlPct)) {
+                arrTriggered.push({
+                    position: objPosition,
+                    currentDelta: vCurrentDelta,
+                    currentMarkPrice: vLiveLtp,
+                    reason: "sl",
+                    ruleAudit: {
+                        rowIndex: vRowIndex,
+                        takeProfitDelta: vTpPct ?? 10,
+                        stopLossDelta: vSlPct ?? 20
+                    }
+                });
+                continue;
+            }
+            // Premium TP/SL configured: skip delta TP/SL for this sell leg.
+            if (vTpPct !== null || vSlPct !== null) {
+                continue;
+            }
+        }
         // "Exit Pos if its PnL is > X of Brokerage": an individual-position TP-like
         // exit evaluated on this position alone, using its stored (entry-side)
         // brokerage. Only the qualifying position is closed; all other open
@@ -13990,12 +14145,16 @@ async function validateCoveredOptionsRenkoAutoTradeInputBeforeConfirmation(
     }
     const objOptionMetadata = getLiveOptionRuleMetadataFromUiState(objUiState, "strategy_option_open", pStrategyCode, pInput.rowIndex);
     const vAbsoluteDelta = Math.abs(Number(objContract.delta || 0));
-    const objImmediateRuleDecision = shouldTriggerTrackedOption(
-        pInput.action.toUpperCase(),
-        vAbsoluteDelta,
-        Number(objOptionMetadata.takeProfitDelta || 0.25),
-        Number(objOptionMetadata.stopLossDelta || 0.65)
-    );
+    // Calendar Spread uses premium % TP/SL (LTP vs sell price), so a delta
+    // immediate-rule check would wrongly block execution. Skip it there.
+    const objImmediateRuleDecision = isCalendarSpreadPremiumTpStrategy(pStrategyCode)
+        ? { shouldAct: false as const, reason: "" as const }
+        : shouldTriggerTrackedOption(
+            pInput.action.toUpperCase(),
+            vAbsoluteDelta,
+            Number(objOptionMetadata.takeProfitDelta || 0.25),
+            Number(objOptionMetadata.stopLossDelta || 0.65)
+        );
     if (objImmediateRuleDecision.shouldAct) {
         return {
             allowed: false,
@@ -24355,6 +24514,26 @@ export async function updateCalendarSpreadOpenPositionQty(req: Request, res: Res
     }
     // 0 is allowed so a position can be reduced out; it is never negative.
     const vQty = Math.max(0, Math.floor(vRawQty));
+    // Optional: edited entry (sell/buy) price. Futures + options both allow it.
+    const vHasEntryPrice = req.body?.entryPrice !== undefined && String(req.body?.entryPrice || "").trim() !== "";
+    const vEntryPrice = vHasEntryPrice ? Number(req.body?.entryPrice) : NaN;
+    if (vHasEntryPrice && (!Number.isFinite(vEntryPrice) || !(vEntryPrice > 0))) {
+        res.status(400).json({ status: "warning", message: "Enter a valid entry price." });
+        return;
+    }
+    // Optional: % TP / % SL of premium (options only, whole percents 1-100).
+    const vHasTpPct = req.body?.takeProfitDelta !== undefined && String(req.body?.takeProfitDelta || "").trim() !== "";
+    const vHasSlPct = req.body?.stopLossDelta !== undefined && String(req.body?.stopLossDelta || "").trim() !== "";
+    const vTpPct = vHasTpPct ? normalizeCalendarSpreadTpPctValue(req.body?.takeProfitDelta) : null;
+    const vSlPct = vHasSlPct ? normalizeCalendarSpreadSlPctValue(req.body?.stopLossDelta) : null;
+    if (vHasTpPct && vTpPct === null) {
+        res.status(400).json({ status: "warning", message: "TP % must be between 1 and 100." });
+        return;
+    }
+    if (vHasSlPct && vSlPct === null) {
+        res.status(400).json({ status: "warning", message: "SL % must be between 1 and 100." });
+        return;
+    }
 
     const vLockKey = `${getManualFutureOrderLockKey(vUserId, "calendar-spread")}::open-qty-update`;
     if (gAutoTraderCycleLocks.has(vLockKey)) {
@@ -24370,10 +24549,21 @@ export async function updateCalendarSpreadOpenPositionQty(req: Request, res: Res
             return;
         }
         const vPreviousQty = Number(objPosition.qty || 0);
-        if (vQty === vPreviousQty) {
+        const vPreviousEntry = Number(objPosition.entryPrice || 0);
+        const objPrevMeta = (objPosition.metadata && typeof objPosition.metadata === "object" ? objPosition.metadata : {}) as Record<string, unknown>;
+        const vIsFuture = isFutureContractSymbol(objPosition.contractName);
+        // SL/TP % apply to options only; futures ignore them.
+        const vNextTpPct = !vIsFuture && vTpPct !== null ? vTpPct : Number(objPrevMeta.takeProfitDelta ?? NaN);
+        const vNextSlPct = !vIsFuture && vSlPct !== null ? vSlPct : Number(objPrevMeta.stopLossDelta ?? NaN);
+        const vNextEntry = vHasEntryPrice ? vEntryPrice : vPreviousEntry;
+        const bUnchanged = vQty === vPreviousQty
+            && (!vHasEntryPrice || vNextEntry === vPreviousEntry)
+            && (!vHasTpPct || vIsFuture || Number(vNextTpPct) === Number(objPrevMeta.takeProfitDelta))
+            && (!vHasSlPct || vIsFuture || Number(vNextSlPct) === Number(objPrevMeta.stopLossDelta));
+        if (bUnchanged) {
             res.json({
                 status: "success",
-                message: "Quantity is unchanged.",
+                message: "No changes to apply.",
                 data: { trackedOpenPositions: await buildOpenPositionsPayload(vUserId, "calendar-spread", arrPositions) }
             });
             return;
@@ -24384,7 +24574,7 @@ export async function updateCalendarSpreadOpenPositionQty(req: Request, res: Res
             contractName: String(objPosition.contractName || "").trim(),
             side: objPosition.side,
             qty: vQty,
-            entryPrice: Number(objPosition.entryPrice || 0),
+            entryPrice: vNextEntry,
             markPrice: Number(objPosition.markPrice || 0)
         }).toFixed(4));
         // Margin scales with the size change; charges are recomputed for the new qty.
@@ -24392,15 +24582,21 @@ export async function updateCalendarSpreadOpenPositionQty(req: Request, res: Res
         const vNextCharge = await estimateTrackedPositionCharge({
             contractName: String(objPosition.contractName || "").trim(),
             qty: vQty,
-            entryPrice: Number(objPosition.entryPrice || 0),
+            entryPrice: vNextEntry,
             markPrice: Number(objPosition.markPrice || 0)
         }, undefined, resolveTrackedPositionTradingLotSize(objPosition));
         const objUpdated: RollingFuturesLtImportedPositionRecord = {
             ...objPosition,
             qty: vQty,
+            entryPrice: vNextEntry,
             charges: Number(vNextCharge.toFixed(4)),
             pnl: vNextPnl,
             margin: Number((Number(objPosition.margin || 0) * vMarginScale).toFixed(4)),
+            metadata: {
+                ...(objPosition.metadata && typeof objPosition.metadata === "object" ? objPosition.metadata : {}),
+                ...(!vIsFuture && vTpPct !== null ? { takeProfitDelta: vTpPct } : {}),
+                ...(!vIsFuture && vSlPct !== null ? { stopLossDelta: vSlPct } : {})
+            },
             updatedAt: new Date().toISOString()
         };
         const arrNext = arrPositions.map((objRow) => (
@@ -24409,21 +24605,35 @@ export async function updateCalendarSpreadOpenPositionQty(req: Request, res: Res
         const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, "calendar-spread", arrNext);
 
         const objProfile = await readLiveProfile(vUserId, "calendar-spread");
+        const arrBits: string[] = [`qty ${vPreviousQty} to ${vQty}`];
+        if (vHasEntryPrice && vNextEntry !== vPreviousEntry) {
+            arrBits.push(`entry ${vPreviousEntry} to ${vNextEntry}`);
+        }
+        if (!vIsFuture && vTpPct !== null) {
+            arrBits.push(`TP ${vTpPct}%`);
+        }
+        if (!vIsFuture && vSlPct !== null) {
+            arrBits.push(`SL ${vSlPct}%`);
+        }
         await logFuturesEvent(
-            vUserId, "calendar-spread", "manual_action", "info", "Open Position Qty Updated",
-            `Updated ${objPosition.contractName} qty from ${vPreviousQty} to ${vQty}.`,
+            vUserId, "calendar-spread", "manual_action", "info", "Open Position Updated",
+            `Updated ${objPosition.contractName}: ${arrBits.join(", ")}.`,
             {
                 symbol: normalizeSymbolValue(getMergedUiState(objProfile).symbol),
                 contractName: String(objPosition.contractName || "").trim(),
                 previousQty: vPreviousQty,
                 qty: vQty,
-                reason: "open_position_qty_update"
+                previousEntryPrice: vPreviousEntry,
+                entryPrice: vNextEntry,
+                takeProfitDelta: !vIsFuture && vTpPct !== null ? vTpPct : Number(objPrevMeta.takeProfitDelta ?? NaN),
+                stopLossDelta: !vIsFuture && vSlPct !== null ? vSlPct : Number(objPrevMeta.stopLossDelta ?? NaN),
+                reason: "open_position_update"
             }
         );
 
         res.json({
             status: "success",
-            message: `Updated ${objPosition.contractName} qty from ${vPreviousQty} to ${vQty}.`,
+            message: `Updated ${objPosition.contractName}: ${arrBits.join(", ")}.`,
             data: {
                 importId: vImportId,
                 previousQty: vPreviousQty,
@@ -24598,6 +24808,150 @@ export async function deleteCalendarSpreadClosedPosition(req: Request, res: Resp
 }
 export async function updateCalendarSpreadClosedPosition(req: Request, res: Response): Promise<void> {
     await updateOptionsScalperClosedPositionInternal(req, res, "calendar-spread");
+}
+// Calendar Spread only: move a Closed Positions row back to Open Positions.
+// Re-opens the SAME contract at the live LTP (fresh entry/charges),
+// keeping stored % TP / % SL so premium tracking resumes.
+// PAPER-ONLY bookkeeping locally: no Delta Exchange order is placed.
+export async function restoreCalendarSpreadClosedPosition(req: Request, res: Response): Promise<void> {
+    const vUserId = getAccountId(req);
+    if (!vUserId) {
+        res.status(401).json({ status: "warning", message: "Sign in to continue." });
+        return;
+    }
+    const vCloseId = String(req.body?.closeId || "").trim();
+    if (!vCloseId) {
+        res.status(400).json({ status: "warning", message: "Closed position ID is required." });
+        return;
+    }
+    const vLockKey = `${getManualFutureOrderLockKey(vUserId, "calendar-spread")}::closed-restore`;
+    if (gAutoTraderCycleLocks.has(vLockKey)) {
+        res.status(409).json({ status: "warning", message: "Another position change is in progress. Please wait for it to finish." });
+        return;
+    }
+    gAutoTraderCycleLocks.add(vLockKey);
+    try {
+        const arrClosed = await listOptionsScalperPaperClosedPositions(vUserId, "calendar-spread");
+        const objClosed = arrClosed.find((objRow) => String(objRow.closeId || "").trim() === vCloseId);
+        if (!objClosed) {
+            res.status(404).json({ status: "warning", message: "Closed position was not found." });
+            return;
+        }
+        const vContractName = String(objClosed.contractName || "").trim();
+        if (!vContractName) {
+            res.status(400).json({ status: "warning", message: "Closed position has no contract to restore." });
+            return;
+        }
+        const vSide = String(objClosed.side || "").trim().toUpperCase() === "BUY" ? "BUY" : "SELL";
+        const vQty = Math.max(1, Math.floor(Number(objClosed.qty || 0)));
+        const objProfile = await readLiveProfile(vUserId, "calendar-spread");
+        const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, "calendar-spread");
+        if (arrExisting.some((objRow) => String(objRow.contractName || "").trim() === vContractName && !isTrackedPositionInactive(objRow))) {
+            res.status(409).json({ status: "warning", message: `${vContractName} is already active in Open Positions.` });
+            return;
+        }
+        const bIsFuture = isFutureContractSymbol(vContractName);
+        const objTicker = await getLiveOptionTicker(vContractName);
+        const objMeta = (objClosed.metadata && typeof objClosed.metadata === "object" ? objClosed.metadata : {}) as Record<string, unknown>;
+        const vNowIso = new Date().toISOString();
+        let objRestored: RollingFuturesLtImportedPositionRecord;
+        if (bIsFuture) {
+            const vSymbol = normalizeSymbolValue(String(objMeta.symbol || vContractName.split("-")[0] || "BTC"));
+            const objPaperOpen = await buildOptionsScalperPaperFutureOpen(vUserId, "calendar-spread", {
+                action: vSide === "BUY" ? "buy" : "sell",
+                symbol: vSymbol,
+                qty: vQty,
+                orderType: "market_order"
+            });
+            objRestored = {
+                ...objPaperOpen.position,
+                importId: crypto.randomUUID(),
+                contractName: vContractName,
+                side: vSide,
+                qty: vQty,
+                metadata: { ...(objMeta as object), ...(objPaperOpen.position.metadata as object || {}), openedReason: "closed_restore", restoredFromCloseId: vCloseId },
+                openedAt: vNowIso,
+                updatedAt: vNowIso
+            };
+        }
+        else {
+            const vEntryPrice = resolveTrackedOptionEntryPrice(vSide, {
+                bestBid: Number(objTicker?.bestBid || 0),
+                bestAsk: Number(objTicker?.bestAsk || 0),
+                markPrice: Number(objTicker?.markPrice || 0)
+            }, Number(objTicker?.markPrice || 0));
+            if (!(vEntryPrice > 0)) {
+                res.status(400).json({ status: "warning", message: `Unable to fetch a live price for ${vContractName}. Please try again.` });
+                return;
+            }
+            const vSymbol = normalizeSymbolValue(String(objMeta.symbol || vContractName.split("-")[1] || "BTC"));
+            const objRowState = getNormalizedOptionRowUiState(getMergedUiState(objProfile), "calendar-spread", 1);
+            const vEntryCharge = await estimateTrackedPositionCharge({
+                contractName: vContractName, qty: vQty, entryPrice: vEntryPrice, markPrice: vEntryPrice
+            }, undefined, getLotSizeForSymbol(vSymbol));
+            const vTpPct = normalizeCalendarSpreadTpPctValue(objMeta.takeProfitDelta ?? objRowState.tpD) ?? 10;
+            const vSlPct = normalizeCalendarSpreadSlPctValue(objMeta.stopLossDelta ?? objRowState.slD) ?? 20;
+            objRestored = {
+                userId: vUserId,
+                strategyCode: "calendar-spread",
+                importId: crypto.randomUUID(),
+                contractName: vContractName,
+                side: vSide,
+                qty: vQty,
+                entryPrice: vEntryPrice,
+                markPrice: resolveTrackedOptionLivePrice(vSide, objTicker, vEntryPrice),
+                charges: Number(vEntryCharge.toFixed(4)),
+                pnl: 0,
+                margin: 0,
+                liquidationPrice: 0,
+                metadata: optionMetadataToRecord({
+                    rowIndex: 1,
+                    manualTraderDelta: getSignedOptionBaseDelta(vContractName, Math.abs(Number(objTicker?.delta || 0))),
+                    takeProfitDelta: vTpPct,
+                    stopLossDelta: vSlPct,
+                    reEntryDelta: Math.max(0, Number(objRowState.reD || 0)),
+                    reEnterEnabled: Boolean(objRowState.reEnter),
+                    openedReason: "closed_restore",
+                    baseDelta: getSignedOptionBaseDelta(vContractName, Math.abs(Number(objTicker?.delta || 0))),
+                    baseTheta: Math.abs(Number(objTicker?.theta || 0)),
+                    requestedExpiryDate: getTrackedOptionResolvedExpiryDate({ contractName: vContractName } as RollingFuturesLtImportedPositionRecord),
+                    resolvedExpiryDate: getTrackedOptionResolvedExpiryDate({ contractName: vContractName } as RollingFuturesLtImportedPositionRecord),
+                    restoredFromCloseId: vCloseId
+                } as unknown as Parameters<typeof optionMetadataToRecord>[0]),
+                openedAt: vNowIso,
+                updatedAt: vNowIso
+            };
+        }
+        // __RESTORE_SAVE__
+        const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, "calendar-spread", [...arrExisting, objRestored]);
+        await deleteOptionsScalperPaperClosedPosition(vUserId, "calendar-spread", vCloseId);
+        await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(vUserId, await readLiveProfile(vUserId, "calendar-spread"));
+        await logFuturesEvent(
+            vUserId, "calendar-spread",
+            bIsFuture ? "future_opened" : "option_opened",
+            "success",
+            "Closed Position Restored",
+            `Restored ${vContractName} (${vSide} x${vQty}) from Closed Positions back to Open Positions locally. No Delta Exchange order was placed.`,
+            { contractName: vContractName, side: vSide, qty: vQty, closeId: vCloseId, reason: "closed_restore" }
+        );
+        res.json({
+            status: "success",
+            message: `${vContractName} restored to Open Positions.`,
+            data: {
+                importId: objRestored.importId,
+                trackedOpenPositions: await buildOpenPositionsPayload(vUserId, "calendar-spread", arrSaved)
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to restore the closed position.")
+        });
+    }
+    finally {
+        gAutoTraderCycleLocks.delete(vLockKey);
+    }
 }
 export async function getCalendarSpreadEvents(req: Request, res: Response): Promise<void> {
     await getEventsInternal(req, res, "calendar-spread");

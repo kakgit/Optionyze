@@ -73,6 +73,13 @@
         engineStatus: document.getElementById(`${prefix}EngineStatus`),
         openRenkoSignal: document.getElementById(`${prefix}OpenRenkoSignal`),
         autoTraderButton: document.getElementById("btnRollingFuturesDemoAutoTrader"),
+        // Calendar Spread Futures controls (page-local only).
+        futQty: document.getElementById("txtCalendarSpreadFutQty"),
+        buyFutButton: document.getElementById("btnCalendarSpreadBuyFut"),
+        sellFutButton: document.getElementById("btnCalendarSpreadSellFut"),
+        futuresPositionsBody: document.getElementById("calendarSpreadFuturesOpenPositionsBody"),
+        futuresClearButton: document.getElementById("btnCalendarSpreadFuturesClear"),
+        futuresRefreshButton: document.getElementById("btnCalendarSpreadFuturesRefresh"),
         pageStatus: document.getElementById(`${prefix}PageStatus`),
         importStatus: document.getElementById(`${prefix}ImportStatus`),
         resetDefaultsButton: document.getElementById("btnRollingFuturesResetDefaults"),
@@ -100,10 +107,11 @@
         buyCeButton: document.getElementById("btnRollingFuturesBuyCe"),
         buyPeButton: document.getElementById("btnRollingFuturesBuyPe"),
         execStrategyButton: document.getElementById("btnRollingFuturesExecAllLegs"),
-        sellPeButton2: document.getElementById("btnRollingFuturesSellPe2"),
-        sellCeButton2: document.getElementById("btnRollingFuturesSellCe2"),
-        buyCeButton2: document.getElementById("btnRollingFuturesBuyCe2"),
-        buyPeButton2: document.getElementById("btnRollingFuturesBuyPe2"),
+        // Removed Row-2 (calendar-spread cleanup): no second row on this page.
+        sellPeButton2: null,
+        sellCeButton2: null,
+        buyCeButton2: null,
+        buyPeButton2: null,
         bsFutQty: document.getElementById("txtRollingFuturesBsQty"),
         minusDelta: document.getElementById("txtRollingFuturesMinusDelta"),
         plusDelta: document.getElementById("txtRollingFuturesPlusDelta"),
@@ -125,16 +133,17 @@
         tpD1: document.getElementById("txtRollingFuturesTpD1"),
         slD1: document.getElementById("txtRollingFuturesSlD1"),
         reEnter1: document.getElementById("chkRollingFuturesReEnter1"),
-        action2: document.getElementById("ddlRollingFuturesAction2"),
-        legs2: document.getElementById("ddlRollingFuturesLegs2"),
-        optionExpiryMode2: document.getElementById("ddlRollingFuturesExpiryType2"),
-        optionExpiryDate2: document.getElementById("txtRollingFuturesExpiry2"),
-        qty2: document.getElementById("txtRollingFuturesQty2"),
-        newD2: document.getElementById("txtRollingFuturesNewD2"),
-        reD2: document.getElementById("txtRollingFuturesReD2"),
-        tpD2: document.getElementById("txtRollingFuturesTpD2"),
-        slD2: document.getElementById("txtRollingFuturesSlD2"),
-        reEnter2: document.getElementById("chkRollingFuturesReEnter2"),
+        // Removed Row-2 (calendar-spread cleanup).
+        action2: null,
+        legs2: null,
+        optionExpiryMode2: null,
+        optionExpiryDate2: null,
+        qty2: null,
+        newD2: null,
+        reD2: null,
+        tpD2: null,
+        slD2: null,
+        reEnter2: null,
         closeNetProfitBrokerage: document.getElementById("chkRollingFuturesCloseNetProfitBrokerage"),
         brokerageMultiplier: document.getElementById("txtRollingFuturesBrokerageMultiplier"),
         brok2Rec: document.getElementById("txtRollingFuturesBrok2Rec"),
@@ -148,8 +157,9 @@
         closePosPnlAboveBrokerage: document.getElementById("chkRollingFuturesClosePosPnlAboveBrokerage"),
         closePosPnlAboveBrokerageX: document.getElementById("txtRollingFuturesClosePosPnlAboveBrokerageX"),
         reEnterBlock: document.getElementById("chkRollingFuturesReEnterBlock"),
-        buyHedgeSellPremiumGate: document.getElementById("chkRollingFuturesBuyHedgeSellPremiumGate"),
-        buyHedgeSellPremiumPct: document.getElementById("txtRollingFuturesBuyHedgeSellPremiumPct"),
+        // Removed blocks (calendar-spread cleanup): element no longer exists.
+        buyHedgeSellPremiumGate: null,
+        buyHedgeSellPremiumPct: null,
         strangleDeltaDiffReplaceEnabled: document.getElementById("chkRollingFuturesStrangleDeltaDiffReplaceEnabled"),
         strangleDeltaDiffReplacePct: document.getElementById("txtRollingFuturesStrangleDeltaDiffReplacePct"),
         buyHedgeOppositeLegOnGate: document.getElementById("chkRollingFuturesBuyHedgeOppositeLegOnGate"),
@@ -159,9 +169,10 @@
         placeOppositeTrades: document.getElementById("chkRollingFuturesPlaceOppositeTrades"),
         alternatingLegRestrictionEnabled: document.getElementById("chkRollingFuturesAlternatingLegRestrictionEnabled"),
         openIfLastPnlNegative: document.getElementById("chkRollingFuturesOpenIfLastPnlNegative"),
-    autoRolloverT2BuyEnabled: document.getElementById("chkRollingFuturesAutoRolloverT2BuyEnabled"),
-    autoReenterOnLossEnabled: document.getElementById("chkRollingFuturesAutoReenterOnLossEnabled"),
-    lossReenterThreshold: document.getElementById("txtRollingFuturesLossReenterThreshold"),
+    // Removed blocks (calendar-spread cleanup): always off / unlinked.
+    autoRolloverT2BuyEnabled: null,
+    autoReenterOnLossEnabled: null,
+    lossReenterThreshold: null,
         renkoFeedEnabled: document.getElementById("chkRollingFuturesRenkoFeedEnabled"),
         renkoFeedPts: document.getElementById("txtRollingFuturesRenkoFeedPts"),
         renkoFeedManualPrice: document.getElementById("txtRollingFuturesRenkoFeedManualPrice"),
@@ -272,9 +283,15 @@
         openEditSymbol: document.getElementById(`${prefix}OpenEditSymbol`),
         openEditStatus: document.getElementById(`${prefix}OpenEditStatus`),
         openEditQty: document.getElementById(`txt${idPrefix}OpenEditQty`),
+        openEditEntry: document.getElementById(`txt${idPrefix}OpenEditEntry`),
+        openEditTpPct: document.getElementById(`txt${idPrefix}OpenEditTpPct`),
+        openEditSlPct: document.getElementById(`txt${idPrefix}OpenEditSlPct`),
+        openEditTpWrap: document.getElementById(`${prefix}OpenEditTpWrap`),
+        openEditSlWrap: document.getElementById(`${prefix}OpenEditSlWrap`),
         closeOpenEditModalButton: document.getElementById(`btn${idPrefix}CloseOpenEditModal`),
         saveOpenEditButton: document.getElementById(`btn${idPrefix}SaveOpenEdit`),
-        linkRowQtyToMultiplier: document.getElementById("chkRollingFuturesLinkRowQtyToMultiplier"),
+        // Removed block (calendar-spread cleanup): rows keep independent qty.
+        linkRowQtyToMultiplier: null,
         closedEditModal: document.getElementById(`${prefix}ClosedEditModal`),
         closedEditSymbol: document.getElementById(`${prefix}ClosedEditSymbol`),
         closedEditStatus: document.getElementById(`${prefix}ClosedEditStatus`),
@@ -1885,8 +1902,8 @@
                         <span>Expiry: <strong>${escapeHtml(formatSavedProfileValue(state[keys.expiryDate], "-"))}</strong></span>
                         <span>Qty: <strong>${escapeHtml(formatSavedProfileValue(state[keys.qty], "-"))}</strong></span>
                         <span>New D: <strong>${escapeHtml(formatSavedProfileValue(state[keys.newD], "-"))}</strong></span>
-                        <span>TP D: <strong>${escapeHtml(formatSavedProfileValue(state[keys.tpD], "-"))}</strong></span>
-                        <span>SL D: <strong>${escapeHtml(formatSavedProfileValue(state[keys.slD], "-"))}</strong></span>
+                        <span>% TP of Premium: <strong>${escapeHtml(formatSavedProfileValue(state[keys.tpD], "10"))}%</strong></span>
+                        <span>% SL of Premium: <strong>${escapeHtml(formatSavedProfileValue(state[keys.slD], "20"))}%</strong></span>
                     </div>
                 </div>
             `;
@@ -1898,35 +1915,10 @@
                     ${isStrangleLikePage
                         ? `<span>Enabled: <strong>${escapeHtml(String(Boolean(state.strangleDeltaDiffReplaceEnabled)) === "true" ? "ON" : "OFF")}</strong></span>
                     <span>Threshold %: <strong>${escapeHtml(formatSavedProfileValue(state.strangleDeltaDiffReplacePct, "50"))}</strong></span>`
-                        : `<span>Enabled: <strong>${escapeHtml(String(Boolean(state.buyHedgeSellPremiumGate)) === "true" ? "ON" : "OFF")}</strong></span>
-                    <span>Increment Lots: <strong>${escapeHtml(formatSavedProfileValue(state.buyHedgeSellPremiumPct, "1"))}</strong></span>`}
+                        : `<span>Enabled: <strong>OFF</strong></span>
+                    <span>Increment Lots: <strong>0</strong></span>`}
                 </div>
-            </div>
-            <div class="rolling-futures-saved-profile-card">
-                <div class="rolling-futures-saved-profile-title">${isStrangleLikePage ? "Reopen Rule" : "Increment Mode"}</div>
-                <div class="rolling-futures-saved-profile-grid">
-                    ${isStrangleLikePage
-                        ? `<span>Reopen At New D: <strong>${escapeHtml(String(Boolean(state.strangleReopenAtNewD)) === "true" ? "ON" : "OFF")}</strong></span>`
-                        : `<span>Same-side Legs: <strong>${escapeHtml(String(Boolean(state.sameSideLegIncrementEnabled ?? state.buyQtyPercentEnabled ?? true)) === "true" ? "ON" : "OFF")}</strong></span>
-                    <span>Unchecked Mode: <strong>Increment on every Renko side change</strong></span>`}
-                </div>
-            </div>
-            ${isStrangleLikePage ? "" : `
-            <div class="rolling-futures-saved-profile-card">
-                <div class="rolling-futures-saved-profile-title">Opposite Trade Mode</div>
-                <div class="rolling-futures-saved-profile-grid">
-                    <span>Enabled: <strong>${escapeHtml(String(Boolean(state.placeOppositeTrades)) === "true" ? "ON" : "OFF")}</strong></span>
-                    <span>Behavior: <strong>Flip CE/PE only</strong></span>
-                </div>
-            </div>
-            <div class="rolling-futures-saved-profile-card">
-                <div class="rolling-futures-saved-profile-title">Duplicate Contract Mode</div>
-                <div class="rolling-futures-saved-profile-grid">
-                    <span>Enabled: <strong>${escapeHtml(String(Boolean(state.allowDuplicateContracts)) === "true" ? "ON" : "OFF")}</strong></span>
-                    <span>Behavior: <strong>Allow same contract stacking</strong></span>
-                </div>
-            </div>`}
-        ` : "";
+            </div>` : "";
         const renkoBlock = supportsRenkoFeed ? `
             <div class="rolling-futures-saved-profile-card">
                 <div class="rolling-futures-saved-profile-title">Renko Feed</div>
@@ -2034,12 +2026,13 @@
     }
 
     function getSupportedOptionRowIndexes() {
-        return isCoveredMode ? [1, 2] : [1];
+        // Calendar-spread shows Row-1 only.
+        return [1];
     }
 
     function normalizeOptionRowIndex(rowIndex) {
-        const vRowIndex = Number(rowIndex);
-        return isCoveredMode && vRowIndex === 2 ? 2 : 1;
+        // Calendar-spread shows Row-1 only.
+        return 1;
     }
 
     function getOptionRowNodes(rowIndex) {
@@ -2154,8 +2147,8 @@
                 expiryMode: "6",
                 newD: "0.33",
                 reD: "0.33",
-                tpD: "0.10",
-                slD: "0.50"
+                tpD: "10",
+                slD: "20"
             };
             return isStrangleLikePage
                 ? {
@@ -2178,6 +2171,32 @@
         return optionDefaults;
     }
 
+    function normalizeCalendarSpreadTpPct(value, fallback) {
+        // Calendar Spread "% TP of Premium" accepts whole percents 1-100.
+        const vRaw = Number(value);
+        if (Number.isFinite(vRaw) && vRaw >= 1 && vRaw <= 100) {
+            return String(Math.round(vRaw));
+        }
+        const vFallback = Number(fallback);
+        if (Number.isFinite(vFallback) && vFallback >= 1 && vFallback <= 100) {
+            return String(Math.round(vFallback));
+        }
+        return "10";
+    }
+
+    function normalizeCalendarSpreadSlPct(value, fallback) {
+        // Calendar Spread "% SL of Premium" accepts whole percents 1-100.
+        const vRaw = Number(value);
+        if (Number.isFinite(vRaw) && vRaw >= 1 && vRaw <= 100) {
+            return String(Math.round(vRaw));
+        }
+        const vFallback = Number(fallback);
+        if (Number.isFinite(vFallback) && vFallback >= 1 && vFallback <= 100) {
+            return String(Math.round(vFallback));
+        }
+        return "20";
+    }
+
     function readOptionRowState(rowIndex) {
         const vRowIndex = normalizeOptionRowIndex(rowIndex);
         const keys = getOptionRowStateKeys(vRowIndex);
@@ -2198,8 +2217,8 @@
         rowState[keys.reD] = isStrangleLikePage || bUseNewDForReEntry
             ? rowState[keys.newD]
             : getInputValue(nodes.reD, defaults.reD);
-        rowState[keys.tpD] = getInputValue(nodes.tpD, defaults.tpD);
-        rowState[keys.slD] = getInputValue(nodes.slD, defaults.slD);
+        rowState[keys.tpD] = normalizeCalendarSpreadTpPct(getInputValue(nodes.tpD, defaults.tpD), defaults.tpD);
+        rowState[keys.slD] = normalizeCalendarSpreadSlPct(getInputValue(nodes.slD, defaults.slD), defaults.slD);
         rowState[keys.reEnter] = (supportsRenkoFeed && !bUseNewDForReEntry)
             ? false
             : getCheckboxValue(nodes.reEnter, defaults.reEnter);
@@ -2225,8 +2244,8 @@
         setInputValue(nodes.qty, uiState[keys.qty] ?? defaults.qty);
         setInputValue(nodes.newD, uiState[keys.newD] ?? defaults.newD);
         setInputValue(nodes.reD, (isStrangleLikePage || bUseNewDForReEntry) ? (uiState[keys.newD] ?? defaults.newD) : (uiState[keys.reD] ?? defaults.reD));
-        setInputValue(nodes.tpD, uiState[keys.tpD] ?? defaults.tpD);
-        setInputValue(nodes.slD, uiState[keys.slD] ?? defaults.slD);
+        setInputValue(nodes.tpD, normalizeCalendarSpreadTpPct(uiState[keys.tpD] ?? defaults.tpD, defaults.tpD));
+        setInputValue(nodes.slD, normalizeCalendarSpreadSlPct(uiState[keys.slD] ?? defaults.slD, defaults.slD));
         setCheckboxValue(nodes.reEnter, (supportsRenkoFeed && !bUseNewDForReEntry) ? false : (uiState[keys.reEnter] ?? defaults.reEnter));
     }
 
@@ -2246,6 +2265,8 @@
             symbol: "BTC",
             manualFutOrderType: "market_order",
             bsFutQty: "1",
+            // Calendar Spread Futures qty (page-local only, persisted like other controls).
+            calendarSpreadFutQty: "1",
             futuresLadderStepPoints: "200",
             futuresLadderGridOffsetPoints: "50",
             futuresLadderOrderOffsetPoints: "100",
@@ -2271,7 +2292,8 @@
             closePosPnlAboveBrokerage: false,
             closePosPnlAboveBrokerageX: "5",
             reEnterBlock: false,
-            buyHedgeSellPremiumGate: !isCoveredLivePageMode(),
+            // Removed blocks: keep lot increment off and multiplier unlinked.
+            buyHedgeSellPremiumGate: false,
             buyHedgeSellPremiumPct: "1",
             strangleDeltaDiffReplaceEnabled: isStrangleLikePage,
             strangleDeltaDiffReplacePct: isStrangleLikePage ? "40" : "50",
@@ -3994,6 +4016,8 @@
             symbol: String(ids.symbol?.value || "BTC").trim().toUpperCase(),
             manualFutOrderType: String(ids.futureOrderType?.value || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
             bsFutQty: getInputValue(ids.bsFutQty, "1"),
+            // Calendar Spread Futures qty (page-local only, persisted like other controls).
+            calendarSpreadFutQty: getInputValue(ids.futQty, "1"),
             futuresLadderStepPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderStepPoints, 200, 1),
             futuresLadderGridOffsetPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderGridOffsetPoints, 50, 0),
             futuresLadderOrderOffsetPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderOrderOffsetPoints, 100, 0),
@@ -4019,8 +4043,9 @@
             closePosPnlAboveBrokerage: getCheckboxValue(ids.closePosPnlAboveBrokerage, false),
             closePosPnlAboveBrokerageX: getInputValue(ids.closePosPnlAboveBrokerageX, "5"),
             reEnterBlock: false,
-            buyHedgeSellPremiumGate: isStrangleLikePage ? false : getCheckboxValue(ids.buyHedgeSellPremiumGate, false),
-            buyHedgeSellPremiumPct: isStrangleLikePage ? "2" : getInputValue(ids.buyHedgeSellPremiumPct, "1"),
+            // Removed blocks: increment permanently off on calendar-spread.
+            buyHedgeSellPremiumGate: false,
+            buyHedgeSellPremiumPct: "1",
             strangleDeltaDiffReplaceEnabled: isStrangleLikePage ? getCheckboxValue(ids.strangleDeltaDiffReplaceEnabled, false) : false,
             strangleDeltaDiffReplacePct: isStrangleLikePage ? getInputValue(ids.strangleDeltaDiffReplacePct, "50") : "50",
             buyHedgeOppositeLegOnGate: getCheckboxValue(ids.buyHedgeOppositeLegOnGate, false),
@@ -4030,10 +4055,11 @@
             placeOppositeTrades: isStrangleLikePage ? false : getCheckboxValue(ids.placeOppositeTrades, false),
             alternatingLegRestrictionEnabled: isStrangleLikePage ? true : getCheckboxValue(ids.alternatingLegRestrictionEnabled, true),
             openIfLastPnlNegative: isStrangleLikePage ? false : getCheckboxValue(ids.openIfLastPnlNegative, false),
-        autoRolloverT2BuyEnabled: getCheckboxValue(ids.autoRolloverT2BuyEnabled, true),
-        linkRowQtyToMultiplier: getCheckboxValue(ids.linkRowQtyToMultiplier, true),
-        autoReenterOnLossEnabled: getCheckboxValue(ids.autoReenterOnLossEnabled, false),
-        lossReenterThreshold: normalizeLossReenterThresholdInput(ids.lossReenterThreshold),
+        // Removed blocks (calendar-spread cleanup): force off / unlinked.
+        autoRolloverT2BuyEnabled: false,
+        linkRowQtyToMultiplier: false,
+        autoReenterOnLossEnabled: false,
+        lossReenterThreshold: "1000",
             renkoEnabled: supportsRenkoFeed ? getCheckboxValue(ids.renkoEnabled, false) : false,
             renkoStepPoints: supportsRenkoFeed ? String(getRenkoBoxSizeValue()) : "100",
             renkoBaseValue: supportsRenkoFeed ? normalizeRenkoBaseValue(ids.renkoBaseValue?.value || "") : "",
@@ -4118,6 +4144,8 @@
                 setInputValue(ids.futuresTradeSide, normalizeFuturesScalperTradeSideValue(objUiState.futuresTradeSide));
             }
             setInputValue(ids.bsFutQty, objUiState.bsFutQty);
+            // Calendar Spread Futures qty (page-local only, persisted like other controls).
+            setInputValue(ids.futQty, objUiState.calendarSpreadFutQty ?? objUiState.bsFutQty ?? "1");
             if (isFuturesScalperPage) {
                 setInputValue(ids.futuresLadderStepPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderStepPoints, 200, 1));
                 setInputValue(ids.futuresLadderGridOffsetPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderGridOffsetPoints, 50, 0));
@@ -4145,8 +4173,9 @@
             setInputValue(ids.blockedMarginPct, objUiState.blockedMarginPct);
             setCheckboxValue(ids.closePosPnlAboveBrokerage, objUiState.closePosPnlAboveBrokerage);
             setInputValue(ids.closePosPnlAboveBrokerageX, objUiState.closePosPnlAboveBrokerageX);
-            setCheckboxValue(ids.buyHedgeSellPremiumGate, isStrangleLikePage ? false : objUiState.buyHedgeSellPremiumGate);
-            setInputValue(ids.buyHedgeSellPremiumPct, isStrangleLikePage ? "2" : objUiState.buyHedgeSellPremiumPct);
+            // Removed blocks have no DOM nodes; increment stays off.
+            // setCheckboxValue(ids.buyHedgeSellPremiumGate, isStrangleLikePage ? false : objUiState.buyHedgeSellPremiumGate);
+            // setInputValue(ids.buyHedgeSellPremiumPct, isStrangleLikePage ? "2" : objUiState.buyHedgeSellPremiumPct);
             setCheckboxValue(ids.strangleDeltaDiffReplaceEnabled, objUiState.strangleDeltaDiffReplaceEnabled);
             setInputValue(ids.strangleDeltaDiffReplacePct, objUiState.strangleDeltaDiffReplacePct);
             setCheckboxValue(ids.buyHedgeOppositeLegOnGate, objUiState.buyHedgeOppositeLegOnGate);
@@ -4159,10 +4188,11 @@
             setCheckboxValue(ids.placeOppositeTrades, isStrangleLikePage ? false : objUiState.placeOppositeTrades);
             setCheckboxValue(ids.alternatingLegRestrictionEnabled, isStrangleLikePage ? true : (objUiState.alternatingLegRestrictionEnabled ?? true));
             setCheckboxValue(ids.openIfLastPnlNegative, isStrangleLikePage ? false : objUiState.openIfLastPnlNegative);
-        setCheckboxValue(ids.autoRolloverT2BuyEnabled, objUiState.autoRolloverT2BuyEnabled ?? true);
-        setCheckboxValue(ids.linkRowQtyToMultiplier, objUiState.linkRowQtyToMultiplier ?? true);
-        setCheckboxValue(ids.autoReenterOnLossEnabled, Boolean(objUiState.autoReenterOnLossEnabled));
-        setInputValue(ids.lossReenterThreshold, String(objUiState.lossReenterThreshold ?? "1000"));
+        // Removed blocks have no DOM nodes; skip restoring them.
+        // setCheckboxValue(ids.autoRolloverT2BuyEnabled, objUiState.autoRolloverT2BuyEnabled ?? true);
+        // setCheckboxValue(ids.linkRowQtyToMultiplier, objUiState.linkRowQtyToMultiplier ?? true);
+        // setCheckboxValue(ids.autoReenterOnLossEnabled, Boolean(objUiState.autoReenterOnLossEnabled));
+        // setInputValue(ids.lossReenterThreshold, String(objUiState.lossReenterThreshold ?? "1000"));
             if (usesDeltaRenkoStyleFeedControls()) {
                 setCheckboxValue(ids.renkoFeedEnabled, Boolean(objUiState.renkoFeedEnabled));
                 setInputValue(ids.renkoFeedPts, objUiState.renkoFeedPts || "10");
@@ -4224,44 +4254,21 @@
     }
 
     function isRowQtyLinkedToMultiplier() {
-        return ids.linkRowQtyToMultiplier instanceof HTMLInputElement
-            ? ids.linkRowQtyToMultiplier.checked
-            : true;
+        // Removed block: rows always keep independent qty on calendar-spread.
+        return false;
     }
 
     // Typing a Row Qty means "size this Leg independently", so unlink straight
     // away. Without this the Multiplier overwrites the field on every keystroke
     // while linked, which makes the Row Qty look read-only.
     function unlinkRowQtyOnManualEdit() {
-        if (!isRowQtyLinkedToMultiplier()) {
-            return false;
-        }
-        setCheckboxValue(ids.linkRowQtyToMultiplier, false);
-        return true;
+        // Removed block: already unlinked.
+        return false;
     }
 
     function syncQtyFromStartQty() {
-        // When unlinked, each Row keeps its own independent Qty.
-        if (!isRowQtyLinkedToMultiplier()) {
-            return;
-        }
-        if (!(ids.startQty instanceof HTMLInputElement)) {
-            return;
-        }
-        const vStartQty = String(ids.startQty.value || "").trim() || String(getCoveredMultiplierMin());
-        const vCoveredMultiplierQty = isCoveredMode ? getCoveredMultiplierDraftValue() : Math.max(1, Math.floor(Number(vStartQty || 1)));
-        getSupportedOptionRowIndexes().forEach(function (rowIndex) {
-            const nodes = getOptionRowNodes(rowIndex);
-            if (nodes.qty instanceof HTMLInputElement) {
-                if (isCoveredMode) {
-                    nodes.qty.value = String(vCoveredMultiplierQty);
-                }
-                else {
-                    nodes.qty.value = vStartQty;
-                }
-            }
-        });
-        refreshCoveredBalanceSummaryDisplay();
+        // Removed block: each Row keeps its own independent Qty.
+        return;
     }
 
     async function resetManualTraderDefaults() {
@@ -4568,7 +4575,7 @@
         return objResult;
     }
 
-    async function placeManualFuture(action) {
+    async function placeManualFuture(action, qtyOverride) {
         const vAction = String(action || "").trim().toUpperCase();
         if (vAction !== "BUY" && vAction !== "SELL") {
             throw new Error("Future action must be BUY or SELL.");
@@ -4582,7 +4589,8 @@
             throw new Error("Delta connection is not healthy enough to place a live futures order.");
         }
 
-        const vQty = Math.max(1, Math.floor(Number(ids.bsFutQty?.value || 1)));
+        const vRawQty = qtyOverride !== undefined && qtyOverride !== null ? qtyOverride : ids.bsFutQty?.value;
+        const vQty = Math.max(1, Math.floor(Number(vRawQty || 1)));
         const vOrderType = String(ids.futureOrderType?.value || "market_order").trim() === "limit_order"
             ? "limit_order"
             : "market_order";
@@ -5048,17 +5056,10 @@
     }
 
     function getCoveredTradeIncrementLots() {
-        const bEnabled = ids.buyHedgeSellPremiumGate instanceof HTMLInputElement
-            && ids.buyHedgeSellPremiumGate.checked;
-        const vRawIncrement = Number(ids.buyHedgeSellPremiumPct instanceof HTMLInputElement
-            ? ids.buyHedgeSellPremiumPct.value
-            : 1);
-        const vIncrementLots = Number.isFinite(vRawIncrement)
-            ? Math.max(0, Math.floor(vRawIncrement))
-            : 1;
+        // Removed block: increment is always off on calendar-spread.
         return {
-            enabled: bEnabled,
-            incrementLots: vIncrementLots
+            enabled: false,
+            incrementLots: 0
         };
     }
 
@@ -5100,18 +5101,8 @@
     }
 
     function resolveCoveredTradeQty(action, legSide, rowQty, symbol) {
-        const vBaseQty = Math.max(1, Math.floor(Number(rowQty || 1)));
-        if (!isCoveredMode || isStrangleLikePage) {
-            return vBaseQty;
-        }
-        const objIncrementConfig = getCoveredTradeIncrementLots();
-        if (!objIncrementConfig.enabled || !(objIncrementConfig.incrementLots > 0)) {
-            return vBaseQty;
-        }
-        const vExistingTrades = isCoveredSameSideLegIncrementEnabled()
-            ? countActiveCoveredTradesByLeg(symbol, legSide, action)
-            : countActiveCoveredTradesForSymbol(symbol, action);
-        return vBaseQty + (vExistingTrades * objIncrementConfig.incrementLots);
+        // Removed block: use the row qty exactly as entered.
+        return Math.max(1, Math.floor(Number(rowQty || 1)));
     }
 
     function renderCoveredHedgeGateSummary(rows) {
@@ -5157,62 +5148,8 @@
             ids.hedgeGateSummary.innerHTML = `<span class="rolling-covered-hedge-chip gate">Replace at ${escapeHtml(fmt(vThresholdPct, 0))}% Current at ${escapeHtml(currentPctText)}%</span>`;
             return;
         }
-        const objIncrementConfig = getCoveredTradeIncrementLots();
-        if (!objIncrementConfig.enabled) {
-            ids.hedgeGateSummary.innerHTML = '<span class="rolling-covered-hedge-chip off">Increment Off</span>';
-            return;
-        }
-        const vSymbol = String(ids.symbol?.value || "BTC").trim().toUpperCase();
-        const row1Qty = Math.max(1, Math.floor(Number(getOptionRowNodes(1).qty?.value || 1)));
-        const row2Qty = Math.max(1, Math.floor(Number(getOptionRowNodes(2).qty?.value || 1)));
-        const nextLegChips = [
-            {
-                label: "PE",
-                qty: resolveCoveredTradeQty("sell", "pe", row1Qty, vSymbol),
-                activeCount: countActiveCoveredTradesByLeg(vSymbol, "pe", "sell")
-            },
-            {
-                label: "CE",
-                qty: resolveCoveredTradeQty("sell", "ce", row2Qty, vSymbol),
-                activeCount: countActiveCoveredTradesByLeg(vSymbol, "ce", "sell")
-            }
-        ].map(function (entry) {
-            return `<span class="rolling-covered-hedge-chip neutral">${entry.label} Next ${escapeHtml(fmt(entry.qty, 0))} (${escapeHtml(fmt(entry.activeCount, 0))} open)</span>`;
-        }).join("");
-        ids.hedgeGateSummary.innerHTML = `
-            <span class="rolling-covered-hedge-chip gate">Increment +${escapeHtml(fmt(objIncrementConfig.incrementLots, 0))}</span>
-            ${nextLegChips}
-        `;
-        return;
-        const gateEnabled = ids.buyHedgeSellPremiumGate instanceof HTMLInputElement
-            && ids.buyHedgeSellPremiumGate.checked;
-        const rawThresholdPct = Number(ids.buyHedgeSellPremiumPct instanceof HTMLInputElement
-            ? ids.buyHedgeSellPremiumPct.value
-            : 2);
-        const thresholdPct = Number.isFinite(rawThresholdPct)
-            ? Math.min(100, Math.max(0, rawThresholdPct))
-            : 2;
-        if (!gateEnabled) {
-            ids.hedgeGateSummary.innerHTML = '<span class="rolling-covered-hedge-chip off">Gate Off</span>';
-            return;
-        }
-        const minimumRatio = Math.max(0, 1 - (thresholdPct / 100));
-        const legChips = ["CE", "PE"].map(function (legSide) {
-            const sellLeg = findLatestCoveredSellLeg(rows, legSide);
-            const soldPremium = Number(sellLeg?.entryPrice || 0);
-            const currentPremium = Number(sellLeg?.markPrice || sellLeg?.entryPrice || 0);
-            if (!(soldPremium > 0)) {
-                return `<span class="rolling-covered-hedge-chip neutral">${legSide} Min \u2014</span>`;
-            }
-            const minimumPremium = soldPremium * minimumRatio;
-            const toneClass = currentPremium < minimumPremium ? "success" : "danger";
-            const title = `${legSide} current ${fmt(currentPremium, 2)} | sold ${fmt(soldPremium, 2)} | minimum ${fmt(minimumPremium, 2)}`;
-            return `<span class="rolling-covered-hedge-chip ${toneClass}" title="${escapeHtml(title)}">${legSide} Min ${escapeHtml(fmt(minimumPremium, 2))}</span>`;
-        }).join("");
-        ids.hedgeGateSummary.innerHTML = `
-            <span class="rolling-covered-hedge-chip gate">Gate ${escapeHtml(fmt(thresholdPct, 2))}%</span>
-            ${legChips}
-        `;
+        // Removed increment block: always show off on calendar-spread.
+        ids.hedgeGateSummary.innerHTML = '<span class="rolling-covered-hedge-chip off">Increment Off</span>';
     }
 
     function resolveSecondaryGreekValue(displayValue, fallbackValue) {
@@ -5240,15 +5177,106 @@
         }, 250);
     }
 
+    function isCalendarSpreadFutureRow(row) {
+        const vName = String(row?.contractName || "").trim().toUpperCase();
+        if (!vName) {
+            return false;
+        }
+        // Options contracts carry -C- / -P- / CALL / PUT markers; futures don't.
+        if (vName.includes("-C-") || vName.includes("-P-")) {
+            return false;
+        }
+        if (vName.startsWith("C-") || vName.startsWith("P-")) {
+            return false;
+        }
+        if (vName.endsWith("-C") || vName.endsWith("-P")) {
+            return false;
+        }
+        if (vName.includes("CALL") || vName.includes("PUT")) {
+            return false;
+        }
+        return true;
+    }
+
+    function formatFuturesDateTime(value) {
+        return formatDateTimeDisplay(value);
+    }
+
+    function renderCalendarSpreadFuturesPositions(arrRows) {
+        if (!ids.futuresPositionsBody) {
+            return;
+        }
+        const arrFutures = (Array.isArray(arrRows) ? arrRows : []).filter(isCalendarSpreadFutureRow)
+            .slice().sort(function (left, right) {
+                return new Date(String(right?.openedAt || right?.updatedAt || "")).getTime()
+                    - new Date(String(left?.openedAt || left?.updatedAt || "")).getTime();
+            });
+        if (!arrFutures.length) {
+            ids.futuresPositionsBody.innerHTML = `<tr><td colspan="10" class="rolling-demo-empty">No calendar spread futures positions are currently shown.</td></tr>`;
+            return;
+        }
+        const vFuturesTotalCharges = arrFutures.reduce(function (sum, row) {
+            return sum + Number(row?.charges || 0);
+        }, 0);
+        const bFuturesHasPnl = arrFutures.some(function (row) {
+            return Number.isFinite(Number(row?.pnl));
+        });
+        const vFuturesTotalPnl = bFuturesHasPnl ? arrFutures.reduce(function (sum, row) {
+            return sum + Number(row?.pnl || 0);
+        }, 0) : null;
+        ids.futuresPositionsBody.innerHTML = arrFutures.map(function (row) {
+            const side = String(row.side || "-").trim().toUpperCase();
+            const contractName = String(row.contractName || "-");
+            const importId = String(row.importId || contractName || "");
+            const mark = row.markPrice !== undefined && row.markPrice !== null && row.markPrice !== ""
+                ? row.markPrice
+                : row.ltpPrice;
+            return `<tr>
+                <td>${escapeHtml(contractName)}</td>
+                <td>${renderPositionSide(side)}</td>
+                <td>${escapeHtml(fmt(row.qty, 0))}</td>
+                <td>${escapeHtml(fmt(row.entryPrice, 2))}</td>
+                <td>${escapeHtml(fmt(mark, 2))}</td>
+                <td>${escapeHtml(fmt(row.charges, 4))}</td>
+                <td>${renderPnlValue(row.pnl, false)}</td>
+                <td>${escapeHtml(formatFuturesDateTime(row.openedAt))}</td>
+                <td>${escapeHtml(formatFuturesDateTime(row.updatedAt))}</td>
+                <td>
+                    <div class="rolling-demo-table-actions">
+                        <button class="rolling-demo-icon-btn primary rolling-live-edit-open-position" type="button" data-import-id="${escapeHtml(importId)}" title="Edit the quantity of this futures position" aria-label="Edit the quantity of this futures position">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M12 20h9" />
+                                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                            </svg>
+                        </button>
+                        <button class="rolling-demo-icon-btn danger rolling-live-close-open-position" type="button" data-import-id="${escapeHtml(importId)}" title="Close this futures position" aria-label="Close this futures position">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                        </button>
+                    </div>
+                </td>
+            </tr>`;
+        }).join("") + `<tr class="rolling-demo-total-row">
+            <td colspan="5">Total</td>
+            <td class="rolling-demo-total-value">${escapeHtml(fmt(vFuturesTotalCharges, 4))}</td>
+            <td class="rolling-demo-total-value">${renderPnlValue(vFuturesTotalPnl, true)}</td>
+            <td colspan="3">-</td>
+        </tr>`;
+    }
+
+
     function renderOpenPositions(payload) {
         const objPayload = extractOpenPositionsPayload(payload);
         lastOpenPositionsPayload = objPayload;
-        const arrRows = Array.isArray(objPayload.positions)
+        const arrAllRows = Array.isArray(objPayload.positions)
             ? objPayload.positions.slice().sort(function (left, right) {
                 return new Date(String(right?.openedAt || right?.updatedAt || "")).getTime()
                     - new Date(String(left?.openedAt || left?.updatedAt || "")).getTime();
             })
             : [];
+        // Calendar Spread page: main table shows options only; futures render in
+        // the dedicated Futures Open Positions section below.
+        const arrRows = arrAllRows.filter(function (row) { return !isCalendarSpreadFutureRow(row); });
+        renderCalendarSpreadFuturesPositions(arrAllRows);
         const objTotals = objPayload.totals || {};
         const vPreviousOpenCount = previousOpenPositionCount;
         const bFirstOpenTransition = isCoveredMode && vPreviousOpenCount === 0 && arrRows.length > 0;
@@ -5343,6 +5371,31 @@
             }
             const ltpBlinkClass = isInactive ? "" : getLtpBlinkClass(importId, currentLtp);
             const greeks = row.greeks || {};
+            // Calendar Spread: show SL / TP trigger premium prices computed from
+            // Sell Price and the % SL / TP of Premium (SL above, TP below sell).
+            const slTpCellHtml = (function () {
+                if (String(side || "").trim().toUpperCase() !== "SELL") {
+                    return "-";
+                }
+                const vSellPrice = Number(row.entryPrice || 0);
+                if (!(vSellPrice > 0)) {
+                    return "-";
+                }
+                const objMeta = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+                const vTpRaw = Number(objMeta.takeProfitDelta);
+                const vSlRaw = Number(objMeta.stopLossDelta);
+                const vTpPct = Number.isFinite(vTpRaw) && vTpRaw >= 1 && vTpRaw <= 100 ? Math.round(vTpRaw) : null;
+                const vSlPct = Number.isFinite(vSlRaw) && vSlRaw >= 1 && vSlRaw <= 100 ? Math.round(vSlRaw) : null;
+                const vTpPrice = vTpPct !== null ? vSellPrice * (1 - vTpPct / 100) : null;
+                const vSlPrice = vSlPct !== null ? vSellPrice * (1 + vSlPct / 100) : null;
+                if (vTpPrice === null && vSlPrice === null) {
+                    return "-";
+                }
+                const vSlText = vSlPrice !== null ? escapeHtml(fmt(vSlPrice, 2)) : "-";
+                const vTpText = vTpPrice !== null ? escapeHtml(fmt(vTpPrice, 2)) : "-";
+                const vTitle = `SL triggers at ${vSlPct !== null ? vSlPct + "% above" : "-"} sell (${vSlText}); TP triggers at ${vTpPct !== null ? vTpPct + "% below" : "-"} sell (${vTpText})`;
+                return `<span title="${escapeHtml(vTitle)}"><div>${vSlText}</div><div>${vTpText}</div></span>`;
+            })();
             const coveredSideRowClass = isCoveredMode && (side === "BUY" || side === "SELL")
                 ? `rolling-covered-side-row ${side.toLowerCase()}`
                 : "";
@@ -5395,12 +5448,12 @@
                         2
                     )}</td>
                     <td>${escapeHtml(contractName)}</td>
-                    <td>${renderPositionSide(side)}</td>
                     <td>${escapeHtml(fmt(row.lotSize || lotSize, 3))}</td>
                     <td>${escapeHtml(fmt(row.qty, 0))}${buildOpenPositionSourceLotHintHtml(row)}</td>
                     <td>${side === "BUY" ? escapeHtml(fmt(row.entryPrice, 2)) : "-"}</td>
                     <td>${side === "SELL" ? escapeHtml(fmt(row.entryPrice, 2)) : "-"}</td>
                     <td class="${escapeHtml(ltpBlinkClass)}">${escapeHtml(fmt(row.ltpPrice, 2))}</td>
+                    <td>${slTpCellHtml}</td>
                     <td>${escapeHtml(fmt(row.charges, 4))}</td>
                     <td>${renderPnlValue(row.pnl, false)}</td>
                     <td>${escapeHtml(formatDateTimeDisplay(row.openedAt))}</td>
@@ -5633,6 +5686,19 @@
         return postJson(`${endpointBase}/open-positions/delete`, { importId: importId });
     }
 
+    // Calendar Spread Futures section: remove only futures rows locally.
+    async function closeCalendarSpreadFuturesLocally() {
+        const arrRemaining = (Array.isArray(displayedPositions) ? displayedPositions : [])
+            .filter(function (row) { return !isCalendarSpreadFutureRow(row); });
+        displayedPositions = arrRemaining;
+        lastOpenPositionsPayload = {
+            ...(lastOpenPositionsPayload || {}),
+            positions: arrRemaining.slice()
+        };
+        await postJson(`${endpointBase}/open-positions`, { positions: arrRemaining });
+        renderOpenPositions(lastOpenPositionsPayload);
+    }
+
     async function clearSavedOpenPositions() {
         return postJson(`${endpointBase}/open-positions/clear`, {});
     }
@@ -5643,6 +5709,41 @@
 
     async function deleteSavedClosedPosition(closeId) {
         return postJson(`${endpointBase}/closed-positions/delete`, { closeId: closeId });
+    }
+
+    // Calendar Spread only: move a Closed Positions row back to Open Positions.
+    async function restoreSavedClosedPosition(closeId) {
+        return postJson(`${endpointBase}/closed-positions/restore`, { closeId: closeId });
+    }
+
+    function handleClosedRestoreClick(closeId) {
+        const vCloseId = String(closeId || "").trim();
+        if (!vCloseId) {
+            setStatus(ids.pageStatus, "Unable to find the selected closed position.", "danger");
+            return;
+        }
+        const confirmed = window.confirm("Restore this position back to Open Positions? It will re-enter at the live price with its saved % TP / % SL.");
+        if (!confirmed) {
+            return;
+        }
+        void restoreSavedClosedPosition(vCloseId).then(function (objResult) {
+            const trackedPayload = objResult?.data?.trackedOpenPositions || null;
+            const vMessage = objResult?.message || "Closed position restored to Open Positions.";
+            if (trackedPayload) {
+                renderOpenPositions(trackedPayload);
+            }
+            return Promise.all([
+                loadSavedOpenPositions().catch(function () { return undefined; }),
+                loadClosedPositions().catch(function () { return undefined; }),
+                loadClosedAltPositions().catch(function () { return undefined; }),
+                loadAccountSummary().catch(function () { return undefined; }),
+                loadEvents().catch(function () { return undefined; })
+            ]).then(function () {
+                setStatus(ids.pageStatus, vMessage, "success");
+            });
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to restore the closed position.", "danger");
+        });
     }
 
     async function updateSavedClosedPositionQty(closeId, qty) {
@@ -5727,6 +5828,12 @@
                                     </svg>
                                 </button>
                             ` : ""}
+                            <button class="rolling-demo-icon-btn primary rolling-live-restore-closed-position" type="button" data-close-id="${escapeHtml(closeId)}" title="Restore this position to Open Positions" aria-label="Restore this position to Open Positions">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M3 12a9 9 0 1 0 3-6.7" />
+                                    <path d="M3 3v6h6" />
+                                </svg>
+                            </button>
                             <button class="rolling-demo-icon-btn warn rolling-live-delete-closed-position" type="button" data-close-id="${escapeHtml(closeId)}" title="Delete this closed position permanently" aria-label="Delete this closed position permanently">
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="M18 6 6 18" />
@@ -5766,7 +5873,7 @@
             ids.closedPageNumbers.innerHTML = pageNumbers.join("");
         }
     }
-function renderClosedAltPositions(rows) {
+    function renderClosedAltPositions(rows) {
         closedAltPositions = Array.isArray(rows)
             ? rows.slice().sort(function (left, right) {
                 return new Date(String(right?.startAt || right?.endAt || "")).getTime()
@@ -5822,6 +5929,12 @@ function renderClosedAltPositions(rows) {
                                     </svg>
                                 </button>
                             ` : ""}
+                            <button class="rolling-demo-icon-btn primary rolling-live-restore-closed-position" type="button" data-close-id="${escapeHtml(closeId)}" title="Restore this position to Open Positions" aria-label="Restore this position to Open Positions">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M3 12a9 9 0 1 0 3-6.7" />
+                                    <path d="M3 3v6h6" />
+                                </svg>
+                            </button>
                             <button class="rolling-demo-icon-btn warn rolling-live-delete-closed-position" type="button" data-close-id="${escapeHtml(closeId)}" title="Delete this closed position permanently" aria-label="Delete this closed position permanently">
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="M18 6 6 18" />
@@ -5862,6 +5975,26 @@ function renderClosedAltPositions(rows) {
         }
     }
 
+    async function loadClosedAltPositions() {
+        if (!canUseLiveActions()) {
+            renderClosedAltPositions([]);
+            return [];
+        }
+        const query = new URLSearchParams();
+        query.set("symbol", String(ids.symbol?.value || "BTC").trim().toUpperCase());
+        if (ids.closedAltFromDate instanceof HTMLInputElement && ids.closedAltFromDate.value) {
+            query.set("fromDate", ids.closedAltFromDate.value);
+        }
+        if (ids.closedAltToDate instanceof HTMLInputElement && ids.closedAltToDate.value) {
+            query.set("toDate", ids.closedAltToDate.value);
+        }
+        const objResult = await getJson(`${endpointBase}/closed-positions?${query.toString()}`);
+        const arrRows = Array.isArray(objResult?.data?.positions) ? objResult.data.positions : [];
+        closedAltPositionsPage = 1;
+        renderClosedAltPositions(arrRows);
+        return arrRows;
+    }
+
     async function loadClosedPositions() {
         if (!canUseLiveActions()) {
             renderClosedPositions([]);
@@ -5885,25 +6018,6 @@ function renderClosedAltPositions(rows) {
         }
         closedPositionsPage = 1;
         renderClosedPositions(arrRows);
-        return arrRows;
-    }
-async function loadClosedAltPositions() {
-        if (!canUseLiveActions()) {
-            renderClosedAltPositions([]);
-            return [];
-        }
-        const query = new URLSearchParams();
-        query.set("symbol", String(ids.symbol?.value || "BTC").trim().toUpperCase());
-        if (ids.closedAltFromDate instanceof HTMLInputElement && ids.closedAltFromDate.value) {
-            query.set("fromDate", ids.closedAltFromDate.value);
-        }
-        if (ids.closedAltToDate instanceof HTMLInputElement && ids.closedAltToDate.value) {
-            query.set("toDate", ids.closedAltToDate.value);
-        }
-        const objResult = await getJson(`${endpointBase}/closed-positions?${query.toString()}`);
-        const arrRows = Array.isArray(objResult?.data?.positions) ? objResult.data.positions : [];
-        closedAltPositionsPage = 1;
-        renderClosedAltPositions(arrRows);
         return arrRows;
     }
 
@@ -6021,10 +6135,31 @@ async function loadClosedAltPositions() {
     function openOpenEditModal(row) {
         editingOpenPositionImportId = String(row?.importId || "").trim();
         if (ids.openEditSymbol) {
-            ids.openEditSymbol.textContent = `Update Qty for ${String(row?.contractName || "this open position").trim() || "this open position"}.`;
+            ids.openEditSymbol.textContent = `Update ${String(row?.contractName || "this open position").trim() || "this open position"}.`;
         }
         if (ids.openEditQty instanceof HTMLInputElement) {
             ids.openEditQty.value = String(Math.max(1, Math.floor(Number(row?.qty || 1))));
+        }
+        if (ids.openEditEntry instanceof HTMLInputElement) {
+            ids.openEditEntry.value = String(Number(row?.entryPrice || 0));
+        }
+        const bIsFutureRow = isCalendarSpreadFutureRow(row);
+        const objMeta = (row?.metadata && typeof row.metadata === "object" ? row.metadata : {});
+        if (ids.openEditTpPct instanceof HTMLInputElement) {
+            const vTp = Number(objMeta.takeProfitDelta);
+            ids.openEditTpPct.value = Number.isFinite(vTp) && vTp >= 1 && vTp <= 100 ? String(Math.round(vTp)) : "";
+            ids.openEditTpPct.placeholder = "Row default";
+        }
+        if (ids.openEditSlPct instanceof HTMLInputElement) {
+            const vSl = Number(objMeta.stopLossDelta);
+            ids.openEditSlPct.value = Number.isFinite(vSl) && vSl >= 1 && vSl <= 100 ? String(Math.round(vSl)) : "";
+            ids.openEditSlPct.placeholder = "Row default";
+        }
+        if (ids.openEditTpWrap instanceof HTMLElement) {
+            ids.openEditTpWrap.style.display = bIsFutureRow ? "none" : "";
+        }
+        if (ids.openEditSlWrap instanceof HTMLElement) {
+            ids.openEditSlWrap.style.display = bIsFutureRow ? "none" : "";
         }
         setStatus(ids.openEditStatus, "", "");
         ids.openEditOverlay?.classList.add("show");
@@ -6053,8 +6188,33 @@ async function loadClosedAltPositions() {
         if (!(qty > 0)) {
             throw new Error("Qty must be greater than 0.");
         }
+        const objPayload = { importId: importId, qty: qty };
+        const vEntryRaw = ids.openEditEntry instanceof HTMLInputElement ? String(ids.openEditEntry.value || "").trim() : "";
+        if (vEntryRaw !== "") {
+            const vEntry = Number(vEntryRaw);
+            if (!Number.isFinite(vEntry) || !(vEntry > 0)) {
+                throw new Error("Enter a valid entry price.");
+            }
+            objPayload.entryPrice = vEntry;
+        }
+        const vTpRaw = ids.openEditTpPct instanceof HTMLInputElement ? String(ids.openEditTpPct.value || "").trim() : "";
+        if (vTpRaw !== "" && ids.openEditTpWrap instanceof HTMLElement && ids.openEditTpWrap.style.display !== "none") {
+            const vTp = Number(vTpRaw);
+            if (!Number.isFinite(vTp) || vTp < 1 || vTp > 100) {
+                throw new Error("TP % must be between 1 and 100.");
+            }
+            objPayload.takeProfitDelta = Math.round(vTp);
+        }
+        const vSlRaw = ids.openEditSlPct instanceof HTMLInputElement ? String(ids.openEditSlPct.value || "").trim() : "";
+        if (vSlRaw !== "" && ids.openEditSlWrap instanceof HTMLElement && ids.openEditSlWrap.style.display !== "none") {
+            const vSl = Number(vSlRaw);
+            if (!Number.isFinite(vSl) || vSl < 1 || vSl > 100) {
+                throw new Error("SL % must be between 1 and 100.");
+            }
+            objPayload.stopLossDelta = Math.round(vSl);
+        }
         setStatus(ids.openEditStatus, "Saving...", "info");
-        const objResult = await postJson(`${endpointBase}/open-positions/update-qty`, { importId: importId, qty: qty });
+        const objResult = await postJson(`${endpointBase}/open-positions/update-qty`, objPayload);
         const trackedPayload = objResult?.data?.trackedOpenPositions || null;
         if (trackedPayload) {
             renderOpenPositions(trackedPayload);
@@ -6366,6 +6526,8 @@ async function loadClosedAltPositions() {
     });
     [
         ids.bsFutQty,
+        // Calendar Spread Futures qty (page-local only, persisted like other controls).
+        ids.futQty,
         ids.futuresLadderStepPoints,
         ids.futuresLadderGridOffsetPoints,
         ids.futuresLadderOrderOffsetPoints,
@@ -6386,8 +6548,6 @@ async function loadClosedAltPositions() {
         ids.closePosPnlAboveBrokerage,
         ids.closePosPnlAboveBrokerageX,
         ids.reEnterBlock,
-        ids.buyHedgeSellPremiumGate,
-        ids.buyHedgeSellPremiumPct,
         ids.strangleDeltaDiffReplaceEnabled,
         ids.strangleDeltaDiffReplacePct,
         ids.buyHedgeOppositeLegOnGate,
@@ -6431,7 +6591,7 @@ async function loadClosedAltPositions() {
             startConfirmationPolling();
         }
     });
-    [ids.buyHedgeSellPremiumGate, ids.buyHedgeSellPremiumPct, ids.strangleDeltaDiffReplaceEnabled, ids.strangleDeltaDiffReplacePct].forEach(function (node) {
+    [ids.strangleDeltaDiffReplaceEnabled, ids.strangleDeltaDiffReplacePct].forEach(function (node) {
         node?.addEventListener("change", function () {
             renderCoveredHedgeGateSummary(displayedPositions);
         });
@@ -6488,23 +6648,24 @@ async function loadClosedAltPositions() {
         }, 400);
     }
 
-    ids.linkRowQtyToMultiplier?.addEventListener("change", function () {
-        // Re-link immediately so the Row Qty values visibly follow the Multiplier.
-        syncQtyFromStartQty();
-        queueProfileSave();
-    });
-    ids.autoRolloverT2BuyEnabled?.addEventListener("change", function () {
-        queueProfileSave();
-    });
-    [ids.autoReenterOnLossEnabled, ids.lossReenterThreshold].forEach(function (node) {
-        node?.addEventListener("change", function () {
-            queueProfileSave();
-        });
-    });
-    ids.lossReenterThreshold?.addEventListener("blur", function () {
-        setInputValue(ids.lossReenterThreshold, normalizeLossReenterThresholdInput(ids.lossReenterThreshold));
-        queueProfileSave();
-    });
+    // Removed blocks (calendar-spread cleanup): no DOM nodes, no listeners.
+    // ids.linkRowQtyToMultiplier?.addEventListener("change", function () {
+    //     // Re-link immediately so the Row Qty values visibly follow the Multiplier.
+    //     syncQtyFromStartQty();
+    //     queueProfileSave();
+    // });
+    // ids.autoRolloverT2BuyEnabled?.addEventListener("change", function () {
+    //     queueProfileSave();
+    // });
+    // [ids.autoReenterOnLossEnabled, ids.lossReenterThreshold].forEach(function (node) {
+    //     node?.addEventListener("change", function () {
+    //         queueProfileSave();
+    //     });
+    // });
+    // ids.lossReenterThreshold?.addEventListener("blur", function () {
+    //     setInputValue(ids.lossReenterThreshold, normalizeLossReenterThresholdInput(ids.lossReenterThreshold));
+    //     queueProfileSave();
+    // });
     [
         ids.renkoEnabled,
         ids.renkoBoxSize,
@@ -6850,6 +7011,70 @@ ids.closedAltFromDate?.addEventListener("change", function () {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to place BUY FUT order.", "danger");
         });
     });
+    ids.buyFutButton?.addEventListener("click", function () {
+        void placeManualFuture("BUY", ids.futQty?.value).then(function (objResult) {
+            const objData = objResult?.data || {};
+            const objOrder = objData.order || {};
+            const trackedPayload = objData.trackedOpenPositions || null;
+            const vOrderId = String(objOrder.id || objOrder.order_id || "").trim();
+            const vMessage = objResult?.message || "BUY future order placed.";
+            const vTone = String(objResult?.status || "").trim() === "warning" ? "warning" : "success";
+            if (trackedPayload) {
+                renderOpenPositions(trackedPayload);
+            }
+            setStatus(ids.pageStatus, vOrderId ? `${vMessage} Order ID: ${vOrderId}` : vMessage, vTone);
+            return Promise.all([
+                loadAccountSummary(),
+                loadConnectionStatus(),
+                loadEvents().catch(function () { return undefined; })
+            ]);
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to place BUY FUT order.", "danger");
+        });
+    });
+    ids.sellFutButton?.addEventListener("click", function () {
+        void placeManualFuture("SELL", ids.futQty?.value).then(function (objResult) {
+            const objData = objResult?.data || {};
+            const objOrder = objData.order || {};
+            const trackedPayload = objData.trackedOpenPositions || null;
+            const vOrderId = String(objOrder.id || objOrder.order_id || "").trim();
+            const vMessage = objResult?.message || "SELL future order placed.";
+            const vTone = String(objResult?.status || "").trim() === "warning" ? "warning" : "success";
+            if (trackedPayload) {
+                renderOpenPositions(trackedPayload);
+            }
+            setStatus(ids.pageStatus, vOrderId ? `${vMessage} Order ID: ${vOrderId}` : vMessage, vTone);
+            return Promise.all([
+                loadAccountSummary(),
+                loadConnectionStatus(),
+                loadEvents().catch(function () { return undefined; })
+            ]);
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to place SELL FUT order.", "danger");
+        });
+    });
+    ids.futuresRefreshButton?.addEventListener("click", function () {
+        void loadSavedOpenPositions().then(function () {
+            setStatus(ids.pageStatus, "Futures open positions refreshed.", "success");
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to refresh futures open positions.", "danger");
+        });
+    });
+    ids.futuresClearButton?.addEventListener("click", function () {
+        const confirmed = window.confirm("Clear all futures open positions from this section only? No Delta Exchange order will be placed.");
+        if (!confirmed) {
+            return;
+        }
+        void closeCalendarSpreadFuturesLocally().then(function () {
+            setStatus(ids.pageStatus, "Futures open positions cleared locally.", "success");
+            return Promise.all([
+                loadAccountSummary().catch(function () { return undefined; }),
+                loadEvents().catch(function () { return undefined; })
+            ]);
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to clear futures open positions.", "danger");
+        });
+    });
     ids.sellPeButton?.addEventListener("click", function () {
         void placeManualOption("sell", "pe", 1).then(function (objResult) {
             const trackedPayload = objResult?.data?.trackedOpenPositions || null;
@@ -7156,7 +7381,6 @@ ids.closedAltFromDate?.addEventListener("change", function () {
         }
         void clearSavedClosedPositions().then(function (objResult) {
             renderClosedPositions([]);
-            renderClosedAltPositions([]);
             if (ids.updateRecoveryTotalsCheckbox instanceof HTMLInputElement) {
                 ids.updateRecoveryTotalsCheckbox.checked = false;
             }
@@ -7558,7 +7782,12 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
         const editButton = target ? target.closest(".rolling-live-edit-open-position") : null;
         if (editButton instanceof HTMLButtonElement) {
             const importId = String(editButton.dataset.importId || "").trim();
-            const row = displayedPositions.find(function (item) {
+            // Calendar Spread: futures rows live in the Futures section, so search
+            // the full payload instead of the options-only displayedPositions.
+            const arrAllRows = Array.isArray(lastOpenPositionsPayload?.positions)
+                ? lastOpenPositionsPayload.positions
+                : displayedPositions;
+            const row = arrAllRows.find(function (item) {
                 return String(item?.importId || "").trim() === importId;
             });
             if (!row) {
@@ -7682,7 +7911,10 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
                     loadAccountSummary(),
                     loadConnectionStatus(),
                     refreshImportablePositionsSilently().catch(function () { return undefined; }),
-                    loadEvents().catch(function () { return undefined; })
+                    loadEvents().catch(function () { return undefined; }),
+                    // Closed on this page moves the row server-side already; refresh
+                    // Closed Positions so it appears there immediately.
+                    loadClosedPositions().catch(function () { return undefined; })
                 ]);
             }).catch(function (error) {
                 setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to close imported live position.", "danger");
@@ -7704,6 +7936,8 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
     ids.openPositionsBody?.addEventListener("click", handleOpenPositionsBodyClick);
     ids.openPositionsBodyCoinswitch?.addEventListener("click", handleOpenPositionsBodyClick);
     ids.openPositionsBodyDelta?.addEventListener("click", handleOpenPositionsBodyClick);
+    // Calendar Spread Futures section reuses the same row actions (close on exchange).
+    ids.futuresPositionsBody?.addEventListener("click", handleOpenPositionsBodyClick);
     ids.closedPositionsBody?.addEventListener("click", function (event) {
         const target = event.target instanceof Element ? event.target : null;
         const editButton = target ? target.closest(".rolling-live-edit-closed-position") : null;
@@ -7721,6 +7955,10 @@ ids.closedAltPrevPageButton?.addEventListener("click", function () {
         }
         const deleteButton = target ? target.closest(".rolling-live-delete-closed-position") : null;
         if (!(deleteButton instanceof HTMLButtonElement)) {
+            const restoreLegacyButton = target ? target.closest(".rolling-live-restore-closed-position") : null;
+            if (restoreLegacyButton instanceof HTMLButtonElement) {
+                handleClosedRestoreClick(restoreLegacyButton.dataset.closeId);
+            }
             return;
         }
         const closeId = String(deleteButton.dataset.closeId || "").trim();
@@ -7791,8 +8029,12 @@ ids.closedAltPositionsBody?.addEventListener("click", function (event) {
         }).catch(function (error) {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to delete closed position.", "danger");
         });
+        const restoreAltButton = target ? target.closest(".rolling-live-restore-closed-position") : null;
+        if (restoreAltButton instanceof HTMLButtonElement) {
+            handleClosedRestoreClick(restoreAltButton.dataset.closeId);
+            return;
+        }
     });
-
     async function loadPageForCurrentTarget() {
         displayedPositions = [];
         importablePositions = [];
