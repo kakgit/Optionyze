@@ -24846,16 +24846,7 @@ export async function restoreCalendarSpreadClosedPosition(req: Request, res: Res
         const vQty = Math.max(1, Math.floor(Number(objClosed.qty || 0)));
         const objProfile = await readLiveProfile(vUserId, "calendar-spread");
         const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, "calendar-spread");
-        const arrActiveSameContract = arrExisting.filter((objRow) => String(objRow.contractName || "").trim() === vContractName && !isTrackedPositionInactive(objRow));
-        // The contract may linger as an active row that is hidden from the UI
-        // (e.g. a paper marker left behind by an earlier close). Restore must
-        // bring exactly one live row back, so drop any such row first. The
-        // closed record (history + SL/TP) stays intact until the restore below
-        // deletes it after the fresh row is persisted.
-        let arrBase = arrExisting;
-        if (arrActiveSameContract.length) {
-            arrBase = arrExisting.filter((objRow) => !(String(objRow.contractName || "").trim() === vContractName && !isTrackedPositionInactive(objRow)));
-        }
+        const arrBase = arrExisting;
         const bIsFuture = isFutureContractSymbol(vContractName);
         const objTicker = await getLiveOptionTicker(vContractName);
         const objMeta = (objClosed.metadata && typeof objClosed.metadata === "object" ? objClosed.metadata : {}) as Record<string, unknown>;
@@ -24929,7 +24920,10 @@ export async function restoreCalendarSpreadClosedPosition(req: Request, res: Res
             };
         }
         // __RESTORE_SAVE__
-        const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, "calendar-spread", [...arrBase, objRestored]);
+        // No same-contract purge: the restored row always gets a fresh importId,
+        // so stale hidden dup rows coexist harmlessly and no live row is ever
+        // dropped by a restore. Duplicates are collapsed on read by importId.
+        const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, "calendar-spread", [...arrExisting, objRestored]);
         // Defensive: confirm nothing else vanished in the write. If the
         // persisted set is smaller than expected, re-read storage and merge any
         // missing rows back instead of silently dropping positions.
