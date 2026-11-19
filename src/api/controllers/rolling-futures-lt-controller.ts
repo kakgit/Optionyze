@@ -4484,29 +4484,34 @@ function isCalendarSpreadPremiumTpStrategy(pStrategyCode: RollingFuturesLtStrate
     return pStrategyCode === "calendar-spread";
 }
 
-// Calendar Spread SELL TP: close when LTP falls to (or below)
-// sellPrice * (1 - tpPct / 100). BUY side keeps delta tracking.
+// Calendar Spread premium TP: SELL closes when LTP falls to (or below)
+// entry * (1 - tpPct / 100); BUY closes when LTP rises to (or above)
+// entry * (1 + tpPct / 100).
 function shouldTriggerCalendarSpreadPremiumTp(
     pSide: string,
     pEntryPrice: number,
     pLivePrice: number,
     pTpPct: number | null
 ): boolean {
-    if (String(pSide || "").trim().toUpperCase() !== "SELL") {
-        return false;
-    }
     if (pTpPct === null || !(pTpPct >= 1) || !(pTpPct <= 100)) {
         return false;
     }
     if (!(pEntryPrice > 0) || !(pLivePrice > 0)) {
         return false;
     }
-    const vTarget = pEntryPrice * (1 - pTpPct / 100);
-    return pLivePrice <= vTarget;
+    const vSide = String(pSide || "").trim().toUpperCase();
+    if (vSide === "BUY") {
+        return pLivePrice >= pEntryPrice * (1 + pTpPct / 100);
+    }
+    if (vSide === "SELL") {
+        return pLivePrice <= pEntryPrice * (1 - pTpPct / 100);
+    }
+    return false;
 }
 
-// Calendar Spread SELL SL: close when LTP rises to (or above)
-// sellPrice * (1 + slPct / 100). BUY side keeps delta tracking.
+// Calendar Spread premium SL: SELL closes when LTP rises to (or above)
+// entry * (1 + slPct / 100); BUY closes when LTP falls to (or below)
+// entry * (1 - slPct / 100).
 function normalizeCalendarSpreadSlPctValue(pValue: unknown): number | null {
     // Calendar Spread "% SL of Premium": whole percents 1-100.
     const vRaw = Number(pValue);
@@ -4522,17 +4527,20 @@ function shouldTriggerCalendarSpreadPremiumSl(
     pLivePrice: number,
     pSlPct: number | null
 ): boolean {
-    if (String(pSide || "").trim().toUpperCase() !== "SELL") {
-        return false;
-    }
     if (pSlPct === null || !(pSlPct >= 1) || !(pSlPct <= 100)) {
         return false;
     }
     if (!(pEntryPrice > 0) || !(pLivePrice > 0)) {
         return false;
     }
-    const vTarget = pEntryPrice * (1 + pSlPct / 100);
-    return pLivePrice >= vTarget;
+    const vSide = String(pSide || "").trim().toUpperCase();
+    if (vSide === "BUY") {
+        return pLivePrice <= pEntryPrice * (1 - pSlPct / 100);
+    }
+    if (vSide === "SELL") {
+        return pLivePrice >= pEntryPrice * (1 + pSlPct / 100);
+    }
+    return false;
 }
 
 function shouldTriggerTrackedOption(
@@ -12681,12 +12689,10 @@ async function findTriggeredTrackedOptions(
         const objRowState = getNormalizedOptionRowUiState(pUiState, objPosition.strategyCode, vRowIndex);
         const vLiveTakeProfitDelta = Number(objRowState.tpD);
         const vLiveStopLossDelta = Number(objRowState.slD);
-        // Calendar Spread SELL TP/SL are premium-based.
-        // TP: close when LTP <= sellPrice * (1 - tpPct / 100).
-        // SL: close when LTP >= sellPrice * (1 + slPct / 100).
-        // BUY side keeps delta tracking.
-        if (isCalendarSpreadPremiumTpStrategy(objPosition.strategyCode)
-            && String(objPosition.side || "").trim().toUpperCase() === "SELL") {
+        // Calendar Spread TP/SL are premium-based for both sides.
+        // SELL TP: LTP <= entry * (1 - tpPct/100). BUY TP: LTP >= entry * (1 + tpPct/100).
+        // SELL SL: LTP >= entry * (1 + slPct/100). BUY SL: LTP <= entry * (1 - slPct/100).
+        if (isCalendarSpreadPremiumTpStrategy(objPosition.strategyCode)) {
             const vTpPct = normalizeCalendarSpreadTpPctValue(
                 Number.isFinite(vLiveTakeProfitDelta) && vLiveTakeProfitDelta > 0
                     ? vLiveTakeProfitDelta
@@ -12697,13 +12703,13 @@ async function findTriggeredTrackedOptions(
                     ? vLiveStopLossDelta
                     : Number(objMetadata.stopLossDelta ?? 20)
             ) ?? normalizeCalendarSpreadSlPctValue(objMetadata.stopLossDelta ?? 20);
-            const vSellPrice = Number(objPosition.entryPrice || 0);
+            const vEntryPrice = Number(objPosition.entryPrice || 0);
             const vLiveLtp = resolveTrackedOptionLivePrice(
                 objPosition.side,
                 objTicker,
                 Number(objPosition.markPrice || objPosition.entryPrice || 0)
             );
-            if (shouldTriggerCalendarSpreadPremiumTp(objPosition.side, vSellPrice, vLiveLtp, vTpPct)) {
+            if (shouldTriggerCalendarSpreadPremiumTp(objPosition.side, vEntryPrice, vLiveLtp, vTpPct)) {
                 arrTriggered.push({
                     position: objPosition,
                     currentDelta: vCurrentDelta,
@@ -12717,7 +12723,7 @@ async function findTriggeredTrackedOptions(
                 });
                 continue;
             }
-            if (shouldTriggerCalendarSpreadPremiumSl(objPosition.side, vSellPrice, vLiveLtp, vSlPct)) {
+            if (shouldTriggerCalendarSpreadPremiumSl(objPosition.side, vEntryPrice, vLiveLtp, vSlPct)) {
                 arrTriggered.push({
                     position: objPosition,
                     currentDelta: vCurrentDelta,
@@ -12731,7 +12737,7 @@ async function findTriggeredTrackedOptions(
                 });
                 continue;
             }
-            // Premium TP/SL configured: skip delta TP/SL for this sell leg.
+            // Premium TP/SL configured: skip delta TP/SL for this leg.
             if (vTpPct !== null || vSlPct !== null) {
                 continue;
             }

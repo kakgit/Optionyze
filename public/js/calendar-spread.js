@@ -5372,13 +5372,15 @@
             const ltpBlinkClass = isInactive ? "" : getLtpBlinkClass(importId, currentLtp);
             const greeks = row.greeks || {};
             // Calendar Spread: show SL / TP trigger premium prices computed from
-            // Sell Price and the % SL / TP of Premium (SL above, TP below sell).
+            // entry price and % SL / % TP (SELL: SL above / TP below entry;
+            // BUY: SL below / TP above entry).
             const slTpCellHtml = (function () {
-                if (String(side || "").trim().toUpperCase() !== "SELL") {
+                const vSide = String(side || "").trim().toUpperCase();
+                if (vSide !== "SELL" && vSide !== "BUY") {
                     return "-";
                 }
-                const vSellPrice = Number(row.entryPrice || 0);
-                if (!(vSellPrice > 0)) {
+                const vEntryPrice = Number(row.entryPrice || 0);
+                if (!(vEntryPrice > 0)) {
                     return "-";
                 }
                 const objMeta = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
@@ -5386,14 +5388,20 @@
                 const vSlRaw = Number(objMeta.stopLossDelta);
                 const vTpPct = Number.isFinite(vTpRaw) && vTpRaw >= 1 && vTpRaw <= 100 ? Math.round(vTpRaw) : null;
                 const vSlPct = Number.isFinite(vSlRaw) && vSlRaw >= 1 && vSlRaw <= 100 ? Math.round(vSlRaw) : null;
-                const vTpPrice = vTpPct !== null ? vSellPrice * (1 - vTpPct / 100) : null;
-                const vSlPrice = vSlPct !== null ? vSellPrice * (1 + vSlPct / 100) : null;
+                const vTpPrice = vTpPct !== null
+                    ? (vSide === "BUY" ? vEntryPrice * (1 + vTpPct / 100) : vEntryPrice * (1 - vTpPct / 100))
+                    : null;
+                const vSlPrice = vSlPct !== null
+                    ? (vSide === "BUY" ? vEntryPrice * (1 - vSlPct / 100) : vEntryPrice * (1 + vSlPct / 100))
+                    : null;
                 if (vTpPrice === null && vSlPrice === null) {
                     return "-";
                 }
                 const vSlText = vSlPrice !== null ? escapeHtml(fmt(vSlPrice, 2)) : "-";
                 const vTpText = vTpPrice !== null ? escapeHtml(fmt(vTpPrice, 2)) : "-";
-                const vTitle = `SL triggers at ${vSlPct !== null ? vSlPct + "% above" : "-"} sell (${vSlText}); TP triggers at ${vTpPct !== null ? vTpPct + "% below" : "-"} sell (${vTpText})`;
+                const vSlDir = vSide === "BUY" ? "below" : "above";
+                const vTpDir = vSide === "BUY" ? "above" : "below";
+                const vTitle = `SL triggers at ${vSlPct !== null ? vSlPct + "% " + vSlDir : "-"} entry (${vSlText}); TP triggers at ${vTpPct !== null ? vTpPct + "% " + vTpDir : "-"} entry (${vTpText})`;
                 return `<span title="${escapeHtml(vTitle)}"><div>${vSlText}</div><div>${vTpText}</div></span>`;
             })();
             const coveredSideRowClass = isCoveredMode && (side === "BUY" || side === "SELL")
