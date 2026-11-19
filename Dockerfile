@@ -14,5 +14,6 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/public ./public
+COPY --from=build /app/src/views ./src/views
 EXPOSE 3001
 CMD ["node", "dist/app/server.js"]
