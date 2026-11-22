@@ -381,6 +381,31 @@
                     </div>
                 </div>
 
+                <div class="rolling-futures-demo-grid row calendar-spread-hedge-row">
+                    <div class="rolling-demo-field calendar-spread-hedge-type">
+                        <label for="ddlCalendarSpreadHedgeType">Hedge Type</label>
+                        <select id="ddlCalendarSpreadHedgeType">
+                            <option value="none">None</option>
+                            <option value="futures" selected>Futures</option>
+                            <option value="options">Options</option>
+                        </select>
+                    </div>
+                    <div class="rolling-demo-field calendar-spread-hedge-pct-entry">
+                        <label for="txtCalendarSpreadHedgePctEntry">% Hedge Entry of Premium</label>
+                        <input type="number" min="1" max="100" step="1" id="txtCalendarSpreadHedgePctEntry" value="20" />
+                    </div>
+                    <div class="rolling-demo-field calendar-spread-hedge-pct-exit">
+                        <label for="txtCalendarSpreadHedgePctExit">% Hedge Exit of Premium</label>
+                        <input type="number" min="1" max="100" step="1" id="txtCalendarSpreadHedgePctExit" value="15" />
+                    </div>
+                    <div class="rolling-demo-field calendar-spread-hedge-qty-delta">
+                        <label class="rolling-futures-help-check compact" for="chkCalendarSpreadHedgeQtyDelta">
+                            <input type="checkbox" id="chkCalendarSpreadHedgeQtyDelta" />
+                            Qty of Curr Pos X Curr Pos Delta
+                        </label>
+                    </div>
+                </div>
+
                 <div class="rolling-futures-demo-grid row calendar-spread-futures-row">
                     <div class="rolling-demo-field calendar-spread-futures-qty">
                         <label for="txtCalendarSpreadFutQty">Fut Qty</label>
@@ -565,6 +590,7 @@
                                 <th>Sell Price</th>
                                 <th>LTP</th>
                                 <th>SL / TP</th>
+                                <th>Hedge</th>
                                 <th>Charges</th>
                                 <th>P &amp; L</th>
                                 <th>Start DT</th>
@@ -573,7 +599,7 @@
                         </thead>
                         <tbody id="rollingDualFuturesOpenPositionsBody">
                             <tr>
-                                <td colspan="12" class="rolling-demo-empty"><%= vOpenPositionsEmpty %></td>
+                                <td colspan="13" class="rolling-demo-empty"><%= vOpenPositionsEmpty %></td>
                             </tr>
                         </tbody>
                     </table>
@@ -618,6 +644,7 @@
                                 <th>Qty</th>
                                 <th>Entry</th>
                                 <th>Mark</th>
+                                <th>Cls</th>
                                 <th>Charges</th>
                                 <th>PnL</th>
                                 <th>Opened</th>
@@ -627,7 +654,7 @@
                         </thead>
                         <tbody id="calendarSpreadFuturesOpenPositionsBody">
                             <tr>
-                                <td colspan="10" class="rolling-demo-empty">No calendar spread futures positions are currently shown.</td>
+                                <td colspan="11" class="rolling-demo-empty">No calendar spread futures positions are currently shown.</td>
                             </tr>
                         </tbody>
                     </table>

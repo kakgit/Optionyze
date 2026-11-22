@@ -467,6 +467,11 @@ interface RollingFuturesLtOptionMetadata {
     importedObservationOnly?: boolean;
     importedAt?: string;
     pnlAboveBrokerageSince?: string;
+    // Calendar Spread hedge linkage: set on a SELL option position when its hedge
+    // leg is opened; cleared when the hedge closes. Used to evaluate hedge entry /
+    // exit and to carry the link across re-entries.
+    hedgeImportId?: string;
+    hedgeContractName?: string;
 }
 
 type CoveredLiveConfirmationKind =
@@ -2900,6 +2905,11 @@ function getDefaultManualTraderUiState(
         bsFutQty: "1",
         // Calendar Spread Futures qty (calendar-spread page only, persisted like other controls).
         calendarSpreadFutQty: "1",
+        // Calendar Spread Hedge controls (calendar-spread page only, persisted like other controls).
+        calendarSpreadHedgeType: "futures",
+        calendarSpreadHedgeEntryPct: "20",
+        calendarSpreadHedgeExitPct: "15",
+        calendarSpreadHedgeQtyDelta: false,
         manualBtcQty: "1",
         manualEthQty: "1",
         manualXautQty: "1",
@@ -3635,7 +3645,9 @@ function optionMetadataToRecord(pMetadata: RollingFuturesLtOptionMetadata): Reco
         expiryMode: String(pMetadata.expiryMode || "").trim(),
         importedObservationOnly: Boolean(pMetadata.importedObservationOnly),
         importedAt: String(pMetadata.importedAt || "").trim(),
-        pnlAboveBrokerageSince: String(pMetadata.pnlAboveBrokerageSince || "").trim() || undefined
+        pnlAboveBrokerageSince: String(pMetadata.pnlAboveBrokerageSince || "").trim() || undefined,
+        hedgeImportId: String(pMetadata.hedgeImportId || "").trim() || undefined,
+        hedgeContractName: String(pMetadata.hedgeContractName || "").trim() || undefined
     };
 }
 
@@ -4519,6 +4531,15 @@ function normalizeCalendarSpreadSlPctValue(pValue: unknown): number | null {
         return null;
     }
     return Math.round(vRaw);
+}
+
+// Calendar Spread "Hedge Type": none | futures | options.
+function normalizeCalendarSpreadHedgeTypeValue(pValue: unknown): string {
+    const vRaw = String(pValue ?? "").trim().toLowerCase();
+    if (vRaw === "none" || vRaw === "futures" || vRaw === "options") {
+        return vRaw;
+    }
+    return "futures";
 }
 
 function shouldTriggerCalendarSpreadPremiumSl(
@@ -5727,6 +5748,10 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
         calendarSpreadFutQty: normalizeStringValue((objUiState as Record<string, unknown>).calendarSpreadFutQty ?? objUiState.bsFutQty, String((objDefaults as Record<string, unknown>).calendarSpreadFutQty ?? "1")),
+        calendarSpreadHedgeType: normalizeCalendarSpreadHedgeTypeValue((objUiState as Record<string, unknown>).calendarSpreadHedgeType ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeType),
+        calendarSpreadHedgeEntryPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeEntryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct)),
+        calendarSpreadHedgeExitPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeExitPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct)),
+        calendarSpreadHedgeQtyDelta: normalizeBooleanValue((objUiState as Record<string, unknown>).calendarSpreadHedgeQtyDelta, Boolean((objDefaults as Record<string, unknown>).calendarSpreadHedgeQtyDelta)),
         manualBtcQty: normalizeQtyLikeValue(objUiState.manualBtcQty, objDefaults.manualBtcQty),
         manualEthQty: normalizeQtyLikeValue(objUiState.manualEthQty, objDefaults.manualEthQty),
         manualXautQty: normalizeQtyLikeValue(objUiState.manualXautQty, objDefaults.manualXautQty),
@@ -6182,6 +6207,10 @@ function normalizeProfileSaveInput(
         manualFutOrderType: String(objUiState.manualFutOrderType || "market_order").trim() === "limit_order" ? "limit_order" : "market_order",
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
         calendarSpreadFutQty: normalizeStringValue((objUiState as Record<string, unknown>).calendarSpreadFutQty ?? objUiState.bsFutQty, String((objDefaults as Record<string, unknown>).calendarSpreadFutQty ?? "1")),
+        calendarSpreadHedgeType: normalizeCalendarSpreadHedgeTypeValue((objUiState as Record<string, unknown>).calendarSpreadHedgeType ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeType),
+        calendarSpreadHedgeEntryPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeEntryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct)),
+        calendarSpreadHedgeExitPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeExitPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct)),
+        calendarSpreadHedgeQtyDelta: normalizeBooleanValue((objUiState as Record<string, unknown>).calendarSpreadHedgeQtyDelta, Boolean((objDefaults as Record<string, unknown>).calendarSpreadHedgeQtyDelta)),
         manualBtcQty: normalizeQtyLikeValue(objUiState.manualBtcQty, objDefaults.manualBtcQty),
         manualEthQty: normalizeQtyLikeValue(objUiState.manualEthQty, objDefaults.manualEthQty),
         manualXautQty: normalizeQtyLikeValue(objUiState.manualXautQty, objDefaults.manualXautQty),
@@ -12286,6 +12315,43 @@ async function applyTriggeredOptionRule(
                 );
                 if (objReEntry) {
                     arrNextPositions = [...arrNextPositions, objReEntry.position];
+
+                    // Calendar Spread: carry an open hedge link across an SL/TP re-entry so
+                    // the hedge stays open and re-anchors to the re-entered option leg.
+                    const objClosedMeta = getTrackedOptionMetadata(pPosition);
+                    const vClosedHedgeImportId = String(objClosedMeta.hedgeImportId || "").trim();
+                    if (vClosedHedgeImportId) {
+                        const objHedgeIdx = arrNextPositions.findIndex((objRow) => {
+                            if (String(objRow.importId) === String(pPosition.importId || "").trim()) return false;
+                            const objHMeta = getTrackedOptionMetadata(objRow);
+                            return String(objHMeta.openedReason || "").trim() === "calendar_hedge"
+                                && String(objHMeta.hedgeImportId || "").trim() === String(pPosition.importId || "").trim();
+                        });
+                        if (objHedgeIdx >= 0) {
+                            const objHedge = arrNextPositions[objHedgeIdx];
+                            const objHMeta = getTrackedOptionMetadata(objHedge);
+                            arrNextPositions[objHedgeIdx] = {
+                                ...objHedge,
+                                metadata: optionMetadataToRecord({
+                                    ...objHMeta,
+                                    hedgeImportId: String(objReEntry.position.importId || "").trim()
+                                })
+                            };
+                            const objNewMeta = getTrackedOptionMetadata(objReEntry.position);
+                            arrNextPositions = arrNextPositions.map((objRow) => {
+                                if (String(objRow.importId) !== String(objReEntry.position.importId)) return objRow;
+                                return {
+                                    ...objRow,
+                                    metadata: optionMetadataToRecord({
+                                        ...objNewMeta,
+                                        hedgeImportId: String(objHedge.importId || "").trim(),
+                                        hedgeContractName: String(objHedge.contractName || "").trim()
+                                    })
+                                };
+                            });
+                        }
+                    }
+
                     if (pReason === "expiry_cutoff" && isCoveredOptionsStrategy(pStrategyCode)) {
                         await updateCoveredRowExpiryDateInProfile(
                             pUserId,
@@ -16378,6 +16444,221 @@ function stopAutoTraderCycle(pUserId: string, pStrategyCode: RollingFuturesLtStr
     setLocalSurvivalLeaseToken(pUserId, pStrategyCode, "");
 }
 
+// Calendar Spread hedge engine: entry/exit evaluation for protective futures hedges
+// on open SELL option positions. Runs once per auto-trader cycle, after SL/TP closes
+// so a just-closed leg does not keep a stale hedge link.
+async function evaluateCalendarSpreadHedges(
+    pUserId: string,
+    pProfile: RollingFuturesLtProfileRecord,
+    pUiState: Record<string, unknown>,
+    pTrackedPositions: RollingFuturesLtImportedPositionRecord[],
+    pSelectedApiProfileId: string
+): Promise<RollingFuturesLtImportedPositionRecord[]> {
+    const objUiState = pUiState;
+    const hedgeType = String((objUiState as Record<string, unknown>).calendarSpreadHedgeType || "futures").trim().toLowerCase();
+    const entryPct = Math.max(1, Math.min(100, Math.floor(Number((objUiState as Record<string, unknown>).calendarSpreadHedgeEntryPct || 20) || 20)));
+    const exitPct = Math.max(1, Math.min(100, Math.floor(Number((objUiState as Record<string, unknown>).calendarSpreadHedgeExitPct || 15) || 15)));
+    const useQtyDelta = normalizeBooleanValue((objUiState as Record<string, unknown>).calendarSpreadHedgeQtyDelta, false);
+
+    const vSymbol = normalizeSymbolValue(objUiState.symbol);
+    const vContractName = getContractNameForSymbol(vSymbol);
+    const vNowIso = new Date().toISOString();
+    let arrNext: RollingFuturesLtImportedPositionRecord[] = [...pTrackedPositions];
+    let bChanged = false;
+
+    const mapHedgeByOption = new Map<string, RollingFuturesLtImportedPositionRecord>();
+    for (const objRow of arrNext) {
+        if (!isFutureContractSymbol(objRow.contractName)) continue;
+        const objMeta = getTrackedOptionMetadata(objRow);
+        if (String(objMeta.openedReason || "").trim() !== "calendar_hedge") continue;
+        if (objMeta.hedgeImportId) mapHedgeByOption.set(String(objMeta.hedgeImportId), objRow);
+    }
+
+    for (const objPosition of arrNext) {
+        if (!isOptionContractSymbol(objPosition.contractName)) continue;
+        if (isTrackedPositionInactive(objPosition)) continue;
+        if (String(objPosition.side || "").trim().toUpperCase() !== "SELL") continue;
+
+        const objMetadata = getTrackedOptionMetadata(objPosition);
+        const vEntryPrice = Number(objPosition.entryPrice || 0);
+        if (!(vEntryPrice > 0)) continue;
+        const vPositionQty = Math.max(1, Math.floor(Number(objPosition.qty || 1)));
+        const vOptionImportId = String(objPosition.importId || "").trim();
+        if (!vOptionImportId) continue;
+
+        const objTicker = await getLiveOptionTicker(String(objPosition.contractName || "").trim());
+        const vLivePrice = resolveTrackedOptionLivePrice(objPosition.side, objTicker, Number(objPosition.markPrice || objPosition.entryPrice || 0));
+        if (!(vLivePrice > 0)) continue;
+
+        // A futures contract name (BTCUSD/ETHUSD) resolves via the shared ticker
+        // feed as well; fall back to the futures leg of the market snapshot so the
+        // per-cycle option refresh never blanks a tracked hedge's mark price.
+        const objHedgeTicker = await getLiveMarketSnapshot(buildLiveMarketSnapshotConfig(vSymbol)).catch(() => null);
+        const vFuturesSnapshotPrice = Number(objHedgeTicker?.futuresPrice || objHedgeTicker?.spotPrice || 0);
+
+        const vEntryThreshold = vEntryPrice * (1 + entryPct / 100);
+        const vExitThreshold = vEntryPrice * (1 + exitPct / 100);
+        const bHasHedge = Boolean(objMetadata.hedgeImportId || objMetadata.hedgeContractName);
+        const objExistingHedge = bHasHedge && objMetadata.hedgeImportId ? mapHedgeByOption.get(vOptionImportId) : undefined;
+
+        if (bHasHedge && objExistingHedge) {
+            // Hedge legs are futures: the futures contract resolves either through the
+            // shared option-ticker path or the dedicated futures snapshot leg, so the
+            // mark price never blanks when the scheduled option refresh runs first.
+            const vOldHedgeMark = Number(objExistingHedge.markPrice || objExistingHedge.entryPrice || 0);
+            const objHedgeLiveTicker = await getLiveOptionTicker(String(objExistingHedge.contractName || "").trim());
+            const vHedgeLivePrice = Number(objHedgeLiveTicker?.markPrice || 0) > 0
+                ? Number(objHedgeLiveTicker?.markPrice || 0)
+                : vFuturesSnapshotPrice;
+            if (Number.isFinite(vHedgeLivePrice) && vHedgeLivePrice > 0) {
+                mapHedgeByOption.set(vOptionImportId, {
+                    ...objExistingHedge,
+                    markPrice: vHedgeLivePrice,
+                    pnl: Number(estimateTrackedPositionPnl(objExistingHedge, vHedgeLivePrice).toFixed(4)),
+                    updatedAt: vNowIso
+                });
+                arrNext = arrNext.map((objRow) => String(objRow.importId) === String(objExistingHedge.importId)
+                    ? { ...objRow, markPrice: vHedgeLivePrice, updatedAt: vNowIso }
+                    : objRow);
+                bChanged = true;
+            } else if (!(vOldHedgeMark > 0)) {
+                const vHedgeFallback = Number(objHedgeLiveTicker?.markPrice || vFuturesSnapshotPrice || 0);
+                if (Number.isFinite(vHedgeFallback) && vHedgeFallback > 0) {
+                    mapHedgeByOption.set(vOptionImportId, {
+                        ...objExistingHedge,
+                        markPrice: vHedgeFallback,
+                        updatedAt: vNowIso
+                    });
+                    arrNext = arrNext.map((objRow) => String(objRow.importId) === String(objExistingHedge.importId)
+                        ? { ...objRow, markPrice: vHedgeFallback, updatedAt: vNowIso }
+                        : objRow);
+                    bChanged = true;
+                }
+            }
+            if (vLivePrice <= vExitThreshold) {
+                try {
+                    await closeTrackedPositionOnDelta(
+                        pUserId,
+                        "calendar-spread",
+                        pSelectedApiProfileId,
+                        objExistingHedge,
+                        "CL"
+                    );
+                } catch (objCloseError) {
+                    await logFuturesEvent(
+                        pUserId,
+                        "calendar-spread",
+                        "manual_action",
+                        "warning",
+                        "Calendar Spread Hedge Close Failed",
+                        `Failed to close hedge for ${objPosition.contractName}: ${getErrorMessage(objCloseError, "")}`,
+                        { contractName: objPosition.contractName, hedgeContractName: objExistingHedge.contractName, reason: "hedge_close_error" }
+                    );
+                }
+                arrNext = arrNext.filter((objRow) => String(objRow.importId) !== String(objExistingHedge.importId));
+                bChanged = true;
+                const objOptIdx = arrNext.findIndex((objRow) => String(objRow.importId) === vOptionImportId);
+                if (objOptIdx >= 0) {
+                    const objOptMeta = getTrackedOptionMetadata(arrNext[objOptIdx]);
+                    arrNext[objOptIdx] = {
+                        ...arrNext[objOptIdx],
+                        metadata: optionMetadataToRecord({
+                            ...objOptMeta,
+                            hedgeImportId: undefined,
+                            hedgeContractName: undefined
+                        })
+                    };
+                }
+                await logFuturesEvent(
+                    pUserId,
+                    "calendar-spread",
+                    "option_closed",
+                    "info",
+                    "Calendar Spread Hedge Closed",
+                    `Closed hedge ${objExistingHedge.contractName} for ${objPosition.contractName} at LTP ${vLivePrice.toFixed(2)} (exit threshold ${vExitThreshold.toFixed(2)}).`,
+                    { contractName: objPosition.contractName, hedgeContractName: objExistingHedge.contractName, qty: objExistingHedge.qty, exitPrice: vLivePrice, exitThreshold: vExitThreshold, reason: "calendar_hedge_exit" }
+                );
+            }
+            continue;
+        }
+
+        if (hedgeType === "none") continue;
+        if (bHasHedge && !objExistingHedge) continue;
+        if (vLivePrice < vEntryThreshold) continue;
+
+        const vTickerDelta = Number(objTicker?.delta || 0);
+        // SELL side flips the position delta sign: short CE -> negative signed delta
+        // (hedge BUY), short PE -> positive signed delta (hedge SELL).
+        const vSignedDelta = -vTickerDelta;
+        const vHedgeAction: "BUY" | "SELL" = vSignedDelta < 0 ? "BUY" : "SELL";
+        const vHedgeQty = useQtyDelta
+            ? Math.max(1, Math.round(vPositionQty * Math.abs(vTickerDelta)))
+            : vPositionQty;
+
+        try {
+            const vHedgeActionLower: "buy" | "sell" = vHedgeAction === "BUY" ? "buy" : "sell";
+            const objPaperHedge = await buildOptionsScalperPaperFutureOpen(pUserId, "calendar-spread", {
+                action: vHedgeActionLower,
+                symbol: vSymbol,
+                qty: vHedgeQty,
+                orderType: "market_order"
+            });
+            const objHedgePosition: RollingFuturesLtImportedPositionRecord = {
+                ...objPaperHedge.position,
+                metadata: optionMetadataToRecord({
+                    ...(getTrackedOptionMetadata(objPaperHedge.position) as RollingFuturesLtOptionMetadata),
+                    rowIndex: 1,
+                    reEnterEnabled: false,
+                    openedReason: "calendar_hedge",
+                    hedgeImportId: vOptionImportId,
+                    hedgeContractName: objPosition.contractName
+                })
+            };
+            const vHedgeImportId = String(objHedgePosition.importId || "").trim();
+            arrNext.push(objHedgePosition);
+            bChanged = true;
+
+            const objOptIdx = arrNext.findIndex((objRow) => String(objRow.importId) === vOptionImportId);
+            if (objOptIdx >= 0) {
+                const objOptMeta = getTrackedOptionMetadata(arrNext[objOptIdx]);
+                arrNext[objOptIdx] = {
+                    ...arrNext[objOptIdx],
+                    metadata: optionMetadataToRecord({
+                        ...objOptMeta,
+                        hedgeImportId: vHedgeImportId,
+                        hedgeContractName: String(objHedgePosition.contractName || "").trim()
+                    })
+                };
+            }
+
+            await logFuturesEvent(
+                pUserId,
+                "calendar-spread",
+                "option_opened",
+                "success",
+                "Calendar Spread Hedge Opened",
+                `Opened ${vHedgeAction} ${vHedgeQty} lot(s) ${objHedgePosition.contractName} hedge for ${objPosition.contractName} at LTP ${vLivePrice.toFixed(2)} (entry threshold ${vEntryThreshold.toFixed(2)}).`,
+                { contractName: objPosition.contractName, hedgeContractName: objHedgePosition.contractName, qty: vHedgeQty, action: vHedgeAction, entryPrice: vLivePrice, entryThreshold: vEntryThreshold, reason: "calendar_hedge_entry" }
+            );
+        } catch (objOrderError) {
+            await logFuturesEvent(
+                pUserId,
+                "calendar-spread",
+                "manual_action",
+                "warning",
+                "Calendar Spread Hedge Entry Failed",
+                `Failed to open hedge for ${objPosition.contractName}: ${getErrorMessage(objOrderError, "")}`,
+                { contractName: objPosition.contractName, hedgeAction: vHedgeAction, qty: vHedgeQty, reason: "calendar_hedge_entry_error" }
+            );
+        }
+    }
+    if (bChanged) {
+        arrNext = await replaceRollingFuturesLtImportedPositions(pUserId, "calendar-spread", arrNext);
+    }
+
+    return arrNext;
+}
+
 async function runAutoTraderCycle(
     pUserId: string,
     pStrategyCode: RollingFuturesLtStrategyCode
@@ -16759,6 +17040,20 @@ async function runAutoTraderCycle(
                 break;
             }
         }
+
+        // Calendar Spread hedge engine: evaluates entry/exit of protective futures
+        // hedges for open SELL option positions. Runs after SL/TP so a just-closed
+        // leg does not keep a stale hedge link.
+        if (pStrategyCode === "calendar-spread") {
+            arrSavedPositions = await evaluateCalendarSpreadHedges(
+                pUserId,
+                objProfile,
+                objUiState,
+                arrSavedPositions,
+                vSelectedApiProfileId
+            );
+        }
+
         if (!bRestartCloseProtectionActive && isStrangleOptionsStrategy(pStrategyCode)) {
             const objDeltaDiffTrigger = await findStrangleDeltaDiffReplacementTrigger(
                 pStrategyCode,

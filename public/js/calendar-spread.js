@@ -77,6 +77,11 @@
         futQty: document.getElementById("txtCalendarSpreadFutQty"),
         buyFutButton: document.getElementById("btnCalendarSpreadBuyFut"),
         sellFutButton: document.getElementById("btnCalendarSpreadSellFut"),
+        // Calendar Spread Hedge controls (page-local only, persisted like other controls).
+        hedgeType: document.getElementById("ddlCalendarSpreadHedgeType"),
+        hedgeEntryPct: document.getElementById("txtCalendarSpreadHedgePctEntry"),
+        hedgeExitPct: document.getElementById("txtCalendarSpreadHedgePctExit"),
+        hedgeQtyDelta: document.getElementById("chkCalendarSpreadHedgeQtyDelta"),
         futuresPositionsBody: document.getElementById("calendarSpreadFuturesOpenPositionsBody"),
         futuresClearButton: document.getElementById("btnCalendarSpreadFuturesClear"),
         futuresRefreshButton: document.getElementById("btnCalendarSpreadFuturesRefresh"),
@@ -2267,6 +2272,11 @@
             bsFutQty: "1",
             // Calendar Spread Futures qty (page-local only, persisted like other controls).
             calendarSpreadFutQty: "1",
+            // Calendar Spread Hedge controls (page-local only, persisted like other controls).
+            calendarSpreadHedgeType: "futures",
+            calendarSpreadHedgeEntryPct: "20",
+            calendarSpreadHedgeExitPct: "15",
+            calendarSpreadHedgeQtyDelta: false,
             futuresLadderStepPoints: "200",
             futuresLadderGridOffsetPoints: "50",
             futuresLadderOrderOffsetPoints: "100",
@@ -4018,6 +4028,11 @@
             bsFutQty: getInputValue(ids.bsFutQty, "1"),
             // Calendar Spread Futures qty (page-local only, persisted like other controls).
             calendarSpreadFutQty: getInputValue(ids.futQty, "1"),
+            // Calendar Spread Hedge controls (page-local only, persisted like other controls).
+            calendarSpreadHedgeType: String(ids.hedgeType?.value || "futures").trim(),
+            calendarSpreadHedgeEntryPct: getInputValue(ids.hedgeEntryPct, "20"),
+            calendarSpreadHedgeExitPct: getInputValue(ids.hedgeExitPct, "15"),
+            calendarSpreadHedgeQtyDelta: getCheckboxValue(ids.hedgeQtyDelta, false),
             futuresLadderStepPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderStepPoints, 200, 1),
             futuresLadderGridOffsetPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderGridOffsetPoints, 50, 0),
             futuresLadderOrderOffsetPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderOrderOffsetPoints, 100, 0),
@@ -4146,6 +4161,11 @@
             setInputValue(ids.bsFutQty, objUiState.bsFutQty);
             // Calendar Spread Futures qty (page-local only, persisted like other controls).
             setInputValue(ids.futQty, objUiState.calendarSpreadFutQty ?? objUiState.bsFutQty ?? "1");
+            // Calendar Spread Hedge controls (page-local only, persisted like other controls).
+            setInputValue(ids.hedgeType, String(objUiState.calendarSpreadHedgeType || "futures").trim());
+            setInputValue(ids.hedgeEntryPct, objUiState.calendarSpreadHedgeEntryPct ?? "20");
+            setInputValue(ids.hedgeExitPct, objUiState.calendarSpreadHedgeExitPct ?? "15");
+            setCheckboxValue(ids.hedgeQtyDelta, Boolean(objUiState.calendarSpreadHedgeQtyDelta));
             if (isFuturesScalperPage) {
                 setInputValue(ids.futuresLadderStepPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderStepPoints, 200, 1));
                 setInputValue(ids.futuresLadderGridOffsetPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderGridOffsetPoints, 50, 0));
@@ -5212,7 +5232,7 @@
                     - new Date(String(left?.openedAt || left?.updatedAt || "")).getTime();
             });
         if (!arrFutures.length) {
-            ids.futuresPositionsBody.innerHTML = `<tr><td colspan="10" class="rolling-demo-empty">No calendar spread futures positions are currently shown.</td></tr>`;
+            ids.futuresPositionsBody.innerHTML = `<tr><td colspan="11" class="rolling-demo-empty">No calendar spread futures positions are currently shown.</td></tr>`;
             return;
         }
         const vFuturesTotalCharges = arrFutures.reduce(function (sum, row) {
@@ -5231,12 +5251,40 @@
             const mark = row.markPrice !== undefined && row.markPrice !== null && row.markPrice !== ""
                 ? row.markPrice
                 : row.ltpPrice;
+            // Calendar Spread hedge: "Cls" = the linked SELL option's close trigger
+            // (Sell Price x (1 + Hedge Exit % / 100)). Non-hedge futures show "-".
+            const clsCellHtml = (function () {
+                const objHMeta = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+                if (String(objHMeta.openedReason || "").trim() !== "calendar_hedge"
+                    || !objHMeta.hedgeImportId) {
+                    return "-";
+                }
+                const arrOptionSource = Array.isArray(lastOpenPositionsPayload?.positions)
+                    ? lastOpenPositionsPayload.positions
+                    : (Array.isArray(arrRows) ? arrRows : []);
+                const objOption = arrOptionSource.find(function (candidate) {
+                    return String(candidate?.importId || "").trim() === String(objHMeta.hedgeImportId || "").trim();
+                }) || null;
+                if (!objOption || String(objOption.side || "").trim().toUpperCase() !== "SELL") {
+                    return "-";
+                }
+                const vOptEntry = Number(objOption.entryPrice || 0);
+                if (!(vOptEntry > 0)) {
+                    return "-";
+                }
+                const vExitPctRaw = Number(ids.hedgeExitPct instanceof HTMLInputElement ? ids.hedgeExitPct.value : 15);
+                const vExitPct = Number.isFinite(vExitPctRaw) ? Math.max(1, Math.min(100, Math.floor(vExitPctRaw))) : 15;
+                const vCls = vOptEntry * (1 + vExitPct / 100);
+                const vTip = `Hedge closes when ${escapeHtml(String(objOption.contractName || "-"))} LTP <= ${fmt(vCls, 2)} (sell ${fmt(vOptEntry, 2)} + ${vExitPct}%)`;
+                return `<span title="${escapeHtml(vTip)}"><div>${escapeHtml(fmt(vCls, 2))}</div></span>`;
+            })();
             return `<tr>
                 <td>${escapeHtml(contractName)}</td>
                 <td>${renderPositionSide(side)}</td>
                 <td>${escapeHtml(fmt(row.qty, 0))}</td>
                 <td>${escapeHtml(fmt(row.entryPrice, 2))}</td>
                 <td>${escapeHtml(fmt(mark, 2))}</td>
+                <td>${clsCellHtml}</td>
                 <td>${escapeHtml(fmt(row.charges, 4))}</td>
                 <td>${renderPnlValue(row.pnl, false)}</td>
                 <td>${escapeHtml(formatFuturesDateTime(row.openedAt))}</td>
@@ -5256,7 +5304,7 @@
                 </td>
             </tr>`;
         }).join("") + `<tr class="rolling-demo-total-row">
-            <td colspan="5">Total</td>
+            <td colspan="6">Total</td>
             <td class="rolling-demo-total-value">${escapeHtml(fmt(vFuturesTotalCharges, 4))}</td>
             <td class="rolling-demo-total-value">${renderPnlValue(vFuturesTotalPnl, true)}</td>
             <td colspan="3">-</td>
@@ -5316,7 +5364,7 @@
         }
         if (!arrRows.length) {
             previousOpenPositionLtps = new Map();
-            const openPositionsColumnCount = isCoveredMode ? 12 : 13;
+            const openPositionsColumnCount = isCoveredMode ? 13 : 14;
             ids.openPositionsBody.innerHTML = `<tr><td colspan="${openPositionsColumnCount}" class="rolling-demo-empty">${escapeHtml(openPositionsEmptyText)}</td></tr>`;
             if (ids.openCount) {
                 ids.openCount.textContent = "0";
@@ -5404,6 +5452,45 @@
                 const vTitle = `SL triggers at ${vSlPct !== null ? vSlPct + "% " + vSlDir : "-"} entry (${vSlText}); TP triggers at ${vTpPct !== null ? vTpPct + "% " + vTpDir : "-"} entry (${vTpText})`;
                 return `<span title="${escapeHtml(vTitle)}"><div>${vSlText}</div><div>${vTpText}</div></span>`;
             })();
+            // Calendar Spread hedge column:
+            // - hedge linked  -> open hedge values (side/qty/contract, mark/entry);
+            // - no hedge yet  -> entry trigger LTP at which the hedge WILL open
+            //   (SELL: entry x (1 + Hedge Entry % / 100)), "-" for non-SELL rows.
+            const hedgeCellHtml = (function () {
+                const objMeta = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+                const vHedgeContract = String(objMeta.hedgeContractName || "").trim();
+                if (!vHedgeContract && !objMeta.hedgeImportId) {
+                    const vRowSide = String(side || "").trim().toUpperCase();
+                    const vRowEntry = Number(row.entryPrice || 0);
+                    if (vRowSide !== "SELL" || !(vRowEntry > 0)) {
+                        return "-";
+                    }
+                    const vEntryPctRaw = Number(ids.hedgeEntryPct instanceof HTMLInputElement ? ids.hedgeEntryPct.value : 20);
+                    const vEntryPct = Number.isFinite(vEntryPctRaw) ? Math.max(1, Math.min(100, Math.floor(vEntryPctRaw))) : 20;
+                    const vTrigger = vRowEntry * (1 + vEntryPct / 100);
+                    const vTip = `Hedge opens when LTP >= ${fmt(vTrigger, 2)} (entry ${fmt(vRowEntry, 2)} + ${vEntryPct}%)`;
+                    return `<span title="${escapeHtml(vTip)}"><div>${escapeHtml(fmt(vTrigger, 2))}</div></span>`;
+                }
+                const arrHedgeSource = Array.isArray(lastOpenPositionsPayload?.positions)
+                    ? lastOpenPositionsPayload.positions
+                    : (Array.isArray(displayedPositions) ? displayedPositions : []);
+                const objHedge = arrHedgeSource.find(function (candidate) {
+                    return String(candidate?.importId || "").trim() === String(objMeta.hedgeImportId || "").trim()
+                        || (!objMeta.hedgeImportId && String(candidate?.contractName || "").trim().toUpperCase() === vHedgeContract.toUpperCase());
+                }) || null;
+                if (objHedge) {
+                    const vHedgeSide = String(objHedge.side || "").trim().toUpperCase();
+                    const vHedgeQty = Math.max(0, Math.floor(Number(objHedge.qty || 0)));
+                    const vHedgeMark = Number(objHedge.markPrice || objHedge.ltpPrice || objHedge.entryPrice || 0);
+                    const vHedgeEntry = Number(objHedge.entryPrice || 0);
+                    const vHedgeBits = [`${vHedgeSide} ${vHedgeQty} x ${escapeHtml(String(objHedge.contractName || "-"))}`];
+                    vHedgeBits.push(vHedgeMark > 0 ? `Mk ${escapeHtml(fmt(vHedgeMark, 2))}` : `Mk -`);
+                    vHedgeBits.push(vHedgeEntry > 0 ? `En ${escapeHtml(fmt(vHedgeEntry, 2))}` : `En -`);
+                    const vTip = `Hedge open for ${escapeHtml(contractName)}: ${vHedgeSide} ${vHedgeQty} lot(s) ${escapeHtml(String(objHedge.contractName || "-"))}`;
+                    return `<span title="${vTip}"><div>${vHedgeBits[0]}</div><div>${vHedgeBits[1]} / ${vHedgeBits[2]}</div></span>`;
+                }
+                return `<span title="Hedge linked for ${escapeHtml(contractName)}"><div>${escapeHtml(vHedgeContract || "-")}</div><div>pending</div></span>`;
+            })();
             const coveredSideRowClass = isCoveredMode && (side === "BUY" || side === "SELL")
                 ? `rolling-covered-side-row ${side.toLowerCase()}`
                 : "";
@@ -5462,6 +5549,7 @@
                     <td>${side === "SELL" ? escapeHtml(fmt(row.entryPrice, 2)) : "-"}</td>
                     <td class="${escapeHtml(ltpBlinkClass)}">${escapeHtml(fmt(row.ltpPrice, 2))}</td>
                     <td>${slTpCellHtml}</td>
+                    <td>${hedgeCellHtml}</td>
                     <td>${escapeHtml(fmt(row.charges, 4))}</td>
                     <td>${renderPnlValue(row.pnl, false)}</td>
                     <td>${escapeHtml(formatDateTimeDisplay(row.openedAt))}</td>
@@ -5521,6 +5609,7 @@
                         CE ${escapeHtml(fmt(Number(objTotals.ceQty || 0), 0))} | PE ${escapeHtml(fmt(Number(objTotals.peQty || 0), 0))}
                     </div>
                 </td>
+                <td>-</td>
                 <td>-</td>
                 <td>-</td>
                 <td>-</td>
@@ -6523,6 +6612,11 @@
         ids.bsFutQty,
         // Calendar Spread Futures qty (page-local only, persisted like other controls).
         ids.futQty,
+        // Calendar Spread Hedge controls (page-local only, persisted like other controls).
+        ids.hedgeType,
+        ids.hedgeEntryPct,
+        ids.hedgeExitPct,
+        ids.hedgeQtyDelta,
         ids.futuresLadderStepPoints,
         ids.futuresLadderGridOffsetPoints,
         ids.futuresLadderOrderOffsetPoints,
