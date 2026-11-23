@@ -16571,8 +16571,12 @@ async function evaluateCalendarSpreadHedges(
             }
             // Loss-recovery hedge close: if the re-entered SELL leg has recovered
             // X% of the previous SL loss, close its linked hedge futures.
+            // A hedge living on a re-anchored link (outstanding loss reference)
+            // closes ONLY via this gate; the pullback exit below is skipped so the
+            // new anchor's always-below-threshold entry can't close it early.
             const vLossRefPnl = Number(objMetadata.hedgeLossRefPnl || 0);
-            if (Number.isFinite(vLossRefPnl) && vLossRefPnl < 0) {
+            const bHasLossRef = Number.isFinite(vLossRefPnl) && vLossRefPnl < 0;
+            if (bHasLossRef) {
                 const vLossRecoveryPct = Math.max(1, Math.min(100, Math.floor(Number((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct || 50) || 50)));
                 const vRecoveryTarget = Math.abs(vLossRefPnl) * (vLossRecoveryPct / 100);
                 const vLivePnl = Number(objPosition.pnl || 0);
@@ -16621,6 +16625,11 @@ async function evaluateCalendarSpreadHedges(
                         `Closed hedge ${objExistingHedge.contractName} for ${objPosition.contractName}: recovered ${vLivePnl.toFixed(2)} of ref loss ${vLossRefPnl.toFixed(2)} (target ${vRecoveryTarget.toFixed(2)}, ${vLossRecoveryPct}%)`,
                         { contractName: objPosition.contractName, hedgeContractName: objExistingHedge.contractName, qty: objExistingHedge.qty, exitPrice: vLivePrice, exitThreshold: vRecoveryTarget, reason: "calendar_hedge_loss_recovery" }
                     );
+                    continue;
+                }
+                // Inherited hedge with an outstanding loss reference: pullback exit
+                // is suppressed; it closed ONLY via the recovery gate above.
+                if (bHasLossRef) {
                     continue;
                 }
             }
