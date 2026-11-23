@@ -473,6 +473,8 @@ interface RollingFuturesLtOptionMetadata {
     hedgeImportId?: string;
     hedgeContractName?: string;
     hedgeReanchoredAt?: string;
+    hedgeLossRefPnl?: number;
+    hedgeLossRefContract?: string;
 }
 
 type CoveredLiveConfirmationKind =
@@ -2911,6 +2913,7 @@ function getDefaultManualTraderUiState(
         calendarSpreadHedgeEntryPct: "20",
         calendarSpreadHedgeExitPct: "15",
         calendarSpreadHedgeQtyDelta: false,
+        calendarSpreadHedgeLossRecoveryPct: "50",
         manualBtcQty: "1",
         manualEthQty: "1",
         manualXautQty: "1",
@@ -3649,7 +3652,9 @@ function optionMetadataToRecord(pMetadata: RollingFuturesLtOptionMetadata): Reco
         pnlAboveBrokerageSince: String(pMetadata.pnlAboveBrokerageSince || "").trim() || undefined,
         hedgeImportId: String(pMetadata.hedgeImportId || "").trim() || undefined,
         hedgeContractName: String(pMetadata.hedgeContractName || "").trim() || undefined,
-        hedgeReanchoredAt: String(pMetadata.hedgeReanchoredAt || "").trim() || undefined
+        hedgeReanchoredAt: String(pMetadata.hedgeReanchoredAt || "").trim() || undefined,
+        hedgeLossRefPnl: pMetadata.hedgeLossRefPnl,
+        hedgeLossRefContract: pMetadata.hedgeLossRefContract ? String(pMetadata.hedgeLossRefContract) : undefined
     };
 }
 
@@ -5754,6 +5759,7 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         calendarSpreadHedgeEntryPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeEntryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct)),
         calendarSpreadHedgeExitPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeExitPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct)),
         calendarSpreadHedgeQtyDelta: normalizeBooleanValue((objUiState as Record<string, unknown>).calendarSpreadHedgeQtyDelta, Boolean((objDefaults as Record<string, unknown>).calendarSpreadHedgeQtyDelta)),
+        calendarSpreadHedgeLossRecoveryPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct)),
         manualBtcQty: normalizeQtyLikeValue(objUiState.manualBtcQty, objDefaults.manualBtcQty),
         manualEthQty: normalizeQtyLikeValue(objUiState.manualEthQty, objDefaults.manualEthQty),
         manualXautQty: normalizeQtyLikeValue(objUiState.manualXautQty, objDefaults.manualXautQty),
@@ -6213,6 +6219,7 @@ function normalizeProfileSaveInput(
         calendarSpreadHedgeEntryPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeEntryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct)),
         calendarSpreadHedgeExitPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeExitPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct)),
         calendarSpreadHedgeQtyDelta: normalizeBooleanValue((objUiState as Record<string, unknown>).calendarSpreadHedgeQtyDelta, Boolean((objDefaults as Record<string, unknown>).calendarSpreadHedgeQtyDelta)),
+        calendarSpreadHedgeLossRecoveryPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct)),
         manualBtcQty: normalizeQtyLikeValue(objUiState.manualBtcQty, objDefaults.manualBtcQty),
         manualEthQty: normalizeQtyLikeValue(objUiState.manualEthQty, objDefaults.manualEthQty),
         manualXautQty: normalizeQtyLikeValue(objUiState.manualXautQty, objDefaults.manualXautQty),
@@ -12341,12 +12348,18 @@ async function applyTriggeredOptionRule(
                                 })
                             };
                             const objNewMeta = getTrackedOptionMetadata(objReEntry.position);
+                            const objLossRefMeta: Record<string, unknown> = {};
+                            if (pReason === "sl" && Number.isFinite(vClosePnl) && vClosePnl < 0) {
+                                objLossRefMeta.hedgeLossRefPnl = vClosePnl;
+                                objLossRefMeta.hedgeLossRefContract = String(pPosition.contractName || "").trim();
+                            }
                             arrNextPositions = arrNextPositions.map((objRow) => {
                                 if (String(objRow.importId) !== String(objReEntry.position.importId)) return objRow;
                                 return {
                                     ...objRow,
                                     metadata: optionMetadataToRecord({
                                         ...objNewMeta,
+                                        ...objLossRefMeta,
                                         hedgeImportId: String(objHedge.importId || "").trim(),
                                         hedgeContractName: String(objHedge.contractName || "").trim(),
                                         hedgeReanchoredAt: new Date().toISOString()
@@ -16555,6 +16568,61 @@ async function evaluateCalendarSpreadHedges(
             );
             if (vReanchorAgeMs >= 0 && vReanchorAgeMs < gCalendarSpreadHedgeReanchorCooldownMs) {
                 continue;
+            }
+            // Loss-recovery hedge close: if the re-entered SELL leg has recovered
+            // X% of the previous SL loss, close its linked hedge futures.
+            const vLossRefPnl = Number(objMetadata.hedgeLossRefPnl || 0);
+            if (Number.isFinite(vLossRefPnl) && vLossRefPnl < 0) {
+                const vLossRecoveryPct = Math.max(1, Math.min(100, Math.floor(Number((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct || 50) || 50)));
+                const vRecoveryTarget = Math.abs(vLossRefPnl) * (vLossRecoveryPct / 100);
+                const vLivePnl = Number(objPosition.pnl || 0);
+                if (Number.isFinite(vLivePnl) && vLivePnl >= vRecoveryTarget) {
+                    try {
+                        await closeTrackedPositionOnDelta(
+                            pUserId,
+                            "calendar-spread",
+                            pSelectedApiProfileId,
+                            objExistingHedge,
+                            "CL"
+                        );
+                    } catch (objCloseError) {
+                        await logFuturesEvent(
+                            pUserId,
+                            "calendar-spread",
+                            "manual_action",
+                            "warning",
+                            "Calendar Spread Hedge Close Failed",
+                            `Failed to close hedge (loss recovery) for ${objPosition.contractName}: ${getErrorMessage(objCloseError, "")}`,
+                            { contractName: objPosition.contractName, hedgeContractName: objExistingHedge.contractName, reason: "hedge_close_error" }
+                        );
+                    }
+                    arrNext = arrNext.filter((objRow) => String(objRow.importId) !== String(objExistingHedge.importId));
+                    bChanged = true;
+                    const objOptIdx = arrNext.findIndex((objRow) => String(objRow.importId) === vOptionImportId);
+                    if (objOptIdx >= 0) {
+                        const objOptMeta = getTrackedOptionMetadata(arrNext[objOptIdx]);
+                        arrNext[objOptIdx] = {
+                            ...arrNext[objOptIdx],
+                            metadata: optionMetadataToRecord({
+                                ...objOptMeta,
+                                hedgeImportId: undefined,
+                                hedgeContractName: undefined,
+                                hedgeLossRefPnl: undefined,
+                                hedgeLossRefContract: undefined
+                            })
+                        };
+                    }
+                    await logFuturesEvent(
+                        pUserId,
+                        "calendar-spread",
+                        "option_closed",
+                        "info",
+                        "Calendar Spread Hedge Closed (Loss Recovery)",
+                        `Closed hedge ${objExistingHedge.contractName} for ${objPosition.contractName}: recovered ${vLivePnl.toFixed(2)} of ref loss ${vLossRefPnl.toFixed(2)} (target ${vRecoveryTarget.toFixed(2)}, ${vLossRecoveryPct}%)`,
+                        { contractName: objPosition.contractName, hedgeContractName: objExistingHedge.contractName, qty: objExistingHedge.qty, exitPrice: vLivePrice, exitThreshold: vRecoveryTarget, reason: "calendar_hedge_loss_recovery" }
+                    );
+                    continue;
+                }
             }
             if (vLivePrice <= vExitThreshold) {
                 try {

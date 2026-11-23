@@ -82,6 +82,7 @@
         hedgeEntryPct: document.getElementById("txtCalendarSpreadHedgePctEntry"),
         hedgeExitPct: document.getElementById("txtCalendarSpreadHedgePctExit"),
         hedgeQtyDelta: document.getElementById("chkCalendarSpreadHedgeQtyDelta"),
+        hedgeLossRecoveryPct: document.getElementById("txtCalendarSpreadHedgeLossRecovery"),
         futuresPositionsBody: document.getElementById("calendarSpreadFuturesOpenPositionsBody"),
         futuresClearButton: document.getElementById("btnCalendarSpreadFuturesClear"),
         futuresRefreshButton: document.getElementById("btnCalendarSpreadFuturesRefresh"),
@@ -2277,6 +2278,7 @@
             calendarSpreadHedgeEntryPct: "20",
             calendarSpreadHedgeExitPct: "15",
             calendarSpreadHedgeQtyDelta: false,
+            calendarSpreadHedgeLossRecoveryPct: "50",
             futuresLadderStepPoints: "200",
             futuresLadderGridOffsetPoints: "50",
             futuresLadderOrderOffsetPoints: "100",
@@ -4033,6 +4035,7 @@
             calendarSpreadHedgeEntryPct: getInputValue(ids.hedgeEntryPct, "20"),
             calendarSpreadHedgeExitPct: getInputValue(ids.hedgeExitPct, "15"),
             calendarSpreadHedgeQtyDelta: getCheckboxValue(ids.hedgeQtyDelta, false),
+            calendarSpreadHedgeLossRecoveryPct: getInputValue(ids.hedgeLossRecoveryPct, "50"),
             futuresLadderStepPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderStepPoints, 200, 1),
             futuresLadderGridOffsetPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderGridOffsetPoints, 50, 0),
             futuresLadderOrderOffsetPoints: normalizeFuturesScalperLadderInput(ids.futuresLadderOrderOffsetPoints, 100, 0),
@@ -4166,6 +4169,7 @@
             setInputValue(ids.hedgeEntryPct, objUiState.calendarSpreadHedgeEntryPct ?? "20");
             setInputValue(ids.hedgeExitPct, objUiState.calendarSpreadHedgeExitPct ?? "15");
             setCheckboxValue(ids.hedgeQtyDelta, Boolean(objUiState.calendarSpreadHedgeQtyDelta));
+            setInputValue(ids.hedgeLossRecoveryPct, objUiState.calendarSpreadHedgeLossRecoveryPct ?? "50");
             if (isFuturesScalperPage) {
                 setInputValue(ids.futuresLadderStepPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderStepPoints, 200, 1));
                 setInputValue(ids.futuresLadderGridOffsetPoints, normalizeFuturesScalperLadderValue(objUiState.futuresLadderGridOffsetPoints, 50, 0));
@@ -5486,8 +5490,19 @@
                     const vHedgeBits = [`${vHedgeSide} ${vHedgeQty} x ${escapeHtml(String(objHedge.contractName || "-"))}`];
                     vHedgeBits.push(vHedgeMark > 0 ? `Mk ${escapeHtml(fmt(vHedgeMark, 2))}` : `Mk -`);
                     vHedgeBits.push(vHedgeEntry > 0 ? `En ${escapeHtml(fmt(vHedgeEntry, 2))}` : `En -`);
-                    const vTip = `Hedge open for ${escapeHtml(contractName)}: ${vHedgeSide} ${vHedgeQty} lot(s) ${escapeHtml(String(objHedge.contractName || "-"))}`;
-                    return `<span title="${vTip}"><div>${vHedgeBits[0]}</div><div>${vHedgeBits[1]} / ${vHedgeBits[2]}</div></span>`;
+                    let vTip = `Hedge open for ${escapeHtml(contractName)}: ${vHedgeSide} ${vHedgeQty} lot(s) ${escapeHtml(String(objHedge.contractName || "-"))}`;
+                    const vLossRefPnl = Number(objMeta.hedgeLossRefPnl);
+                    if (Number.isFinite(vLossRefPnl) && vLossRefPnl < 0) {
+                        const vRecPctRaw = Number(ids.hedgeLossRecoveryPct instanceof HTMLInputElement ? ids.hedgeLossRecoveryPct.value : 50);
+                        const vRecPct = Number.isFinite(vRecPctRaw) ? Math.max(1, Math.min(100, Math.floor(vRecPctRaw))) : 50;
+                        const vRecTarget = Math.abs(vLossRefPnl) * (vRecPct / 100);
+                        vHedgeBits.push(`Rec >= ${escapeHtml(fmt(vRecTarget, 2))}`);
+                        vTip += ` | loss ref ${fmt(vLossRefPnl, 2)} closes at +${fmt(vRecTarget, 2)} (${vRecPct}%)`;
+                    }
+                    const vBody = vHedgeBits.length > 3
+                        ? `<div>${vHedgeBits[0]}</div><div>${vHedgeBits[1]} / ${vHedgeBits[2]}</div><div>${vHedgeBits[3]}</div>`
+                        : `<div>${vHedgeBits[0]}</div><div>${vHedgeBits[1]} / ${vHedgeBits[2]}</div>`;
+                    return `<span title="${escapeHtml(vTip)}">${vBody}</span>`;
                 }
                 return `<span title="Hedge linked for ${escapeHtml(contractName)}"><div>${escapeHtml(vHedgeContract || "-")}</div><div>pending</div></span>`;
             })();
@@ -6617,6 +6632,7 @@
         ids.hedgeEntryPct,
         ids.hedgeExitPct,
         ids.hedgeQtyDelta,
+        ids.hedgeLossRecoveryPct,
         ids.futuresLadderStepPoints,
         ids.futuresLadderGridOffsetPoints,
         ids.futuresLadderOrderOffsetPoints,
