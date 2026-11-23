@@ -5255,8 +5255,11 @@
             const mark = row.markPrice !== undefined && row.markPrice !== null && row.markPrice !== ""
                 ? row.markPrice
                 : row.ltpPrice;
-            // Calendar Spread hedge: "Cls" = the linked SELL option's close trigger
-            // (Sell Price x (1 + Hedge Exit % / 100)). Non-hedge futures show "-".
+            // Calendar Spread hedge: "Cls" = the linked SELL option's ACTIVE close trigger.
+            // Fresh hedges close on pullback (Sell x (1 + Hedge Exit % / 100));
+            // inherited hedges with an outstanding loss reference close ONLY via
+            // loss-recovery (option live PnL >= recovery% x |lossRef|).
+            // Non-hedge futures show "-".
             const clsCellHtml = (function () {
                 const objHMeta = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
                 if (String(objHMeta.openedReason || "").trim() !== "calendar_hedge"
@@ -5271,6 +5274,15 @@
                 }) || null;
                 if (!objOption || String(objOption.side || "").trim().toUpperCase() !== "SELL") {
                     return "-";
+                }
+                const objOptMeta = objOption?.metadata && typeof objOption.metadata === "object" ? objOption.metadata : {};
+                const vLossRef = Number(objOptMeta.hedgeLossRefPnl || 0);
+                if (Number.isFinite(vLossRef) && vLossRef < 0) {
+                    const vRecPctRaw = Number(ids.hedgeLossRecoveryPct instanceof HTMLInputElement ? ids.hedgeLossRecoveryPct.value : 50);
+                    const vRecPct = Number.isFinite(vRecPctRaw) ? Math.max(1, Math.min(100, Math.floor(vRecPctRaw))) : 50;
+                    const vTarget = Math.abs(vLossRef) * (vRecPct / 100);
+                    const vTip = `Hedge closes when ${escapeHtml(String(objOption.contractName || "-"))} PnL >= +${fmt(vTarget, 2)} (recovers ${vRecPct}% of ${fmt(vLossRef, 2)})`;
+                    return `<span title="${escapeHtml(vTip)}"><div>+${escapeHtml(fmt(vTarget, 2))} PnL</div></span>`;
                 }
                 const vOptEntry = Number(objOption.entryPrice || 0);
                 if (!(vOptEntry > 0)) {
