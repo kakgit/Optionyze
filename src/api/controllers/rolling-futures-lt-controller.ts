@@ -16622,8 +16622,8 @@ async function evaluateCalendarSpreadHedges(
                         "option_closed",
                         "info",
                         "Calendar Spread Hedge Closed (Loss Recovery)",
-                        `Closed hedge ${objExistingHedge.contractName} for ${objPosition.contractName}: recovered ${vLivePnl.toFixed(2)} of ref loss ${vLossRefPnl.toFixed(2)} (target ${vRecoveryTarget.toFixed(2)}, ${vLossRecoveryPct}%)`,
-                        { contractName: objPosition.contractName, hedgeContractName: objExistingHedge.contractName, qty: objExistingHedge.qty, exitPrice: vLivePrice, exitThreshold: vRecoveryTarget, reason: "calendar_hedge_loss_recovery" }
+                        `Closed hedge ${objExistingHedge.contractName} @ ${Number(objExistingHedge.entryPrice || 0).toFixed(2)} for ${objPosition.contractName}: recovered ${vLivePnl.toFixed(2)} of ref loss ${vLossRefPnl.toFixed(2)} (target ${vRecoveryTarget.toFixed(2)}, ${vLossRecoveryPct}%)`,
+                        { contractName: objPosition.contractName, hedgeContractName: objExistingHedge.contractName, hedgeEntryPrice: Number(objExistingHedge.entryPrice || 0), qty: objExistingHedge.qty, exitPrice: vLivePrice, exitThreshold: vRecoveryTarget, reason: "calendar_hedge_loss_recovery" }
                     );
                     continue;
                 }
@@ -16673,8 +16673,8 @@ async function evaluateCalendarSpreadHedges(
                     "option_closed",
                     "info",
                     "Calendar Spread Hedge Closed",
-                    `Closed hedge ${objExistingHedge.contractName} for ${objPosition.contractName} at LTP ${vLivePrice.toFixed(2)} (exit threshold ${vExitThreshold.toFixed(2)}).`,
-                    { contractName: objPosition.contractName, hedgeContractName: objExistingHedge.contractName, qty: objExistingHedge.qty, exitPrice: vLivePrice, exitThreshold: vExitThreshold, reason: "calendar_hedge_exit" }
+                    `Closed hedge ${objExistingHedge.contractName} @ ${Number(objExistingHedge.entryPrice || 0).toFixed(2)} for ${objPosition.contractName} at LTP ${vLivePrice.toFixed(2)} (exit threshold ${vExitThreshold.toFixed(2)}).`,
+                    { contractName: objPosition.contractName, hedgeContractName: objExistingHedge.contractName, hedgeEntryPrice: Number(objExistingHedge.entryPrice || 0), qty: objExistingHedge.qty, exitPrice: vLivePrice, exitThreshold: vExitThreshold, reason: "calendar_hedge_exit" }
                 );
             }
             continue;
@@ -16735,8 +16735,8 @@ async function evaluateCalendarSpreadHedges(
                 "option_opened",
                 "success",
                 "Calendar Spread Hedge Opened",
-                `Opened ${vHedgeAction} ${vHedgeQty} lot(s) ${objHedgePosition.contractName} hedge for ${objPosition.contractName} at LTP ${vLivePrice.toFixed(2)} (entry threshold ${vEntryThreshold.toFixed(2)}).`,
-                { contractName: objPosition.contractName, hedgeContractName: objHedgePosition.contractName, qty: vHedgeQty, action: vHedgeAction, entryPrice: vLivePrice, entryThreshold: vEntryThreshold, reason: "calendar_hedge_entry" }
+                `Opened ${vHedgeAction} ${vHedgeQty} lot(s) ${objHedgePosition.contractName} @ ${Number(objHedgePosition.entryPrice || 0).toFixed(2)} hedge for ${objPosition.contractName} at LTP ${vLivePrice.toFixed(2)} (entry threshold ${vEntryThreshold.toFixed(2)}).`,
+                { contractName: objPosition.contractName, hedgeContractName: objHedgePosition.contractName, hedgeEntryPrice: Number(objHedgePosition.entryPrice || 0), qty: vHedgeQty, action: vHedgeAction, entryPrice: vLivePrice, entryThreshold: vEntryThreshold, reason: "calendar_hedge_entry" }
             );
         } catch (objOrderError) {
             await logFuturesEvent(
