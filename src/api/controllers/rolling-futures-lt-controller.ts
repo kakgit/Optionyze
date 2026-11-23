@@ -472,6 +472,7 @@ interface RollingFuturesLtOptionMetadata {
     // exit and to carry the link across re-entries.
     hedgeImportId?: string;
     hedgeContractName?: string;
+    hedgeReanchoredAt?: string;
 }
 
 type CoveredLiveConfirmationKind =
@@ -3647,7 +3648,8 @@ function optionMetadataToRecord(pMetadata: RollingFuturesLtOptionMetadata): Reco
         importedAt: String(pMetadata.importedAt || "").trim(),
         pnlAboveBrokerageSince: String(pMetadata.pnlAboveBrokerageSince || "").trim() || undefined,
         hedgeImportId: String(pMetadata.hedgeImportId || "").trim() || undefined,
-        hedgeContractName: String(pMetadata.hedgeContractName || "").trim() || undefined
+        hedgeContractName: String(pMetadata.hedgeContractName || "").trim() || undefined,
+        hedgeReanchoredAt: String(pMetadata.hedgeReanchoredAt || "").trim() || undefined
     };
 }
 
@@ -12334,7 +12336,8 @@ async function applyTriggeredOptionRule(
                                 ...objHedge,
                                 metadata: optionMetadataToRecord({
                                     ...objHMeta,
-                                    hedgeImportId: String(objReEntry.position.importId || "").trim()
+                                    hedgeImportId: String(objReEntry.position.importId || "").trim(),
+                                    hedgeReanchoredAt: new Date().toISOString()
                                 })
                             };
                             const objNewMeta = getTrackedOptionMetadata(objReEntry.position);
@@ -12345,7 +12348,8 @@ async function applyTriggeredOptionRule(
                                     metadata: optionMetadataToRecord({
                                         ...objNewMeta,
                                         hedgeImportId: String(objHedge.importId || "").trim(),
-                                        hedgeContractName: String(objHedge.contractName || "").trim()
+                                        hedgeContractName: String(objHedge.contractName || "").trim(),
+                                        hedgeReanchoredAt: new Date().toISOString()
                                     })
                                 };
                             });
@@ -16444,6 +16448,11 @@ function stopAutoTraderCycle(pUserId: string, pStrategyCode: RollingFuturesLtStr
     setLocalSurvivalLeaseToken(pUserId, pStrategyCode, "");
 }
 
+// Re-anchor cooldown: after an SL/TP re-entry carries the hedge link to a fresh
+// option (which prints AT its entry), the exit gate stays suppressed until the new
+// anchor sees fresh price action instead of closing on the same tick.
+const gCalendarSpreadHedgeReanchorCooldownMs = 90_000;
+
 // Calendar Spread hedge engine: entry/exit evaluation for protective futures hedges
 // on open SELL option positions. Runs once per auto-trader cycle, after SL/TP closes
 // so a just-closed leg does not keep a stale hedge link.
@@ -16534,6 +16543,18 @@ async function evaluateCalendarSpreadHedges(
                         : objRow);
                     bChanged = true;
                 }
+            }
+            // Same-cycle re-anchor guard: after an SL/TP re-entry carries the hedge
+            // link to a fresh option (which prints AT its entry), the exit gate is
+            // meaningless until the new anchor sees fresh price action.
+            const vOptReanchorMs = Date.now() - new Date(String(objMetadata.hedgeReanchoredAt || "")).getTime();
+            const vHedgeReanchorMs = Date.now() - new Date(String(getTrackedOptionMetadata(objExistingHedge).hedgeReanchoredAt || "")).getTime();
+            const vReanchorAgeMs = Math.min(
+                Number.isFinite(vOptReanchorMs) ? vOptReanchorMs : Number.POSITIVE_INFINITY,
+                Number.isFinite(vHedgeReanchorMs) ? vHedgeReanchorMs : Number.POSITIVE_INFINITY
+            );
+            if (vReanchorAgeMs >= 0 && vReanchorAgeMs < gCalendarSpreadHedgeReanchorCooldownMs) {
+                continue;
             }
             if (vLivePrice <= vExitThreshold) {
                 try {
