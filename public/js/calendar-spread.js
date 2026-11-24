@@ -5499,22 +5499,22 @@
                     const vHedgeQty = Math.max(0, Math.floor(Number(objHedge.qty || 0)));
                     const vHedgeMark = Number(objHedge.markPrice || objHedge.ltpPrice || objHedge.entryPrice || 0);
                     const vHedgeEntry = Number(objHedge.entryPrice || 0);
-                    const vHedgeBits = [`${vHedgeSide} ${vHedgeQty} x ${escapeHtml(String(objHedge.contractName || "-"))}`];
-                    vHedgeBits.push(vHedgeMark > 0 ? `Mk ${escapeHtml(fmt(vHedgeMark, 2))}` : `Mk -`);
-                    vHedgeBits.push(vHedgeEntry > 0 ? `En ${escapeHtml(fmt(vHedgeEntry, 2))}` : `En -`);
-                    let vTip = `Hedge open for ${escapeHtml(contractName)}: ${vHedgeSide} ${vHedgeQty} lot(s) ${escapeHtml(String(objHedge.contractName || "-"))}`;
+                    let vTip = `Hedge open for ${contractName}: ${vHedgeSide} ${vHedgeQty} lot(s) ${String(objHedge.contractName || "-")}`;
+                    if (vHedgeMark > 0) {
+                        vTip += ` | Mk ${fmt(vHedgeMark, 2)}`;
+                    }
+                    if (vHedgeEntry > 0) {
+                        vTip += ` | En ${fmt(vHedgeEntry, 2)}`;
+                    }
                     const vLossRefPnl = Number(objMeta.hedgeLossRefPnl);
                     if (Number.isFinite(vLossRefPnl) && vLossRefPnl < 0) {
                         const vRecPctRaw = Number(ids.hedgeLossRecoveryPct instanceof HTMLInputElement ? ids.hedgeLossRecoveryPct.value : 50);
                         const vRecPct = Number.isFinite(vRecPctRaw) ? Math.max(1, Math.min(100, Math.floor(vRecPctRaw))) : 50;
-                        const vRecTarget = Math.abs(vLossRefPnl) * (vRecPct / 100);
-                        vHedgeBits.push(`Rec >= ${escapeHtml(fmt(vRecTarget, 2))}`);
-                        vTip += ` | loss ref ${fmt(vLossRefPnl, 2)} closes at +${fmt(vRecTarget, 2)} (${vRecPct}%)`;
+                        const vTarget = Math.abs(vLossRefPnl) * (vRecPct / 100);
+                        vTip += ` | loss ref ${fmt(vLossRefPnl, 2)} closes at +${fmt(vTarget, 2)} (${vRecPct}%)`;
+                        return `<span title="${escapeHtml(vTip)}"><div>+${escapeHtml(fmt(vTarget, 2))}</div></span>`;
                     }
-                    const vBody = vHedgeBits.length > 3
-                        ? `<div>${vHedgeBits[0]}</div><div>${vHedgeBits[1]} / ${vHedgeBits[2]}</div><div>${vHedgeBits[3]}</div>`
-                        : `<div>${vHedgeBits[0]}</div><div>${vHedgeBits[1]} / ${vHedgeBits[2]}</div>`;
-                    return `<span title="${escapeHtml(vTip)}">${vBody}</span>`;
+                    return `<span title="${escapeHtml(vTip)}"><div>-</div></span>`;
                 }
                 return `<span title="Hedge linked for ${escapeHtml(contractName)}"><div>${escapeHtml(vHedgeContract || "-")}</div><div>pending</div></span>`;
             })();
