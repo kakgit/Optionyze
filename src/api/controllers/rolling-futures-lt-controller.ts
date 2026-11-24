@@ -16499,7 +16499,8 @@ async function evaluateCalendarSpreadHedges(
     for (const objPosition of arrNext) {
         if (!isOptionContractSymbol(objPosition.contractName)) continue;
         if (isTrackedPositionInactive(objPosition)) continue;
-        if (String(objPosition.side || "").trim().toUpperCase() !== "SELL") continue;
+        const vSide = String(objPosition.side || "").trim().toUpperCase();
+        if (vSide !== "SELL" && vSide !== "BUY") continue;
 
         const objMetadata = getTrackedOptionMetadata(objPosition);
         const vEntryPrice = Number(objPosition.entryPrice || 0);
@@ -16518,8 +16519,8 @@ async function evaluateCalendarSpreadHedges(
         const objHedgeTicker = await getLiveMarketSnapshot(buildLiveMarketSnapshotConfig(vSymbol)).catch(() => null);
         const vFuturesSnapshotPrice = Number(objHedgeTicker?.futuresPrice || objHedgeTicker?.spotPrice || 0);
 
-        const vEntryThreshold = vEntryPrice * (1 + entryPct / 100);
-        const vExitThreshold = vEntryPrice * (1 + exitPct / 100);
+        const vEntryThreshold = vSide === "SELL" ? vEntryPrice * (1 + entryPct / 100) : vEntryPrice * (1 - entryPct / 100);
+        const vExitThreshold = vSide === "SELL" ? vEntryPrice * (1 + exitPct / 100) : vEntryPrice * (1 - exitPct / 100);
         const bHasHedge = Boolean(objMetadata.hedgeImportId || objMetadata.hedgeContractName);
         const objExistingHedge = bHasHedge && objMetadata.hedgeImportId ? mapHedgeByOption.get(vOptionImportId) : undefined;
 
@@ -16633,7 +16634,8 @@ async function evaluateCalendarSpreadHedges(
                     continue;
                 }
             }
-            if (vLivePrice <= vExitThreshold) {
+            const bExitTriggered = vSide === "SELL" ? vLivePrice <= vExitThreshold : vLivePrice >= vExitThreshold;
+            if (bExitTriggered) {
                 try {
                     await closeTrackedPositionOnDelta(
                         pUserId,
@@ -16682,12 +16684,13 @@ async function evaluateCalendarSpreadHedges(
 
         if (hedgeType === "none") continue;
         if (bHasHedge && !objExistingHedge) continue;
-        if (vLivePrice < vEntryThreshold) continue;
+        const bEntryTriggered = vSide === "SELL" ? vLivePrice >= vEntryThreshold : vLivePrice <= vEntryThreshold;
+        if (!bEntryTriggered) continue;
 
         const vTickerDelta = Number(objTicker?.delta || 0);
-        // SELL side flips the position delta sign: short CE -> negative signed delta
-        // (hedge BUY), short PE -> positive signed delta (hedge SELL).
-        const vSignedDelta = -vTickerDelta;
+        // Position side flips the hedge direction: long CE -> positive delta -> hedge SELL;
+        // short CE -> negative delta -> hedge BUY. Same formula works both sides.
+        const vSignedDelta = vSide === "SELL" ? -vTickerDelta : vTickerDelta;
         const vHedgeAction: "BUY" | "SELL" = vSignedDelta < 0 ? "BUY" : "SELL";
         const vHedgeQty = useQtyDelta
             ? Math.max(1, Math.round(vPositionQty * Math.abs(vTickerDelta)))
