@@ -9193,7 +9193,7 @@ async function resetCoveredClosedPositionsSessionAfterProfitClose(
     });
 }
 
-// "Exit Pos if its PnL is > X of Brokerage" is available on the covered-options
+// "Exit Pos if its PnL is < -X of Brokerage" is available on the covered-options
 // live page and the options-demo (options-scalper paper) page. Strangle/renko
 // pages keep their exit-all Blocked Margin control instead.
 function getPosPnlAboveBrokerageCloseConfig(
@@ -12825,13 +12825,13 @@ async function findTriggeredTrackedOptions(
                 continue;
             }
         }
-        // "Exit Pos if its PnL is > X of Brokerage": an individual-position TP-like
+        // "Exit Pos if its PnL is < -X of Brokerage": an individual-position SL-like
         // exit evaluated on this position alone, using its stored (entry-side)
         // brokerage. Only the qualifying position is closed; all other open
         // positions keep running until the overall target PnL rules fire.
         // Uses the timer from the Open Positions header textbox: the position
-        // is only closed if PnL stays above the threshold for the specified
-        // number of seconds. If PnL drops below the threshold, the timer resets.
+        // is only closed if PnL stays below the threshold for the specified
+        // number of seconds. If PnL rises above the threshold, the timer resets.
         const objPosPnlCloseRule = getPosPnlAboveBrokerageCloseConfig(objPosition.strategyCode, pUiState);
         if (objPosPnlCloseRule.enabled) {
             const vLiveExitPrice = resolveTrackedOptionLivePrice(
@@ -12844,7 +12844,7 @@ async function findTriggeredTrackedOptions(
             const vPnlThreshold = objPosPnlCloseRule.x * vPosCharges;
             const objMetadata = getTrackedOptionMetadata(objPosition);
             const vTimerSecs = objPosPnlCloseRule.timerSecs;
-            if (Number.isFinite(vOpenPnl) && vOpenPnl > vPnlThreshold) {
+            if (Number.isFinite(vOpenPnl) && vOpenPnl < -vPnlThreshold) {
                 const vNowIso = new Date().toISOString();
                 const vSinceIso = String(objMetadata.pnlAboveBrokerageSince || "").trim();
                 if (!vSinceIso) {
@@ -12882,7 +12882,7 @@ async function findTriggeredTrackedOptions(
                 // Timer still running Ã¢â‚¬â€ keep the position open
                 continue;
             } else {
-                // PnL dropped below threshold Ã¢â‚¬â€ reset the timer
+                // PnL rose above threshold Ã¢â‚¬â€ reset the timer
                 if (String(objMetadata.pnlAboveBrokerageSince || "").trim()) {
                     arrUpdatedPositions.push({
                         ...objPosition,

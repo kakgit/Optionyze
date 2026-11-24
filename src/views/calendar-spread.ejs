@@ -132,13 +132,13 @@
                                 <label class="rolling-futures-neutral-mode rolling-futures-help-mode" for="<%= vShowPosPnlCloseRule ? 'chkRollingFuturesClosePosPnlAboveBrokerage' : 'chkRollingFuturesCloseBlockedMargin' %>">
                                     <% if (vShowPosPnlCloseRule) { %>
                                     <input type="checkbox" id="chkRollingFuturesClosePosPnlAboveBrokerage" />
-                                    <span>Close if Pos PnL &gt; X of Pos Brokerage</span>
+                                    <span>Exit All if Net PnL is < X of Brokerage</span>
                                     <span class="rolling-futures-help-icon-wrap">
                                         <button type="button" class="rolling-futures-help-trigger" aria-label="Show position stop help">
                                             ?
                                         </button>
                                         <span class="rolling-futures-help-popout floating">
-                                            Monitors every open position individually: closes ONLY that position when its live PnL exceeds X &times; its own brokerage. All other positions keep running until the overall target PnL is achieved.
+                                            Monitors every open position individually: closes ALL positions when net PnL falls below X &times; its own brokerage (stop-loss). Timer resets if PnL recovers above threshold.
                                         </span>
                                     </span>
                                     <% } else { %>
