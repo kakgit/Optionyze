@@ -2269,8 +2269,8 @@
             nodes.reEntryMethodNewD1.checked = (vReEntryMethod === "newD");
             nodes.reEntryMethodOppLeg1.checked = (vReEntryMethod === "oppLegPct");
         }
-        if (nodes.oppLegPct?.parentElement?.parentElement) {
-            nodes.oppLegPct.parentElement.parentElement.style.display = (vReEntryMethod === "oppLegPct") ? "" : "none";
+        if (nodes.oppLegPct?.parentElement) {
+            nodes.oppLegPct.parentElement.style.display = (vReEntryMethod === "oppLegPct") ? "" : "none";
         }
     }
 
@@ -6875,8 +6875,8 @@
         ].forEach(function (node) {
             node?.addEventListener("change", function () {
                 if (node === nodes.oppLegPct || node === nodes.reEntryMethodNewD1 || node === nodes.reEntryMethodOppLeg1) {
-                    if (nodes.oppLegPct?.parentElement?.parentElement) {
-                        nodes.oppLegPct.parentElement.parentElement.style.display =
+                    if (nodes.oppLegPct?.parentElement) {
+                        nodes.oppLegPct.parentElement.style.display =
                             (nodes.reEntryMethodOppLeg1.checked === true) ? "" : "none";
                     }
                 }
