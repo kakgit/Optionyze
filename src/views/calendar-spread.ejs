@@ -333,6 +333,28 @@
                         <label for="txtRollingFuturesQty1">Qty</label>
                         <input type="number" min="1" id="txtRollingFuturesQty1" value="1" />
                     </div>
+                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-reenter">
+                        <label for="chkRollingFuturesReEnter1">
+                            Re-Enter
+                            <span class="rolling-futures-help-icon-wrap">
+                                <button type="button" class="rolling-futures-help-trigger" aria-label="Show row 1 re-enter help">
+                                    ?
+                                </button>
+                                <span class="rolling-futures-help-popout floating">
+                                    When enabled, if this row closes because of <code>SL</code> or <code>TP</code>, it reopens from the same row using the same action, leg, quantity, and <code>New D</code>. This re-entry does not use or increase the fresh-trade lot increment.
+                                </span>
+                            </span>
+                        </label>
+                        <div class="rolling-futures-help-inline-top">
+                            <label class="rolling-futures-help-check compact" for="chkRollingFuturesReEnter1">
+                                <input type="checkbox" id="chkRollingFuturesReEnter1" checked />
+                            </label>
+                        </div>
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-opp-premium">
+                        <label for="txtRollingFuturesOppLegPct1">% Premium of Opp Leg</label>
+                        <input type="number" min="1" max="100" step="1" id="txtRollingFuturesOppLegPct1" value="50" />
+                    </div>
                     <div class="rolling-demo-field rolling-covered-row1-inline-action rolling-covered-row1-inline-action-buyce">
                         <label>&nbsp;</label>
                         <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesBuyCe">BUY CE</button>
@@ -352,24 +374,6 @@
                     <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-sld">
                         <label for="txtRollingFuturesSlD1">% SL of Premium</label>
                         <input type="number" min="1" max="100" step="1" id="txtRollingFuturesSlD1" value="20" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-reenter">
-                        <label for="chkRollingFuturesReEnter1">
-                            Re-Enter
-                            <span class="rolling-futures-help-icon-wrap">
-                                <button type="button" class="rolling-futures-help-trigger" aria-label="Show row 1 re-enter help">
-                                    ?
-                                </button>
-                                <span class="rolling-futures-help-popout floating">
-                                    When enabled, if this row closes because of <code>SL</code> or <code>TP</code>, it reopens from the same row using the same action, leg, quantity, and <code>New D</code>. This re-entry does not use or increase the fresh-trade lot increment.
-                                </span>
-                            </span>
-                        </label>
-                        <div class="rolling-futures-help-inline-top">
-                            <label class="rolling-futures-help-check compact" for="chkRollingFuturesReEnter1">
-                                <input type="checkbox" id="chkRollingFuturesReEnter1" checked />
-                            </label>
-                        </div>
                     </div>
                     <div class="rolling-demo-field rolling-covered-row1-break-action rolling-covered-row1-break-action-sellpe">
                         <label>&nbsp;</label>
