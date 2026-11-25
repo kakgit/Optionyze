@@ -5363,7 +5363,8 @@
         // the dedicated Futures Open Positions section below.
         const arrRows = arrAllRows.filter(function (row) { return !isCalendarSpreadFutureRow(row); });
         renderCalendarSpreadFuturesPositions(arrAllRows);
-        const objTotals = objPayload.totals || {};
+        // Compute options-only totals (futures are rendered separately with their own totals).
+        const objTotals = buildFallbackOpenPositionSourceTotals(arrRows);
         const vPreviousOpenCount = previousOpenPositionCount;
         const bFirstOpenTransition = isCoveredMode && vPreviousOpenCount === 0 && arrRows.length > 0;
         const bSessionResetTransition = isCoveredMode && vPreviousOpenCount > 0 && arrRows.length === 0;
