@@ -12340,20 +12340,42 @@ async function applyTriggeredOptionRule(
     if (isCalendarSpreadPremiumTpStrategy(pStrategyCode) && (pReason === "sl" || pReason === "tp")) {
         const objUiState = getMergedUiState(objProfile);
         const vLossRecoveryPct = Math.max(1, Math.min(100, Math.floor(Number((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct || 50) || 50)));
+        const vReEntryMethod = String((objUiState as Record<string, unknown>).reEntryMethod1 || "newD");
         const vClosedLegSide = String(inferTrackedOptionLegSide(pPosition.contractName) || "").trim().toLowerCase() as "ce" | "pe";
         const vOppositeLegSide: "ce" | "pe" = vClosedLegSide === "ce" ? "pe" : "ce";
         const vClosedExpiryDate = getTrackedOptionResolvedExpiryDate(pPosition);
 
-        // Find an open SELL position of the opposite leg with the same expiry.
-        const objOppositeLeg = arrNextPositions.find((objRow) => {
-            const objRowMeta = getTrackedOptionMetadata(objRow);
-            const vRowLegSide = String(inferTrackedOptionLegSide(objRow.contractName) || "").trim().toLowerCase();
-            const vRowAction = String(objRow.side || "").trim().toUpperCase();
-            const vRowExpiry = getTrackedOptionResolvedExpiryDate(objRow);
-            return vRowLegSide === vOppositeLegSide
-                && vRowAction === "SELL"
-                && vRowExpiry === vClosedExpiryDate;
-        });
+        // "Use New D": skip opposite-leg lookup; normal re-entry uses row settings.
+        if (vReEntryMethod === "newD") {
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "manual_action",
+                "info",
+                "Calendar Spread Loss-Recovery Re-Entry (New D)",
+                `Loss-recovery re-entry for ${pPosition.contractName}: using "Use New D" method - will open a new ${vClosedLegSide.toUpperCase()} contract using row settings instead of opposite leg.`,
+                {
+                    contractName: pPosition.contractName,
+                    legSide: vClosedLegSide,
+                    oppositeLegSide: vOppositeLegSide,
+                    expiryDate: vClosedExpiryDate,
+                    reEntryMethod: vReEntryMethod,
+                    reason: "calendar_spread_loss_reentry_new_d"
+                }
+            );
+            // vSkipCalendarSpreadReEntry stays false: normal re-entry proceeds via row settings.
+        }
+        else {
+            // Find an open SELL position of the opposite leg with the same expiry.
+            const objOppositeLeg = arrNextPositions.find((objRow) => {
+                const objRowMeta = getTrackedOptionMetadata(objRow);
+                const vRowLegSide = String(inferTrackedOptionLegSide(objRow.contractName) || "").trim().toLowerCase();
+                const vRowAction = String(objRow.side || "").trim().toUpperCase();
+                const vRowExpiry = getTrackedOptionResolvedExpiryDate(objRow);
+                return vRowLegSide === vOppositeLegSide
+                    && vRowAction === "SELL"
+                    && vRowExpiry === vClosedExpiryDate;
+            });
 
         if (!objOppositeLeg) {
             // No opposite-leg SELL position exists: skip re-entry entirely.
@@ -12462,6 +12484,7 @@ async function applyTriggeredOptionRule(
                     }
                 }
             }
+        }
         }
     }
     if (isOptionsScalperStrategy(pStrategyCode)) {
