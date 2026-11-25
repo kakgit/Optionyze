@@ -2076,6 +2076,8 @@
             slD: ids.slD1,
             oppLegPct: ids.oppLegPct1,
             reEnter: ids.reEnter1,
+            reEntryMethodNewD1: ids.reEntryMethodNewD1,
+            reEntryMethodOppLeg1: ids.reEntryMethodOppLeg1,
             sellPeButton: ids.sellPeButton,
             sellCeButton: ids.sellCeButton,
             buyCeButton: ids.buyCeButton,
