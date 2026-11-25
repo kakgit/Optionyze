@@ -2819,11 +2819,37 @@
         return Number.isFinite(vRequiredMargin) && vRequiredMargin > 0 ? vRequiredMargin : Number.NaN;
     }
 
+    function computeCombinedNetPnl() {
+        // Options Open Positions: displayedPositions is already filtered to exclude futures.
+        const optionsTotals = buildFallbackOpenPositionSourceTotals(displayedPositions);
+
+        // Futures Open Positions: filter the full payload for futures rows.
+        const arrAllRows = Array.isArray(lastOpenPositionsPayload?.positions)
+            ? lastOpenPositionsPayload.positions
+            : [];
+        const futuresRows = arrAllRows.filter(isCalendarSpreadFutureRow);
+        const futuresTotals = buildFallbackOpenPositionSourceTotals(futuresRows);
+
+        // Closed Positions: sum pnl and charges from the closed positions array.
+        let closedTotalPnl = 0;
+        let closedTotalCharges = 0;
+        (Array.isArray(closedPositions) ? closedPositions : []).forEach(function (row) {
+            closedTotalPnl += Number(row?.pnl || 0);
+            closedTotalCharges += Number(row?.charges || 0);
+        });
+
+        return Number((
+            (optionsTotals.totalPnl - optionsTotals.totalCharges) +
+            (futuresTotals.totalPnl - futuresTotals.totalCharges) +
+            (closedTotalPnl - closedTotalCharges)
+        ).toFixed(4));
+    }
+
     function renderNetPnlValue() {
         if (!ids.netPl) {
             return;
         }
-        const vNetPnl = Number(lastRecoveryMetrics?.netPnl);
+        const vNetPnl = computeCombinedNetPnl();
         trackMaxLoss(vNetPnl);
         const vNetPnlText = fmt(vNetPnl, 4) === "-" ? "0.0000" : fmt(vNetPnl, 4);
         if (!isCoveredMode) {
@@ -5442,6 +5468,7 @@
             ids.openPageNumbers.innerHTML = pageNumbers.join("");
         }
         setButtonsEnabled();
+        renderNetPnlValue();
     }
 
     function buildOpenPositionRowHtml(row, nextLtps) {
@@ -6006,6 +6033,7 @@
             }
             ids.closedPageNumbers.innerHTML = pageNumbers.join("");
         }
+        renderNetPnlValue();
     }
     function renderClosedAltPositions(rows) {
         closedAltPositions = Array.isArray(rows)
