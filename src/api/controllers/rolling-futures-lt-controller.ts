@@ -2914,6 +2914,9 @@ function getDefaultManualTraderUiState(
         calendarSpreadHedgeExitPct: "15",
         calendarSpreadHedgeQtyDelta: false,
         calendarSpreadHedgeLossRecoveryPct: "50",
+        // Calendar Spread re-entry method defaults (calendar-spread page only).
+        oppLegPct1: "50",
+        reEntryMethod1: "newD",
         manualBtcQty: "1",
         manualEthQty: "1",
         manualXautQty: "1",
@@ -3952,7 +3955,7 @@ async function processCalendarSpreadLossReenter(
             }
             // Resolve the re-entry settings up front so the catch block can queue
             // them verbatim if the close succeeded but the reopen failed.
-            const objRowInput = buildCalendarSpreadRowOpenInput(pProfile, objPosition);
+            const objRowInput = buildCalendarSpreadRowOpenInput(pProfile, objPosition, arrWorking);
             const vRowIndex = objRowInput.rowIndex;
             const vRowAction = objRowInput.action;
             const vRowLeg = objRowInput.legSide;
@@ -4228,7 +4231,8 @@ function sendCalendarSpreadLossAlertPush(
 // loss-limit re-entry, the T+2 rollover and the manual re-enter action.
 function buildCalendarSpreadRowOpenInput(
     pProfile: RollingFuturesLtProfileRecord,
-    pPosition: RollingFuturesLtImportedPositionRecord
+    pPosition: RollingFuturesLtImportedPositionRecord,
+    pAllPositions: RollingFuturesLtImportedPositionRecord[]
 ): {
     rowIndex: 1 | 2;
     action: "buy" | "sell" | "none";
@@ -4239,6 +4243,7 @@ function buildCalendarSpreadRowOpenInput(
     targetDelta: number;
     takeProfitDelta: number;
     stopLossDelta: number;
+    targetPremium: number;
 } {
     const objUiState = getMergedUiState(pProfile);
     const vRowIndex = getTrackedOptionRowIndexForUi(pPosition, objUiState);
@@ -4249,6 +4254,14 @@ function buildCalendarSpreadRowOpenInput(
     const vExpiryMode = (["1", "2", "4", "5", "6", "7"].includes(String(objRowState.expiryMode || "").trim())
         ? String(objRowState.expiryMode || "5").trim()
         : "5") as "1" | "2" | "4" | "5" | "6" | "7";
+    // Compute target premium from opposite leg LTP x % Premium of Opp Leg
+    const vOppLegPct = Math.max(1, Math.min(100, Number((objRowState as any).oppLegPct || 50)));
+    const vOppLeg = vLeg === "ce" ? "pe" : "ce";
+    const vOppPosition = pAllPositions.find((objPos: RollingFuturesLtImportedPositionRecord) => {
+        return getTrackedOptionLegSide(objPos.contractName) === vOppLeg;
+    });
+    const vOppLTP = vOppPosition ? Number(vOppPosition.markPrice || vOppPosition.entryPrice || 0) : 0;
+    const vTargetPremium = vOppLTP > 0 ? vOppLTP * (vOppLegPct / 100) : 0;
     return {
         rowIndex: vRowIndex,
         action: vAction,
@@ -4258,7 +4271,8 @@ function buildCalendarSpreadRowOpenInput(
         qty: Math.max(1, Math.floor(Number(objRowState.qty || 1))),
         targetDelta: Math.max(0, Number(objRowState.newD || 0.53)),
         takeProfitDelta: Math.max(0, Number(objRowState.tpD || 0)),
-        stopLossDelta: Math.max(0, Number(objRowState.slD || 0))
+        stopLossDelta: Math.max(0, Number(objRowState.slD || 0)),
+        targetPremium: vTargetPremium
     };
 }
 
@@ -5760,6 +5774,8 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         calendarSpreadHedgeExitPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeExitPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct)),
         calendarSpreadHedgeQtyDelta: normalizeBooleanValue((objUiState as Record<string, unknown>).calendarSpreadHedgeQtyDelta, Boolean((objDefaults as Record<string, unknown>).calendarSpreadHedgeQtyDelta)),
         calendarSpreadHedgeLossRecoveryPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct)),
+        oppLegPct1: normalizeStringValue((objUiState as Record<string, unknown>).oppLegPct1, "50"),
+        reEntryMethod1: normalizeStringValue((objUiState as Record<string, unknown>).reEntryMethod1, "newD"),
         manualBtcQty: normalizeQtyLikeValue(objUiState.manualBtcQty, objDefaults.manualBtcQty),
         manualEthQty: normalizeQtyLikeValue(objUiState.manualEthQty, objDefaults.manualEthQty),
         manualXautQty: normalizeQtyLikeValue(objUiState.manualXautQty, objDefaults.manualXautQty),
@@ -10702,13 +10718,14 @@ async function findStrangleDemoChainContract(
 async function findBestLiveOptionContractWithNearestFallback(
     pConfig: Parameters<typeof findBestLiveOptionContract>[0],
     pOptionSide: "CE" | "PE",
-    pTargetDelta: number
+    pTargetDelta: number,
+    pTargetPremium?: number
 ): Promise<Awaited<ReturnType<typeof findBestLiveOptionContract>>> {
-    const objStrictMatch = await findBestLiveOptionContract(pConfig, pOptionSide, pTargetDelta, true);
+    const objStrictMatch = await findBestLiveOptionContract(pConfig, pOptionSide, pTargetDelta, true, pTargetPremium);
     if (objStrictMatch) {
         return objStrictMatch;
     }
-    return findBestLiveOptionContract(pConfig, pOptionSide, pTargetDelta, false);
+    return findBestLiveOptionContract(pConfig, pOptionSide, pTargetDelta, false, pTargetPremium);
 }
 
 async function updateCoveredRowExpiryDateInProfile(
@@ -10761,6 +10778,7 @@ async function buildOptionsScalperPaperOptionOpen(
         stopLossDelta?: number;
         reEntryDelta?: number;
         reEnterEnabled?: boolean;
+        targetPremium?: number;
     }
 ): Promise<{
     position: RollingFuturesLtImportedPositionRecord;
@@ -10811,11 +10829,11 @@ async function buildOptionsScalperPaperOptionOpen(
             action: pInput.action,
             forceStrike: pInput.requestedStrike
         })
-        : await findBestLiveOptionContractWithNearestFallback(objConfig, vOptionSide, pInput.targetDelta);
+        : await findBestLiveOptionContractWithNearestFallback(objConfig, vOptionSide, pInput.targetDelta, pInput.targetPremium);
     if (!objContract) {
         const vMessage = pInput.chainSource
             ? `No ${vOptionSide} contract${pInput.requestedStrike ? ` at strike ${pInput.requestedStrike}` : ""} with delta above 0.50 was found on ${pInput.chainSource === "coinswitch" ? "CoinSwitch" : "Delta Exchange"} for ${pInput.symbol} expiry ${pInput.expiryDate}.`
-            : `No live ${pInput.legSide.toUpperCase()} contract was found for ${pInput.symbol} near target delta ${pInput.targetDelta.toFixed(2)}.`;
+            : `No live ${pInput.legSide.toUpperCase()} contract was found for ${pInput.symbol} near target delta ${pInput.targetDelta.toFixed(2)}${pInput.targetPremium ? ` / target premium ${pInput.targetPremium.toFixed(2)}` : ""}.`;
         await logFuturesEvent(
             pUserId,
             pStrategyCode,
@@ -11210,6 +11228,7 @@ async function openTrackedOptionReEntry(
         forceLegSide?: "ce" | "pe";
         forceTargetDelta?: number;
         forceQty?: number;
+        forceContractName?: string;
     }
 ): Promise<{
     position: RollingFuturesLtImportedPositionRecord;
@@ -11388,11 +11407,49 @@ async function openTrackedOptionReEntry(
         loopSeconds: 8
     };
 
-    const objContract = await findBestLiveOptionContractWithNearestFallback(
-        objConfig,
-        vLegSide === "pe" ? "PE" : "CE",
-        vTargetDelta
-    );
+    let objContract: Awaited<ReturnType<typeof findBestLiveOptionContract>> | null = null;
+    if (pOptions?.forceContractName) {
+        const vForcedContractName = String(pOptions.forceContractName || "").trim();
+        const vTicker = await getLiveOptionTicker(vForcedContractName);
+        if (!vTicker) {
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "manual_action",
+                "warning",
+                "Paper Option Re-Entry Skipped",
+                `Skipped re-entry for ${pClosedPosition.contractName} because no live ticker was found for forced contract ${vForcedContractName}.`,
+                {
+                    contractName: pClosedPosition.contractName,
+                    forcedContractName: vForcedContractName,
+                    reason: "paper_option_reentry_no_ticker"
+                }
+            );
+            return null;
+        }
+        const vExpiryDate = getTrackedOptionResolvedExpiryDate(pClosedPosition);
+        objContract = {
+            contractSymbol: String(vTicker.contractSymbol || "").trim(),
+            optionSide: (String(pOptions?.forceLegSide || "").trim().toUpperCase() === "PE" ? "PE" : "CE"),
+            strike: Number(vTicker.strike || 0),
+            markPrice: Number(vTicker.markPrice || 0),
+            bestBid: vTicker.bestBid ?? null,
+            bestAsk: vTicker.bestAsk ?? null,
+            delta: Number.isFinite(Number(vTicker.delta || 0)) ? Number(vTicker.delta) : Number.NaN,
+            gamma: Number.NaN,
+            theta: Number.NaN,
+            vega: Number.NaN,
+            expiryDate: vExpiryDate,
+            requestedExpiryDate: vExpiryDate,
+            usedNextDayFallback: false
+        };
+    } else {
+        objContract = await findBestLiveOptionContractWithNearestFallback(
+            objConfig,
+            vLegSide === "pe" ? "PE" : "CE",
+            vTargetDelta
+        );
+    }
     if (!objContract) {
         await logFuturesEvent(
             pUserId,
@@ -12272,6 +12329,141 @@ async function applyTriggeredOptionRule(
         await schedulePendingOptionRecoveryRefresh(pUserId, pStrategyCode, pReason);
     }
 
+
+    // Calendar Spread loss-recovery hedge close: when a SELL option hits SL/TP and
+    // no opposite-leg position exists, skip re-entry entirely. When an opposite leg
+    // is open, use its live premium x recovery% to find the nearest strike above target
+    // and open that contract via forceContractName.
+    let vSkipCalendarSpreadReEntry = false;
+    let vLossRecoveryForceContractName: string | undefined;
+    let vLossRecoveryForceLegSide: "ce" | "pe" | undefined;
+    if (isCalendarSpreadPremiumTpStrategy(pStrategyCode) && (pReason === "sl" || pReason === "tp")) {
+        const objUiState = getMergedUiState(objProfile);
+        const vLossRecoveryPct = Math.max(1, Math.min(100, Math.floor(Number((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct || 50) || 50)));
+        const vClosedLegSide = String(inferTrackedOptionLegSide(pPosition.contractName) || "").trim().toLowerCase() as "ce" | "pe";
+        const vOppositeLegSide: "ce" | "pe" = vClosedLegSide === "ce" ? "pe" : "ce";
+        const vClosedExpiryDate = getTrackedOptionResolvedExpiryDate(pPosition);
+
+        // Find an open SELL position of the opposite leg with the same expiry.
+        const objOppositeLeg = arrNextPositions.find((objRow) => {
+            const objRowMeta = getTrackedOptionMetadata(objRow);
+            const vRowLegSide = String(inferTrackedOptionLegSide(objRow.contractName) || "").trim().toLowerCase();
+            const vRowAction = String(objRow.side || "").trim().toUpperCase();
+            const vRowExpiry = getTrackedOptionResolvedExpiryDate(objRow);
+            return vRowLegSide === vOppositeLegSide
+                && vRowAction === "SELL"
+                && vRowExpiry === vClosedExpiryDate;
+        });
+
+        if (!objOppositeLeg) {
+            // No opposite-leg SELL position exists: skip re-entry entirely.
+            vSkipCalendarSpreadReEntry = true;
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "manual_action",
+                "info",
+                "Calendar Spread Loss-Recovery Re-Entry Skipped",
+                `Skipped loss-recovery re-entry for ${pPosition.contractName}: no open opposite-leg (${vOppositeLegSide.toUpperCase()}) SELL position exists on expiry ${vClosedExpiryDate}.`,
+                {
+                    contractName: pPosition.contractName,
+                    legSide: vClosedLegSide,
+                    oppositeLegSide: vOppositeLegSide,
+                    expiryDate: vClosedExpiryDate,
+                    reason: "calendar_spread_loss_recovery_no_opposite_leg"
+                }
+            );
+        } else {
+            const vOppositePremium = Number(objOppositeLeg.markPrice || objOppositeLeg.entryPrice || 0);
+            if (!(vOppositePremium > 0)) {
+                vSkipCalendarSpreadReEntry = true;
+                await logFuturesEvent(
+                    pUserId,
+                    pStrategyCode,
+                    "manual_action",
+                    "warning",
+                    "Calendar Spread Loss-Recovery Re-Entry Skipped",
+                    `Skipped loss-recovery re-entry for ${pPosition.contractName}: opposite leg ${String(objOppositeLeg.contractName || "").trim()} has no valid premium (${vOppositePremium}).`,
+                    {
+                        contractName: pPosition.contractName,
+                        oppositeContractName: String(objOppositeLeg.contractName || "").trim(),
+                        oppositePremium: vOppositePremium,
+                        reason: "calendar_spread_loss_recovery_no_premium"
+                    }
+                );
+            } else {
+                const vTargetPremium = vOppositePremium * (vLossRecoveryPct / 100);
+                const vExpiryLabel = normalizeIsoDateOnly(vClosedExpiryDate);
+                if (!vExpiryLabel) {
+                    vSkipCalendarSpreadReEntry = true;
+                    await logFuturesEvent(
+                        pUserId,
+                        pStrategyCode,
+                        "manual_action",
+                        "warning",
+                        "Calendar Spread Loss-Recovery Re-Entry Skipped",
+                        `Skipped loss-recovery re-entry for ${pPosition.contractName}: invalid expiry label for ${vClosedExpiryDate}.`,
+                        {
+                            contractName: pPosition.contractName,
+                            expiryDate: vClosedExpiryDate,
+                            reason: "calendar_spread_loss_recovery_invalid_expiry"
+                        }
+                    );
+                } else {
+                    const vSideForChain = vOppositeLegSide === "pe" ? "put" : "call";
+                    const objChain = await listDeltaOptionChainRoundedToThousand(
+                        normalizeSymbolValue(objUiState.symbol),
+                        vExpiryLabel,
+                        vSideForChain
+                    );
+                    const arrCandidates = objChain.rows
+                        .filter((objRow) => Number.isFinite(Number(objRow.markPrice || 0)) && Number(objRow.markPrice) >= vTargetPremium)
+                        .sort((pLeft, pRight) => Number(pLeft.markPrice || 0) - Number(pRight.markPrice || 0));
+                    const objTargetRow = arrCandidates[0];
+                    if (!objTargetRow) {
+                        vSkipCalendarSpreadReEntry = true;
+                        await logFuturesEvent(
+                            pUserId,
+                            pStrategyCode,
+                            "manual_action",
+                            "warning",
+                            "Calendar Spread Loss-Recovery Re-Entry Skipped",
+                            `Skipped loss-recovery re-entry for ${pPosition.contractName}: no chain strike at or above target premium ${vTargetPremium.toFixed(2)} (opp premium ${vOppositePremium.toFixed(2)} x ${vLossRecoveryPct}%).`,
+                            {
+                                contractName: pPosition.contractName,
+                                oppositeContractName: String(objOppositeLeg.contractName || "").trim(),
+                                oppositePremium: vOppositePremium,
+                                targetPremium: vTargetPremium,
+                                lossRecoveryPct: vLossRecoveryPct,
+                                reason: "calendar_spread_loss_recovery_no_chain_candidate"
+                            }
+                        );
+                    } else {
+                        vLossRecoveryForceContractName = String(objTargetRow.symbol || "").trim();
+                        vLossRecoveryForceLegSide = vOppositeLegSide;
+                        await logFuturesEvent(
+                            pUserId,
+                            pStrategyCode,
+                            "manual_action",
+                            "info",
+                            "Calendar Spread Loss-Recovery Re-Entry Target",
+                            `Loss-recovery re-entry target for ${pPosition.contractName}: opposite leg ${String(objOppositeLeg.contractName || "").trim()} premium ${vOppositePremium.toFixed(2)} x ${vLossRecoveryPct}% = ${vTargetPremium.toFixed(2)}, opening ${String(objTargetRow.symbol || "").trim()} at markPrice ${Number(objTargetRow.markPrice || 0).toFixed(2)}.`,
+                            {
+                                contractName: pPosition.contractName,
+                                oppositeContractName: String(objOppositeLeg.contractName || "").trim(),
+                                oppositePremium: vOppositePremium,
+                                targetPremium: vTargetPremium,
+                                lossRecoveryPct: vLossRecoveryPct,
+                                forcedContractName: vLossRecoveryForceContractName,
+                                forcedLegSide: vLossRecoveryForceLegSide,
+                                reason: "calendar_spread_loss_reentry_target"
+                            }
+                        );
+                    }
+                }
+            }
+        }
+    }
     if (isOptionsScalperStrategy(pStrategyCode)) {
         const vProfitClosePauseUntil = new Date(Date.now() + gProfitClosePauseAfterOptionRuleMs).toISOString();
         const objRuntimeBeforeProfitPause = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode)
@@ -12297,7 +12489,7 @@ async function applyTriggeredOptionRule(
                 buildInactiveTrackedPosition(pPosition, objCloseResult.closedRecord, pReason)
             ];
         }
-        if (bAllowPaperReEntry || pReason === "delta_diff_replace") {
+        if ((bAllowPaperReEntry || pReason === "delta_diff_replace") && !vSkipCalendarSpreadReEntry) {
             try {
                 const objReEntry = await openTrackedOptionReEntry(
                     pUserId,
@@ -12319,7 +12511,12 @@ async function applyTriggeredOptionRule(
                         useRowAction: true,
                         useRowQty: true,
                         forceQty: Math.max(1, Math.floor(Number(pPosition.qty || 1))),
-                        useRowReEntryDelta: true
+                        useRowReEntryDelta: true,
+                        ...(vLossRecoveryForceContractName ? {
+                            forceContractName: vLossRecoveryForceContractName,
+                            forceLegSide: vLossRecoveryForceLegSide,
+                            useRowReEntryDelta: false
+                        } : {})
                     }
                 );
                 if (objReEntry) {
@@ -25089,7 +25286,7 @@ export async function reenterCalendarSpreadOpenPosition(req: Request, res: Respo
 
         const objUiState = getMergedUiState(objProfile);
         const vSymbol = normalizeSymbolValue(objUiState.symbol);
-        const objRowInput = buildCalendarSpreadRowOpenInput(objProfile, objPosition);
+        const objRowInput = buildCalendarSpreadRowOpenInput(objProfile, objPosition, arrPositions);
 
         const objClosed = await closeOptionsScalperPaperPosition(vUserId, "calendar-spread", objPosition);
         await appendOptionsScalperPaperClosedPositions(vUserId, "calendar-spread", [objClosed]);
@@ -25486,4 +25683,10 @@ export async function updateStraddleDemoRecoveryMetrics(req: Request, res: Respo
 export async function recalculateStraddleDemoRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "straddle-demo");
 }
+
+
+
+
+
+
 

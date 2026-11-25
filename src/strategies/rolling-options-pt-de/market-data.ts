@@ -812,7 +812,8 @@ export async function findBestLiveOptionContract(
     pConfig: RollingOptionsPtDeConfig,
     pOptionSide: "CE" | "PE",
     pTargetDelta: number,
-    pRequireAtOrBelowTarget = false
+    pRequireAtOrBelowTarget = false,
+    pTargetPremium?: number
 ): Promise<RollingOptionsPtDeLiveOptionContract | null> {
     const arrExpiryCandidates = [
         { expiryDate: pConfig.expiryDate, usedNextDayFallback: false },
@@ -862,14 +863,24 @@ export async function findBestLiveOptionContract(
             const vDelta = Math.abs(parseNumber(objRow.greeks?.delta, NaN));
             const vStrike = parseNumber(objRow.strike_price, NaN);
             const vMarkPrice = parseNumber(objRow.mark_price, NaN);
-            if (!Number.isFinite(vDelta) || !Number.isFinite(vStrike) || !Number.isFinite(vMarkPrice) || !(vMarkPrice > 0)) {
-                continue;
-            }
-            if (pRequireAtOrBelowTarget && vDelta > Math.abs(pTargetDelta)) {
+            if (!Number.isFinite(vStrike) || !Number.isFinite(vMarkPrice) || !(vMarkPrice > 0)) {
                 continue;
             }
 
-            const vGap = Math.abs(vDelta - Math.abs(pTargetDelta));
+            let vGap: number;
+            const vTargetPremium = pTargetPremium ?? 0;
+            if (Number.isFinite(pTargetPremium)) {
+                // Premium-based match: find contract with mark price closest to target premium.
+                vGap = Math.abs(vMarkPrice - vTargetPremium);
+            } else {
+                if (!Number.isFinite(vDelta)) {
+                    continue;
+                }
+                if (pRequireAtOrBelowTarget && vDelta > Math.abs(pTargetDelta)) {
+                    continue;
+                }
+                vGap = Math.abs(vDelta - Math.abs(pTargetDelta));
+            }
             if (vGap >= vBestGap) {
                 continue;
             }

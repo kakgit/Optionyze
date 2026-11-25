@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
@@ -345,6 +345,14 @@
                         <label for="txtRollingFuturesSlD1">% SL of Premium</label>
                         <input type="number" min="1" max="100" step="1" id="txtRollingFuturesSlD1" value="20" />
                     </div>
+                    <div class="rolling-demo-field rolling-covered-row1-inline-action rolling-covered-row1-inline-action-buyce">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesBuyCe">BUY CE</button>
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row1-inline-action rolling-covered-row1-inline-action-buype">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesBuyPe">BUY PE</button>
+                    </div>
                     <div class="rolling-demo-field rolling-covered-row1-break-action rolling-covered-row1-break-action-sellpe">
                         <label>&nbsp;</label>
                         <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesSellPe">SELL PE</button>
@@ -356,6 +364,14 @@
                 </div>
 
                 <div class="rolling-futures-demo-grid row" style="display: flex; gap: 16px; align-items: flex-start;">
+                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-reentry-method" style="flex: 1;">
+                        <label class="rolling-futures-help-check compact" for="radRollingFuturesReEntryNewD1">
+                            <input type="radio" id="radRollingFuturesReEntryNewD1" name="rollingFuturesReEntryMethod1" value="newD" checked /> Use New D
+                        </label>
+                        <label class="rolling-futures-help-check compact" for="radRollingFuturesReEntryOppLeg1">
+                            <input type="radio" id="radRollingFuturesReEntryOppLeg1" name="rollingFuturesReEntryMethod1" value="oppLegPct" /> % Premium of Opp Leg
+                        </label>
+                    </div>
                     <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-reenter" style="flex: 1;">
                         <label for="chkRollingFuturesReEnter1">
                             Re-Enter
@@ -364,7 +380,7 @@
                                     ?
                                 </button>
                                 <span class="rolling-futures-help-popout floating">
-                                    When enabled, if this row closes because of <code>SL</code> or <code>TP</code>, it reopens from the same row using the same action, leg, quantity, and <code>New D</code>. This re-entry does not use or increase the fresh-trade lot increment.
+                                    When enabled, if this row closes because of <code>SL</code> or <code>TP</code>, it reopens from the same row using the same action, leg, quantity, and the selected re-entry method. This re-entry does not use or increase the fresh-trade lot increment.
                                 </span>
                             </span>
                         </label>

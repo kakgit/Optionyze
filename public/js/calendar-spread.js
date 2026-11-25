@@ -138,7 +138,10 @@
         reD1: document.getElementById("txtRollingFuturesReD1"),
         tpD1: document.getElementById("txtRollingFuturesTpD1"),
         slD1: document.getElementById("txtRollingFuturesSlD1"),
+        oppLegPct1: document.getElementById("txtRollingFuturesOppLegPct1"),
         reEnter1: document.getElementById("chkRollingFuturesReEnter1"),
+        reEntryMethodNewD1: document.getElementById("radRollingFuturesReEntryNewD1"),
+        reEntryMethodOppLeg1: document.getElementById("radRollingFuturesReEntryOppLeg1"),
         // Removed Row-2 (calendar-spread cleanup).
         action2: null,
         legs2: null,
@@ -2071,6 +2074,7 @@
             reD: ids.reD1,
             tpD: ids.tpD1,
             slD: ids.slD1,
+            oppLegPct: ids.oppLegPct1,
             reEnter: ids.reEnter1,
             sellPeButton: ids.sellPeButton,
             sellCeButton: ids.sellCeButton,
@@ -2091,7 +2095,9 @@
             reD: `reD${vRowIndex}`,
             tpD: `tpD${vRowIndex}`,
             slD: `slD${vRowIndex}`,
-            reEnter: `reEnter${vRowIndex}`
+            oppLegPct: `oppLegPct${vRowIndex}`,
+            reEnter: `reEnter${vRowIndex}`,
+            reEntryMethod: `reEntryMethod${vRowIndex}`
         };
     }
 
@@ -2110,7 +2116,9 @@
             reD: isDualLikeMode ? "0.65" : (isLong ? "0.65" : "0.65"),
             tpD: isDualLikeMode ? "0.30" : (isLong ? "0.30" : "0.30"),
             slD: isDualLikeMode ? "0.80" : (isLong ? "0.80" : "0.80"),
-            reEnter: bAllowCoveredDemoReEntry || !supportsRenkoFeed
+            oppLegPct: "50",
+            reEnter: bAllowCoveredDemoReEntry || !supportsRenkoFeed,
+            reEntryMethod: "newD"
         };
         if (isCoveredMode && vRowIndex === 2) {
             const coveredBuyDefaults = {
@@ -2225,9 +2233,11 @@
             : getInputValue(nodes.reD, defaults.reD);
         rowState[keys.tpD] = normalizeCalendarSpreadTpPct(getInputValue(nodes.tpD, defaults.tpD), defaults.tpD);
         rowState[keys.slD] = normalizeCalendarSpreadSlPct(getInputValue(nodes.slD, defaults.slD), defaults.slD);
+        rowState[keys.oppLegPct] = getInputValue(nodes.oppLegPct, defaults.oppLegPct);
         rowState[keys.reEnter] = (supportsRenkoFeed && !bUseNewDForReEntry)
             ? false
             : getCheckboxValue(nodes.reEnter, defaults.reEnter);
+        rowState[keys.reEntryMethod] = (nodes.reEntryMethodNewD1?.checked === true) ? "newD" : "oppLegPct";
         return rowState;
     }
 
@@ -2252,7 +2262,14 @@
         setInputValue(nodes.reD, (isStrangleLikePage || bUseNewDForReEntry) ? (uiState[keys.newD] ?? defaults.newD) : (uiState[keys.reD] ?? defaults.reD));
         setInputValue(nodes.tpD, normalizeCalendarSpreadTpPct(uiState[keys.tpD] ?? defaults.tpD, defaults.tpD));
         setInputValue(nodes.slD, normalizeCalendarSpreadSlPct(uiState[keys.slD] ?? defaults.slD, defaults.slD));
+        setInputValue(nodes.oppLegPct, uiState[keys.oppLegPct] ?? defaults.oppLegPct);
         setCheckboxValue(nodes.reEnter, (supportsRenkoFeed && !bUseNewDForReEntry) ? false : (uiState[keys.reEnter] ?? defaults.reEnter));
+        const vReEntryMethod = uiState[keys.reEntryMethod] ?? defaults.reEntryMethod;
+        if (nodes.reEntryMethodNewD1 && nodes.reEntryMethodOppLeg1) {
+            nodes.reEntryMethodNewD1.checked = (vReEntryMethod === "newD");
+            nodes.reEntryMethodOppLeg1.checked = (vReEntryMethod === "oppLegPct");
+        }
+        nodes.oppLegPct?.parentElement?.parentElement?.style.display = (vReEntryMethod === "oppLegPct") ? "" : "none";
     }
 
     function formatCurrentDateTimeLocalValue() {
@@ -2365,6 +2382,7 @@
             defaultState[keys.reD] = defaults.reD;
             defaultState[keys.tpD] = defaults.tpD;
             defaultState[keys.slD] = defaults.slD;
+            defaultState[keys.oppLegPct] = defaults.oppLegPct;
             defaultState[keys.reEnter] = defaults.reEnter;
         });
         return defaultState;
@@ -6848,9 +6866,20 @@
             nodes.reD,
             nodes.tpD,
             nodes.slD,
-            nodes.reEnter
+            nodes.reEnter,
+            nodes.oppLegPct,
+            nodes.reEntryMethodNewD1,
+            nodes.reEntryMethodOppLeg1
         ].forEach(function (node) {
-            node?.addEventListener("change", queueProfileSave);
+            node?.addEventListener("change", function () {
+                if (node === nodes.oppLegPct || node === nodes.reEntryMethodNewD1 || node === nodes.reEntryMethodOppLeg1) {
+                    if (nodes.oppLegPct?.parentElement?.parentElement) {
+                        nodes.oppLegPct.parentElement.parentElement.style.display =
+                            (nodes.reEntryMethodOppLeg1.checked === true) ? "" : "none";
+                    }
+                }
+                queueProfileSave();
+            });
             if (node instanceof HTMLInputElement && node.type !== "checkbox") {
                 node.addEventListener("input", queueProfileSave);
             }
