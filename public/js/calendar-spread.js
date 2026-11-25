@@ -2819,37 +2819,73 @@
         return Number.isFinite(vRequiredMargin) && vRequiredMargin > 0 ? vRequiredMargin : Number.NaN;
     }
 
-    function computeCombinedNetPnl() {
-        // Options Open Positions: displayedPositions is already filtered to exclude futures.
+    function computeSectionTotals() {
+        // Mirrors the three table TOTAL rows exactly:
+        // - Options TOTAL row: buildFallbackOpenPositionSourceTotals(displayedPositions)
+        // - Futures TOTAL row: vFuturesTotalCharges / vFuturesTotalPnl reduces
+        // - Closed TOTAL row: totalCharges / totalPnl reduces over closedPositions
         const optionsTotals = buildFallbackOpenPositionSourceTotals(displayedPositions);
 
-        // Futures Open Positions: filter the full payload for futures rows.
         const arrAllRows = Array.isArray(lastOpenPositionsPayload?.positions)
             ? lastOpenPositionsPayload.positions
             : [];
         const futuresRows = arrAllRows.filter(isCalendarSpreadFutureRow);
-        const futuresTotals = buildFallbackOpenPositionSourceTotals(futuresRows);
-
-        // Closed Positions: sum pnl and charges from the closed positions array.
-        let closedTotalPnl = 0;
-        let closedTotalCharges = 0;
-        (Array.isArray(closedPositions) ? closedPositions : []).forEach(function (row) {
-            closedTotalPnl += Number(row?.pnl || 0);
-            closedTotalCharges += Number(row?.charges || 0);
+        const futuresCharges = futuresRows.reduce(function (sum, row) {
+            return sum + Number(row?.charges || 0);
+        }, 0);
+        const futuresHasPnl = futuresRows.some(function (row) {
+            return Number.isFinite(Number(row?.pnl));
         });
+        const futuresPnl = futuresRows.reduce(function (sum, row) {
+            return sum + Number(row?.pnl || 0);
+        }, 0);
 
+        const closedCharges = (Array.isArray(closedPositions) ? closedPositions : []).reduce(function (sum, row) {
+            return sum + Number(row?.charges || 0);
+        }, 0);
+        const closedPnl = (Array.isArray(closedPositions) ? closedPositions : []).reduce(function (sum, row) {
+            return sum + Number(row?.pnl || 0);
+        }, 0);
+
+        return {
+            optionsCharges: Number(optionsTotals.totalCharges || 0),
+            optionsPnl: Number(optionsTotals.totalPnl || 0),
+            futuresCharges: Number(futuresCharges || 0),
+            futuresPnl: futuresHasPnl ? Number(futuresPnl || 0) : 0,
+            closedCharges: Number(closedCharges || 0),
+            closedPnl: Number(closedPnl || 0)
+        };
+    }
+
+    function computeCombinedNetPnl() {
+        // Legacy alias kept for compatibility: Net PnL = Section PnL sums - Section charge sums.
+        const objSections = computeSectionTotals();
         return Number((
-            (optionsTotals.totalPnl - optionsTotals.totalCharges) +
-            (futuresTotals.totalPnl - futuresTotals.totalCharges) +
-            (closedTotalPnl - closedTotalCharges)
+            (objSections.optionsPnl - objSections.optionsCharges) +
+            (objSections.futuresPnl - objSections.futuresCharges) +
+            (objSections.closedPnl - objSections.closedCharges)
         ).toFixed(4));
+    }
+
+    function renderHeroTotals() {
+        const objSections = computeSectionTotals();
+        const vTotalBrokerage = Number((objSections.optionsCharges + objSections.futuresCharges + objSections.closedCharges).toFixed(4));
+        const vTotalPnl = Number((objSections.optionsPnl + objSections.futuresPnl + objSections.closedPnl).toFixed(4));
+        const vNetPnl = Number((vTotalPnl - vTotalBrokerage).toFixed(4));
+        if (ids.brok2Rec instanceof HTMLInputElement) {
+            ids.brok2Rec.value = fmt(vTotalBrokerage, 4) === "-" ? "0" : fmt(vTotalBrokerage, 4);
+        }
+        if (ids.yet2Recover instanceof HTMLInputElement) {
+            ids.yet2Recover.value = fmt(vTotalPnl, 4) === "-" ? "0" : fmt(vTotalPnl, 4);
+        }
+        return { totalBrokerage: vTotalBrokerage, totalPnl: vTotalPnl, netPnl: vNetPnl };
     }
 
     function renderNetPnlValue() {
         if (!ids.netPl) {
             return;
         }
-        const vNetPnl = computeCombinedNetPnl();
+        const vNetPnl = renderHeroTotals().netPnl;
         trackMaxLoss(vNetPnl);
         const vNetPnlText = fmt(vNetPnl, 4) === "-" ? "0.0000" : fmt(vNetPnl, 4);
         if (!isCoveredMode) {
@@ -2870,12 +2906,9 @@
     function applyRecoveryMetrics(recoveryMetrics) {
         const objMetrics = recoveryMetrics || {};
         lastRecoveryMetrics = objMetrics;
-        if (ids.brok2Rec instanceof HTMLInputElement) {
-            ids.brok2Rec.value = fmt(objMetrics.totalBrokerageToRecover, 4) === "-" ? "0" : fmt(objMetrics.totalBrokerageToRecover, 4);
-        }
-        if (ids.yet2Recover instanceof HTMLInputElement) {
-            ids.yet2Recover.value = fmt(objMetrics.totalPnl, 4) === "-" ? "0" : fmt(objMetrics.totalPnl, 4);
-        }
+        // Hero metrics are section-driven (options + futures + closed sums).
+        // Do not overwrite the hero inputs with the stale server snapshot here;
+        // renderHeroTotals (via renderNetPnlValue) keeps them in sync with the tables.
         renderNetPnlValue();
     }
 
@@ -5422,6 +5455,7 @@
                 ids.openCount.textContent = String(arrRows.length);
             }
             setButtonsEnabled();
+            renderNetPnlValue();
             return;
         }
         if (!ids.openPositionsBody) {
@@ -5441,6 +5475,7 @@
                 ids.openPageNumbers.innerHTML = "";
             }
             setButtonsEnabled();
+            renderNetPnlValue();
             return;
         }
         const totalPages = Math.max(1, Math.ceil(arrRows.length / openPositionsPageSize));
@@ -5955,6 +5990,7 @@
             if (ids.closedPageNumbers) {
                 ids.closedPageNumbers.innerHTML = "";
             }
+            renderNetPnlValue();
             return;
         }
         const startIndex = (closedPositionsPage - 1) * closedPositionsPageSize;
