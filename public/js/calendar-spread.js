@@ -2269,7 +2269,9 @@
             nodes.reEntryMethodNewD1.checked = (vReEntryMethod === "newD");
             nodes.reEntryMethodOppLeg1.checked = (vReEntryMethod === "oppLegPct");
         }
-        nodes.oppLegPct?.parentElement?.parentElement?.style.display = (vReEntryMethod === "oppLegPct") ? "" : "none";
+        if (nodes.oppLegPct?.parentElement?.parentElement) {
+            nodes.oppLegPct.parentElement.parentElement.style.display = (vReEntryMethod === "oppLegPct") ? "" : "none";
+        }
     }
 
     function formatCurrentDateTimeLocalValue() {
