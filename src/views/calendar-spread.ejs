@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
@@ -333,6 +333,29 @@
                         <label for="txtRollingFuturesQty1">Qty</label>
                         <input type="number" min="1" id="txtRollingFuturesQty1" value="1" />
                     </div>
+                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-newd">
+                        <label for="txtRollingFuturesNewD1">New D</label>
+                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD1" value="<%= bIsCoveredLivePage ? '0.27' : '0.33' %>" />
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-tpd">
+                        <label for="txtRollingFuturesTpD1">% TP of Premium</label>
+                        <input type="number" min="1" max="100" step="1" id="txtRollingFuturesTpD1" value="10" />
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-sld">
+                        <label for="txtRollingFuturesSlD1">% SL of Premium</label>
+                        <input type="number" min="1" max="100" step="1" id="txtRollingFuturesSlD1" value="20" />
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row1-break-action rolling-covered-row1-break-action-sellpe">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesSellPe">SELL PE</button>
+                    </div>
+                    <div class="rolling-demo-field rolling-covered-row1-break-action rolling-covered-row1-break-action-sellce">
+                        <label>&nbsp;</label>
+                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesSellCe">SELL CE</button>
+                    </div>
+                </div>
+
+                <div class="rolling-futures-demo-grid row">
                     <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-reenter">
                         <label for="chkRollingFuturesReEnter1">
                             Re-Enter
@@ -355,35 +378,8 @@
                         <label for="txtRollingFuturesOppLegPct1">% Premium of Opp Leg</label>
                         <input type="number" min="1" max="100" step="1" id="txtRollingFuturesOppLegPct1" value="50" />
                     </div>
-                    <div class="rolling-demo-field rolling-covered-row1-inline-action rolling-covered-row1-inline-action-buyce">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesBuyCe">BUY CE</button>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-inline-action rolling-covered-row1-inline-action-buype">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesBuyPe">BUY PE</button>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-newd">
-                        <label for="txtRollingFuturesNewD1">New D</label>
-                        <input type="number" min="0" max="2" step="0.01" id="txtRollingFuturesNewD1" value="<%= bIsCoveredLivePage ? '0.27' : '0.33' %>" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-tpd">
-                        <label for="txtRollingFuturesTpD1">% TP of Premium</label>
-                        <input type="number" min="1" max="100" step="1" id="txtRollingFuturesTpD1" value="10" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-break rolling-covered-row1-break-sld">
-                        <label for="txtRollingFuturesSlD1">% SL of Premium</label>
-                        <input type="number" min="1" max="100" step="1" id="txtRollingFuturesSlD1" value="20" />
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-break-action rolling-covered-row1-break-action-sellpe">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn buy" type="button" id="btnRollingFuturesSellPe">SELL PE</button>
-                    </div>
-                    <div class="rolling-demo-field rolling-covered-row1-break-action rolling-covered-row1-break-action-sellce">
-                        <label>&nbsp;</label>
-                        <button class="rolling-demo-btn sell" type="button" id="btnRollingFuturesSellCe">SELL CE</button>
-                    </div>
                 </div>
+
 
                 <div class="rolling-futures-demo-grid row calendar-spread-hedge-row">
                     <div class="rolling-demo-field calendar-spread-hedge-type">
