@@ -184,12 +184,12 @@ const gStrategyNames: Record<RollingFuturesLtStrategyCode, string> = {
     "rolling-futures-lt-short": "Short Rolling Futures",
     "rolling-futures-lt-dual": "Dual Rolling Futures",
     "covered-options": "Covered Options",
-    "strangle-options": "Strangle Options",
     "renko-options": "Renko Options",
     "crypto-scalper": "Crypto Scalper",
     "options-scalper": "Options Demo",
     "straddle-demo": "Straddle Demo",
-    "calendar-spread": "Calendar Spread"
+    "calendar-spread": "Calendar Spread",
+    "option-hedged-futures": "Option Hedged Futures"
 };
 const gFutureLimitRetryDelayMs = 5000;
 const gFutureLimitRetryCount = 5;
@@ -518,7 +518,6 @@ function getAccountId(req: Request): string {
         req.authAccount?.isVerifier
         && (
             req.originalUrl.includes("/covered-options")
-            || req.originalUrl.includes("/strangle-options")
             || req.originalUrl.includes("/renko-options")
         )
     );
@@ -531,13 +530,11 @@ function getAccountId(req: Request): string {
 function isDualRollingFuturesStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
     return pStrategyCode === "rolling-futures-lt-dual"
         || pStrategyCode === "covered-options"
-        || pStrategyCode === "strangle-options"
         || pStrategyCode === "renko-options";
 }
 
 function isCoveredLikeStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
     return pStrategyCode === "covered-options"
-        || pStrategyCode === "strangle-options"
         || pStrategyCode === "renko-options"
         || pStrategyCode === "options-scalper"
         || pStrategyCode === "straddle-demo"
@@ -565,7 +562,7 @@ function supportsRenkoSettingsStrategy(pStrategyCode: RollingFuturesLtStrategyCo
 }
 
 function isStrangleOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "strangle-options" || pStrategyCode === "renko-options" || pStrategyCode === "straddle-demo";
+    return pStrategyCode === "renko-options" || pStrategyCode === "straddle-demo";
 }
 
 // Calendar Spread dropped these five Manual Trader toggles from its page, so
@@ -577,7 +574,7 @@ function isManualTraderToggleRemovedStrategy(pStrategyCode: RollingFuturesLtStra
 }
 
 function isCoveredOptionsStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
-    return pStrategyCode === "covered-options" || pStrategyCode === "strangle-options" || pStrategyCode === "renko-options";
+    return pStrategyCode === "covered-options" || pStrategyCode === "renko-options";
 }
 
 function isDualServerManagedStrategy(pStrategyCode: RollingFuturesLtStrategyCode): boolean {
@@ -594,7 +591,7 @@ function getCoveredLikeStrategyLabel(pStrategyCode: RollingFuturesLtStrategyCode
     if (pStrategyCode === "calendar-spread") {
         return "Calendar Spread";
     }
-    return pStrategyCode === "strangle-options" ? "Strangle Options" : "Covered Options";
+    return "Covered Options";
 }
 
 function getCoveredLikeLowerLabel(pStrategyCode: RollingFuturesLtStrategyCode): string {
@@ -604,7 +601,7 @@ function getCoveredLikeLowerLabel(pStrategyCode: RollingFuturesLtStrategyCode): 
     if (pStrategyCode === "straddle-demo") {
         return "straddle demo";
     }
-    return pStrategyCode === "strangle-options" ? "strangle" : "covered";
+    return "covered";
 }
 
 function getCoveredLikeLegText(pStrategyCode: RollingFuturesLtStrategyCode): string {
@@ -617,7 +614,7 @@ function getCoveredLikeLegText(pStrategyCode: RollingFuturesLtStrategyCode): str
     if (pStrategyCode === "calendar-spread") {
         return "calendar spread leg";
     }
-    return pStrategyCode === "strangle-options" ? "strangle leg" : "covered leg";
+    return "covered leg";
 }
 
 function getCoveredLikePositionText(pStrategyCode: RollingFuturesLtStrategyCode): string {
@@ -630,7 +627,7 @@ function getCoveredLikePositionText(pStrategyCode: RollingFuturesLtStrategyCode)
     if (pStrategyCode === "calendar-spread") {
         return "calendar spread position";
     }
-    return pStrategyCode === "strangle-options" ? "strangle position" : "covered position";
+    return "covered position";
 }
 
 function normalizeOptionRowIndex(
@@ -1075,9 +1072,7 @@ async function executePendingDualStrategyRequestByRecord(
 }> {
     const vStrategyCode: RollingFuturesLtStrategyCode = pRequest.strategyCode === "covered-options"
         ? "covered-options"
-        : (pRequest.strategyCode === "strangle-options"
-            ? "strangle-options"
-            : (pRequest.strategyCode === "renko-options" ? "renko-options" : "rolling-futures-lt-dual"));
+        : (pRequest.strategyCode === "renko-options" ? "renko-options" : "rolling-futures-lt-dual");
     if (!isDualExecStrategyAllowed(vStrategyCode, pRequest.execStrategy)) {
         throw new Error(gExecStrategyUnauthorizedMessage);
     }
@@ -5773,7 +5768,7 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         calendarSpreadHedgeEntryPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeEntryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct)),
         calendarSpreadHedgeExitPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeExitPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct)),
         calendarSpreadHedgeQtyDelta: normalizeBooleanValue((objUiState as Record<string, unknown>).calendarSpreadHedgeQtyDelta, Boolean((objDefaults as Record<string, unknown>).calendarSpreadHedgeQtyDelta)),
-        calendarSpreadHedgeLossRecoveryPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct)),
+        calendarSpreadHedgeLossRecoveryPct: String(Math.max(1, Math.floor(Number((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct) || 50))),
         oppLegPct1: normalizeStringValue((objUiState as Record<string, unknown>).oppLegPct1, "50"),
         reEntryMethod1: normalizeStringValue((objUiState as Record<string, unknown>).reEntryMethod1, "newD"),
         manualBtcQty: normalizeQtyLikeValue(objUiState.manualBtcQty, objDefaults.manualBtcQty),
@@ -6235,7 +6230,7 @@ function normalizeProfileSaveInput(
         calendarSpreadHedgeEntryPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeEntryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct)),
         calendarSpreadHedgeExitPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeExitPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct)),
         calendarSpreadHedgeQtyDelta: normalizeBooleanValue((objUiState as Record<string, unknown>).calendarSpreadHedgeQtyDelta, Boolean((objDefaults as Record<string, unknown>).calendarSpreadHedgeQtyDelta)),
-        calendarSpreadHedgeLossRecoveryPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct)),
+        calendarSpreadHedgeLossRecoveryPct: String(Math.max(1, Math.floor(Number((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct) || 50))),
         manualBtcQty: normalizeQtyLikeValue(objUiState.manualBtcQty, objDefaults.manualBtcQty),
         manualEthQty: normalizeQtyLikeValue(objUiState.manualEthQty, objDefaults.manualEthQty),
         manualXautQty: normalizeQtyLikeValue(objUiState.manualXautQty, objDefaults.manualXautQty),
@@ -8427,7 +8422,7 @@ function buildDeltaClientOrderId(
 ): string {
     const vPrefix = pStrategyCode === "covered-options"
         ? "COV"
-        : (pStrategyCode === "strangle-options" ? "STG" : (pStrategyCode === "renko-options" ? "RNK" : "RFD"));
+        : (pStrategyCode === "renko-options" ? "RNK" : "RFD");
     const vRunTag = String(pRunTag || "").trim().toUpperCase().slice(0, 10);
     const vSequence = Math.max(1, Math.floor(Number(pSequence || 1))).toString(36).toUpperCase().padStart(2, "0").slice(-2);
     return `${vPrefix}-${vRunTag}-${pOrderKind}${vSequence}`.slice(0, 32);
@@ -8436,9 +8431,6 @@ function buildDeltaClientOrderId(
 function getStrategyClientOrderIdPrefix(pStrategyCode: RollingFuturesLtStrategyCode): string {
     if (pStrategyCode === "covered-options") {
         return "COV-";
-    }
-    if (pStrategyCode === "strangle-options") {
-        return "STG-";
     }
     if (pStrategyCode === "renko-options") {
         return "RNK-";
@@ -12339,7 +12331,7 @@ async function applyTriggeredOptionRule(
     let vLossRecoveryForceLegSide: "ce" | "pe" | undefined;
     if (isCalendarSpreadPremiumTpStrategy(pStrategyCode) && (pReason === "sl" || pReason === "tp")) {
         const objUiState = getMergedUiState(objProfile);
-        const vLossRecoveryPct = Math.max(1, Math.min(100, Math.floor(Number((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct || 50) || 50)));
+        const vLossRecoveryPct = Math.max(1, Math.floor(Number((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct || 50) || 50));
         const vReEntryMethod = String((objUiState as Record<string, unknown>).reEntryMethod1 || "newD");
         const vClosedLegSide = String(inferTrackedOptionLegSide(pPosition.contractName) || "").trim().toLowerCase() as "ce" | "pe";
         const vOppositeLegSide: "ce" | "pe" = vClosedLegSide === "ce" ? "pe" : "ce";
@@ -16798,7 +16790,7 @@ async function evaluateCalendarSpreadHedges(
             const vLossRefPnl = Number(objMetadata.hedgeLossRefPnl || 0);
             const bHasLossRef = Number.isFinite(vLossRefPnl) && vLossRefPnl < 0;
             if (bHasLossRef) {
-                const vLossRecoveryPct = Math.max(1, Math.min(100, Math.floor(Number((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct || 50) || 50)));
+                const vLossRecoveryPct = Math.max(1, Math.floor(Number((objUiState as Record<string, unknown>).calendarSpreadHedgeLossRecoveryPct || 50) || 50));
                 const vRecoveryTarget = Math.abs(vLossRefPnl) * (vLossRecoveryPct / 100);
                 const vLivePnl = Number(objPosition.pnl || 0);
                 if (Number.isFinite(vLivePnl) && vLivePnl >= vRecoveryTarget) {
@@ -19622,7 +19614,7 @@ async function executeCoveredOpenPositionSwap(
 async function swapCoveredOpenPositionInternal(req: Request, res: Response): Promise<void> {
     const pStrategyCode: RollingFuturesLtStrategyCode = req.originalUrl.includes("/renko-options")
         ? "renko-options"
-        : (req.originalUrl.includes("/strangle-options") ? "strangle-options" : "covered-options");
+        : "covered-options";
     const vStrategyLabel = getCoveredLikeStrategyLabel(pStrategyCode);
     const vLowerLabel = getCoveredLikeLowerLabel(pStrategyCode);
     const vUserId = getAccountId(req);
@@ -22678,10 +22670,6 @@ export async function listCoveredOptionsVerifierRunningUsers(req: Request, res: 
     await listCoveredLikeVerifierRunningUsers(req, res, "covered-options", "Covered Options");
 }
 
-export async function listStrangleOptionsVerifierRunningUsers(req: Request, res: Response): Promise<void> {
-    await listCoveredLikeVerifierRunningUsers(req, res, "strangle-options", "Strangle Options");
-}
-
 export async function listRenkoOptionsVerifierRunningUsers(req: Request, res: Response): Promise<void> {
     await listCoveredLikeVerifierRunningUsers(req, res, "renko-options", "Renko Options");
 }
@@ -23314,86 +23302,44 @@ export async function setCoveredOptionsRenkoManualSignal(req: Request, res: Resp
         });
     }
 }
-export async function getStrangleOptionsProfile(req: Request, res: Response): Promise<void> {
-    await getProfileInternal(req, res, "strangle-options");
-}
 export async function getRenkoOptionsProfile(req: Request, res: Response): Promise<void> {
     await getProfileInternal(req, res, "renko-options");
-}
-export async function saveStrangleOptionsProfile(req: Request, res: Response): Promise<void> {
-    await saveProfileInternal(req, res, "strangle-options");
 }
 export async function saveRenkoOptionsProfile(req: Request, res: Response): Promise<void> {
     await saveProfileInternal(req, res, "renko-options");
 }
-export async function getStrangleOptionsConnectionStatus(req: Request, res: Response): Promise<void> {
-    await getConnectionStatusInternal(req, res, "strangle-options");
-}
 export async function getRenkoOptionsConnectionStatus(req: Request, res: Response): Promise<void> {
     await getConnectionStatusInternal(req, res, "renko-options");
-}
-export async function getStrangleOptionsRuntimeStatus(req: Request, res: Response): Promise<void> {
-    await getRuntimeStatusInternal(req, res, "strangle-options");
 }
 export async function getRenkoOptionsRuntimeStatus(req: Request, res: Response): Promise<void> {
     await getRuntimeStatusInternal(req, res, "renko-options");
 }
-export async function checkStrangleOptionsConnection(req: Request, res: Response): Promise<void> {
-    await checkConnectionInternal(req, res, "strangle-options");
-}
 export async function checkRenkoOptionsConnection(req: Request, res: Response): Promise<void> {
     await checkConnectionInternal(req, res, "renko-options");
-}
-export async function enableStrangleOptionsAutoTrader(req: Request, res: Response): Promise<void> {
-    await enableAutoTraderInternal(req, res, "strangle-options");
 }
 export async function enableRenkoOptionsAutoTrader(req: Request, res: Response): Promise<void> {
     await enableAutoTraderInternal(req, res, "renko-options");
 }
-export async function disableStrangleOptionsAutoTrader(req: Request, res: Response): Promise<void> {
-    await disableAutoTraderInternal(req, res, "strangle-options");
-}
 export async function disableRenkoOptionsAutoTrader(req: Request, res: Response): Promise<void> {
     await disableAutoTraderInternal(req, res, "renko-options");
-}
-export async function getStrangleOptionsAccountSummary(req: Request, res: Response): Promise<void> {
-    await getAccountSummaryInternal(req, res, "strangle-options");
 }
 export async function getRenkoOptionsAccountSummary(req: Request, res: Response): Promise<void> {
     await getAccountSummaryInternal(req, res, "renko-options");
 }
-export async function calculateStrangleOptionsRecommendedStartQty(req: Request, res: Response): Promise<void> {
-    await calculateRecommendedStartQtyInternal(req, res, "strangle-options");
-}
 export async function calculateRenkoOptionsRecommendedStartQty(req: Request, res: Response): Promise<void> {
     await calculateRecommendedStartQtyInternal(req, res, "renko-options");
-}
-export async function executeStrangleOptionsManualFuture(req: Request, res: Response): Promise<void> {
-    await executeManualFutureInternal(req, res, "strangle-options");
 }
 export async function executeRenkoOptionsManualFuture(req: Request, res: Response): Promise<void> {
     await executeManualFutureInternal(req, res, "renko-options");
 }
-export async function executeStrangleOptionsManualOption(req: Request, res: Response): Promise<void> {
-    await executeManualOptionInternal(req, res, "strangle-options");
-}
 export async function executeRenkoOptionsManualOption(req: Request, res: Response): Promise<void> {
     await executeManualOptionInternal(req, res, "renko-options");
-}
-export async function executeStrangleOptionsStrategy(req: Request, res: Response): Promise<void> {
-    await executeStrategyInternal(req, res, "strangle-options");
 }
 export async function executeRenkoOptionsStrategy(req: Request, res: Response): Promise<void> {
     await executeStrategyInternal(req, res, "renko-options");
 }
-export async function confirmStrangleOptionsLiveAction(req: Request, res: Response): Promise<void> {
-    await confirmCoveredLiveActionInternal(req, res, "strangle-options");
-}
 export async function confirmRenkoOptionsLiveAction(req: Request, res: Response): Promise<void> {
     await confirmCoveredLiveActionInternal(req, res, "renko-options");
-}
-export async function rejectStrangleOptionsLiveAction(req: Request, res: Response): Promise<void> {
-    await rejectCoveredLiveActionInternal(req, res, "strangle-options");
 }
 export async function rejectRenkoOptionsLiveAction(req: Request, res: Response): Promise<void> {
     await rejectCoveredLiveActionInternal(req, res, "renko-options");
@@ -23401,7 +23347,7 @@ export async function rejectRenkoOptionsLiveAction(req: Request, res: Response):
 export async function listAdminPendingCoveredLikeLiveActions(req: Request, res: Response): Promise<void> {
     const arrRuntimeRows = await listRollingFuturesLtRuntime();
     const arrPending = await Promise.all(arrRuntimeRows
-        .filter((objRuntime) => objRuntime.strategyCode === "covered-options" || objRuntime.strategyCode === "strangle-options" || objRuntime.strategyCode === "renko-options")
+        .filter((objRuntime) => objRuntime.strategyCode === "covered-options" || objRuntime.strategyCode === "renko-options")
         .map(async (objRuntime) => {
             const objPending = getCoveredLiveConfirmationState(objRuntime);
             if (!objPending) {
@@ -23479,7 +23425,7 @@ export async function confirmAdminPendingCoveredLikeLiveAction(req: Request, res
     const vAccountId = String(req.body?.accountId || "").trim();
     const vStrategyCode = String(req.body?.strategyCode || "").trim() as RollingFuturesLtStrategyCode;
     const vActionId = String(req.body?.actionId || "").trim();
-    if (!vAccountId || (vStrategyCode !== "covered-options" && vStrategyCode !== "strangle-options" && vStrategyCode !== "renko-options")) {
+    if (!vAccountId || (vStrategyCode !== "covered-options" && vStrategyCode !== "renko-options")) {
         res.status(400).json({ status: "warning", message: "Valid account and strategy are required." });
         return;
     }
@@ -23490,7 +23436,7 @@ export async function rejectAdminPendingCoveredLikeLiveAction(req: Request, res:
     const vAccountId = String(req.body?.accountId || "").trim();
     const vStrategyCode = String(req.body?.strategyCode || "").trim() as RollingFuturesLtStrategyCode;
     const vActionId = String(req.body?.actionId || "").trim();
-    if (!vAccountId || (vStrategyCode !== "covered-options" && vStrategyCode !== "strangle-options" && vStrategyCode !== "renko-options")) {
+    if (!vAccountId || (vStrategyCode !== "covered-options" && vStrategyCode !== "renko-options")) {
         res.status(400).json({ status: "warning", message: "Valid account and strategy are required." });
         return;
     }
@@ -23838,20 +23784,11 @@ export async function swapCoveredOptionsImportedOpenPosition(req: Request, res: 
 export async function getCoveredOptionsClosedPositions(req: Request, res: Response): Promise<void> {
     await getClosedPositionsInternal(req, res, "covered-options");
 }
-export async function getStrangleOptionsImportableOpenPositions(req: Request, res: Response): Promise<void> {
-    await getImportableOpenPositionsInternal(req, res, "strangle-options");
-}
 export async function getRenkoOptionsImportableOpenPositions(req: Request, res: Response): Promise<void> {
     await getImportableOpenPositionsInternal(req, res, "renko-options");
 }
-export async function getStrangleOptionsOpenPositions(req: Request, res: Response): Promise<void> {
-    await getOpenPositionsInternal(req, res, "strangle-options");
-}
 export async function getRenkoOptionsOpenPositions(req: Request, res: Response): Promise<void> {
     await getOpenPositionsInternal(req, res, "renko-options");
-}
-export async function saveStrangleOptionsOpenPositions(req: Request, res: Response): Promise<void> {
-    await saveOpenPositionsInternal(req, res, "strangle-options");
 }
 export async function handleCoveredOptionsTradeWebhook(req: Request, res: Response): Promise<void> {
     try {
@@ -23946,38 +23883,20 @@ export async function handleCoveredOptionsTradeWebhook(req: Request, res: Respon
 export async function saveRenkoOptionsOpenPositions(req: Request, res: Response): Promise<void> {
     await saveOpenPositionsInternal(req, res, "renko-options");
 }
-export async function deleteStrangleOptionsOpenPosition(req: Request, res: Response): Promise<void> {
-    await deleteOpenPositionInternal(req, res, "strangle-options");
-}
 export async function deleteRenkoOptionsOpenPosition(req: Request, res: Response): Promise<void> {
     await deleteOpenPositionInternal(req, res, "renko-options");
-}
-export async function clearStrangleOptionsOpenPositions(req: Request, res: Response): Promise<void> {
-    await clearOpenPositionsInternal(req, res, "strangle-options");
 }
 export async function clearRenkoOptionsOpenPositions(req: Request, res: Response): Promise<void> {
     await clearOpenPositionsInternal(req, res, "renko-options");
 }
-export async function reconcileStrangleOptionsOpenPositions(req: Request, res: Response): Promise<void> {
-    await reconcileOpenPositionsInternal(req, res, "strangle-options");
-}
 export async function reconcileRenkoOptionsOpenPositions(req: Request, res: Response): Promise<void> {
     await reconcileOpenPositionsInternal(req, res, "renko-options");
-}
-export async function closeStrangleOptionsImportedOpenPosition(req: Request, res: Response): Promise<void> {
-    await closeImportedOpenPositionInternal(req, res, "strangle-options");
 }
 export async function closeRenkoOptionsImportedOpenPosition(req: Request, res: Response): Promise<void> {
     await closeImportedOpenPositionInternal(req, res, "renko-options");
 }
-export async function swapStrangleOptionsImportedOpenPosition(req: Request, res: Response): Promise<void> {
-    await swapCoveredOpenPositionInternal(req, res);
-}
 export async function swapRenkoOptionsImportedOpenPosition(req: Request, res: Response): Promise<void> {
     await swapCoveredOpenPositionInternal(req, res);
-}
-export async function getStrangleOptionsClosedPositions(req: Request, res: Response): Promise<void> {
-    await getClosedPositionsInternal(req, res, "strangle-options");
 }
 export async function getRenkoOptionsClosedPositions(req: Request, res: Response): Promise<void> {
     await getClosedPositionsInternal(req, res, "renko-options");
@@ -23985,17 +23904,11 @@ export async function getRenkoOptionsClosedPositions(req: Request, res: Response
 export async function getCoveredOptionsEvents(req: Request, res: Response): Promise<void> {
     await getEventsInternal(req, res, "covered-options");
 }
-export async function getStrangleOptionsEvents(req: Request, res: Response): Promise<void> {
-    await getEventsInternal(req, res, "strangle-options");
-}
 export async function getRenkoOptionsEvents(req: Request, res: Response): Promise<void> {
     await getEventsInternal(req, res, "renko-options");
 }
 export async function clearCoveredOptionsEventsController(req: Request, res: Response): Promise<void> {
     await clearEventsInternal(req, res, "covered-options");
-}
-export async function clearStrangleOptionsEventsController(req: Request, res: Response): Promise<void> {
-    await clearEventsInternal(req, res, "strangle-options");
 }
 export async function clearRenkoOptionsEventsController(req: Request, res: Response): Promise<void> {
     await clearEventsInternal(req, res, "renko-options");
@@ -24003,26 +23916,17 @@ export async function clearRenkoOptionsEventsController(req: Request, res: Respo
 export async function deleteCoveredOptionsEventController(req: Request, res: Response): Promise<void> {
     await deleteEventInternal(req, res, "covered-options");
 }
-export async function deleteStrangleOptionsEventController(req: Request, res: Response): Promise<void> {
-    await deleteEventInternal(req, res, "strangle-options");
-}
 export async function deleteRenkoOptionsEventController(req: Request, res: Response): Promise<void> {
     await deleteEventInternal(req, res, "renko-options");
 }
 export async function executeCoveredOptionsKillSwitch(req: Request, res: Response): Promise<void> {
     await executeKillSwitchInternal(req, res, "covered-options");
 }
-export async function executeStrangleOptionsKillSwitch(req: Request, res: Response): Promise<void> {
-    await executeKillSwitchInternal(req, res, "strangle-options");
-}
 export async function executeRenkoOptionsKillSwitch(req: Request, res: Response): Promise<void> {
     await executeKillSwitchInternal(req, res, "renko-options");
 }
 export async function updateCoveredOptionsRecoveryMetrics(req: Request, res: Response): Promise<void> {
     await updateRecoveryMetricsInternal(req, res, "covered-options");
-}
-export async function updateStrangleOptionsRecoveryMetrics(req: Request, res: Response): Promise<void> {
-    await updateRecoveryMetricsInternal(req, res, "strangle-options");
 }
 export async function updateRenkoOptionsRecoveryMetrics(req: Request, res: Response): Promise<void> {
     await updateRecoveryMetricsInternal(req, res, "renko-options");
@@ -24514,9 +24418,6 @@ export async function recalculateCryptoScalperRecoveryTotalPnl(req: Request, res
     await recalculateRecoveryTotalPnlInternal(req, res, "crypto-scalper");
 }
 
-export async function recalculateStrangleOptionsRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
-    await recalculateRecoveryTotalPnlInternal(req, res, "strangle-options");
-}
 export async function recalculateRenkoOptionsRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "renko-options");
 }
@@ -25706,6 +25607,9 @@ export async function updateStraddleDemoRecoveryMetrics(req: Request, res: Respo
 export async function recalculateStraddleDemoRecoveryTotalPnl(req: Request, res: Response): Promise<void> {
     await recalculateRecoveryTotalPnlInternal(req, res, "straddle-demo");
 }
+
+
+
 
 
 

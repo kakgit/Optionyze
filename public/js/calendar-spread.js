@@ -5360,7 +5360,7 @@
                 const vLossRef = Number(objOptMeta.hedgeLossRefPnl || 0);
                 if (Number.isFinite(vLossRef) && vLossRef < 0) {
                     const vRecPctRaw = Number(ids.hedgeLossRecoveryPct instanceof HTMLInputElement ? ids.hedgeLossRecoveryPct.value : 50);
-                    const vRecPct = Number.isFinite(vRecPctRaw) ? Math.max(1, Math.min(100, Math.floor(vRecPctRaw))) : 50;
+                    const vRecPct = Number.isFinite(vRecPctRaw) ? Math.max(1, Math.floor(vRecPctRaw)) : 50;
                     const vTarget = Math.abs(vLossRef) * (vRecPct / 100);
                     const vTip = `Hedge closes when ${escapeHtml(String(objOption.contractName || "-"))} PnL >= +${fmt(vTarget, 2)} (recovers ${vRecPct}% of ${fmt(vLossRef, 2)})`;
                     return `<span title="${escapeHtml(vTip)}"><div>+${escapeHtml(fmt(vTarget, 2))} PnL</div></span>`;
@@ -5594,7 +5594,7 @@
                     const vLossRefPnl = Number(objMeta.hedgeLossRefPnl);
                     if (Number.isFinite(vLossRefPnl) && vLossRefPnl < 0) {
                         const vRecPctRaw = Number(ids.hedgeLossRecoveryPct instanceof HTMLInputElement ? ids.hedgeLossRecoveryPct.value : 50);
-                        const vRecPct = Number.isFinite(vRecPctRaw) ? Math.max(1, Math.min(100, Math.floor(vRecPctRaw))) : 50;
+                        const vRecPct = Number.isFinite(vRecPctRaw) ? Math.max(1, Math.floor(vRecPctRaw)) : 50;
                         const vTarget = Math.abs(vLossRefPnl) * (vRecPct / 100);
                         vTip += ` | loss ref ${fmt(vLossRefPnl, 2)} closes at +${fmt(vTarget, 2)} (${vRecPct}%)`;
                         return `<span title="${escapeHtml(vTip)}"><div>+${escapeHtml(fmt(vTarget, 2))}</div></span>`;

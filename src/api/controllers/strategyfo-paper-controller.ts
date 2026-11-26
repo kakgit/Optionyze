@@ -35,16 +35,6 @@ export function renderCryptoScalperPage(req: Request, res: Response): void {
     });
 }
 
-export function renderStrangleOptionsPage(req: Request, res: Response): void {
-    res.render("covered-options", {
-        pageTitle: "Strangle Options - Live | Optionyze",
-        pageVariant: "strangle",
-        currentAccount: req.authAccount,
-        defaultUserId: req.authAccount?.accountId || "demo-paper",
-        rollingTelegramEventTypes: gRollingFuturesTelegramEventTypes
-    });
-}
-
 export function renderRenkoOptionsPage(req: Request, res: Response): void {
     res.render("covered-options", {
         pageTitle: "Renko Options - Live | Optionyze",
@@ -70,6 +60,15 @@ export function renderOptionsDemoPage(req: Request, res: Response): void {
 export function renderCalendarSpreadPage(req: Request, res: Response): void {
     res.render("calendar-spread", {
         pageTitle: "Calendar Spread | Optionyze",
+        pageVariant: "demo",
+        currentAccount: req.authAccount,
+        defaultUserId: req.authAccount?.accountId || "demo-paper"
+    });
+}
+
+export function renderOptionHedgedFuturesPage(req: Request, res: Response): void {
+    res.render("option-hedged-futures", {
+        pageTitle: "Option Hedged Futures | Optionyze",
         pageVariant: "demo",
         currentAccount: req.authAccount,
         defaultUserId: req.authAccount?.accountId || "demo-paper"

@@ -19,17 +19,15 @@ import {
     renderCoveredOptionsPage,
     renderCryptoScalperPage,
     renderRenkoOptionsPage,
-    renderStrangleOptionsPage,
     renderOptionsDemoPage,
-    renderCalendarSpreadPage
+    renderCalendarSpreadPage,
+    renderOptionHedgedFuturesPage
 } from "../api/controllers/strategyfo-paper-controller";
 import { renderManageTradesPage } from "../api/controllers/users-controller";
 import { buildOpenPositionsPayload, recoverRollingFuturesLtAutoTraderCycles, syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade, syncOptionsScalperRenkoRuntimeAndMaybeAutoTrade, syncCalendarSpreadRenkoRuntimeAndMaybeAutoTrade } from "../api/controllers/rolling-futures-lt-controller";
 import { loadRollingFuturesLtRuntime } from "../storage/rolling-futures-lt-runtime-store";
 import { ensureLiveTickerSymbols, getLiveMarketSnapshot } from "../strategies/rolling-options-pt-de/market-data";
 import type { RollingOptionsPtDeConfig } from "../strategies/rolling-options-pt-de/types";
-import { renderArbitragePage, renderCoinSwitchDeltaPage } from "../api/controllers/arbitrage-controller";
-import { renderBybitDeltaPage } from "../api/controllers/bybit-arbitrage-controller";
 import {
     changePassword,
     renderChangePasswordPage,
@@ -81,9 +79,12 @@ function getDemoRenkoLotSize(symbol: "BTC" | "ETH"): number {
 
 // Maps an open-positions WebSocket path to the strategy code it is allowed to
 // stream. Returning "" means the path is not an open-positions stream.
-function resolveOpenPositionsStreamStrategyCode(pathname: string): "" | "calendar-spread" {
+function resolveOpenPositionsStreamStrategyCode(pathname: string): "" | "calendar-spread" | "option-hedged-futures" {
     if (pathname === "/ws/calendar-spread/open-positions") {
         return "calendar-spread";
+    }
+    if (pathname === "/ws/option-hedged-futures/open-positions") {
+        return "option-hedged-futures";
     }
     return "";
 }
@@ -146,18 +147,12 @@ async function bootstrap(): Promise<void> {
     app.get("/survival-admin/dashboard", requireSurvivalAdminPage, renderSurvivalAdminDashboardPage);
     app.get("/survival-admin/running-users", requireSurvivalAdminPage, renderSurvivalAdminRunningUsersPage);
     app.get("/dashboard", requireAuthPage, requireFreshPasswordPage, renderDashboardPage);
-    app.get("/arbitrage", requireAuthPage, requireFreshPasswordPage, (_req, res) => {
-        res.redirect(302, "/arbitrage/shark-delta");
-    });
-    app.get("/arbitrage/shark-delta", requireAuthPage, requireFreshPasswordPage, renderArbitragePage);
-    app.get("/arbitrage/bybit-delta", requireAuthPage, requireFreshPasswordPage, renderBybitDeltaPage);
-    app.get("/arbitrage/coinswitch-delta", requireAuthPage, requireFreshPasswordPage, renderCoinSwitchDeltaPage);
     app.get("/covered-options", requireAuthPage, requireFreshPasswordPage, renderCoveredOptionsPage);
     app.get("/crypto-scalper", requireAuthPage, requireFreshPasswordPage, renderCryptoScalperPage);
-    app.get("/strangle-options", requireAuthPage, requireFreshPasswordPage, renderStrangleOptionsPage);
     app.get("/renko-options", requireAuthPage, requireFreshPasswordPage, renderRenkoOptionsPage);
     app.get("/options-demo", requireAuthPage, requireFreshPasswordPage, renderOptionsDemoPage);
     app.get("/calendar-spread", requireAuthPage, requireFreshPasswordPage, renderCalendarSpreadPage);
+    app.get("/option-hedged-futures", requireAuthPage, requireFreshPasswordPage, renderOptionHedgedFuturesPage);
 app.get("/manage-trades", requireAuthPage,
 requireFreshPasswordPage, requireAdminPage,
 renderManageTradesPage);
@@ -183,7 +178,7 @@ renderManageTradesPage);
         try {
             const objUrl = new URL(String(req.url || ""), "http://localhost");
             const vIsStatusSocket = objUrl.pathname === "/ws/status";
-            if (!vIsStatusSocket && objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/covered-options/renko" && objUrl.pathname !== "/ws/calendar-spread/renko" && objUrl.pathname !== "/ws/calendar-spread/open-positions") {
+            if (!vIsStatusSocket && objUrl.pathname !== "/ws/options-demo/renko" && objUrl.pathname !== "/ws/covered-options/renko" && objUrl.pathname !== "/ws/calendar-spread/renko" && objUrl.pathname !== "/ws/calendar-spread/open-positions" && objUrl.pathname !== "/ws/option-hedged-futures/renko" && objUrl.pathname !== "/ws/option-hedged-futures/open-positions") {
                 socket.destroy();
                 return;
             }
