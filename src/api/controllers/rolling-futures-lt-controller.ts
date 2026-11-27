@@ -475,6 +475,7 @@ interface RollingFuturesLtOptionMetadata {
     hedgeReanchoredAt?: string;
     hedgeLossRefPnl?: number;
     hedgeLossRefContract?: string;
+    hedgeEntrySkipLoggedAt?: number;
 }
 
 type CoveredLiveConfirmationKind =
@@ -17108,6 +17109,12 @@ async function evaluateCalendarSpreadHedges(
             return String(objRow.side || "").trim().toUpperCase() === vHedgeAction;
         });
         if (bSameSideFutureOpen) {
+            const vLastSkipLoggedAt = Number(objMetadata.hedgeEntrySkipLoggedAt || 0);
+            const vNowMs = Date.now();
+            const vSkipCooldownMs = 60 * 1000; // 60 seconds cooldown before re-logging same skip
+            if (!(vNowMs - vLastSkipLoggedAt >= vSkipCooldownMs)) {
+                continue;
+            }
             await logFuturesEvent(
                 pUserId,
                 "calendar-spread",
@@ -17121,6 +17128,17 @@ async function evaluateCalendarSpreadHedges(
                     reason: "calendar_hedge_entry_same_side_open"
                 }
             );
+            arrNext = arrNext.map((objRow) => {
+                if (String(objRow.importId) !== vOptionImportId) return objRow;
+                const objRowMeta = getTrackedOptionMetadata(objRow);
+                return {
+                    ...objRow,
+                    metadata: optionMetadataToRecord({
+                        ...objRowMeta,
+                        hedgeEntrySkipLoggedAt: vNowMs
+                    })
+                };
+            });
             continue;
         }
 
