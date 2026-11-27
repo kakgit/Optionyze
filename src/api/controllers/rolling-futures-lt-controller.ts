@@ -12231,6 +12231,91 @@ async function applyTriggeredOptionRule(
         );
     let arrNextPositions = pTrackedPositions.filter((objRow) => objRow.importId !== pPosition.importId);
 
+    // SL-only: when one leg hits SL, close the opposite leg (CE↔PE, same expiry) too
+    let vOppositeLegPosition: RollingFuturesLtImportedPositionRecord | undefined;
+    let vOppositeLegClosePnl = 0;
+    let vOppositeLegCloseCharge = 0;
+    if (pReason === "sl") {
+        const vClosedLegSide = String(inferTrackedOptionLegSide(pPosition.contractName) || "").trim().toLowerCase();
+        const vOppositeLegSide: "ce" | "pe" = vClosedLegSide === "ce" ? "pe" : "ce";
+        const vClosedExpiryDate = getTrackedOptionResolvedExpiryDate(pPosition);
+        vOppositeLegPosition = arrNextPositions.find((objRow) => {
+            const objRowMeta = getTrackedOptionMetadata(objRow);
+            const vRowLegSide = String(inferTrackedOptionLegSide(objRow.contractName) || "").trim().toLowerCase();
+            const vRowExpiry = getTrackedOptionResolvedExpiryDate(objRow);
+            return vRowLegSide === vOppositeLegSide
+                && vRowExpiry === vClosedExpiryDate;
+        });
+        if (vOppositeLegPosition) {
+            const vOpposite = vOppositeLegPosition;
+            const objOppositeCloseResult = await closeTrackedPositionOnDelta(
+                pUserId,
+                pStrategyCode,
+                pSelectedApiProfileId,
+                vOpposite,
+                "SL"
+            );
+            const { client } = await getDeltaClientForAccountId(pUserId, pSelectedApiProfileId);
+            const objOppositeMeta = getTrackedOptionMetadata(vOpposite);
+            const vOppositeResolvedCloseCharge = await resolveOrderChargeFromDelta(
+                client,
+                vOpposite.contractName,
+                objOppositeCloseResult.payload,
+                String(vOpposite.side || "").trim().toUpperCase() === "BUY" ? "SELL" : "BUY",
+                Number(vOpposite.qty || 0),
+                objOppositeCloseResult.placedAt
+            );
+            vOppositeLegCloseCharge = vOppositeResolvedCloseCharge !== null
+                ? vOppositeResolvedCloseCharge
+                : await estimateTrackedPositionCharge(
+                    vOpposite,
+                    Number(vOpposite.markPrice || vOpposite.entryPrice || 0)
+                );
+            vOppositeLegClosePnl = Number.isFinite(Number(objOppositeCloseResult.realizedPnl))
+                ? Number(objOppositeCloseResult.realizedPnl)
+                : estimateTrackedPositionPnl(
+                    vOpposite,
+                    Number.isFinite(Number(objOppositeCloseResult.payload?.average_fill_price || 0))
+                        ? Number(objOppositeCloseResult.payload?.average_fill_price || 0)
+                        : Number(vOpposite.markPrice || vOpposite.entryPrice || 0)
+                );
+            arrNextPositions = arrNextPositions.filter((objRow) => objRow.importId !== vOpposite.importId);
+
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "sl_triggered",
+                "warning",
+                "Option SL Triggered - Opposite Leg Closed",
+                `Closed opposite leg ${vOpposite.contractName} after SL triggered on ${pPosition.contractName} at LTP ${Number(pCurrentMarkPrice || 0).toFixed(2)} using row ${objRuleRowState.rowIndex} SL ${vAppliedStopLossDelta.toFixed(4)}.`,
+                {
+                    contractName: vOpposite.contractName,
+                    qty: vOpposite.qty,
+                    currentDelta: Math.abs(Number(pCurrentDelta || 0)),
+                    reason: "sl_opposite_leg",
+                    rowIndex: objRuleRowState.rowIndex,
+                    takeProfitDelta: Number(vAppliedTakeProfitDelta.toFixed(4)),
+                    stopLossDelta: Number(vAppliedStopLossDelta.toFixed(4))
+                }
+            );
+            await logFuturesEvent(
+                pUserId,
+                pStrategyCode,
+                "future_closed",
+                vOppositeLegClosePnl < 0 ? "warning" : "info",
+                "Option SL Realized PnL - Opposite Leg",
+                `Captured realized PnL ${vOppositeLegClosePnl.toFixed(2)} and close charge ${vOppositeLegCloseCharge.toFixed(2)} for opposite leg ${vOpposite.contractName}.`,
+                {
+                    contractName: vOpposite.contractName,
+                    qty: vOpposite.qty,
+                    pnlDelta: Number(vOppositeLegClosePnl.toFixed(4)),
+                    closeCharge: Number(vOppositeLegCloseCharge.toFixed(4)),
+                    reason: "sl_opposite_leg"
+                }
+            );
+        }
+    }
+
     if (pReason === "expiry_cutoff") {
         await logFuturesEvent(
             pUserId,
@@ -12617,6 +12702,66 @@ async function applyTriggeredOptionRule(
                         reason: "paper_reentry_error"
                     }
                 );
+            }
+        }
+
+        // SL-only: re-enter the opposite leg using its own stored metadata
+        if (pReason === "sl" && vOppositeLegPosition) {
+            const objOppositeMeta = getTrackedOptionMetadata(vOppositeLegPosition);
+            const objOppositeRowState = getNormalizedOptionRowUiState(
+                getMergedUiState(objProfile),
+                pStrategyCode,
+                objOppositeMeta.rowIndex
+            );
+            const bOppositeAllowReEntry = Boolean(objOppositeRowState.reEnter || objOppositeMeta.reEnterEnabled);
+            if (bOppositeAllowReEntry) {
+                try {
+                    const objOppositeReEntry = await openTrackedOptionReEntry(
+                        pUserId,
+                        pStrategyCode,
+                        pSelectedApiProfileId,
+                        objProfile,
+                        vOppositeLegPosition,
+                        objOppositeMeta,
+                        pReason,
+                        {
+                            useRowAction: true,
+                            useRowQty: true,
+                            forceQty: Math.max(1, Math.floor(Number(vOppositeLegPosition.qty || 1))),
+                            useRowReEntryDelta: true,
+                        }
+                    );
+                    if (objOppositeReEntry) {
+                        arrNextPositions = [...arrNextPositions, objOppositeReEntry.position];
+                        await logFuturesEvent(
+                            pUserId,
+                            pStrategyCode,
+                            "reentry_opened",
+                            "success",
+                            "Paper Option Opposite Leg Re-Entry Opened",
+                            `Opened replacement paper option ${objOppositeReEntry.position.contractName} (opposite leg) after SL on ${pPosition.contractName}.`,
+                            {
+                                contractName: objOppositeReEntry.position.contractName,
+                                qty: objOppositeReEntry.position.qty,
+                                reason: "sl_opposite_leg_reentry"
+                            }
+                        );
+                    }
+                }
+                catch (objOppositeError) {
+                    await logFuturesEvent(
+                        pUserId,
+                        pStrategyCode,
+                        "engine_error",
+                        "warning",
+                        "Paper Opposite Leg Re-Entry Skipped",
+                        getErrorMessage(objOppositeError, "Unable to open the paper re-entry option for the opposite leg."),
+                        {
+                            contractName: vOppositeLegPosition.contractName,
+                            reason: "paper_opposite_leg_reentry_error"
+                        }
+                    );
+                }
             }
         }
         const arrSaved = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrNextPositions);
