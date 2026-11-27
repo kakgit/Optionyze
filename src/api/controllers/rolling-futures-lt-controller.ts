@@ -5049,11 +5049,33 @@ async function syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
 }
 
 async function refreshOptionsScalperPaperOpenPositions(
-    pPositions: RollingFuturesLtImportedPositionRecord[]
+    pPositions: RollingFuturesLtImportedPositionRecord[],
+    pUserId?: string,
+    pStrategyCode?: RollingFuturesLtStrategyCode
 ): Promise<RollingFuturesLtImportedPositionRecord[]> {
     const arrNext: RollingFuturesLtImportedPositionRecord[] = [];
+
+    // When an SL/TP trigger + re-entry is in progress, pause price updates so
+    // that a just-closed position does not get its mark price refreshed and
+    // reappear as "live" on the open positions feed.
+    let bSkipPriceUpdates = false;
+    if (pUserId && pStrategyCode) {
+        const objPauseRuntime = await loadRollingFuturesLtRuntime(pUserId, pStrategyCode);
+        const vPendingUntil = getOptionReentryPendingUntil(objPauseRuntime);
+        if (vPendingUntil && Number.isFinite(new Date(vPendingUntil).getTime()) && new Date(vPendingUntil).getTime() > Date.now()) {
+            bSkipPriceUpdates = true;
+        }
+    }
+
     for (const objPosition of Array.isArray(pPositions) ? pPositions : []) {
         if (isTrackedPositionInactive(objPosition)) {
+            arrNext.push({
+                ...objPosition,
+                updatedAt: String(objPosition.updatedAt || objPosition.openedAt || new Date().toISOString()).trim()
+            });
+            continue;
+        }
+        if (bSkipPriceUpdates) {
             arrNext.push({
                 ...objPosition,
                 updatedAt: String(objPosition.updatedAt || objPosition.openedAt || new Date().toISOString()).trim()
@@ -12574,14 +12596,19 @@ async function applyTriggeredOptionRule(
             objMetadata.rowIndex
         );
         const bAllowPaperReEntry = Boolean(objPaperRowState.reEnter || objMetadata.reEnterEnabled);
+        const objStateWithPause = buildRuntimeStateWithProfitClosePause(
+            objRuntimeBeforeProfitPause,
+            vProfitClosePauseUntil
+        );
+        const objStateWithReentry = buildRuntimeStateWithOptionReentryPending(
+            objRuntimeBeforeProfitPause,
+            new Date(Date.now() + gOptionReentryPendingMs).toISOString()
+        );
         await saveRollingFuturesLtRuntime({
             ...objRuntimeBeforeProfitPause,
             userId: pUserId,
             strategyCode: pStrategyCode,
-            state: buildRuntimeStateWithProfitClosePause(
-                objRuntimeBeforeProfitPause,
-                vProfitClosePauseUntil
-            )
+            state: { ...objStateWithPause, ...objStateWithReentry }
         });
         if ((pReason === "sl" || pReason === "tp") && objCloseResult.closedRecord) {
             arrNextPositions = [
@@ -15224,7 +15251,9 @@ async function syncRenkoPaperRuntimeAndMaybeAutoTradeInternal(
     gOptionsScalperRenkoAutoTradeLocks.add(vLockKey);
     try {
         let arrCurrentTrackedPositions = await refreshOptionsScalperPaperOpenPositions(
-            await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode)
+            await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode),
+            pUserId,
+            pStrategyCode
         );
         if (arrCurrentTrackedPositions.length) {
             arrCurrentTrackedPositions = await replaceRollingFuturesLtImportedPositions(pUserId, pStrategyCode, arrCurrentTrackedPositions);
@@ -15483,7 +15512,9 @@ export async function syncCoveredOptionsRenkoRuntimeAndMaybeAutoTrade(
         }
 
         let arrCurrentTrackedPositions = await refreshOptionsScalperPaperOpenPositions(
-            await listRollingFuturesLtImportedPositions(pUserId, "covered-options")
+            await listRollingFuturesLtImportedPositions(pUserId, "covered-options"),
+            pUserId,
+            "covered-options"
         );
         const objGuardRuntime = objSync.runtime || await loadRollingFuturesLtRuntime(pUserId, "covered-options");
         let vQueuedCount = 0;
@@ -17254,7 +17285,9 @@ async function runAutoTraderCycle(
         }
         if (isPaperDemoStrategy(pStrategyCode)) {
             const arrRefreshedPaperPositions = await refreshOptionsScalperPaperOpenPositions(
-                await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode)
+                await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode),
+                pUserId,
+                pStrategyCode
             );
             // Calendar Spread rolls DAILY T+2 buy positions one hour before the
             // 5:30 PM IST settlement, and cuts/re-enters any position whose live
@@ -19286,7 +19319,7 @@ async function reconcileOpenPositionsInternal(req: Request, res: Response, pStra
     if (isPaperDemoStrategy(pStrategyCode)) {
         try {
             const arrExisting = await listRollingFuturesLtImportedPositions(vUserId, pStrategyCode);
-            const arrRefreshed = await refreshOptionsScalperPaperOpenPositions(arrExisting);
+            const arrRefreshed = await refreshOptionsScalperPaperOpenPositions(arrExisting, vUserId, pStrategyCode);
             const arrSaved = await replaceRollingFuturesLtImportedPositions(vUserId, pStrategyCode, arrRefreshed);
             const objOpenPositions = await buildOpenPositionsPayload(vUserId, pStrategyCode, arrSaved);
             await logFuturesEvent(
