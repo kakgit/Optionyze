@@ -5556,20 +5556,25 @@
             // Option Hedged Futures hedge column:
             // - hedge linked  -> open hedge values (side/qty/contract, mark/entry);
             // - no hedge yet  -> entry trigger LTP at which the hedge WILL open
-            //   (SELL: entry x (1 + Hedge Entry % / 100)), "-" for non-SELL rows.
+            //   (SELL: entry x (1 + Hedge Entry % / 100)); (BUY: entry x (1 - Hedge Entry % / 100))
             const hedgeCellHtml = (function () {
                 const objMeta = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
                 const vHedgeContract = String(objMeta.hedgeContractName || "").trim();
                 if (!vHedgeContract && !objMeta.hedgeImportId) {
                     const vRowSide = String(side || "").trim().toUpperCase();
                     const vRowEntry = Number(row.entryPrice || 0);
-                    if (vRowSide !== "SELL" || !(vRowEntry > 0)) {
+                    if (!(vRowEntry > 0) || (vRowSide !== "SELL" && vRowSide !== "BUY")) {
                         return "-";
                     }
                     const vEntryPctRaw = Number(ids.hedgeEntryPct instanceof HTMLInputElement ? ids.hedgeEntryPct.value : 20);
                     const vEntryPct = Number.isFinite(vEntryPctRaw) ? Math.max(1, Math.min(100, Math.floor(vEntryPctRaw))) : 20;
-                    const vTrigger = vRowEntry * (1 + vEntryPct / 100);
-                    const vTip = `Hedge opens when LTP >= ${fmt(vTrigger, 2)} (entry ${fmt(vRowEntry, 2)} + ${vEntryPct}%)`;
+                    const bIsSell = vRowSide === "SELL";
+                    const vTrigger = bIsSell
+                        ? vRowEntry * (1 + vEntryPct / 100)
+                        : vRowEntry * (1 - vEntryPct / 100);
+                    const vTriggerDir = bIsSell ? ">=" : "<=";
+                    const vPctDir = bIsSell ? "+" : "-";
+                    const vTip = `Hedge opens when LTP ${vTriggerDir} ${fmt(vTrigger, 2)} (entry ${fmt(vRowEntry, 2)} ${vPctDir} ${vEntryPct}%)`;
                     return `<span title="${escapeHtml(vTip)}"><div>${escapeHtml(fmt(vTrigger, 2))}</div></span>`;
                 }
                 const arrHedgeSource = Array.isArray(lastOpenPositionsPayload?.positions)
