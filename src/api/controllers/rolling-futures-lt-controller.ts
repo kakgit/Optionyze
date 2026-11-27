@@ -17053,6 +17053,30 @@ async function evaluateCalendarSpreadHedges(
             ? Math.max(1, Math.round(vPositionQty * Math.abs(vTickerDelta)))
             : vPositionQty;
 
+        // Skip opening a new futures hedge if a futures position on the same
+        // side is already open in Futures Open Positions. This prevents stacking
+        // multiple SELL (or BUY) hedges while an existing one is still running.
+        const bSameSideFutureOpen = arrNext.some((objRow) => {
+            if (!isFutureContractSymbol(objRow.contractName)) return false;
+            return String(objRow.side || "").trim().toUpperCase() === vHedgeAction;
+        });
+        if (bSameSideFutureOpen) {
+            await logFuturesEvent(
+                pUserId,
+                "calendar-spread",
+                "manual_action",
+                "info",
+                "Calendar Spread Hedge Entry Skipped",
+                `Skipped opening ${vHedgeAction} hedge for ${objPosition.contractName}: a ${vHedgeAction} futures position is already open in Futures Open Positions.`,
+                {
+                    contractName: objPosition.contractName,
+                    hedgeAction: vHedgeAction,
+                    reason: "calendar_hedge_entry_same_side_open"
+                }
+            );
+            continue;
+        }
+
         try {
             const vHedgeActionLower: "buy" | "sell" = vHedgeAction === "BUY" ? "buy" : "sell";
             const objPaperHedge = await buildOptionsScalperPaperFutureOpen(pUserId, "calendar-spread", {
