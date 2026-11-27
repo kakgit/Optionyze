@@ -17076,10 +17076,13 @@ async function evaluateCalendarSpreadHedges(
         if (!bEntryTriggered) continue;
 
         const vTickerDelta = Number(objTicker?.delta || 0);
-        // Position side flips the hedge direction: long CE -> positive delta -> hedge BUY;
-        // short CE -> negative delta -> hedge SELL. Same formula works both sides.
+        // Position side flips the hedge direction: long CE -> positive delta -> hedge SELL;
+        // short CE -> negative delta -> hedge BUY. Same formula works both sides.
+        // Hedge is always OPPOSITE to the option position side:
+        //   BUY option  -> SELL futures hedge (profit when price goes down)
+        //   SELL option -> BUY futures hedge (profit when price goes up)
         const vSignedDelta = vSide === "SELL" ? -vTickerDelta : vTickerDelta;
-        const vHedgeAction: "BUY" | "SELL" = vSignedDelta < 0 ? "SELL" : "BUY";
+        const vHedgeAction: "BUY" | "SELL" = vSignedDelta > 0 ? "SELL" : "BUY";
         const vHedgeQty = useQtyDelta
             ? Math.max(1, Math.round(vPositionQty * Math.abs(vTickerDelta)))
             : vPositionQty;
