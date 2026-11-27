@@ -2905,6 +2905,7 @@ function getDefaultManualTraderUiState(
         calendarSpreadFutQty: "1",
         // Calendar Spread Hedge controls (calendar-spread page only, persisted like other controls).
         calendarSpreadHedgeType: "futures",
+        calendarSpreadHedgeSide: "opp",
         calendarSpreadHedgeEntryPct: "20",
         calendarSpreadHedgeExitPct: "15",
         calendarSpreadHedgeQtyDelta: false,
@@ -4558,6 +4559,14 @@ function normalizeCalendarSpreadHedgeTypeValue(pValue: unknown): string {
     return "futures";
 }
 
+function normalizeCalendarSpreadHedgeSideValue(pValue: unknown): string {
+    const vRaw = String(pValue ?? "").trim().toLowerCase();
+    if (vRaw === "same" || vRaw === "opp") {
+        return vRaw;
+    }
+    return "opp";
+}
+
 function shouldTriggerCalendarSpreadPremiumSl(
     pSide: string,
     pEntryPrice: number,
@@ -5787,6 +5796,7 @@ function getMergedUiState(pProfile: RollingFuturesLtProfileRecord): Record<strin
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
         calendarSpreadFutQty: normalizeStringValue((objUiState as Record<string, unknown>).calendarSpreadFutQty ?? objUiState.bsFutQty, String((objDefaults as Record<string, unknown>).calendarSpreadFutQty ?? "1")),
         calendarSpreadHedgeType: normalizeCalendarSpreadHedgeTypeValue((objUiState as Record<string, unknown>).calendarSpreadHedgeType ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeType),
+        calendarSpreadHedgeSide: normalizeCalendarSpreadHedgeSideValue((objUiState as Record<string, unknown>).calendarSpreadHedgeSide ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeSide),
         calendarSpreadHedgeEntryPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeEntryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct)),
         calendarSpreadHedgeExitPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeExitPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct)),
         calendarSpreadHedgeQtyDelta: normalizeBooleanValue((objUiState as Record<string, unknown>).calendarSpreadHedgeQtyDelta, Boolean((objDefaults as Record<string, unknown>).calendarSpreadHedgeQtyDelta)),
@@ -6249,6 +6259,7 @@ function normalizeProfileSaveInput(
         bsFutQty: normalizeStringValue(objUiState.bsFutQty, String(objDefaults.bsFutQty)),
         calendarSpreadFutQty: normalizeStringValue((objUiState as Record<string, unknown>).calendarSpreadFutQty ?? objUiState.bsFutQty, String((objDefaults as Record<string, unknown>).calendarSpreadFutQty ?? "1")),
         calendarSpreadHedgeType: normalizeCalendarSpreadHedgeTypeValue((objUiState as Record<string, unknown>).calendarSpreadHedgeType ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeType),
+        calendarSpreadHedgeSide: normalizeCalendarSpreadHedgeSideValue((objUiState as Record<string, unknown>).calendarSpreadHedgeSide ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeSide),
         calendarSpreadHedgeEntryPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeEntryPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeEntryPct)),
         calendarSpreadHedgeExitPct: String(normalizeCalendarSpreadSlPctValue((objUiState as Record<string, unknown>).calendarSpreadHedgeExitPct ?? (objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct) ?? Number((objDefaults as Record<string, unknown>).calendarSpreadHedgeExitPct)),
         calendarSpreadHedgeQtyDelta: normalizeBooleanValue((objUiState as Record<string, unknown>).calendarSpreadHedgeQtyDelta, Boolean((objDefaults as Record<string, unknown>).calendarSpreadHedgeQtyDelta)),
@@ -17076,13 +17087,15 @@ async function evaluateCalendarSpreadHedges(
         if (!bEntryTriggered) continue;
 
         const vTickerDelta = Number(objTicker?.delta || 0);
-        // Position side flips the hedge direction: long CE -> positive delta -> hedge SELL;
-        // short CE -> negative delta -> hedge BUY. Same formula works both sides.
-        // Hedge is always OPPOSITE to the option position side:
-        //   BUY option  -> SELL futures hedge (profit when price goes down)
-        //   SELL option -> BUY futures hedge (profit when price goes up)
-        const vSignedDelta = vSide === "SELL" ? -vTickerDelta : vTickerDelta;
-        const vHedgeAction: "BUY" | "SELL" = vSignedDelta > 0 ? "SELL" : "BUY";
+        const vHedgeSide = String((objUiState as Record<string, unknown>).calendarSpreadHedgeSide || "opp").trim().toLowerCase();
+        const vIsCe = String(objPosition.contractName || "").trim().toUpperCase().endsWith("CE");
+        // Hedge side logic per user-specified table:
+        //   CE: Same Side → opposite of option; Opp Side → same as option
+        //   PE: Same Side → same as option; Opp Side → opposite of option
+        const vBaseHedgeAction: "BUY" | "SELL" = vSide; // same as option side (BUY→BUY, SELL→SELL)
+        const vOppositeHedgeAction: "BUY" | "SELL" = vSide === "BUY" ? "SELL" : "BUY"; // opposite of option side
+        const bUseOppositeHedge = vIsCe === (vHedgeSide === "same");
+        const vHedgeAction: "BUY" | "SELL" = bUseOppositeHedge ? vOppositeHedgeAction : vBaseHedgeAction;
         const vHedgeQty = useQtyDelta
             ? Math.max(1, Math.round(vPositionQty * Math.abs(vTickerDelta)))
             : vPositionQty;

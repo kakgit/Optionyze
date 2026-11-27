@@ -406,6 +406,15 @@
                             <option value="options">Options</option>
                         </select>
                     </div>
+                    <div class="rolling-demo-field option-hedged-futures-hedge-side">
+                        <label>Hedge Side</label>
+                        <label class="rolling-futures-help-check compact" for="radCalendarSpreadHedgeSideSame">
+                            <input type="radio" name="radCalendarSpreadHedgeSide" value="same" id="radCalendarSpreadHedgeSideSame" /> Same Side
+                        </label>
+                        <label class="rolling-futures-help-check compact" for="radCalendarSpreadHedgeSideOpp">
+                            <input type="radio" name="radCalendarSpreadHedgeSide" value="opp" id="radCalendarSpreadHedgeSideOpp" checked /> Opp Side
+                        </label>
+                    </div>
                     <div class="rolling-demo-field option-hedged-futures-hedge-pct-entry">
                         <label for="txtCalendarSpreadHedgePctEntry">% Hedge Entry of Premium</label>
                         <input type="number" min="1" max="100" step="1" id="txtCalendarSpreadHedgePctEntry" value="20" />

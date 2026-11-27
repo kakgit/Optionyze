@@ -79,6 +79,8 @@
         sellFutButton: document.getElementById("btnCalendarSpreadSellFut"),
         // Option Hedged Futures Hedge controls (page-local only, persisted like other controls).
         hedgeType: document.getElementById("ddlCalendarSpreadHedgeType"),
+        hedgeSideSame: document.getElementById("radCalendarSpreadHedgeSideSame"),
+        hedgeSideOpp: document.getElementById("radCalendarSpreadHedgeSideOpp"),
         hedgeEntryPct: document.getElementById("txtCalendarSpreadHedgePctEntry"),
         hedgeExitPct: document.getElementById("txtCalendarSpreadHedgePctExit"),
         hedgeQtyDelta: document.getElementById("chkCalendarSpreadHedgeQtyDelta"),
@@ -2034,6 +2036,12 @@
         }
     }
 
+    function setRadioValue(node, value) {
+        if (node instanceof HTMLInputElement) {
+            node.checked = Boolean(value);
+        }
+    }
+
     function getSupportedOptionRowIndexes() {
         // option-hedged-futures shows Row-1 only.
         return [1];
@@ -2296,6 +2304,7 @@
             calendarSpreadFutQty: "1",
             // Option Hedged Futures Hedge controls (page-local only, persisted like other controls).
             calendarSpreadHedgeType: "futures",
+            calendarSpreadHedgeSide: "opp",
             calendarSpreadHedgeEntryPct: "20",
             calendarSpreadHedgeExitPct: "15",
             calendarSpreadHedgeQtyDelta: false,
@@ -4113,6 +4122,7 @@
             calendarSpreadFutQty: getInputValue(ids.futQty, "1"),
             // Option Hedged Futures Hedge controls (page-local only, persisted like other controls).
             calendarSpreadHedgeType: String(ids.hedgeType?.value || "futures").trim(),
+            calendarSpreadHedgeSide: (ids.hedgeSideSame?.checked === true ? "same" : "opp"),
             calendarSpreadHedgeEntryPct: getInputValue(ids.hedgeEntryPct, "20"),
             calendarSpreadHedgeExitPct: getInputValue(ids.hedgeExitPct, "15"),
             calendarSpreadHedgeQtyDelta: getCheckboxValue(ids.hedgeQtyDelta, false),
@@ -4247,6 +4257,8 @@
             setInputValue(ids.futQty, objUiState.calendarSpreadFutQty ?? objUiState.bsFutQty ?? "1");
             // Option Hedged Futures Hedge controls (page-local only, persisted like other controls).
             setInputValue(ids.hedgeType, String(objUiState.calendarSpreadHedgeType || "futures").trim());
+            setRadioValue(ids.hedgeSideSame, objUiState.calendarSpreadHedgeSide === "same");
+            setRadioValue(ids.hedgeSideOpp, objUiState.calendarSpreadHedgeSide === "opp");
             setInputValue(ids.hedgeEntryPct, objUiState.calendarSpreadHedgeEntryPct ?? "20");
             setInputValue(ids.hedgeExitPct, objUiState.calendarSpreadHedgeExitPct ?? "15");
             setCheckboxValue(ids.hedgeQtyDelta, Boolean(objUiState.calendarSpreadHedgeQtyDelta));
@@ -6733,6 +6745,8 @@
         ids.futQty,
         // Option Hedged Futures Hedge controls (page-local only, persisted like other controls).
         ids.hedgeType,
+        ids.hedgeSideSame,
+        ids.hedgeSideOpp,
         ids.hedgeEntryPct,
         ids.hedgeExitPct,
         ids.hedgeQtyDelta,
