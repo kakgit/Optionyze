@@ -17034,7 +17034,7 @@ async function evaluateCalendarSpreadHedges(
                     continue;
                 }
             }
-            const bExitTriggered = vSide === "SELL" ? vLivePrice >= vExitThreshold : vLivePrice <= vExitThreshold;
+            const bExitTriggered = vSide === "SELL" ? vLivePrice <= vExitThreshold : vLivePrice >= vExitThreshold;
             if (bExitTriggered) {
                 try {
                     await closeTrackedPositionOnDelta(
