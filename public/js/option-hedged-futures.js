@@ -270,6 +270,17 @@
         closedAltNextPageButton: document.getElementById("btnRollingDualFuturesClosedAltNextPage"),
         closedAltPageInfo: document.getElementById("rollingDualFuturesClosedAltClosedPositionsPageInfo"),
         closedAltPageNumbers: document.getElementById("rollingDualFuturesClosedAltClosedPageNumbers"),
+        // Options Closed Positions section
+        optionsClosedFromDate: document.getElementById("txtRollingDualFuturesOptionsClosedAltFromDate"),
+        optionsClosedToDate: document.getElementById("txtRollingDualFuturesOptionsClosedAltToDate"),
+        optionsClosedClearFiltersButton: document.getElementById("btnRollingDualFuturesOptionsClosedAltClearFilters"),
+        optionsClosedRefreshButton: document.getElementById("btnRollingDualFuturesOptionsClosedAltRefresh"),
+        optionsClosedClearButton: document.getElementById("btnRollingDualFuturesOptionsClosedAltClear"),
+        optionsClosedPositionsBody: document.getElementById("rollingDualFuturesOptionsClosedAltClosedPositionsBody"),
+        optionsClosedPrevPageButton: document.getElementById("btnRollingDualFuturesOptionsClosedAltPrevPage"),
+        optionsClosedNextPageButton: document.getElementById("btnRollingDualFuturesOptionsClosedAltNextPage"),
+        optionsClosedPageInfo: document.getElementById("rollingDualFuturesOptionsClosedAltClosedPositionsPageInfo"),
+        optionsClosedPageNumbers: document.getElementById("rollingDualFuturesOptionsClosedAltClosedPageNumbers"),
         refreshEventsButton: document.getElementById(`btn${idPrefix}RefreshEvents`),
         clearEventsButton: document.getElementById(`btn${idPrefix}ClearEvents`),
         eventLog: document.getElementById(`${prefix}EventLog`),
@@ -324,6 +335,8 @@
     let closedPositionsPage = 1;
     let closedAltPositions = [];
     let closedAltPositionsPage = 1;
+    let optionsClosedPositions = [];
+    let optionsClosedPositionsPage = 1;
     let editingClosedPositionCloseId = "";
     let editingOpenPositionImportId = "";
     let connectionPollTimer = null;
@@ -6207,6 +6220,109 @@
         const arrRows = Array.isArray(objResult?.data?.positions) ? objResult.data.positions : [];
         closedAltPositionsPage = 1;
         renderClosedAltPositions(arrRows);
+        return arrRows;
+    }
+
+    function renderOptionsClosedPositions(rows) {
+        optionsClosedPositions = Array.isArray(rows)
+            ? rows.slice().sort(function (left, right) {
+                return new Date(String(right?.startAt || right?.endAt || "")).getTime()
+                    - new Date(String(left?.startAt || left?.endAt || "")).getTime();
+            })
+            : [];
+        const totalPages = Math.max(1, Math.ceil(optionsClosedPositions.length / closedPositionsPageSize));
+        optionsClosedPositionsPage = Math.min(optionsClosedPositionsPage, totalPages);
+        optionsClosedPositionsPage = Math.max(optionsClosedPositionsPage, 1);
+        if (!ids.optionsClosedPositionsBody) {
+            return;
+        }
+        if (!optionsClosedPositions.length) {
+            ids.optionsClosedPositionsBody.innerHTML = `<tr><td colspan="10" class="rolling-demo-empty">No options closed positions found.</td></tr>`;
+            if (ids.optionsClosedPageInfo) {
+                ids.optionsClosedPageInfo.textContent = "Page 0 of 0";
+            }
+            if (ids.optionsClosedPageNumbers) {
+                ids.optionsClosedPageNumbers.innerHTML = "";
+            }
+            return;
+        }
+        const startIndex = (optionsClosedPositionsPage - 1) * closedPositionsPageSize;
+        const pageRows = optionsClosedPositions.slice(startIndex, startIndex + closedPositionsPageSize);
+        const closedRowsHtml = pageRows.map(function (row) {
+            const closeId = String(row.closeId || row.rowId || "").trim();
+            const contractName = String(row.symbol || "-");
+            const side = String(row.side || "-").trim().toUpperCase();
+            const lotSize = contractName.includes("ETH") ? 0.01 : 0.001;
+            return `
+                <tr>
+                    <td>${escapeHtml(formatDateTimeDisplay(row.endAt || row.startAt))}</td>
+                    <td>${escapeHtml(contractName)}</td>
+                    <td>${renderPositionSide(side)}</td>
+                    <td>${escapeHtml(fmt(lotSize, 3))}</td>
+                    <td>${escapeHtml(fmt(row.qty, 0))}</td>
+                    <td>${row.buyPrice === null ? "-" : escapeHtml(fmt(row.buyPrice, 2))}</td>
+                    <td>${row.sellPrice === null ? "-" : escapeHtml(fmt(row.sellPrice, 2))}</td>
+                    <td>${escapeHtml(fmt(row.charges, 2))}</td>
+                    <td>${renderPnlValue(row.pnl, false)}</td>
+                    <td>
+                        <div class="rolling-demo-table-actions">
+                            <button class="rolling-demo-icon-btn warn rolling-live-delete-closed-position" type="button" data-close-id="${escapeHtml(closeId)}" title="Delete this closed position permanently" aria-label="Delete this closed position permanently">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M18 6 6 18" />
+                                    <path d="m6 6 12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join("");
+        const totalCharges = optionsClosedPositions.reduce(function (sum, row) {
+            return sum + Number(row?.charges || 0);
+        }, 0);
+        const hasPnl = optionsClosedPositions.some(function (row) {
+            return Number.isFinite(Number(row?.pnl));
+        });
+        const totalPnl = hasPnl ? optionsClosedPositions.reduce(function (sum, row) {
+            return sum + Number(row?.pnl || 0);
+        }, 0) : null;
+        ids.optionsClosedPositionsBody.innerHTML = `${closedRowsHtml}
+            <tr class="rolling-demo-total-row">
+                <td colspan="7">Total</td>
+                <td class="rolling-demo-total-value">${escapeHtml(fmt(totalCharges, 2))}</td>
+                <td class="rolling-demo-total-value">${renderPnlValue(totalPnl, true)}</td>
+                <td>-</td>
+            </tr>
+        `;
+        if (ids.optionsClosedPageInfo) {
+            ids.optionsClosedPageInfo.textContent = `Page ${optionsClosedPositionsPage} of ${totalPages} | ${optionsClosedPositions.length} records`;
+        }
+        if (ids.optionsClosedPageNumbers) {
+            const pageNumbers = [];
+            for (let page = 1; page <= totalPages; page += 1) {
+                pageNumbers.push(`<button class="rolling-demo-icon-btn ${page === optionsClosedPositionsPage ? "primary" : "warn"} rolling-live-closed-page-btn" type="button" data-page="${page}">${page}</button>`);
+            }
+            ids.optionsClosedPageNumbers.innerHTML = pageNumbers.join("");
+        }
+    }
+
+    async function loadOptionsClosedPositions() {
+        if (!canUseLiveActions()) {
+            renderOptionsClosedPositions([]);
+            return [];
+        }
+        const query = new URLSearchParams();
+        query.set("symbol", String(ids.symbol?.value || "BTC").trim().toUpperCase());
+        if (ids.optionsClosedFromDate instanceof HTMLInputElement && ids.optionsClosedFromDate.value) {
+            query.set("fromDate", ids.optionsClosedFromDate.value);
+        }
+        if (ids.optionsClosedToDate instanceof HTMLInputElement && ids.optionsClosedToDate.value) {
+            query.set("toDate", ids.optionsClosedToDate.value);
+        }
+        const objResult = await getJson(`${endpointBase}/options-closed-positions?${query.toString()}`);
+        const arrRows = Array.isArray(objResult?.data?.positions) ? objResult.data.positions : [];
+        optionsClosedPositionsPage = 1;
+        renderOptionsClosedPositions(arrRows);
         return arrRows;
     }
 

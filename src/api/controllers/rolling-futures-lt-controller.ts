@@ -7281,6 +7281,14 @@ export async function buildOpenPositionsPayload(
     const bCoveredOptionsRecoveryBaseline = isCoveredLikeStrategy(pStrategyCode);
     const bLiveCoveredOptionsRecovery = isCoveredOptionsStrategy(pStrategyCode);
     let arrPositions = pPositions || await listRollingFuturesLtImportedPositions(pUserId, pStrategyCode);
+    // Exclude inactive (closed) positions from Open Positions payload.
+    // Closed option positions should appear in Options Closed Positions, not Open Positions.
+    arrPositions = arrPositions.filter((objPosition) => {
+        const objMeta = objPosition.metadata && typeof objPosition.metadata === "object"
+            ? objPosition.metadata as Record<string, unknown>
+            : {};
+        return String(objMeta.positionState || "").trim().toLowerCase() !== "inactive";
+    });
     const objNormalizedBaseDeltaSigns = normalizeTrackedOptionBaseDeltaSigns(arrPositions);
     if (objNormalizedBaseDeltaSigns.changed) {
         arrPositions = objNormalizedBaseDeltaSigns.positions;
@@ -21666,6 +21674,98 @@ async function getClosedPositionsInternal(req: Request, res: Response, pStrategy
     }
 }
 
+async function getOptionsClosedPositionsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
+    if (isPaperDemoStrategy(pStrategyCode)) {
+        const vUserId = getAccountId(req);
+        const objProfile = await readLiveProfile(vUserId, pStrategyCode);
+        const objUiState = getMergedUiState(objProfile);
+        const vRawSymbol = String(req.query?.symbol || req.body?.symbol || objUiState.symbol).trim().toUpperCase();
+        const vSelectedSymbol = (vRawSymbol === "XAUT" || vRawSymbol === "XAUTUSD") ? "XAUT" : normalizeSymbolValue(vRawSymbol);
+        const vFromDate = String(req.query?.fromDate || req.body?.fromDate || "").trim();
+        const vToDate = String(req.query?.toDate || req.body?.toDate || "").trim();
+        const arrRows = filterPaperClosedPositionsByRange(
+            (await listOptionsScalperPaperClosedPositions(vUserId, pStrategyCode))
+                .filter((objRow) => isTrackedContractForSymbol(objRow.contractName, vSelectedSymbol)),
+            vFromDate,
+            vToDate
+        ).map(mapOptionsScalperPaperClosedPosition);
+        res.json({
+            status: "success",
+            data: {
+                profileLabel: "Paper",
+                positions: arrRows
+            }
+        });
+        return;
+    }
+    // For live strategies, fetch Delta trade history and filter to option contracts only
+    const vProfileId = await resolveProfileId(req, pStrategyCode);
+    if (!vProfileId) {
+        res.status(400).json({ status: "warning", message: "API profile is required." });
+        return;
+    }
+    try {
+        const objProfile = await readLiveProfile(getAccountId(req), pStrategyCode);
+        const objUiState = getMergedUiState(objProfile);
+        const vRawSymbol = String(req.query?.symbol || req.body?.symbol || objUiState.symbol).trim().toUpperCase();
+        const vSelectedSymbol = (vRawSymbol === "XAUT" || vRawSymbol === "XAUTUSD") ? "XAUT" : normalizeSymbolValue(vRawSymbol);
+        const vFromDate = String(req.query?.fromDate || req.body?.fromDate || "").trim();
+        const { client, profile } = await getDeltaClientForAccountId(getAccountId(req), vProfileId);
+        const vPageSize = 100;
+        const arrRows: DeltaOrderHistoryRow[] = [];
+        let vAfterCursor = "";
+        let vSafetyCounter = 0;
+        const vStartTime = toEpochMicros(vFromDate);
+        const vEndTime = toEpochMicros(String(req.query?.toDate || ""), true);
+        while (vSafetyCounter < 100) {
+            const objParams: Record<string, string | number> = { page_size: vPageSize };
+            if (vStartTime) {
+                objParams.start_time = vStartTime;
+            }
+            if (vEndTime) {
+                objParams.end_time = vEndTime;
+            }
+            if (vAfterCursor) {
+                objParams.after = vAfterCursor;
+            }
+            const objResponse = await client.apis.TradeHistory.getOrderHistory(objParams);
+            const objPayload = readResponsePayload(objResponse);
+            const arrPageRows = Array.isArray(objPayload.result) ? objPayload.result as DeltaOrderHistoryRow[] : [];
+            arrRows.push(...arrPageRows);
+            const vNextAfter = String((objPayload.meta as { after?: unknown } | undefined)?.after || "").trim();
+            vSafetyCounter += 1;
+            if (!vNextAfter || vNextAfter === vAfterCursor || arrPageRows.length < vPageSize) {
+                break;
+            }
+            vAfterCursor = vNextAfter;
+        }
+        const arrClosedOptionPositions = arrRows
+            .filter((objRow) => String(objRow.state || "").trim().toLowerCase() === "closed")
+            .filter((objRow) => {
+                const vContract = String(objRow.product_symbol || objRow.symbol || "").trim().toUpperCase();
+                return isTrackedContractForSymbol(vContract, vSelectedSymbol)
+                    && isOptionContractSymbol(vContract)  // Only options, not futures
+                    && doesClosedOrderHistoryRowBelongToStrategy(objRow, pStrategyCode);
+            })
+            .map(mapLiveClosedPosition);
+        res.json({
+            status: "success",
+            data: {
+                profileId: profile.profileId,
+                profileName: profile.referenceName,
+                totalCount: arrClosedOptionPositions.length,
+                positions: arrClosedOptionPositions
+            }
+        });
+    }
+    catch (objError) {
+        res.status(500).json({
+            status: "danger",
+            message: getErrorMessage(objError, "Unable to fetch Delta closed option positions.")
+        });
+    }
+}
+
 async function clearOptionsScalperClosedPositionsInternal(req: Request, res: Response, pStrategyCode: RollingFuturesLtStrategyCode): Promise<void> {
     const vUserId = getAccountId(req);
     if (!vUserId) {
@@ -25558,6 +25658,9 @@ export async function closeCalendarSpreadImportedOpenPosition(req: Request, res:
 }
 export async function getCalendarSpreadClosedPositions(req: Request, res: Response): Promise<void> {
     await getClosedPositionsInternal(req, res, "calendar-spread");
+}
+export async function getOptionsClosedPositions(req: Request, res: Response): Promise<void> {
+    await getOptionsClosedPositionsInternal(req, res, "calendar-spread");
 }
 export async function clearCalendarSpreadClosedPositions(req: Request, res: Response): Promise<void> {
     await clearOptionsScalperClosedPositionsInternal(req, res, "calendar-spread");

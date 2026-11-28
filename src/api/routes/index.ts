@@ -136,6 +136,7 @@ import {
     executeCalendarSpreadTermStructureStrangle,
     getCalendarSpreadAccountSummary,
     getCalendarSpreadClosedPositions,
+    getOptionsClosedPositions,
     getCalendarSpreadConnectionStatus,
     getCalendarSpreadEvents,
     getCalendarSpreadImportableOpenPositions,
@@ -882,6 +883,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     objRouter.post("/calendar-spread/closed-positions/restore", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await restoreCalendarSpreadClosedPosition(req, res);
     });
+    objRouter.get("/calendar-spread/options-closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsClosedPositions(req, res);
+    });
     objRouter.get("/calendar-spread/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getCalendarSpreadEvents(req, res);
     });
@@ -1012,6 +1016,9 @@ export function createApiRouter(pRunnerManager: RunnerManager): Router {
     });
     objRouter.post("/option-hedged-futures/closed-positions/restore", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await restoreCalendarSpreadClosedPosition(req, res);
+    });
+    objRouter.get("/option-hedged-futures/options-closed-positions", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
+        await getOptionsClosedPositions(req, res);
     });
     objRouter.get("/option-hedged-futures/events", requireAuthApi, requireFreshPasswordApi, async (req, res) => {
         await getCalendarSpreadEvents(req, res);
