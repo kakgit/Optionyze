@@ -8410,6 +8410,38 @@ ids.closedAltPositionsBody?.addEventListener("click", function (event) {
             setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to delete closed position.", "danger");
         });
     });
+    ids.optionsClosedPositionsBody?.addEventListener("click", function (event) {
+        const target = event.target instanceof Element ? event.target : null;
+        const deleteButton = target ? target.closest(".rolling-live-delete-closed-position") : null;
+        if (!(deleteButton instanceof HTMLButtonElement)) {
+            return;
+        }
+        const closeId = String(deleteButton.dataset.closeId || "").trim();
+        const row = optionsClosedPositions.find(function (item) {
+            return String(item?.closeId || item?.rowId || "").trim() === closeId;
+        });
+        if (!row) {
+            setStatus(ids.pageStatus, "Unable to find the selected closed position.", "danger");
+            return;
+        }
+        const confirmed = window.confirm(`Delete ${row.symbol || "this closed position"} permanently? This will remove it from Options Closed Positions only.`);
+        if (!confirmed) {
+            return;
+        }
+        void deleteSavedClosedPosition(closeId).then(function () {
+            return Promise.all([
+                loadOptionsClosedPositions().catch(function () { return undefined; }),
+                loadClosedAltPositions().catch(function () { return undefined; }),
+                loadClosedPositions().catch(function () { return undefined; }),
+                loadAccountSummary().catch(function () { return undefined; }),
+                loadEvents().catch(function () { return undefined; })
+            ]);
+        }).then(function () {
+            setStatus(ids.pageStatus, "Closed position deleted.", "success");
+        }).catch(function (error) {
+            setStatus(ids.pageStatus, error instanceof Error ? error.message : "Unable to delete closed position.", "danger");
+        });
+    });
     async function loadPageForCurrentTarget() {
         displayedPositions = [];
         importablePositions = [];
