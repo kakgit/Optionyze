@@ -21570,7 +21570,9 @@ async function getClosedPositionsInternal(req: Request, res: Response, pStrategy
         const vToDate = String(req.query?.toDate || req.body?.toDate || "").trim();
         const arrRows = filterPaperClosedPositionsByRange(
             (await listOptionsScalperPaperClosedPositions(vUserId, pStrategyCode))
-                .filter((objRow) => isTrackedContractForSymbol(objRow.contractName, vSelectedSymbol)),
+                .filter((objRow) => isTrackedContractForSymbol(objRow.contractName, vSelectedSymbol)
+                    && !isOptionContractSymbol(objRow.contractName))  // Futures only
+            ,
             vFromDate,
             vToDate
         ).map(mapOptionsScalperPaperClosedPosition);
@@ -21648,6 +21650,7 @@ async function getClosedPositionsInternal(req: Request, res: Response, pStrategy
             .filter((objRow) => {
                 const vContract = String(objRow.product_symbol || objRow.symbol || "").trim().toUpperCase();
                 return isTrackedContractForSymbol(vContract, vSelectedSymbol)
+                    && !isOptionContractSymbol(vContract)  // Futures only
                     && doesClosedOrderHistoryRowBelongToStrategy(objRow, pStrategyCode);
             })
             .map(mapLiveClosedPosition);
@@ -21690,7 +21693,9 @@ async function getOptionsClosedPositionsInternal(req: Request, res: Response, pS
         const vToDate = String(req.query?.toDate || req.body?.toDate || "").trim();
         const arrRows = filterPaperClosedPositionsByRange(
             (await listOptionsScalperPaperClosedPositions(vUserId, pStrategyCode))
-                .filter((objRow) => isTrackedContractForSymbol(objRow.contractName, vSelectedSymbol)),
+                .filter((objRow) => isTrackedContractForSymbol(objRow.contractName, vSelectedSymbol)
+                    && isOptionContractSymbol(objRow.contractName))  // Options only
+            ,
             vFromDate,
             vToDate
         ).map(mapOptionsScalperPaperClosedPosition);

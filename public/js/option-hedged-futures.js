@@ -8451,6 +8451,7 @@ ids.closedAltPositionsBody?.addEventListener("click", function (event) {
             loadAccountSummary().catch(function () { return undefined; }),
             loadClosedPositions().catch(function () { return undefined; }),
             loadClosedAltPositions().catch(function () { return undefined; }),
+            loadOptionsClosedPositions().catch(function () { return undefined; }),
         ]);
     }
 
