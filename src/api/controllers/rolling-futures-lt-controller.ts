@@ -17030,8 +17030,8 @@ async function evaluateCalendarSpreadHedges(
                         "calendar-spread",
                         "option_closed",
                         "info",
-                        "Calendar Spread Hedge Closed (Loss Recovery)",
-                        `Closed hedge ${objExistingHedge.contractName} @ ${Number(objExistingHedge.entryPrice || 0).toFixed(2)} for ${objPosition.contractName}: recovered ${vLivePnl.toFixed(2)} of ref loss ${vLossRefPnl.toFixed(2)} (target ${vRecoveryTarget.toFixed(2)}, ${vLossRecoveryPct}%)`,
+                        "Calendar Spread Hedge Closed - Option SL loss recovered",
+                        `Why closed: re-entered ${objPosition.side} ${objPosition.contractName} (entry ${Number(objPosition.entryPrice || 0).toFixed(2)}) recovered ${vLivePnl.toFixed(2)} of the previous SL loss ${vLossRefPnl.toFixed(2)}, reaching the recovery target ${vRecoveryTarget.toFixed(2)} (${vLossRecoveryPct}%). Closed linked hedge ${objExistingHedge.contractName} @ ${Number(objExistingHedge.entryPrice || 0).toFixed(2)} (qty ${objExistingHedge.qty}) at option LTP ${vLivePrice.toFixed(2)}.`,
                         { contractName: objPosition.contractName, hedgeContractName: objExistingHedge.contractName, hedgeEntryPrice: Number(objExistingHedge.entryPrice || 0), qty: objExistingHedge.qty, exitPrice: vLivePrice, exitThreshold: vRecoveryTarget, reason: "calendar_hedge_loss_recovery" }
                     );
                     continue;
@@ -17058,8 +17058,8 @@ async function evaluateCalendarSpreadHedges(
                         "calendar-spread",
                         "manual_action",
                         "warning",
-                        "Calendar Spread Hedge Close Failed",
-                        `Failed to close hedge for ${objPosition.contractName}: ${getErrorMessage(objCloseError, "")}`,
+                        "Calendar Spread Hedge Close Failed (premium exit trigger)",
+                        `Why close was attempted: ${vSide} ${objPosition.contractName} premium reached the exit level (LTP ${vLivePrice.toFixed(2)} vs exit threshold ${vExitThreshold.toFixed(2)} from entry ${Number(objPosition.entryPrice || 0).toFixed(2)}). Failed to close hedge ${objExistingHedge.contractName}: ${getErrorMessage(objCloseError, "")}`,
                         { contractName: objPosition.contractName, hedgeContractName: objExistingHedge.contractName, reason: "hedge_close_error" }
                     );
                 }
@@ -17077,13 +17077,16 @@ async function evaluateCalendarSpreadHedges(
                         })
                     };
                 }
+                const vExitDirectionText = vSide === "SELL"
+                    ? `option premium pulled back to <= exit ${vExitThreshold.toFixed(2)} (entry ${Number(objPosition.entryPrice || 0).toFixed(2)} + exit % ${exitPct}%)`
+                    : `option premium recovered to >= exit ${vExitThreshold.toFixed(2)} (entry ${Number(objPosition.entryPrice || 0).toFixed(2)} - exit % ${exitPct}%)`;
                 await logFuturesEvent(
                     pUserId,
                     "calendar-spread",
                     "option_closed",
                     "info",
-                    "Calendar Spread Hedge Closed",
-                    `Closed hedge ${objExistingHedge.contractName} @ ${Number(objExistingHedge.entryPrice || 0).toFixed(2)} for ${objPosition.contractName} at LTP ${vLivePrice.toFixed(2)} (exit threshold ${vExitThreshold.toFixed(2)}).`,
+                    "Calendar Spread Hedge Closed - Option premium reversed to exit level",
+                    `Why closed: ${objPosition.side} ${objPosition.contractName} ${vExitDirectionText} at LTP ${vLivePrice.toFixed(2)}. Closed linked hedge ${objExistingHedge.contractName} ${String(objExistingHedge.side || "").trim().toUpperCase()} @ ${Number(objExistingHedge.entryPrice || 0).toFixed(2)} (qty ${objExistingHedge.qty}).`,
                     { contractName: objPosition.contractName, hedgeContractName: objExistingHedge.contractName, hedgeEntryPrice: Number(objExistingHedge.entryPrice || 0), qty: objExistingHedge.qty, exitPrice: vLivePrice, exitThreshold: vExitThreshold, reason: "calendar_hedge_exit" }
                 );
             }
