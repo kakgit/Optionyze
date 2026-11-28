@@ -17097,7 +17097,9 @@ async function evaluateCalendarSpreadHedges(
 
         const vTickerDelta = Number(objTicker?.delta || 0);
         const vHedgeSide = String((objUiState as Record<string, unknown>).calendarSpreadHedgeSide || "opp").trim().toLowerCase();
-        const vIsCe = String(objPosition.contractName || "").trim().toUpperCase().endsWith("CE");
+        // Use the shared helper: contracts are like C-BTC-60000-301126 / P-BTC-58000-301126
+        // so a suffix check for "CE" never matches. getTrackedOptionLegSide handles C-/P- prefixes.
+        const vIsCe = getTrackedOptionLegSide(String(objPosition.contractName || "").trim()) === "ce";
         // Hedge side logic per user-specified table:
         //   CE: Same Side → opposite of option; Opp Side → same as option
         //   PE: Same Side → same as option; Opp Side → opposite of option
