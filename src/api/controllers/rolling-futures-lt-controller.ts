@@ -11203,13 +11203,13 @@ async function closeTrackedPositionOnDelta(
     if (isOptionsScalperStrategy(pStrategyCode)) {
         const objClosed = await closeOptionsScalperPaperPosition(pUserId, pStrategyCode, pPosition);
         const vClosedAtIso = objClosed.endAt;
-        if (pOrderKind === "CL") {
-            await appendOptionsScalperPaperClosedPositions(pUserId, pStrategyCode, [objClosed]);
-            await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
-                pUserId,
-                await readLiveProfile(pUserId, pStrategyCode)
-            );
-        }
+        // Always append to paper closed positions for SL, TP and CL closes so that
+        // SL/TP-closed options appear in Options Closed Positions section.
+        await appendOptionsScalperPaperClosedPositions(pUserId, pStrategyCode, [objClosed]);
+        await syncOptionsScalperRecoveryMetricsFromPaperClosedPositions(
+            pUserId,
+            await readLiveProfile(pUserId, pStrategyCode)
+        );
         return {
             payload: {
                 id: crypto.randomUUID(),
